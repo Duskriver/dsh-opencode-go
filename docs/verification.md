@@ -45,6 +45,12 @@ The tarball was installed into a separate Web profile in the same temporary Harn
 
 The browser-factory test additionally evaluates the distributed `lib/client.js` against the published React/store/UI module table, checks the package ID, mounts the settings section, and verifies CSS insertion.
 
-## Limits
+## Subscription usage verification (0.1.1)
+
+The usage tests invoke the actual published Typert Host gateway against a local HTTP fixture, checking the Bearer credential, credential changes, all three windows, and failure handling. Browser component tests check provider switching, polling cleanup, monthly details, and failed-refresh behavior. Adapter tests cover non-zero cached input in OpenAI, DeepSeek, and Kimi usage fields.
+
+The local Web profile was also checked against the real read-only OpenCode Go usage endpoint. The button renders immediately before the model selector, and its details show rolling, weekly, and monthly percentages and local reset times. This check sends no model-generation request. The manual Remote codec supports both the published DSH `schema` shape and the current source build's `create()` shape.
+
+## Remaining limits
 
 Real paid OpenCode Go completions, Desktop, non-macOS platforms, and other DSH releases are not verified. The automated gateway tests preserve the adapter's request and replay semantics but cannot establish account validity or live provider availability.

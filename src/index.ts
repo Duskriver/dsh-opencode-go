@@ -47,6 +47,7 @@ import {
 } from './catalog.ts'
 import { Config, assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig } from './config.ts'
+import { GoUsageService } from './usage.ts'
 
 export { OpencodeGoAdapter } from './adapter.ts'
 export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess } from './adapter.ts'
@@ -94,6 +95,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig): void {
       'MISSING_CREDENTIAL',
     )
   }
+  ctx.plugin(GoUsageService, { baseURL: () => current().baseURL, resolveApiKey })
   const logger = {
     fallback: ({ error }: { url: string; error: unknown; kept: number }): void => {
       ctx.logger.warn(`llm-opencode-go: live model listing unreachable; serving the curated table until the next refresh (${String(error)})`)

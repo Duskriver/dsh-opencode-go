@@ -1,6 +1,16 @@
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
 
 export const en = {
+  usageTitle: 'OpenCode Go usage',
+  usageHint: 'Account usage · used percentage · refreshes every minute',
+  usageWeekShort: 'week',
+  usage_rolling: '5 hours',
+  usage_weekly: 'Weekly',
+  usage_monthly: 'Monthly',
+  usageResets: 'Resets',
+  usageLimited: 'Limit reached',
+  usageLoading: 'Loading usage…',
+  usageUnavailable: 'Unavailable',
   nav: 'OpenCode Go',
   title: 'OpenCode Go',
   intro: 'Use your OpenCode Go subscription in the harness. Paste the API key below and save; the models the gateway currently serves are listed underneath.',
@@ -48,6 +58,16 @@ export const en = {
 
 /** Chinese copy; the key set mirrors {@link en}. */
 export const zh: typeof en = {
+  usageTitle: 'OpenCode Go 用量',
+  usageHint: '账号额度 · 已用百分比 · 每分钟刷新',
+  usageWeekShort: '周',
+  usage_rolling: '5 小时',
+  usage_weekly: '每周',
+  usage_monthly: '每月',
+  usageResets: '重置于',
+  usageLimited: '已达限额',
+  usageLoading: '正在读取用量…',
+  usageUnavailable: '暂不可用',
   nav: 'OpenCode Go',
   title: 'OpenCode Go',
   intro: '在 Harness 中使用你的 OpenCode Go 订阅。填入下方 API key 并保存即可；网关当前提供的模型列在下面。',

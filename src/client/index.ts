@@ -19,6 +19,7 @@ import { OpencodeGoSection } from './Section.tsx'
 import type { OpencodeGoSectionInjected } from './Section.tsx'
 import { OpencodeGoSectionController, type OpencodeGoSettings } from './section-controller.ts'
 import { en, zh } from './locales.ts'
+import { registerUsagePill } from './usage.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -52,6 +53,7 @@ export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remot
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'llm-opencode-go: copy dictionaries')
+  registerUsagePill(ctx)
 
   // The Host schema validated the section before it reached the wire; the
   // decoder narrows structurally and keeps the last accepted value otherwise.

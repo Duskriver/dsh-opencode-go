@@ -29,6 +29,7 @@ function clientHarness(): ClientHarness {
   const credentialListeners: Array<(ref: string) => void> = []
   let injectCallback: (() => unknown) | undefined
   const ctx = {
+    inject: vi.fn(),
     effect: (fn: () => unknown) => {
       fn()
       return () => {}

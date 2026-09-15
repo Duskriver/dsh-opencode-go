@@ -49,6 +49,16 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 
 模型 ID 须在当前网关目录中可用。Web 和 Headless 使用各自的 profile，需要分别安装插件。
 
+## 订阅用量
+
+Web 中选择 `opencode-go` 提供方的模型后，模型名左侧显示 **Go · 5h 已用百分比 · 周已用百分比**。点击可查看 5 小时、每周、每月用量和本地时区的重置时间。
+
+数据通过 Host 使用已配置的 API Key 查询 `GET /zen/go/v1/usage`，每分钟刷新；浏览器不接收 API Key。切换到其他提供方后隐藏，页面不可见时暂停查询。接口失败或响应缺失时显示“暂不可用”，不会填成 0%。接口返回的是账号订阅额度，不是当前会话 token 数。
+
+这个接口可在 [OpenCode 官方源码](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts) 中查到；当前返回 `rolling`、`weekly`、`monthly` 各窗口的 `status`、`percent` 和 `resetsAt`，不返回缓存命中率。
+
+底部的缓存命中率由每次模型响应的缓存 token 统计计算。插件支持 `prompt_tokens_details.cached_tokens`、`prompt_cache_hit_tokens` 和顶层 `cached_tokens`。上游未返回缓存统计时，当前 pi-ai / Harness 统计链路也可能显示 0；可在 OpenCode 控制台的使用历史中展开对应请求的输入明细进行核对。新会话首次请求出现 0 命中是可能的，同一会话后续有可复用的提示前缀才可能命中。
+
 ## 配置
 
 Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。启用开关立即生效；保存其他配置后，后续请求使用新值。

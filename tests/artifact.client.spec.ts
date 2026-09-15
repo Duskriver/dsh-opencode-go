@@ -30,6 +30,7 @@ it('loads the built client and registers the settings section using published pl
     const effects: Array<() => void> = []
     const scope = stubSettingsScope().scope
     client.apply({
+      inject: vi.fn(),
       effect: (install: () => (() => void)) => { effects.push(install()) },
       locale: { register: () => () => {}, bind: () => (key: string) => key },
       settingsScope: { bind: () => scope },

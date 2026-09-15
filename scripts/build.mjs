@@ -2,7 +2,7 @@
 import { build } from 'esbuild'
 import { transform } from 'lightningcss'
 import { readFile, mkdir, rm, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -22,7 +22,7 @@ const cssPlugin = {
     build.onLoad({ filter: /.*/, namespace: 'plugin-css' }, async args => {
       const result = transform({ filename: args.path, code: await readFile(args.path), cssModules: { pattern: '[hash]_[local]' }, minify: true })
       const classes = Object.fromEntries(Object.entries(result.exports).map(([key, value]) => [key, value.name]))
-      return { loader: 'js', contents: `const id = ${JSON.stringify(pkg.name + '/settings')}; if (!document.querySelector('style[data-plugin-css=' + JSON.stringify(id) + ']')) { const style = document.createElement('style'); style.dataset.plugin = ${JSON.stringify(pkg.name)}; style.dataset.pluginCss = id; style.textContent = ${JSON.stringify(result.code.toString())}; document.head.appendChild(style); } export default ${JSON.stringify(classes)};` }
+      return { loader: 'js', contents: `const id = ${JSON.stringify(pkg.name + '/' + basename(args.path))}; if (!document.querySelector('style[data-plugin-css=' + JSON.stringify(id) + ']')) { const style = document.createElement('style'); style.dataset.plugin = ${JSON.stringify(pkg.name)}; style.dataset.pluginCss = id; style.textContent = ${JSON.stringify(result.code.toString())}; document.head.appendChild(style); } export default ${JSON.stringify(classes)};` }
     })
   },
 }

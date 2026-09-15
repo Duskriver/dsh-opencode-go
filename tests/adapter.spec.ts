@@ -51,6 +51,24 @@ afterEach(async () => {
 })
 
 describe('OpencodeGoAdapter stream', () => {
+  it.each([
+    { prompt_tokens_details: { cached_tokens: 80 } },
+    { prompt_cache_hit_tokens: 80 },
+    { cached_tokens: 80 },
+  ])('preserves cached input from the wire usage %j', async (cacheFields) => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    gateway.pushCompletions({ events: [
+      textEvents[0]!, textEvents[1]!,
+      JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: 'stop' }], usage: {
+        prompt_tokens: 100, completion_tokens: 5, ...cacheFields,
+      } }), '[DONE]',
+    ] })
+    const adapter = await adapterFor(gateway.url)
+    const chunks = await drain(adapter.stream(requestOf({ sessionId: 'cache-session' as never })))
+    expect(chunks.find(chunk => chunk.type === 'usage')).toMatchObject({
+      usage: { inputTokens: 20, outputTokens: 5, cacheReadTokens: 80, totalTokens: 105 },
+    })
+  })
   it('streams chat completions with the session header and Harness user agent', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     gateway.pushCompletions({ events: textEvents })
