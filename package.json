@@ -1,9 +1,17 @@
 {
   "name": "dsh-opencode-go",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode Go model provider and settings UI for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Duskriver/dsh-opencode-go.git"
+  },
+  "homepage": "https://github.com/Duskriver/dsh-opencode-go#readme",
+  "bugs": {
+    "url": "https://github.com/Duskriver/dsh-opencode-go/issues"
+  },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -178,6 +186,7 @@
   },
   "keywords": [
     "deepseek-harness",
+    "dsh-plugin",
     "dsh",
     "opencode",
     "opencode-go",
