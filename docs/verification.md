@@ -47,4 +47,4 @@ The browser-factory test additionally evaluates the distributed `lib/client.js` 
 
 ## Limits
 
-Real paid OpenCode Go completions, Desktop, non-macOS platforms, and other DSH releases are not verified. The automated gateway tests preserve the adapter's request and replay semantics but cannot establish account validity or live provider availability. npm publication has not been performed.
+Real paid OpenCode Go completions, Desktop, non-macOS platforms, and other DSH releases are not verified. The automated gateway tests preserve the adapter's request and replay semantics but cannot establish account validity or live provider availability.
