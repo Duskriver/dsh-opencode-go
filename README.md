@@ -1,26 +1,36 @@
 # dsh-opencode-go
 
-可独立构建、打包和安装的 DeepSeek Harness OpenCode Go 插件。包含模型适配器和 Web 设置页，无需修改 DSH 源码或重新构建 DSH。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中使用 OpenCode Go 订阅模型，支持流式回复、工具调用、图片输入和 Web 设置页。
 
-## 兼容版本
+插件自动添加 OpenCode Go 所需的会话请求头，并从网关获取可用模型目录。通过 DSH 插件命令安装，无需修改 DSH 源码。
 
-当前适配并验证 **DSH `0.1.6-alpha.1`**，依赖使用明确版本。npm 的 DSH `latest` 标签仍指向较旧版本，请勿省略版本号后假定兼容。未验证其他 DSH 版本、Desktop 或其他操作系统。
+## 安装与使用
 
-插件依赖 DSH 的公开服务接口；OpenCode Go 的请求头、模型目录和转换逻辑由本项目维护。无需安装或挂载 `dsh-llm-pi-ai` 才能使用本适配器；DSH 默认组合可以继续挂载它以服务其他提供方。
+已验证兼容 **DSH `0.1.6-alpha.1`**。其他版本尚未验证。
 
-## 安装
-
-在已经安装兼容版本 DSH 的环境执行：
+### Web
 
 ```sh
 dsh plugin --profile web add dsh-opencode-go
-dsh --profile web --dump-config
-dsh web
 ```
 
-配置树应出现 `dsh-opencode-go` 层和 `id: opencode-go`。Web 设置中打开 **OpenCode Go**，保存 API Key，再在模型选择器选择该提供方的模型。安装插件不会自动更改默认模型。
+安装后启动或重启 `dsh web`：
 
-Headless 用户先把以下内容保存为当前目录下的 `headless.patch.yml`，选择默认模型：
+1. 打开 **设置 → OpenCode Go**。
+2. 填入 OpenCode Go API Key 并保存。
+3. 在会话的模型选择器中选择 OpenCode Go 模型。
+
+API Key 来自你的 OpenCode Go 订阅。安装插件不会自动更改默认模型。
+
+### Headless
+
+安装到 Headless profile：
+
+```sh
+dsh plugin --profile headless add dsh-opencode-go
+```
+
+将以下内容保存为 `headless.patch.yml`，选择默认模型：
 
 ```yaml
 - id: agent-default-model
@@ -29,35 +39,21 @@ Headless 用户先把以下内容保存为当前目录下的 `headless.patch.yml
     model: deepseek-v4.1-flash
 ```
 
-再独立安装到 Headless profile：
+在 Bash 或 Zsh 中读取 API Key，然后运行任务：
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go
 read -s OPENCODE_API_KEY
 export OPENCODE_API_KEY
 dsh --profile headless --patch ./headless.patch.yml "你好"
 ```
 
-安装器若提示 pnpm 拦截依赖构建脚本，按提示在该 profile 的 `pnpm-workspace.yaml` 中逐项声明 `allowBuilds`。本次测试对 `@google/genai` 和 `protobufjs` 均设置为 `false`，未执行这些脚本；OpenCode Go 测试路径不需要它们。无需全局放开安装脚本。
-
-### 从已有二次开发版本迁移
-
-本插件使用配置行 `id: opencode-go`，设置命名空间仍是 `llm-opencode-go`，凭据引用仍是 `OPENCODE_API_KEY`。现有二次开发版内置行 `id: llm-opencode-go` 必须停用，避免两个适配器竞争同一个提供方路由。
-
-把以下停用行合并进对应 profile 的 `cordis.patch.yml`，保留已有的其他配置行：
-
-```yaml
-- id: llm-opencode-go
-  disabled: true
-```
-
-无需删除原仓库代码；停用旧行后由外部安装包提供功能。
-
-如果通用 pi-ai 的配置也声明了 `opencode-go` 路由，请移除该路由配置。其他提供方可继续使用。
+模型 ID 须在当前网关目录中可用。Web 和 Headless 使用各自的 profile，需要分别安装插件。
 
 ## 配置
 
-修改对应 profile 的 `cordis.patch.yml`：
+Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。启用开关立即生效；保存其他配置后，后续请求使用新值。
+
+需要通过文件配置时，在对应 profile 的 `cordis.patch.yml` 中添加以下内容。所有字段均有默认值，通常只需配置 API Key。
 
 ```yaml
 - id: opencode-go
@@ -72,50 +68,64 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
     requestImageMaxBytes: 1048576
 ```
 
-所有字段均有默认值。`apiKeyEnv` 是凭据引用名，不是密钥；存在 credentials 服务时使用该服务，否则读取进程环境。Web 设置可覆盖基础配置，后续请求读取新值。禁用开关或移除密钥会撤销路由，设置页仍可访问。
+`apiKeyEnv` 是凭据引用名，不是密钥。插件通过 DSH credentials 服务解析凭据；未挂载该服务时读取进程环境。Web 保存的设置可覆盖文件中的基础配置。
 
-## 请求与模型行为
+关闭插件开关或移除密钥会撤下提供方路由，设置页仍可访问。
 
-- 每次请求包含 Harness User-Agent 和 `x-opencode-session`；同一会话保持相同值，无会话 ID 的请求使用独立随机值。
-- 模型目录取 pi-ai 目录及本项目补充表与网关 `/models` 的交集。未知协议的模型不会猜测加入。
-- 实时目录获取失败时，请求目录可回退到本地表；显式模型发现会报告失败。
-- 保留流式输出、工具调用、历史回放及支持图片的模型转换；输入图片须有 DSH attachment 服务。
-- 模型看到会话内容和工具定义，不增加隐藏系统提示。会话请求头用于网关路由；图片编码和历史前缀影响缓存复用。
+## 常见问题
 
-## 从源码构建与打包
+### 安装提示依赖构建脚本被拦截
 
-需要 Node.js `^22.19.0 || >=24.0.0` 和 npm。所有依赖从 npm 获取，不使用 `workspace:`、本机路径或 DSH 源码别名。
+按安装器提示，在该 profile 的 `pnpm-workspace.yaml` 中逐项设置 `allowBuilds`。OpenCode Go 已验证的运行路径不需要执行 `@google/genai` 和 `protobufjs` 的安装脚本，可以将这两项设为 `false` 后重试。保留文件中的其他配置，无需全局放开安装脚本。
+
+### 提示 `opencode-go` 路由已被占用
+
+同一 profile 中只能有一个适配器提供 `opencode-go` 路由。如果已经通过其他插件或通用 pi-ai 配置接入 OpenCode Go，请先停用那一项配置。其他提供方可以继续使用。
+
+### 没有出现预期的模型
+
+先确认插件已启用且 API Key 已配置，再刷新设置页中的模型列表。插件仅展示本地适配表与网关实时目录的交集；尚未适配协议的新模型不会自动加入。
+
+实时目录获取失败时，适配器可使用本地表继续处理请求；设置页中的模型发现会显示失败，便于重新尝试。
+
+## 功能说明
+
+- **会话请求头**：每次请求包含 Harness User-Agent 和 `x-opencode-session`。同一会话保持相同 ID，无会话 ID 的请求使用独立随机值。
+- **流式与历史**：支持流式输出、工具调用及历史回放，协议请求由 pi-ai 执行。
+- **图片输入**：支持目录中声明图片能力的模型，需要 DSH attachment 服务。
+- **提示与缓存**：插件不增加隐藏系统提示；会话 ID 用于网关路由，历史前缀及图片编码影响缓存复用。
+
+## 卸载
+
+从对应 profile 移除插件，再重启应用：
+
+```sh
+dsh plugin --profile web remove dsh-opencode-go
+# 或
+dsh plugin --profile headless remove dsh-opencode-go
+```
+
+如果默认模型仍指向 `opencode-go`，请改选其他提供方。凭据和历史会话由 DSH 管理。
+
+## 开发
+
+需要 Node.js `^22.19.0 || >=24.0.0` 和 npm。
 
 ```sh
 npm ci
+npm run typecheck
 npm test
 npm pack
 ```
 
-`npm test` 先构建，再执行测试；`npm pack` 也会构建。产物是 `dsh-opencode-go-0.1.0.tgz`，包含 Host、Client、声明文件及 bundle 配置，不包含源码、测试或密钥。
+`npm test` 会先构建再执行测试；`npm pack` 生成可安装的 `.tgz` 包。依赖均通过 npm 安装，不需要 DSH 源码仓库。
 
-## 验证与维护
+- [验证说明](docs/verification.md)：测试范围、隔离安装与 Headless 验证方法。
+- [架构与依赖](docs/independent-package.md)：Host、Client 构建方式和转换代码的维护方式。
+- [第三方声明](THIRD_PARTY_NOTICES.md)：代码来源与许可。
 
-```sh
-npm run typecheck
-npm test
-npm run verify:installed -- /path/to/isolated-consumer
-npm run verify:headless -- /path/to/isolated-consumer
-```
+自动化测试使用本地模拟网关，不会发起付费模型请求。真实账号、Desktop 和其他操作系统尚未验证。
 
-后两项使用隔离目录中的已安装包。准备方式和实际验证记录见 [验证说明](docs/verification.md)。架构与代码来源见 [独立发布决策](docs/independent-package.md)和 [第三方声明](THIRD_PARTY_NOTICES.md)。
+## 许可证
 
-测试使用本地模拟网关，不会发送真实 OpenCode Go API 请求。真实账号、额度和网关当前模型可用性须在配置自己的密钥后验证。
-
-## 卸载
-
-```sh
-dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile headless remove dsh-opencode-go
-```
-
-重启相应应用后移除插件；如默认模型仍指向 `opencode-go`，请选择其他提供方。凭据和历史会话由 DSH 管理。
-
-## 发布
-
-维护者在有发布权限的 npm 账号下执行 `npm publish --access public`。发布前执行 `npm run typecheck`、`npm test` 和 `npm publish --dry-run`；发布后检查 registry 版本并用包名验证安装。每次更新递增版本号，已发布的版本不可覆盖。构建脚本从 `package.json` 读取 Client 模块 ID。
+[MIT](LICENSE)
