@@ -1,0 +1,3 @@
+# Disable the adapter bundled by the existing fork before enabling the external package.
+- id: llm-opencode-go
+  disabled: true
