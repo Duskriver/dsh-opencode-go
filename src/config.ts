@@ -21,7 +21,7 @@ import { DEFAULT_BASE_URL } from './catalog.ts'
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
 
-/** Default interval between live catalog re-resolutions. */
+/** Runtime request cache lifetime; model listing/discovery always revalidates immediately. */
 export const DEFAULT_REFRESH_MINUTES = 60
 
 /** Default maximum idle interval while a stream read is outstanding. */
@@ -41,7 +41,7 @@ export interface OpencodeGoConfig {
   apiKeyEnv: string
   /** The gateway endpoint; also the base of the live model listing. */
   baseURL: string
-  /** How long one live catalog resolution stays authoritative, in minutes. */
+  /** Runtime request cache lifetime in minutes; explicit catalog reads bypass it. */
   refreshMinutes: number
   /** Largest idle gap between stream events before the request fails. */
   streamIdleTimeoutMs: number

@@ -41,9 +41,6 @@ const API_KEY_FIELD = 'apiKey'
  */
 const OPENCODE_GO_PROVIDER = 'opencode-go'
 
-/** How many model names the page previews out of the whole listing. */
-const MODEL_PREVIEW_LIMIT = 6
-
 /** The adapter fields this page edits. */
 export interface OpencodeGoSettings {
   /** Whether the adapter serves its route; false withdraws it from every picker. */
@@ -233,7 +230,7 @@ export class OpencodeGoSectionController {
           ? {
             status: 'ready',
             count: response.value.length,
-            preview: response.value.slice(0, MODEL_PREVIEW_LIMIT).map(model => model.name ?? model.id),
+            preview: response.value.map(model => model.name ?? model.id),
           }
           : { status: 'failed', message: response.error.message }
         this.store.set(this.projection())

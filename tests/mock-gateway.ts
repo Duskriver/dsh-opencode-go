@@ -17,6 +17,8 @@ export interface MockGateway {
 export interface CompletionsScript {
   status?: number
   events?: string[]
+  /** Anthropic requires named SSE events as well as each JSON event's type. */
+  namedEvents?: boolean
   body?: string
   headers?: Record<string, string>
   /** Milliseconds between SSE events; exceeding the idle timeout fails the stream. */
@@ -62,7 +64,7 @@ export async function mockGateway(modelListing: { status: number; body: unknown 
     request.on('end', () => {
       paths.push(request.url ?? '')
       headers.push(request.headers)
-      if (request.url === '/models' && request.method === 'GET') {
+      if ((request.url === '/models' || request.url === '/v1/models') && request.method === 'GET') {
         modelListings += 1
         const payload = JSON.stringify(listing.body)
         response.writeHead(listing.status, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(payload)) })
@@ -95,7 +97,7 @@ export async function mockGateway(modelListing: { status: number; body: unknown 
       const writeNext = (): void => {
         const event = behavior.events?.[index++]
         if (event === undefined) { response.end(); return }
-        response.write(`data: ${event}\n\n`)
+        response.write(`${behavior.namedEvents ? `event: ${JSON.parse(event).type}\n` : ''}data: ${event}\n\n`)
         if (behavior.delayMs === undefined) writeNext()
         else setTimeout(writeNext, behavior.delayMs)
       }

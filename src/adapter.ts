@@ -141,13 +141,15 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
-    const snapshot = await this.catalogOf(this.options.config()).snapshot()
-    return [...snapshot.models.values()].map(model => ({
+    const snapshot = await this.catalogOf(this.options.config()).snapshot(true)
+    return [...[...snapshot.models.values()].map(model => ({
       provider: PROVIDER_ID,
       id: model.id,
       name: model.name,
       inputModalities: [...model.input],
-    }))
+    })), ...[...snapshot.unavailable].map(([id, reason]) => ({
+      provider: PROVIDER_ID, id, name: id, description: `Metadata unavailable: ${reason}`,
+    }))]
   }
 
   override async resolveModel(
@@ -155,7 +157,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: string,
     _signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    const snapshot = await this.catalogOf(this.options.config()).snapshot()
+    const snapshot = await this.catalogOf(this.options.config()).forModel(model)
     const resolved = snapshot.models.get(model)
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
@@ -205,7 +207,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
     const config = this.options.config()
-    const snapshot = await this.catalogOf(config).snapshot()
+    const snapshot = await this.catalogOf(config).forModel(options.model)
     const model = snapshot.models.get(options.model)
     if (model === undefined) {
       throw new LlmError(`opencode-go has no model "${options.model}"`, 'UNKNOWN_MODEL')

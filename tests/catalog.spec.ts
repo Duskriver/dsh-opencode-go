@@ -50,7 +50,7 @@ describe('OpencodeGoCatalog', () => {
     expect(gateway.modelListings).toBe(1)
   })
 
-  it('carries the addition on the sibling protocol, the vision modalities, and sibling capacities', async () => {
+  it('uses online capacities and modalities while preserving established family wire compatibility', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {})
     const snapshot = await catalog.snapshot()
@@ -61,8 +61,8 @@ describe('OpencodeGoCatalog', () => {
     if (addition === undefined || sibling === undefined || visionSibling === undefined) throw new Error('expected the sibling trio')
     expect(addition.api).toBe(sibling.api)
     expect(addition.baseUrl).toBe(gateway.url)
-    expect(addition.contextWindow).toBe(sibling.contextWindow)
-    expect(addition.maxTokens).toBe(sibling.maxTokens)
+    expect(addition.contextWindow).toBe(262144)
+    expect(addition.maxTokens).toBe(131072)
     expect([...addition.input]).toEqual([...visionSibling.input])
     expect(addition.input).toContain('image')
     expect(addition.name).toBe('DeepSeek V4.1 Flash')
@@ -102,8 +102,8 @@ describe('OpencodeGoCatalog', () => {
     const snapshot = await catalog.snapshot()
 
     expect(snapshot.live).toBe(false)
-    expect(snapshot.models.has('deepseek-v4.1-flash')).toBe(true)
-    expect(fallbacks).toHaveLength(1)
+    expect(snapshot.models.has('deepseek-v4-flash')).toBe(true)
+    expect(fallbacks).toHaveLength(2)
   })
 
   it('caches one resolution for the refresh interval, then refetches', async () => {

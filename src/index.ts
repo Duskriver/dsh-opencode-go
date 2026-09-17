@@ -97,11 +97,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig): void {
   }
   ctx.plugin(GoUsageService, { baseURL: () => current().baseURL, resolveApiKey })
   const logger = {
-    fallback: ({ error }: { url: string; error: unknown; kept: number }): void => {
-      ctx.logger.warn(`llm-opencode-go: live model listing unreachable; serving the curated table until the next refresh (${String(error)})`)
+    fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {
+      ctx.logger.warn(`llm-opencode-go: could not refresh ${url}; using last-known model data (${String(error)})`)
     },
     omitted: (ids: readonly string[]): void => {
-      ctx.logger.info(`llm-opencode-go: live listing carries ids the curated table cannot route; omitted: ${ids.join(', ')}`)
+      ctx.logger.warn(`llm-opencode-go: gateway models awaiting usable online metadata: ${ids.join(', ')}`)
     },
   }
   const adapter = new OpencodeGoAdapter({

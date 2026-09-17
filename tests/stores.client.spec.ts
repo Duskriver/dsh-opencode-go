@@ -411,11 +411,11 @@ describe('OpencodeGoSectionController', () => {
     expect(discoverModels).toHaveBeenCalledWith('llm-opencode-go', { provider: 'opencode-go' })
 
     await vi.waitFor(() => { expect(state().models.status).toBe('ready') })
-    // A model without a name previews as its id, and the preview is bounded.
+    // Every model is visible, including those beyond the former six-name preview.
     expect(state().models).toEqual({
       status: 'ready',
       count: 7,
-      preview: ['DeepSeek V4.1 Flash', 'deepseek-v4-flash', 'kimi-k2', 'glm-5', 'qwen3-max', 'grok-5'],
+      preview: ['DeepSeek V4.1 Flash', 'deepseek-v4-flash', 'kimi-k2', 'glm-5', 'qwen3-max', 'grok-5', 'gpt-6'],
     })
   })
 

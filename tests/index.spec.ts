@@ -165,7 +165,7 @@ describe('llm-opencode-go plugin mount', () => {
     expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
   })
 
-  it('omits live ids the curated table cannot route, serving the rest', async () => {
+  it('keeps unconfigured live ids visible with an explicit diagnostic', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'test-key')
     const gateway = await mockGateway({
       status: 200,
@@ -177,7 +177,7 @@ describe('llm-opencode-go plugin mount', () => {
     apply(ctx, configOf(gateway.url))
 
     const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'opencode-go' })
-    expect(models.map(model => model.id)).not.toContain('mystery-model')
+    expect(models.find(model => model.id === 'mystery-model')?.name).toContain('metadata unavailable')
     expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
   })
 

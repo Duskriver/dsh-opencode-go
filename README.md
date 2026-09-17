@@ -50,6 +50,24 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 
 模型 ID 须在当前网关目录中可用。Web 和 Headless 使用各自的 profile，需要分别安装插件。
 
+## 升级插件
+
+更新 Web profile 中的插件到 npm 最新版本：
+
+```sh
+dsh plugin --profile web update dsh-opencode-go --latest
+```
+
+完成后重启 `dsh web` 并刷新浏览器。Headless 用户将 `web` 换成 `headless`；如果两个 profile 都安装了插件，需要分别升级。
+
+如果此前安装的是本地目录或 `.tgz` 文件，用以下命令切换到 npm 最新版：
+
+```sh
+dsh plugin --profile web add dsh-opencode-go@latest
+```
+
+升级插件无需卸载，也无需重新填写 API Key。模型目录会自动同步，正常新增模型不需要再次升级插件。
+
 ## 订阅用量显示
 
 ![alt text](image.png)
@@ -67,9 +85,13 @@ Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。启用开关
 
 ### 没有出现预期的模型
 
-先确认插件已启用且 API Key 已配置，再刷新设置页中的模型列表。插件仅展示本地适配表与网关实时目录的交集；尚未适配协议的新模型不会自动加入。
+先确认插件已启用且 API Key 已配置，再刷新设置页中的模型列表。插件每次读取模型列表都会请求网关 `/models`，并同步 [models.dev 的 OpenCode Go 配置](https://models.dev/api.json)。模型的协议、上下文长度、输出上限和图片能力来自在线配置，新模型无需等待本插件或 pi-ai 发布新版本。
 
-实时目录获取失败时，适配器可使用本地表继续处理请求；设置页中的模型发现会显示失败，便于重新尝试。
+网关和在线配置已收录、且使用 Anthropic Messages、OpenAI Chat Completions 或 OpenAI Responses 协议的新模型，在下次读取或刷新列表时即可使用。刷新会绕过已有会话的目录缓存；直接请求尚未缓存的新模型也会立即重新同步。设置页显示完整模型列表。
+
+网关已公布 ID 但尚无有效协议/能力配置的模型仍会显示，并标注配置暂不可用；调用时会说明原因。仅凭模型 ID 无法可靠推断调用方式。上游新增全新协议或协议特例时，仍可能需要适配。
+
+在线配置暂时不可达时，优先复用本次运行中成功获取的配置，以 pi-ai 内置配置作为备用。网关目录不可达时，已有请求可以使用上次目录；设置页刷新会显示失败，避免把旧目录误认为最新结果。`refreshMinutes` 只控制已有模型请求的缓存时长，不阻止主动读取列表获取新模型。
 
 ## 功能说明
 
