@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { Context } from '@deepseek-ai/cordis'
+import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { readModelMetadata } from '../src/model-metadata.ts'
 import { configOf } from './config-of.ts'
@@ -18,6 +19,51 @@ function metadataReplies(reply: (init?: RequestInit) => Response | Promise<Respo
 }
 
 describe('runtime model metadata', () => {
+  it.each(['minimax-m2.7', 'union-alpha'])('resolves %s through the host without inventing reasoning controls', async (id) => {
+    metadataReplies(() => Response.json(metadataDocument({
+      [id]: modelMetadata({ provider: { npm: '@ai-sdk/anthropic' }, reasoning_options: [] }),
+    })))
+    const gateway = await mockGateway({ status: 200, body: listingBody([id]) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['opencode-go'], adapter)
+    try {
+      const models = await ctx.llm.listModels('opencode-go')
+      const resolved = await Promise.all(models.map(model => ctx.llm.resolveModelInfo('opencode-go', model.id)))
+      expect(resolved).toEqual([expect.objectContaining({ id })])
+      expect(resolved[0]).not.toHaveProperty('reasoning')
+      expect((await adapter.catalogOf(configOf(gateway.url)).snapshot()).models.get(id)?.reasoning).toBe(true)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps incomplete metadata from breaking the host model catalog while retaining discovery diagnostics', async () => {
+    metadataReplies(() => Response.json(metadataDocument({
+      ready: modelMetadata({ reasoning_options: [{ type: 'effort', values: ['low', 'high'] }] }),
+    })))
+    const gateway = await mockGateway({ status: 200, body: listingBody(['ready', 'not-ready']) })
+    const config = configOf(gateway.url)
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['opencode-go'], adapter)
+    try {
+      // The browser eagerly resolves every listed model; a single rejection hides the provider.
+      const models = await ctx.llm.listModels('opencode-go')
+      const resolved = await Promise.all(models.map(model => ctx.llm.resolveModelInfo('opencode-go', model.id)))
+      expect(resolved.map(model => model.id)).toEqual(['ready'])
+      expect(resolved[0]?.reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'high'])
+      expect(await discoverCatalogModels(adapter.catalogOf(config))).toContainEqual(expect.objectContaining({
+        id: 'not-ready', name: expect.stringContaining('metadata unavailable'),
+      }))
+      await expect(ctx.llm.resolveModelInfo('opencode-go', 'not-ready')).rejects.toMatchObject({ code: 'MODEL_METADATA_UNAVAILABLE' })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('discovers union-alpha without a pi-ai entry', async () => {
     expect(getBuiltinModels('opencode-go').some(model => model.id === 'union-alpha')).toBe(false)
     const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })

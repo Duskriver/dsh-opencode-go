@@ -142,14 +142,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
     const snapshot = await this.catalogOf(this.options.config()).snapshot(true)
-    return [...[...snapshot.models.values()].map(model => ({
+    // DSH resolves every listed model before showing the provider. Unconfigured
+    // ids belong in settings discovery diagnostics, not this selectable list.
+    return [...snapshot.models.values()].map(model => ({
       provider: PROVIDER_ID,
       id: model.id,
       name: model.name,
       inputModalities: [...model.input],
-    })), ...[...snapshot.unavailable].map(([id, reason]) => ({
-      provider: PROVIDER_ID, id, name: id, description: `Metadata unavailable: ${reason}`,
-    }))]
+    }))
   }
 
   override async resolveModel(
@@ -168,16 +168,17 @@ export class OpencodeGoAdapter extends LlmAdapter {
   /** Describe one model: capacities plus the reasoning levels it actually offers. */
   private modelInfo(model: Model<Api>): LlmResolvedModelInfo {
     const reasoning: Pick<LlmResolvedModelInfo, 'reasoning'> = {}
-    /* v8 ignore start -- every shipped opencode-go model reasons; the empty branch exists for a future non-reasoning addition */
-    if (model.reasoning) {
+    const levels = model.reasoning ? getSupportedThinkingLevels(model) : []
+    // Intrinsic reasoning does not imply adjustable efforts. DSH requires a
+    // nonempty choices list whenever reasoning controls are exposed.
+    if (levels.length > 0) {
       reasoning.reasoning = {
-        efforts: getSupportedThinkingLevels(model).map(level => ({
+        efforts: levels.map(level => ({
           id: ReasoningEffortId(level),
           name: `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
         })),
       }
     }
-    /* v8 ignore stop */
     return {
       provider: PROVIDER_ID,
       id: model.id,
