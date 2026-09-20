@@ -9,6 +9,8 @@
 
 ## 安装与使用
 
+插件 `0.1.5` 起支持 DSH `0.1.5-rc.1`、`0.1.5-rc.2` 和 `0.1.6-alpha.1`。使用 DSH `0.1.5` 的用户可直接升级插件，无需升级 DSH。
+
 ### Web
 
 ```sh
@@ -77,6 +79,16 @@ dsh plugin --profile web add dsh-opencode-go@latest
 Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。启用开关立即生效；
 
 ## 常见问题
+
+### DSH 0.1.5 安装插件后无法启动
+
+插件 `0.1.0`–`0.1.4` 使用了 DSH `0.1.6` 新增的图片接口，在旧版 DSH 上可能出现 `IMAGE_OFFLOAD_REQUIRED_CODE` 导出不存在的启动错误。升级插件到 `0.1.5` 或更新版本后重启即可：
+
+```sh
+dsh plugin --profile web update dsh-opencode-go --latest
+```
+
+Headless 用户将 `web` 换成 `headless`。修复保留了两版宿主的图片处理方式：DSH `0.1.5` 在请求超过图片预算时将最旧图片转成占位文本，DSH `0.1.6` 继续由宿主记录并处理图片卸载。
 
 
 ### 提示 `opencode-go` 路由已被占用

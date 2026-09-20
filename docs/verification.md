@@ -59,4 +59,18 @@ A read-only check against the live OpenCode Go listing and models.dev resolved 3
 
 ## Remaining limits
 
-Real paid OpenCode Go completions, Desktop, non-macOS platforms, and other DSH releases are not verified. The automated gateway tests preserve the adapter's request and replay semantics but cannot establish account validity or live provider availability.
+Real paid OpenCode Go completions, Desktop, non-macOS platforms, and DSH releases outside the versions documented here are not verified. The automated gateway tests preserve the adapter's request and replay semantics but cannot establish account validity or live provider availability.
+
+## DSH 0.1.5 compatibility (plugin 0.1.5)
+
+Issue #1 reproduced as an ESM import failure before plugin activation: DSH 0.1.5 lacks `IMAGE_OFFLOAD_REQUIRED_CODE`, `requiredImageOffload`, and `projectOffloadedImages`. The regression test failed against both actual published `dsh-llm` 0.1.5 release candidates before the fix.
+
+`npm test` builds the distributed artifact and runs `tests/host-compatibility.spec.ts` in fresh Node processes against the published LLM packages `0.1.5-rc.1`, `0.1.5-rc.2`, and `0.1.6-alpha.1`. The two older versions are pinned npm aliases in development dependencies. A resolution hook selects the LLM package for both the plugin and Cordis Loader; it does not mock that package's exports. This focused matrix does not replace full CLI/profile checks.
+
+The fixture verifies native ESM loading, Loader activation, model listing, streamed text, image transport, repeated-image byte accounting, nested oldest-image offloading, immutable history, and a second check against encoded image sizes. All external model metadata is replaced by an offline fixture, and completions go to a loopback gateway with a fake credential.
+
+The compatibility bridge uses the host's own functions. On 0.1.5 it preserves the stock adapter's two-pass transient projection (estimated bytes before reading images, exact encoded bytes afterward). On 0.1.6 it preserves durable offload marks and the `IMAGE_OFFLOAD_REQUIRED` retry signal; it never silently substitutes legacy offloading on a modern host. The existing conversion suite additionally checks surface-marked images, path descriptions, and unsupported image roles.
+
+Validation: 146 tests passed, Host and Client type checks passed, and the package built successfully on Node.js 24.14.1.
+
+Full installed checks also passed against separate npm CLI installations whose entire DSH dependency closures were pinned to `0.1.5-rc.1` and `0.1.5-rc.2` respectively (not just the CLI version). The `0.1.5` plugin tarball was installed through `dsh plugin` into each installation's Web and Headless profiles under isolated `DSH_HOME` directories. Both versions passed `verify:installed` for package resolution, catalog, streaming, request headers, and unload; both passed `verify:headless` through the official launcher and loopback gateway. Browser checks confirmed the Web shell and OpenCode Go settings section load, including the API-key field, advanced settings, and enable switch, with no page errors.
