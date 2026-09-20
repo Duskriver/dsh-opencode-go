@@ -13,7 +13,8 @@
     "url": "https://github.com/Duskriver/dsh-opencode-go/issues"
   },
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.1.5-rc.1 <0.1.6-0 || 0.1.6-alpha.1"
   },
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
