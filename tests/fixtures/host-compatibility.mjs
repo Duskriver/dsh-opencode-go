@@ -1,22 +1,31 @@
 /** Exercise the shipped artifact with real, versioned LLM packages; no mocked exports. */
 import assert from 'node:assert/strict'
-import { registerHooks } from 'node:module'
+import { createRequire, registerHooks } from 'node:module'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
+const legacy = process.argv[2].startsWith('dsh-llm-v015')
 const llmURL = import.meta.resolve(process.argv[2])
+const aliased = process.argv[2].startsWith('dsh-llm-')
+const attachmentPackage = aliased ? process.argv[2].replace('dsh-llm-', 'dsh-attachment-') : '@deepseek-ai/dsh-attachment'
+const attachmentURL = import.meta.resolve(attachmentPackage)
+const localPackage = aliased ? process.argv[2].replace('dsh-llm-', 'dsh-attachment-local-') : '@deepseek-ai/dsh-attachment-local'
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    return specifier === '@deepseek-ai/dsh-llm'
-      ? { url: llmURL, shortCircuit: true }
-      : nextResolve(specifier, context)
+    if (specifier === '@deepseek-ai/dsh-llm') return { url: llmURL, shortCircuit: true }
+    if (specifier === '@deepseek-ai/dsh-attachment') return { url: attachmentURL, shortCircuit: true }
+    return nextResolve(specifier, context)
   },
 })
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const llm = await import('@deepseek-ai/dsh-llm')
 const plugin = await import('../../lib/index.js')
-const legacy = process.argv[2].startsWith('dsh-llm-v015')
+const { LocalAttachmentStore } = await import(localPackage)
+const sharp = createRequire(import.meta.resolve(localPackage))('sharp')
 const bodies = []
 const networkFetch = globalThis.fetch
 globalThis.fetch = (input, init) => {
@@ -52,6 +61,7 @@ const server = createServer((request, response) => {
   })
 })
 const ctx = new Context()
+const attachmentHome = await mkdtemp(join(tmpdir(), 'opencode-go-image-compat-'))
 process.env.OPENCODE_GO_COMPAT_KEY = 'fixture-key'
 try {
   server.listen(0, '127.0.0.1')
@@ -71,6 +81,39 @@ try {
   const drain = async stream => { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks }
   const text = await drain(ctx.llm.stream(request([user([{ type: 'text', text: 'hello' }])])))
   assert.ok(text.some(c => c.type === 'text-delta' && c.text === 'compat-ok'))
+
+  // Exercise the real attachment policy validation, resizing and encoding (#2).
+  // The original image-transport mock below ignores the second argument entirely.
+  await ctx.plugin(LocalAttachmentStore, { dshHome: attachmentHome, normalizedImageMaxPixels: 8 * 1024 * 1024 })
+  const imageConfig = { ...config, maxRequestImageBytes: 20 * 1024 * 1024 }
+  const realAdapter = new plugin.OpencodeGoAdapter({ config: () => imageConfig,
+    resolveApiKey: async () => 'fixture-key', imageAccess: {
+      resolveImageAccess: () => undefined,
+      resolveAttachments: () => ctx.attachments,
+    },
+  })
+  for (const [width, height, maxPixels, maxBytes] of [
+    [800, 600, 2048 * 2048, 1024 * 1024],
+    [3000, 2000, 2048 * 2048, 1024 * 1024],
+    [3000, 2000, 1000 * 1000, 64 * 1024],
+  ]) {
+    imageConfig.requestImagePixelBudget = maxPixels
+    imageConfig.requestImageMaxBytes = maxBytes
+    const data = await sharp({ create: { width, height, channels: 3, background: '#5588aa' } }).png().toBuffer()
+    const attachment = await ctx.attachments.saveImage({ data, mediaType: 'image/png' })
+    assert.deepEqual([attachment.width, attachment.height], [width, height], 'admission must leave resizing to the request path')
+    const chunks = await drain(realAdapter.stream(request([user([{ type: 'image', attachment }])])))
+    assert.ok(chunks.some(c => c.type === 'text-delta' && c.text === 'compat-ok'))
+    const sent = bodies.at(-1).messages.flatMap(m => Array.isArray(m.content) ? m.content : [])
+      .filter(c => c.type === 'image_url')
+    assert.equal(sent.length, 1)
+    const encoded = Buffer.from(sent[0].image_url.url.split(',')[1], 'base64')
+    const metadata = await sharp(encoded).metadata()
+    assert.ok(metadata.width * metadata.height <= maxPixels)
+    assert.ok(encoded.length <= maxBytes)
+    if (width === 800) assert.deepEqual([metadata.width, metadata.height], [width, height])
+    else assert.ok(metadata.width < width && metadata.height < height)
+  }
 
   const reads = []
   let encodedBytes = 3
@@ -124,9 +167,10 @@ try {
     await assert.rejects(() => drain(adapter.stream(request([user([recent])]))),
       error => error.code === 'IMAGE_OFFLOAD_REQUIRED')
   }
-  console.log(`PASS: host compatibility (${process.argv[2]}): ESM, Loader, catalog, text, image bounds, history`)
+  console.log(`PASS: host compatibility (${process.argv[2]}): ESM, Loader, catalog, text, real images, resizing, image bounds, history`)
 } finally {
   await ctx.fiber.dispose()
+  await rm(attachmentHome, { recursive: true, force: true })
   server.closeAllConnections()
   await new Promise(resolve => server.close(resolve))
 }

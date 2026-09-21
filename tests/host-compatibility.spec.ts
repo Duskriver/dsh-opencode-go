@@ -5,9 +5,9 @@ import { expect, it } from 'vitest'
 
 const run = promisify(execFile)
 
-// A fresh Node process tests the distributed ESM imports as well as behavior.
-// Mocking exports in Vitest would hide the startup failure reported in #1.
-it.each(['dsh-llm-v015-rc1', 'dsh-llm-v015-rc2', '@deepseek-ai/dsh-llm'])(
+// A fresh Node process tests distributed ESM imports and real LLM/attachment packages.
+// Mocking exports or attachment reads would hide the failures reported in #1 and #2.
+it.each(['dsh-llm-v015-rc1', 'dsh-llm-v015-rc2', '@deepseek-ai/dsh-llm', 'dsh-llm-v016-alpha2'])(
   'loads and streams the built plugin against %s',
   async (llm) => {
     const { stdout } = await run(process.execPath, [

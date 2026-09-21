@@ -239,8 +239,14 @@ export interface PiImageRequestBudget {
 }
 
 /** Deterministic request target for one source under the route budgets. */
-function requestImageTarget(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget {
-  return { ...requestImageDimensions(ref.width, ref.height, budget.maxPixels), maxBytes: budget.maxBytes }
+function requestImageTarget(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget & PiImageRequestBudget {
+  // DSH 0.1.5 reads the pixel policy; 0.1.6 reads explicit target dimensions.
+  // Supply both contracts so each host retains its own image preparation path.
+  return {
+    ...requestImageDimensions(ref.width, ref.height, budget.maxPixels),
+    maxPixels: budget.maxPixels,
+    maxBytes: budget.maxBytes,
+  }
 }
 
 /**
