@@ -10,11 +10,14 @@ import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
 import { sortModels, type GoModel } from './models-contract.ts'
 import type { ModelMetadata } from './model-metadata.ts'
+import { readJsonResponse } from './json-response.ts'
 
 export const PROVIDER_ID = 'opencode-go'
 export const DISPLAY_NAME = 'OpenCode Go'
 export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
 const MODELS_FETCH_TIMEOUT_MS = 10_000
+const MODEL_LISTING_MAX_BYTES = 1024 * 1024
+const MODEL_METADATA_MAX_BYTES = 16 * 1024 * 1024
 
 export interface CatalogSnapshot {
   readonly details: ModelMetadata['details']
@@ -58,7 +61,7 @@ async function fetchLiveModelIds(baseURL: string): Promise<readonly string[]> {
     throw new LlmError(`could not reach ${url}`, 'DISCOVERY_FAILED', { cause: error })
   }
   if (!response.ok) throw new LlmError(`${url} answered ${response.status}`, 'DISCOVERY_FAILED')
-  return readLiveModelIds(await response.json())
+  return readLiveModelIds(await readJsonResponse(response, MODEL_LISTING_MAX_BYTES))
 }
 
 /** The adapter resolves and passes credentials for each generation request. */
@@ -115,7 +118,7 @@ export class OpencodeGoCatalog {
     })
     if (response.status === 304 && this.metadata !== undefined) return this.metadata
     if (!response.ok) throw new Error(`models.dev answered ${response.status}`)
-    const metadata = readModelMetadata(await response.json(), this.baseURL, builtin)
+    const metadata = readModelMetadata(await readJsonResponse(response, MODEL_METADATA_MAX_BYTES), this.baseURL, builtin)
     this.metadata = metadata
     this.metadataETag = response.headers.get('etag') ?? undefined
     return metadata

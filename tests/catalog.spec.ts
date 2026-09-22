@@ -1,3 +1,4 @@
+import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import {
@@ -6,6 +7,33 @@ import {
   readLiveModelIds,
 } from '../src/catalog.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway } from './mock-gateway.ts'
+import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
+
+const metadataOnlyId = 'compressed-metadata-only-model'
+const metadataOnlyDocument = () => metadataDocument({
+  [metadataOnlyId]: modelMetadata({ name: 'Compressed metadata model', limit: { context: 12345, output: 6789 } }),
+})
+
+function routeMetadataTo(gatewayURL: string): void {
+  const networkFetch = globalThis.fetch
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input)
+    return networkFetch(url === MODELS_METADATA_URL ? `${gatewayURL}/models` : input, init)
+  })
+}
+
+const responseFormats = [
+  { name: 'plain JSON', responseBodyTransform: undefined, responseHeaders: undefined },
+  ...[
+    { encoding: 'br', compress: brotliCompressSync },
+    { encoding: 'gzip', compress: gzipSync },
+    { encoding: 'deflate', compress: deflateSync },
+  ].flatMap(({ encoding, compress }) => [false, true].map(withHeader => ({
+    name: `${encoding} with ${withHeader ? 'correct' : 'missing'} Content-Encoding`,
+    responseBodyTransform: (body: Buffer) => compress(body),
+    responseHeaders: withHeader ? { 'content-encoding': encoding } : undefined,
+  }))),
+]
 
 afterEach(async () => {
   vi.useRealTimers()
@@ -33,6 +61,107 @@ describe('readLiveModelIds', () => {
 })
 
 describe('OpencodeGoCatalog', () => {
+  it.each(responseFormats)('reads $name from both discovery endpoints over HTTP', async ({ name: _name, ...format }) => {
+    const gateway = await mockGateway({ status: 200, body: listingBody([metadataOnlyId]), ...format })
+    const metadataGateway = await mockGateway({ status: 200, body: metadataOnlyDocument(), ...format })
+    routeMetadataTo(metadataGateway.url)
+    const fallback = vi.fn()
+    const catalog = new OpencodeGoCatalog(gateway.url, 60_000, fallback, () => {})
+
+    const snapshot = await catalog.snapshot()
+
+    expect(snapshot.live).toBe(true)
+    expect(snapshot.models.get(metadataOnlyId)).toMatchObject({
+      name: 'Compressed metadata model', contextWindow: 12345, maxTokens: 6789,
+    })
+    expect(snapshot.unavailable.size).toBe(0)
+    expect(fallback).not.toHaveBeenCalled()
+    expect(gateway.modelListings).toBe(1)
+    expect(metadataGateway.modelListings).toBe(1)
+  })
+
+  it.each(['listing', 'metadata'])('reports a corrupt %s response without configuring an unknown model', async (source) => {
+    const corrupt = { responseBodyTransform: (body: Buffer) => gzipSync(body).subarray(0, 8) }
+    const gateway = await mockGateway({
+      status: 200, body: listingBody([metadataOnlyId]), ...(source === 'listing' ? corrupt : {}),
+    })
+    const metadataGateway = await mockGateway({
+      status: 200, body: metadataOnlyDocument(), ...(source === 'metadata' ? corrupt : {}),
+    })
+    routeMetadataTo(metadataGateway.url)
+    const fallback = vi.fn()
+    const snapshot = await new OpencodeGoCatalog(gateway.url, 60_000, fallback, () => {}).snapshot()
+
+    expect(snapshot.live).toBe(source !== 'listing')
+    expect(snapshot.models.size).toBe(0)
+    expect(snapshot.unavailable.has(metadataOnlyId)).toBe(source === 'metadata')
+    expect(fallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      url: source === 'listing' ? `${gateway.url}/models` : MODELS_METADATA_URL,
+      error: expect.any(Error),
+    }))
+  })
+
+  it.each([
+    { source: 'listing', maxBytes: 1024 * 1024 },
+    { source: 'metadata', maxBytes: 16 * 1024 * 1024 },
+  ].flatMap(limit => [false, true].map(withHeader => ({ ...limit, withHeader }))))(
+    'enforces the $source byte limit on gzip over HTTP, Content-Encoding=$withHeader',
+    async ({ source, maxBytes, withHeader }) => {
+      const oversized = source === 'listing'
+        ? { data: [{ id: metadataOnlyId }], padding: '' }
+        : { ...metadataOnlyDocument(), padding: '' }
+      oversized.padding = 'x'.repeat(maxBytes + 1 - Buffer.byteLength(JSON.stringify(oversized)))
+      expect(Buffer.byteLength(JSON.stringify(oversized))).toBe(maxBytes + 1)
+      const format = {
+        responseBodyTransform: (body: Buffer) => gzipSync(body),
+        responseHeaders: withHeader ? { 'content-encoding': 'gzip' } : undefined,
+      }
+      const gateway = await mockGateway({
+        status: 200, body: source === 'listing' ? oversized : listingBody([metadataOnlyId]), ...format,
+      })
+      const metadataGateway = await mockGateway({
+        status: 200, body: source === 'metadata' ? oversized : metadataOnlyDocument(), ...format,
+      })
+      routeMetadataTo(metadataGateway.url)
+      const fallback = vi.fn()
+
+      const snapshot = await new OpencodeGoCatalog(gateway.url, 60_000, fallback, () => {}).snapshot()
+
+      expect(snapshot.live).toBe(source !== 'listing')
+      expect(snapshot.models.size).toBe(0)
+      expect(snapshot.unavailable.has(metadataOnlyId)).toBe(source === 'metadata')
+      expect(fallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        url: source === 'listing' ? `${gateway.url}/models` : MODELS_METADATA_URL,
+        error: expect.any(RangeError),
+      }))
+      expect(fallback.mock.calls[0][0].error.message).toContain(`${maxBytes} byte limit`)
+    },
+  )
+
+  it('keeps the last usable snapshot when compressed discovery responses become corrupt', async () => {
+    let corrupt = false
+    const responseBodyTransform = (body: Buffer): Buffer => corrupt
+      ? Buffer.from('{ invalid JSON') : brotliCompressSync(body)
+    const gateway = await mockGateway({ status: 200, body: listingBody([metadataOnlyId]), responseBodyTransform })
+    const metadataGateway = await mockGateway({ status: 200, body: metadataOnlyDocument(), responseBodyTransform })
+    routeMetadataTo(metadataGateway.url)
+    const fallback = vi.fn()
+    const catalog = new OpencodeGoCatalog(gateway.url, 60_000, fallback, () => {})
+    const first = await catalog.snapshot()
+    expect(first.models.has(metadataOnlyId)).toBe(true)
+
+    corrupt = true
+    const stale = await catalog.snapshot(true)
+
+    expect(stale.live).toBe(false)
+    expect(stale.models).toEqual(first.models)
+    expect(stale.details).toEqual(first.details)
+    expect(fallback).toHaveBeenCalledTimes(2)
+    expect(fallback.mock.calls.map(([detail]) => detail.url)).toEqual(expect.arrayContaining([
+      MODELS_METADATA_URL, `${gateway.url}/models`,
+    ]))
+  })
+
   it('serves the curated table intersected with the live listing', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4-flash', 'deepseek-v4.1-flash', 'brand-new-model']) })
     const omitted: string[][] = []
