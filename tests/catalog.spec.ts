@@ -1,3 +1,4 @@
+import { brotliCompressSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import {
@@ -6,6 +7,7 @@ import {
   readLiveModelIds,
 } from '../src/catalog.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway } from './mock-gateway.ts'
+import { metadataDocument, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
 afterEach(async () => {
   vi.useRealTimers()
@@ -33,6 +35,25 @@ describe('readLiveModelIds', () => {
 })
 
 describe('OpencodeGoCatalog', () => {
+  it('accepts Brotli-compressed model responses without content-encoding headers', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']), responseBodyTransform: body => brotliCompressSync(body) })
+    const networkFetch = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === MODELS_METADATA_URL) {
+        return Promise.resolve(new Response(brotliCompressSync(Buffer.from(JSON.stringify(metadataDocument()))), {
+          headers: { 'content-type': 'application/json' },
+        }))
+      }
+      return networkFetch(input, init)
+    })
+    const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {})
+
+    const snapshot = await catalog.snapshot()
+
+    expect(snapshot.live).toBe(true)
+    expect(snapshot.models.has('deepseek-v4.1-flash')).toBe(true)
+  })
+
   it('serves the curated table intersected with the live listing', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4-flash', 'deepseek-v4.1-flash', 'brand-new-model']) })
     const omitted: string[][] = []

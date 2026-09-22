@@ -46,7 +46,7 @@ export const textEvents = [
  * OpenCode Go gateway stand-in: `GET /models` answers the configured listing,
  * `POST /chat/completions` replays scripted SSE behaviors in order.
  */
-export async function mockGateway(modelListing: { status: number; body: unknown }): Promise<MockGateway> {
+export async function mockGateway(modelListing: { status: number; body: unknown; responseBodyTransform?: (body: Buffer) => Buffer }): Promise<MockGateway> {
   const paths: string[] = []
   const headers: IncomingMessage['headers'][] = []
   const bodies: unknown[] = []
@@ -66,9 +66,10 @@ export async function mockGateway(modelListing: { status: number; body: unknown 
       headers.push(request.headers)
       if ((request.url === '/models' || request.url === '/v1/models') && request.method === 'GET') {
         modelListings += 1
-        const payload = JSON.stringify(listing.body)
-        response.writeHead(listing.status, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(payload)) })
-        response.end(payload)
+        const payload = Buffer.from(JSON.stringify(listing.body))
+        const transformed = listing.responseBodyTransform?.(payload) ?? payload
+        response.writeHead(listing.status, { 'content-type': 'application/json', 'content-length': String(transformed.byteLength) })
+        response.end(transformed)
         return
       }
       bodies.push(body.length === 0 ? undefined : JSON.parse(body))
