@@ -37,7 +37,17 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
     const bindScope = vi.fn(() => scope)
     const ctx = {
       inject: vi.fn((services: string[], callback: (child: unknown) => void) => {
-        if (services.includes(host === 'modern' ? 'configForms' : 'settingsScope')) callback(ctx)
+        if (services.includes(host === 'modern' ? 'configForms' : 'settingsScope')) callback({
+          ...ctx,
+          remote: new Proxy(ctx.remote, {
+            get(target, key: keyof typeof ctx.remote) {
+              if (key === 'opencodeGoModels' && !services.includes('remote.opencodeGoModels')) {
+                throw new Error('cannot get property "remote.opencodeGoModels" without inject')
+              }
+              return target[key]
+            },
+          }),
+        })
       }),
       get: () => ({ get: getForm }),
       effect: (install: () => (() => void) | Promise<() => void>) => { effects.push(install()) },
@@ -57,9 +67,11 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
     }
     expect(slots).toHaveBeenCalledWith(expect.objectContaining({ id: 'opencode-go', name: 'settings.section' }), expect.any(Function))
     const [options, Component] = slots.mock.calls[0] as unknown as [
-      { inject(): { hooks: { opencodeGo: { getSnapshot(): unknown } } } }, React.ComponentType<object>,
+      { inject(): { loadModels(): void; hooks: { opencodeGo: { getSnapshot(): { models: { status: string } } } } } }, React.ComponentType<object>,
     ]
     const face = options.inject()
+    face.loadModels()
+    await vi.waitFor(() => expect(face.hooks.opencodeGo.getSnapshot().models.status).toBe('ready'))
     const markup = renderToStaticMarkup(React.createElement(Component, {
       ...face, useOpencodeGo: () => face.hooks.opencodeGo.getSnapshot(),
     }))

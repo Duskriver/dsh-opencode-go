@@ -168,3 +168,5 @@ All four requests returned HTTP 200 and `finish.kind: stop`. After inspecting ea
 | 0.1.6-alpha.2 | 8/8 passed | 4.759 s | 133 / 702 |
 
 Total: four additional live completion requests and 3,092 reported tokens, including reasoning output. No code corrections or retries were needed. This verifies ordinary text-only code generation and executable output; it does not exercise an agent's multi-turn tool-call workflow. Credential handling was identical to the live image checks above.
+
+The settings build was also loaded in the user's running local `0.1.7-alpha.1` Web profile. This exposed a missing `remote.opencodeGoModels` injection in the browser settings scope; both legacy and modern settings bindings now declare it, and the distributed-client regression checks exercise model loading under that injection requirement. After rebuilding and restarting the Host, the real settings page loaded 40 gateway models, including 3 recent releases and 8 deprecated entries, with the deprecated-model switch off. No completion request was sent during this check.

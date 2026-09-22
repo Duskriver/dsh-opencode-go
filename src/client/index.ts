@@ -58,12 +58,12 @@ export function apply(ctx: ClientContext): void {
   registerUsagePill(ctx)
   const modelsReady = ctx.remote.$mount(goRemote)
   ctx.effect(async () => await modelsReady)
-  ctx.inject(['configForms'], child => {
+  ctx.inject(['configForms', 'remote.opencodeGoModels'], child => {
     const forms = child.get('configForms') as { get<T>(id: string): SettingsScope<T> }
     // Profile forms use the bundle entry id, not the legacy settings namespace.
     mountSettings(child, forms.get<OpencodeGoSettings>('opencode-go'), modelsReady)
   })
-  ctx.inject(['settingsScope'], child => {
+  ctx.inject(['settingsScope', 'remote.opencodeGoModels'], child => {
     mountSettings(child, child.settingsScope.bind({
       namespace: 'llm-opencode-go',
       decode: (section): OpencodeGoSettings | undefined =>
