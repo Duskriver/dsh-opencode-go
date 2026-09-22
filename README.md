@@ -1,19 +1,16 @@
 # dsh-opencode-go
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中使用 OpenCode Go 订阅模型，支持流式回复、工具调用、图片输入和 Web 设置页。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中使用 OpenCode Go 订阅模型，支持流式回复、工具调用、图片输入。
 
-插件自动添加 OpenCode Go 所需的会话请求头，并从网关获取可用模型目录，显示套餐剩余额度。通过 DSH 插件命令安装，无需修改 DSH 源码。
+插件自动添加 OpenCode Go 所需的会话请求头，并自动获取可用模型目录，显示套餐剩余额度。
 
 无需任何设置，一key开始
 
 
 ## 安装与使用
 
-插件 `0.1.6` 兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1` 和 `0.1.6-alpha.2`，并通过这四个版本的真实图片和普通代码请求验证。使用 DSH `0.1.5` 的用户无需升级宿主。
+兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1` 和 `0.1.6-alpha.2`
 
-插件 `0.1.6` 修复了 `0.1.5` 在旧版 DSH 上图片请求缺少 `maxPixels` 的问题（[Issue #2](https://github.com/Duskriver/dsh-opencode-go/issues/2)），同时保留新版宿主要求的图片目标宽高。
-
-npm 包通过 `engines.dsh` 明确声明宿主版本要求，并保留 DSH 组件的 peerDependencies。dshmarket 中本插件的安装来源也是该 npm 包，市场会将其安装到选定的 DSH profile。
 
 ### Web
 
@@ -27,7 +24,7 @@ dsh plugin --profile web add dsh-opencode-go
 2. 填入 OpenCode Go API Key 并保存。
 3. 在会话的模型选择器中选择 OpenCode Go 模型。
 
-API Key 来自你的 OpenCode Go 订阅。安装插件不会自动更改默认模型。
+
 
 ### Headless
 
@@ -66,13 +63,6 @@ dsh plugin --profile web update dsh-opencode-go --latest
 
 完成后重启 `dsh web` 并刷新浏览器。Headless 用户将 `web` 换成 `headless`；如果两个 profile 都安装了插件，需要分别升级。
 
-如果此前安装的是本地目录或 `.tgz` 文件，用以下命令切换到 npm 最新版：
-
-```sh
-dsh plugin --profile web add dsh-opencode-go@latest
-```
-
-升级插件无需卸载，也无需重新填写 API Key。模型目录会自动同步，正常新增模型不需要再次升级插件。
 
 ## 订阅用量显示
 
@@ -80,7 +70,7 @@ dsh plugin --profile web add dsh-opencode-go@latest
 
 ## 配置
 
-Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。启用开关立即生效；
+Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。
 
 ## 常见问题
 
@@ -94,18 +84,6 @@ dsh plugin --profile web add dsh-opencode-go@0.1.6
 
 Headless 用户将 `web` 换成 `headless`。修复保留了两版宿主的图片处理方式：DSH `0.1.5` 在请求超过图片预算时将最旧图片转成占位文本，DSH `0.1.6` 继续由宿主记录并处理图片卸载。
 
-### 新版本是否必须等待一天才能安装
-
-npm 本身没有统一的 24 小时安装等待期。DSH 插件命令底层使用 pnpm；pnpm 11 起默认设置 `minimumReleaseAge: 1440`，按包名或 `latest` 安装、升级时可能继续选中发布满一天的旧版本。默认的非严格策略允许上面显式指定 `@0.1.6` 的安装；如果 profile 显式配置了严格的发布时间限制，则仍会被阻止。
-
-需要立即安装该修复时，可在对应 profile 的 `pnpm-workspace.yaml`（默认位于 `~/.dsh/profiles/web/`）中，将此版本合并到已有的例外列表，再运行上面的安装命令：
-
-```yaml
-minimumReleaseAgeExclude:
-  - dsh-opencode-go@0.1.6
-```
-
-保留文件中的其他设置和已有例外。此项仅豁免本插件的 `0.1.6`，不改变其他依赖的等待策略。参见 [pnpm 发布时间限制文档](https://pnpm.io/settings/dependency-resolution#minimumreleaseage)。市场目录、兼容性缓存或 npm 镜像也可能晚于官方 registry 更新；页面仍显示旧版本不代表新版尚未发布。
 
 
 ### 提示 `opencode-go` 路由已被占用
