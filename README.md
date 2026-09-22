@@ -2,27 +2,16 @@
 
 [English](README.en.md)
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中使用 OpenCode Go 订阅模型，支持流式回复、工具调用和图片输入。
+功能：让你在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中完美使用 OpenCode Go 订阅模型，支持流式回复、工具调用和图片输入。
 
-插件会自动添加 OpenCode Go 所需的会话请求头、读取网关模型目录，并显示订阅用量。
+插件会自动添加 OpenCode Go 所需的会话请求头、读取网关模型目录，并显示订阅用量，仅需配置你的key
 
 ## 安装与使用
 
-插件 `0.1.7` 兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` 和 `0.1.7-alpha.1`，旧版 DSH 用户无需升级宿主。
+兼容清单：
+ `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` 和 `0.1.7-alpha.1`
 
-如需从源码构建并安装本地包：
-
-```sh
-npm ci --legacy-peer-deps
-npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz
-```
-
-开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
-
-
-### Web
-
+### 一键安装
 ```sh
 dsh plugin --profile web add dsh-opencode-go@0.1.7
 ```
@@ -59,6 +48,16 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 ```
 
 模型 ID 须在当前网关目录中可用。Web 和 Headless 使用各自的 profile，需要分别安装插件。
+
+如需从源码构建并安装本地包：
+
+```sh
+npm ci --legacy-peer-deps
+npm pack
+dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz
+```
+
+开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
 
 ## 模型容量设置
 
