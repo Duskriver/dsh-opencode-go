@@ -10,6 +10,7 @@ import type { LlmDiscoveredModel, SettingsPathOpView } from '@deepseek-ai/dsh-ap
 import { RemoteError, stubSettingsScope } from './support/client.ts'
 import {
   StagedForm,
+  jsonField,
   numberField,
   textField,
   type FieldState,
@@ -268,6 +269,57 @@ describe('StagedForm', () => {
   })
 })
 
+describe('jsonField', () => {
+  const spec = jsonField('modelLimits')
+
+  it('formats an absent value as empty text and an object as readable JSON', () => {
+    expect(spec.format(undefined)).toBe('')
+    expect(JSON.parse(spec.format({ 'mimo-v2.6-flash': { contextWindow: 262_144 } })))
+      .toEqual({ 'mimo-v2.6-flash': { contextWindow: 262_144 } })
+  })
+
+  it('accepts an object draft, clears on empty, and blocks malformed JSON', () => {
+    expect(spec.parse('{"a":{"maxTokens":32768}}'))
+      .toEqual({ kind: 'set', value: { a: { maxTokens: 32768 } } })
+    expect(spec.parse('   ')).toEqual({ kind: 'clear' })
+    expect(spec.parse('{not json')).toBeUndefined()
+  })
+
+  it('stages a per-model map through the shared form', () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptWrites(host)
+    const form = new StagedForm(host.scope as never, [...specs, spec])
+    host.publish({ status: 'ready', writable: true, value: {}, user: {} })
+
+    form.actions().edit('modelLimits', '{"mimo-v2.6-flash":{"contextWindow":262144,"maxTokens":32768}}')
+
+    expect(form.field('modelLimits').overridden).toBe(true)
+    expect(form.field('modelLimits').invalid).toBe(false)
+
+    form.actions().edit('modelLimits', '{broken')
+    expect(form.field('modelLimits').invalid).toBe(true)
+    expect(form.shell().invalid).toBe(true)
+  })
+
+  it('accepts a structured settings write when the Host returns a cloned value', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    const form = new StagedForm(host.scope as never, [...specs, spec])
+    const current = () => host.scope.getSnapshot()
+    setSpy(host).mockImplementation(async (field, value) => {
+      host.publish({
+        value: { ...current().value as object, [field]: structuredClone(value) },
+        user: { ...current().user as object, [field]: structuredClone(value) },
+      })
+    })
+    host.publish({ status: 'ready', writable: true, value: {}, user: {} })
+
+    form.actions().edit('modelLimits', '{"mimo-v2.6-flash":{"contextWindow":262144}}')
+    await form.save()
+
+    expect(form.shell()).toEqual(settled)
+  })
+})
+
 describe('OpencodeGoSectionController', () => {
   const ready = (value: OpencodeGoSettings, user: Record<string, unknown> = {}) => ({
     status: 'ready' as const,
@@ -416,7 +468,35 @@ describe('OpencodeGoSectionController', () => {
       status: 'ready',
       count: 7,
       preview: ['DeepSeek V4.1 Flash', 'deepseek-v4-flash', 'kimi-k2', 'glm-5', 'qwen3-max', 'grok-5', 'gpt-6'],
+      entries: [
+        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+        { id: 'deepseek-v4-flash' },
+        { id: 'kimi-k2' }, { id: 'glm-5' }, { id: 'qwen3-max' }, { id: 'grok-5' }, { id: 'gpt-6' },
+      ],
     })
+  })
+
+  it('publishes model entries and the current per-model draft for the capacity editor', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    const discoverModels = vi.fn(() => Promise.resolve(discovered([
+      { id: 'mimo-v2.6-flash', name: 'Mimo V2.6 Flash', contextWindow: 262_144, maxTokens: 32_768 },
+    ])))
+    const controller = new OpencodeGoSectionController(host.scope, pageCtx(discoverModels))
+    host.publish(ready({ modelLimits: { 'mimo-v2.6-flash': { contextWindow: 131_072 } } }, {
+      modelLimits: { 'mimo-v2.6-flash': { contextWindow: 131_072 } },
+    }))
+
+    controller.loadModels()
+    const state = () => controller.inject().hooks.opencodeGo.getSnapshot()
+    await vi.waitFor(() => { expect(state().models.status).toBe('ready') })
+
+    expect(state().models).toMatchObject({
+      status: 'ready',
+      count: 1,
+      preview: ['Mimo V2.6 Flash'],
+      entries: [{ id: 'mimo-v2.6-flash', name: 'Mimo V2.6 Flash', contextWindow: 262_144, maxTokens: 32_768 }],
+    })
+    expect(state().modelLimitDraft).toEqual({ 'mimo-v2.6-flash': { contextWindow: 131_072 } })
   })
 
   it('reports a refused listing with the Host diagnostic', async () => {
@@ -479,11 +559,11 @@ describe('OpencodeGoSectionController', () => {
     controller.loadModels()
     controller.loadModels()
     settleSecond(discovered([{ id: 'second' }]))
-    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'] }) })
+    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] }) })
 
     rejectFirst(new Error('the first read failed late'))
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'] })
+    expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] })
   })
 
   it('drops a listing answer a later read already replaced', async () => {
@@ -500,10 +580,10 @@ describe('OpencodeGoSectionController', () => {
     controller.loadModels()
     controller.loadModels()
     settleSecond(discovered([{ id: 'second' }]))
-    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'] }) })
+    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] }) })
 
     settleFirst(discovered([{ id: 'first' }, { id: 'another' }]))
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'] })
+    expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] })
   })
 })

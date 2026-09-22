@@ -114,12 +114,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * The catalog resolver for one configuration, rebuilding on the facts it
    * owns. Public for the plugin's discovery registration, which resolves the
    * current configuration the same way the adapter does.
-   * @param config - the configuration whose endpoint and refresh interval the
-   *   resolver serves; a change to either yields a fresh resolver.
-   * @returns the resolver caching one snapshot per endpoint/refresh pair.
+   * @param config - the configuration whose endpoint, refresh interval, and
+   *   model capacities the resolver serves; a change to any yields a fresh resolver.
+   * @returns the resolver caching one snapshot per configuration generation.
    */
   catalogOf(config: OpencodeGoConfig): OpencodeGoCatalog {
-    const key = `${config.baseURL}|${String(config.refreshMinutes)}`
+    // Model capacities belong in the key: two generations that differ only in
+    // limits must not share a cached snapshot after a settings write.
+    const key = `${config.baseURL}|${String(config.refreshMinutes)}|${JSON.stringify(config.modelLimits ?? {})}`
     if (this.catalogCache?.key !== key) {
       this.catalogCache = {
         key,
@@ -130,6 +132,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
           this.options.onFallback ?? (() => {}),
           /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
           this.options.onOmitted ?? (() => {}),
+          () => this.options.config().modelLimits ?? {},
         ),
       }
     }

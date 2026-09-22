@@ -142,6 +142,32 @@ describe('settings-backed configuration', () => {
     expect(gateway.paths.filter(path => path === '/chat/completions')).toHaveLength(2)
   })
 
+  it('applies and removes per-model capacities without a restart', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    const ctx = await boot({
+      settingsYaml: '',
+      credentials: { OPENCODE_API_KEY: 'test-key' },
+      baseURL: gateway.url,
+    })
+    await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
+      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+
+    const advertised = (await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow
+    expect(advertised).toBeGreaterThan(0)
+
+    await ctx.settings.update(NS, {
+      modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 123_456, maxTokens: 5_432 } },
+    })
+    expect((await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
+      .toBe(123_456)
+
+    // `update` is merge-only, so use the documented replace path to remove the
+    // user-layer field and let the catalog value re-inherit.
+    await ctx.settings.replace(NS, {})
+    expect((await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
+      .toBe(advertised)
+  })
+
   it('drops the route when the credential goes away, and revives it on return', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     gateway.pushCompletions({ events: textEvents })

@@ -131,6 +131,66 @@ describe('OpencodeGoCatalog', () => {
     expect(first).toBe(second)
     expect(gateway.modelListings).toBe(1)
   })
+
+  describe('configured model caps', () => {
+    function builtinOf(id: string): { contextWindow: number; maxTokens: number } {
+      const model = (getBuiltinModels('opencode-go') as { id: string; contextWindow: number; maxTokens: number }[])
+        .find(candidate => candidate.id === id)
+      if (model === undefined) throw new Error(`expected builtin ${id}`)
+      return model
+    }
+
+    it('applies a configured override over the advertised capacities', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
+      const limits = { 'deepseek-v4-flash': { contextWindow: 262_144, maxTokens: 32_768 } }
+      const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {}, () => limits)
+
+      const snapshot = await catalog.snapshot()
+
+      expect(snapshot.models.get('deepseek-v4-flash')).toMatchObject({
+        contextWindow: 262_144,
+        maxTokens: 32_768,
+      })
+    })
+
+    it('moves only the declared field and leaves an undeclared model alone', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
+      const advertised = builtinOf('deepseek-v4-flash')
+      const untouched = builtinOf('deepseek-v4-flash-vision-exp')
+      const limits = { 'deepseek-v4-flash': { contextWindow: advertised.contextWindow - 1 } }
+      const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {}, () => limits)
+
+      const snapshot = await catalog.snapshot()
+
+      expect(snapshot.models.get('deepseek-v4-flash')).toMatchObject({
+        contextWindow: advertised.contextWindow - 1,
+        maxTokens: advertised.maxTokens,
+      })
+      expect(snapshot.models.get('deepseek-v4-flash-vision-exp')).toMatchObject({
+        contextWindow: untouched.contextWindow,
+        maxTokens: untouched.maxTokens,
+      })
+    })
+
+    it('re-reads caps and restores the advertised value when an override is removed', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      let limits: Record<string, { contextWindow?: number; maxTokens?: number }> = {
+        'deepseek-v4-flash': { contextWindow: 262_144 },
+      }
+      const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {}, () => limits)
+
+      const advertised = (await catalog.snapshot()).models.get('deepseek-v4-flash')?.contextWindow
+      expect(advertised).toBeGreaterThan(0)
+
+      limits = { 'deepseek-v4-flash': { contextWindow: 524_288 } }
+      expect((await catalog.snapshot(true)).models.get('deepseek-v4-flash')?.contextWindow).toBe(524_288)
+
+      limits = {}
+      expect((await catalog.snapshot(true)).models.get('deepseek-v4-flash')?.contextWindow).toBe(advertised)
+    })
+  })
 })
 
 describe('discoverCatalogModels', () => {

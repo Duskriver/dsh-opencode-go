@@ -27,6 +27,20 @@ export const DEFAULT_REFRESH_MINUTES = 60
 /** Default maximum idle interval while a stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 
+/**
+ * One model's configured capacities. Every field is optional so a deployment
+ * can override only the value it needs and inherit the other from the catalog.
+ */
+export interface OpencodeGoModelLimit {
+  /** Context window in tokens, overriding what the catalog advertised. */
+  contextWindow?: number
+  /** Output cap per request, overriding what the catalog advertised. */
+  maxTokens?: number
+}
+
+/** Per-model capacity overrides, keyed by the model id the gateway serves. */
+export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit>
+
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
   /**
@@ -51,6 +65,8 @@ export interface OpencodeGoConfig {
   requestImagePixelBudget: number
   /** Raw encoded-byte target for one request image before base64 expansion. */
   requestImageMaxBytes: number
+  /** Per-model capacity overrides; an absent field inherits the catalog value. */
+  modelLimits: OpencodeGoModelLimits
 }
 
 /** Runtime schema for {@link OpencodeGoConfig}. */
@@ -65,6 +81,10 @@ export const Config: z<OpencodeGoConfig> = z.object({
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   requestImagePixelBudget: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
   requestImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
+  modelLimits: z.dict(z.object({
+    contextWindow: z.number().step(1).min(1),
+    maxTokens: z.number().step(1).min(1),
+  })).default({}),
 })
 
 /**

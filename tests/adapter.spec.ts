@@ -381,4 +381,22 @@ describe('OpencodeGoAdapter stream', () => {
       .rejects.toMatchObject({ code: 'UNKNOWN_MODEL' })
     expect(adapter.providerInfo(PROVIDER_ID)).toEqual({ id: PROVIDER_ID, name: 'OpenCode Go' })
   })
+
+  it('rebuilds the resolver when a configured model capacity changes', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    let modelLimits: Record<string, { contextWindow?: number; maxTokens?: number }> = {}
+    const adapter = new OpencodeGoAdapter({
+      config: () => configOf(gateway.url, { modelLimits }),
+      resolveApiKey: () => Promise.resolve('test-key'),
+    })
+
+    const advertised = (await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')).context!.contextWindow
+    expect(advertised).toBeGreaterThan(0)
+
+    modelLimits = { 'deepseek-v4.1-flash': { contextWindow: 123_456, maxTokens: 5_432 } }
+    expect((await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')).context?.contextWindow).toBe(123_456)
+
+    modelLimits = {}
+    expect((await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')).context?.contextWindow).toBe(advertised)
+  })
 })

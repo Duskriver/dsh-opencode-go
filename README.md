@@ -1,16 +1,14 @@
 # dsh-opencode-go
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中使用 OpenCode Go 订阅模型，支持流式回复、工具调用、图片输入。
+[English](README.en.md)
 
-插件自动添加 OpenCode Go 所需的会话请求头，并自动获取可用模型目录，显示套餐剩余额度。
+在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中使用 OpenCode Go 订阅模型，支持流式回复、工具调用和图片输入。
 
-无需任何设置，一key开始
-
+插件会自动添加 OpenCode Go 所需的会话请求头、读取网关模型目录，并显示订阅用量。
 
 ## 安装与使用
 
-兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1` 和 `0.1.6-alpha.2`
-
+兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1` 和 `0.1.6-alpha.2`。
 
 ### Web
 
@@ -18,13 +16,11 @@
 dsh plugin --profile web add dsh-opencode-go
 ```
 
-安装后启动或重启 `dsh web`：
+安装后启动或重启 `dsh web`，然后：
 
 1. 打开 **设置 → OpenCode Go**。
 2. 填入 OpenCode Go API Key 并保存。
 3. 在会话的模型选择器中选择 OpenCode Go 模型。
-
-
 
 ### Headless
 
@@ -53,6 +49,30 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 
 模型 ID 须在当前网关目录中可用。Web 和 Headless 使用各自的 profile，需要分别安装插件。
 
+## 模型容量设置
+
+Web 用户可在 **设置 → OpenCode Go → 模型容量** 中按模型覆盖容量。该区域默认折叠，打开后可以：
+
+- 搜索模型名称或 ID。
+- 设置 **上下文窗口** 和 **最大输出**。
+- 查看目录公布的容量作为参考。
+- 对单个模型点击 **使用目录值**，或清除全部覆盖。
+
+留空的字段会继承目录值。填写的正整数会直接传给适配器，不会被插件自动限制到提供方能力以内；超过上游真实能力的值可能被网关拒绝。修改会跟随设置页的 **Save** / **Discard** 流程，并在下一次请求或模型读取时生效，无需重启。
+
+Headless 或 profile patch 也可以直接配置 `modelLimits`：
+
+```yaml
+- id: llm-opencode-go
+  config:
+    modelLimits:
+      deepseek-v4.1-flash:
+        contextWindow: 262144
+        maxTokens: 32768
+```
+
+每个模型可以只设置其中一个字段；没有设置的字段继续使用目录值。
+
 ## 升级插件
 
 更新 Web profile 中的插件到 npm 最新版本：
@@ -63,14 +83,9 @@ dsh plugin --profile web update dsh-opencode-go --latest
 
 完成后重启 `dsh web` 并刷新浏览器。Headless 用户将 `web` 换成 `headless`；如果两个 profile 都安装了插件，需要分别升级。
 
-
 ## 订阅用量显示
 
-![alt text](image.png)
-
-## 配置
-
-Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。
+![OpenCode Go usage display](image.png)
 
 ## 常见问题
 
@@ -83,8 +98,6 @@ dsh plugin --profile web add dsh-opencode-go@0.1.6
 ```
 
 Headless 用户将 `web` 换成 `headless`。修复保留了两版宿主的图片处理方式：DSH `0.1.5` 在请求超过图片预算时将最旧图片转成占位文本，DSH `0.1.6` 继续由宿主记录并处理图片卸载。
-
-
 
 ### 提示 `opencode-go` 路由已被占用
 
@@ -107,7 +120,8 @@ Headless 用户将 `web` 换成 `headless`。修复保留了两版宿主的图�
 - **会话请求头**：每次请求包含 Harness User-Agent 和 `x-opencode-session`。同一会话保持相同 ID，无会话 ID 的请求使用独立随机值。
 - **流式与历史**：支持流式输出、工具调用及历史回放，协议请求由 pi-ai 执行。
 - **图片输入**：支持目录中声明图片能力的模型，需要 DSH attachment 服务。
-- **提示与缓存**：插件不增加隐藏系统提示；会话 ID 用于网关路由；
+- **模型容量覆盖**：可按模型覆盖上下文窗口和最大输出，空值继承在线目录。
+- **提示与缓存**：插件不增加隐藏系统提示；会话 ID 用于网关路由。
 
 ## 卸载
 
@@ -119,11 +133,9 @@ dsh plugin --profile web remove dsh-opencode-go
 dsh plugin --profile headless remove dsh-opencode-go
 ```
 
-
-
 ## 反馈
 
-遇到bug或有功能建议请提issue
+遇到 bug 或有功能建议请提 issue。
 
 ## 许可证
 

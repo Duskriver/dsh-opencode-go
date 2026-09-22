@@ -9,6 +9,7 @@ import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
 import type { ModelMetadata } from './model-metadata.ts'
+import type { OpencodeGoModelLimits } from './config.ts'
 
 export const PROVIDER_ID = 'opencode-go'
 export const DISPLAY_NAME = 'OpenCode Go'
@@ -29,6 +30,28 @@ function builtinModels(baseURL: string): Map<string, Model<Api>> {
   return new Map((getBuiltinModels('opencode-go') as Model<Api>[]).map(model => [model.id, {
     ...model, provider: PROVIDER_ID, baseUrl: modelBaseURL(model.api, baseURL),
   }]))
+}
+
+/**
+ * Apply the deployment's per-model capacities over the catalog's settled model.
+ * Values are trusted here: the provider remains responsible for refusing a
+ * capacity it cannot actually serve at request time.
+ */
+function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
+  const limit = limits[model.id]
+  if (limit === undefined) return model
+  const contextWindow = limit.contextWindow ?? model.contextWindow
+  const maxTokens = limit.maxTokens ?? model.maxTokens
+  if (contextWindow === model.contextWindow && maxTokens === model.maxTokens) return model
+  return { ...model, contextWindow, maxTokens }
+}
+
+/** Apply configured capacities across a catalog map without changing its keys. */
+function withModelLimits(
+  models: ReadonlyMap<string, Model<Api>>,
+  limits: OpencodeGoModelLimits,
+): Map<string, Model<Api>> {
+  return new Map([...models].map(([id, model]) => [id, withModelLimit(model, limits)]))
 }
 
 /** A valid empty listing means the gateway serves nothing; malformed replies are failures. */
@@ -85,6 +108,8 @@ export class OpencodeGoCatalog {
   private pending: Promise<CatalogSnapshot> | undefined
   private metadata: ModelMetadata | undefined
   private metadataETag: string | undefined
+  /** Last live model set before limits are applied, used to make removals reversible. */
+  private baseModels: ReadonlyMap<string, Model<Api>> | undefined
 
   constructor(
     private readonly baseURL: string,
@@ -92,6 +117,8 @@ export class OpencodeGoCatalog {
     private readonly onFallback: (detail: { url: string; error: unknown; kept: number }) => void,
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
     private readonly onOmitted: (ids: readonly string[]) => void,
+    /** Re-read on every rebuild so a settings write takes effect immediately. */
+    private readonly limits: () => OpencodeGoModelLimits = () => ({}),
   ) {}
 
   snapshot(force = false): Promise<CatalogSnapshot> {
@@ -126,20 +153,25 @@ export class OpencodeGoCatalog {
       fetchLiveModelIds(this.baseURL), this.refreshMetadata(builtin),
     ])
     const metadata = metadataResult.status === 'fulfilled' ? metadataResult.value : this.metadata
-    const known = new Map([...builtin, ...(this.served?.models ?? []), ...(metadata?.models ?? [])])
+    // `served.models` may already contain an older override. Keep the last
+    // live, unmodified snapshot separately so clearing a setting can restore the
+    // catalog value instead of preserving the previous generation's number.
+    const known = new Map([...builtin, ...(this.baseModels ?? []), ...(metadata?.models ?? [])])
+    const limits = this.limits()
     if (metadataResult.status === 'rejected') {
       this.onFallback({ url: MODEL_METADATA_URL, error: metadataResult.reason, kept: known.size })
     }
     if (listing.status === 'rejected') {
       // Once observed, an outage must not resurrect retired models.
-      const models = this.served?.models ?? known
+      const baseModels = this.baseModels ?? known
+      const models = withModelLimits(baseModels, limits)
       this.onFallback({ url: `${this.baseURL.replace(/\/+$/, '')}/models`, error: listing.reason, kept: models.size })
       return {
         models, unavailable: this.served?.unavailable ?? new Map(),
         provider: buildProvider(this.baseURL, [...models.values()]), live: false, fetchedAtMs: Date.now(),
       }
     }
-    const models = new Map<string, Model<Api>>()
+    const baseModels = new Map<string, Model<Api>>()
     const unavailable = new Map<string, string>()
     for (const id of listing.value) {
       const error = metadata?.errors.get(id)
@@ -147,9 +179,11 @@ export class OpencodeGoCatalog {
       if (error !== undefined || model === undefined) {
         unavailable.set(id, error ?? 'model metadata has not been published on models.dev yet')
       } else {
-        models.set(id, model)
+        baseModels.set(id, model)
       }
     }
+    this.baseModels = baseModels
+    const models = withModelLimits(baseModels, limits)
     if (unavailable.size > 0) this.onOmitted([...unavailable.keys()])
     return {
       models, unavailable, provider: buildProvider(this.baseURL, [...models.values()]),
