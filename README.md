@@ -22,7 +22,7 @@ dsh plugin --profile web add dsh-opencode-go@0.1.7
 2. 填入 OpenCode Go API Key 并保存。
 3. 在会话的模型选择器中选择 OpenCode Go 模型。
 
-### Headless
+### 无头模式
 
 安装到 Headless profile：
 
