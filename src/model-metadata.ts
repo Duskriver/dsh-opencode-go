@@ -1,10 +1,13 @@
 /** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
 import type { Api, Model, ModelCost, ModelThinkingLevel, ThinkingLevelMap } from '@earendil-works/pi-ai'
 
+import { validReleaseDate, type GoModel } from './models-contract.ts'
+
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
 export interface ModelMetadata {
   readonly models: ReadonlyMap<string, Model<Api>>
+  readonly details: ReadonlyMap<string, Pick<GoModel, 'deprecated' | 'releaseDate'>>
   readonly errors: ReadonlyMap<string, string>
 }
 
@@ -72,7 +75,11 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
   const entries = record(provider.models)
   const models = new Map<string, Model<Api>>()
   const errors = new Map<string, string>()
+  const details = new Map<string, Pick<GoModel, 'deprecated' | 'releaseDate'>>()
   for (const [id, value] of Object.entries(entries)) {
+    const data = record(value)
+    details.set(id, { deprecated: data.status === 'deprecated',
+      ...(validReleaseDate(data.release_date) ? { releaseDate: data.release_date } : {}) })
     try {
       const metadata = record(value)
       const npm = record(metadata.provider).npm ?? provider.npm
@@ -122,5 +129,5 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
       errors.set(id, error instanceof Error ? error.message : String(error))
     }
   }
-  return { models, errors }
+  return { models, errors, details }
 }

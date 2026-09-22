@@ -6,7 +6,7 @@
  * the tuning fields, the save/discard actions, and the unavailable posture.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindSnapshotSelector } from './support/client.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -40,11 +40,14 @@ const settled: Omit<OpencodeGoSectionState, SectionField> = {
   saving: false,
   failed: false,
   enabled: true,
+  showDeprecatedModels: false,
+  pickerSaving: false,
+  pickerFailed: false,
   apiKeyConfigured: false,
   apiKeyWritable: true,
 }
 
-type ModelEntry = { id: string; name?: string; contextWindow?: number; maxTokens?: number }
+type ModelEntry = import('../src/models-contract.ts').GoModel
 
 function listing(entries: readonly ModelEntry[]) {
   return {
@@ -81,6 +84,7 @@ function actions() {
     discard: vi.fn(),
     loadModels: vi.fn(),
     setEnabled: vi.fn(),
+    setShowDeprecatedModels: vi.fn(),
   }
 }
 
@@ -102,8 +106,9 @@ function openAdvanced(): void {
 }
 
 /** The model-capacity disclosure starts collapsed; open it before its table. */
-function openModelLimits(): void {
-  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.limitsLabel) }))
+function openModelLimits() {
+  // Capacity editing is always visible in the combined model list.
+
 }
 
 describe('OpencodeGoSection', () => {
@@ -171,21 +176,42 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(en.keyConfigured)).toBeTruthy()
     expect(screen.getByText(t('modelsCount', { count: 2 }))).toBeTruthy()
     openModelLimits()
-    expect(screen.getByRole('row', { name: /DeepSeek V4\.1 Flash/ })).toBeTruthy()
-    expect(screen.getByRole('row', { name: /Kimi K2/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Kimi K2/ })).toBeTruthy()
   })
 
-  it('keeps model capacities collapsed until the disclosure is opened', () => {
-    renderSection(stateOf({ models: listing([{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }]) }))
+  it('keeps deprecated gateway models configurable and changes picker visibility immediately', () => {
+    const acts = actions()
+    renderSection(stateOf({ models: listing([{ id: 'old', name: 'Old model', deprecated: true }]),
+      modelLimitDraft: { absent: { maxTokens: 10 } },
+    }), acts)
+    expect(screen.queryByRole('button', { name: /absent/ })).toBeNull()
+    expect(screen.getByLabelText(t('limitsOutputLabel', { name: 'Old model' })).hasAttribute('disabled')).toBe(false)
+    const toggle = screen.getByRole('switch', { name: en.showDeprecatedLabel })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+    expect(acts.setShowDeprecatedModels).toHaveBeenCalledWith(true)
+    expect(acts.save).not.toHaveBeenCalled()
+  })
 
-    const trigger = screen.getByRole('button', { name: en.limitsLabel })
-    expect(trigger.getAttribute('aria-expanded')).toBe('false')
-    expect(trigger.getAttribute('aria-controls')).toBe('opencode-go-model-limits')
-    expect(screen.queryByRole('table')).toBeNull()
+  it('shows new models first, deprecated models last, and retains search within status filters', () => {
+    renderSection(stateOf({ models: listing([
+      { id: 'old', name: 'Old', deprecated: true }, { id: 'normal', name: 'Normal' },
+      { id: 'new', name: 'New', releaseDate: new Date().toISOString().slice(0, 10) },
+    ]) }))
+    const nav = () => screen.getByRole('navigation', { name: en.modelsLabel })
+    expect(within(nav()).getAllByRole('button').map(button => button.textContent?.split(' ')[0])).toEqual(['New', 'Normal', 'Old'])
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterDeprecated + ' 1') }))
+    expect(within(nav()).getAllByRole('button')).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'new' } })
+    expect(screen.queryByRole('navigation')).toBeNull()
+  })
 
-    fireEvent.click(trigger)
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByRole('table')).toBeTruthy()
+  it('shows one selected model editor immediately alongside the searchable list', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+    expect(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' }))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: en.limitsLabel })).toBeNull()
   })
 
   it('makes model capacities searchable and stages numeric edits', () => {
@@ -199,7 +225,7 @@ describe('OpencodeGoSection', () => {
     }), edits)
 
     openModelLimits()
-    expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.getByRole('region', { name: en.modelDetails })).toBeTruthy()
     const context = screen.getByLabelText(t('limitsContextLabel', { name: 'DeepSeek V4.1 Flash' })) as HTMLInputElement
     expect(context.type).toBe('number')
     expect(context.value).toBe('131072')
@@ -212,8 +238,8 @@ describe('OpencodeGoSection', () => {
 
     const filter = screen.getByLabelText(en.limitsFilterLabel)
     fireEvent.change(filter, { target: { value: 'kimi' } })
-    expect(screen.queryByRole('row', { name: /DeepSeek V4\.1 Flash/ })).toBeNull()
-    expect(screen.getByRole('row', { name: /Kimi K2/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /DeepSeek V4\.1 Flash/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Kimi K2/ })).toBeTruthy()
 
     fireEvent.change(filter, { target: { value: 'not-there' } })
     expect(screen.getByText(t('limitsNoMatches', { query: 'not-there' }))).toBeTruthy()
@@ -252,14 +278,13 @@ describe('OpencodeGoSection', () => {
     expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
   })
 
-  it('counts only numeric overrides in the collapsed summary and permits offline resets', () => {
+  it('never invents gateway membership from offline saved overrides, but permits clearing them', () => {
     const edits = actions()
     renderSection(stateOf({ models: { status: 'failed', message: 'offline' },
       modelLimitDraft: { retired: { maxTokens: 1024 }, reset: null },
     }), edits)
-    expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
-    openModelLimits()
-    expect(screen.getAllByText(t('limitsSummary', { count: 1 }))).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /retired/ })).toBeNull()
+    expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
     expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"retired":null,"reset":null}')
   })
@@ -295,8 +320,8 @@ describe('OpencodeGoSection', () => {
 
     expect(screen.queryByLabelText(en.baseURLLabel)).toBeNull()
     // The collapsed row still says a tuning field carries a user value.
-    expect(screen.getByText(en.overridden)).toBeTruthy()
-    expect(screen.getByText(en.advancedHint)).toBeTruthy()
+    expect(screen.getByRole('button', { name: new RegExp(en.advancedLabel) }).textContent).toContain(en.overridden)
+    expect(screen.queryByText(en.advancedHint)).toBeNull()
 
     openAdvanced()
     expect(screen.getByLabelText(en.baseURLLabel)).toHaveProperty('value', 'https://opencode.ai/zen/go/v1')
@@ -421,6 +446,33 @@ describe('OpencodeGoSection', () => {
 })
 
 describe('OpencodeGoSectionController through the component', () => {
+  it('persists picker visibility without saving unrelated drafts and reports refused writes', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    host.publish({ status: 'ready', writable: true, value: {}, user: {} })
+    host.set.mockImplementation((field: string, value: unknown) => {
+      host.publish({ value: { ...host.scope.getSnapshot().value, [field]: value } })
+    })
+    const controller = new OpencodeGoSectionController(host.scope, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+    } } as never)
+    render(<OpencodeGoSection {...controller.inject()} t={t}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    try {
+      await act(async () => { await Promise.resolve() })
+      fireEvent.change(screen.getByLabelText(en.keyLabel), { target: { value: 'unsaved-key' } })
+      const toggle = () => screen.getByRole('switch', { name: en.showDeprecatedLabel })
+      await act(async () => { fireEvent.click(toggle()) })
+      expect(host.set).toHaveBeenCalledWith('showDeprecatedModels', true)
+      expect(toggle().getAttribute('aria-checked')).toBe('true')
+      expect(screen.getByLabelText(en.keyLabel)).toHaveProperty('value', 'unsaved-key')
+      host.set.mockRejectedValueOnce(new Error('write refused'))
+      await act(async () => { fireEvent.click(toggle()) })
+      expect(toggle().getAttribute('aria-checked')).toBe('true')
+      expect(screen.getByRole('alert').textContent).toBe(en.pickerFailed)
+    } finally { controller.dispose() }
+  })
+
   it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     host.set.mockImplementation((field: string, value: unknown) => {
@@ -448,7 +500,7 @@ describe('OpencodeGoSectionController through the component', () => {
       fireEvent.change(input(), { target: { value: '200000' } })
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.scope.getSnapshot().value?.modelLimits?.m?.contextWindow).toBe(200000)
-      expect(screen.getByText(t('limitsAdvertised', { context: 262144, output: 32768 }))).toBeTruthy()
+      expect(screen.getByText(t('capacityDefault', { value: '262,144' }) + ' · ' + en.overridden)).toBeTruthy()
       expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
 
       fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))

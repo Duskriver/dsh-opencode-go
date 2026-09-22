@@ -53,14 +53,18 @@ The model ID must be available in the current gateway catalog. Web and Headless 
 
 ## Model capacity settings
 
-In Web, open **Settings → OpenCode Go → Model capacities** to override capacities per model. The section is collapsed by default and lets you:
+In Web, open **Settings → OpenCode Go**, select a model on the left, and edit its capacities on the right. Advanced settings are collapsed behind the top-right control. You can:
 
-- Search by model name or ID.
+- Search by model name or ID, or filter recent releases, customized models, and deprecated models.
 - Set the **context window** and **maximum output**.
 - See the catalog-advertised capacities as a reference.
 - Click **Use catalog** for one model or clear all overrides.
 
 Blank fields inherit the catalog values. Positive integers are passed directly to the adapter; the plugin does not clamp them to the provider's actual capabilities, so values above the upstream limit may be rejected by the gateway. Changes use the settings page's **Save** / **Discard** flow and take effect on the next request or model read without a restart.
+
+Only models returned by the Go gateway's `/models` endpoint appear. Entries found only in models.dev or saved capacity overrides do not establish membership. NEW uses models.dev `release_date` and the last seven UTC calendar days; recent releases sort first. Missing dates are not guessed. Models with models.dev `status: deprecated` sort last in settings and remain configurable and callable.
+
+**Show deprecated models in conversations** is off by default (`showDeprecatedModels: false`). Toggling it immediately updates conversation model pickers without a separate Save. Hiding a model does not interrupt existing conversations using it. This switch is independent of staged capacity edits.
 
 Headless or profile patches can also configure `modelLimits` directly:
 

@@ -1,0 +1,59 @@
+/** Settings discovery includes lifecycle data that the host's generic model DTO omits. */
+import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
+
+export interface GoModel {
+  id: string
+  name?: string
+  contextWindow?: number
+  maxTokens?: number
+  deprecated?: boolean
+  releaseDate?: string
+}
+
+export function validReleaseDate(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value
+}
+
+/** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
+export function isNewModel(model: GoModel, now = Date.now()): boolean {
+  if (model.deprecated || !validReleaseDate(model.releaseDate)) return false
+  const days = Math.floor(now / 86_400_000) - Date.parse(model.releaseDate) / 86_400_000
+  return days >= 0 && days < 7
+}
+
+export function sortModels(models: readonly GoModel[], now = Date.now()): GoModel[] {
+  const rank = (model: GoModel): number => model.deprecated ? 2 : isNewModel(model, now) ? 0 : 1
+  return [...models].sort((a, b) => rank(a) - rank(b)
+    || (isNewModel(a, now) && isNewModel(b, now) ? b.releaseDate!.localeCompare(a.releaseDate!) : 0))
+}
+
+export function parseGoModels(value: unknown): GoModel[] {
+  if (!Array.isArray(value)) throw new Error('Invalid OpenCode Go model list')
+  return value.map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object') throw new Error('Invalid OpenCode Go model')
+    const row = entry as Record<string, unknown>
+    if (typeof row.id !== 'string' || !row.id) throw new Error('Missing OpenCode Go model id')
+    const model: GoModel = { id: row.id }
+    if (typeof row.name === 'string') model.name = row.name
+    for (const key of ['contextWindow', 'maxTokens'] as const) {
+      if (typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] > 0) model[key] = row[key]
+    }
+    if (typeof row.deprecated === 'boolean') model.deprecated = row.deprecated
+    if (validReleaseDate(row.releaseDate)) model.releaseDate = row.releaseDate
+    return model
+  })
+}
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface TypertRemoteNamespaceMap {
+    opencodeGoModels: { read(): Promise<RemoteResult<readonly GoModel[]>> }
+  }
+}
+const codec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#GoModels',
+  schema: { parse: parseGoModels }, create: () => ({ parse: parseGoModels }) }
+export const modelsRemote: TypertRemoteContribution = {
+  package: 'dsh-opencode-go',
+  descriptors: [{ id: 'dsh-opencode-go#opencodeGoModels/read', service: 'opencodeGoModels',
+    namespace: 'opencodeGoModels', method: 'read', invocation: { kind: 'direct' }, parameters: [], result: codec }],
+}

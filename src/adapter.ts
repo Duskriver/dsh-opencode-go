@@ -151,15 +151,18 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
-    const snapshot = await this.catalogOf(this.options.config()).snapshot(true)
+    const config = this.options.config()
+    const snapshot = await this.catalogOf(config).snapshot(true)
     // DSH resolves every listed model before showing the provider. Unconfigured
     // ids belong in settings discovery diagnostics, not this selectable list.
-    return [...snapshot.models.values()].map(model => ({
-      provider: PROVIDER_ID,
-      id: model.id,
-      name: model.name,
-      inputModalities: [...model.input],
-    }))
+    return [...snapshot.models.values()]
+      .filter(model => config.showDeprecatedModels || !snapshot.details.get(model.id)?.deprecated)
+      .map(model => ({
+        provider: PROVIDER_ID,
+        id: model.id,
+        name: model.name,
+        inputModalities: [...model.input],
+      }))
   }
 
   override async resolveModel(

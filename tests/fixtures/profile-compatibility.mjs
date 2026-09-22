@@ -12,7 +12,7 @@ globalThis.fetch = async (input) => {
   const url = input instanceof Request ? input.url : String(input)
   if (url === 'https://models.dev/api.json') return Response.json({
     'opencode-go': { npm: '@ai-sdk/openai-compatible', models: {
-      'compat-model': { name: 'Compatibility fixture', reasoning: false,
+      'compat-model': { name: 'Compatibility fixture', reasoning: false, status: 'deprecated',
         modalities: { input: ['text'] }, limit: { context: 100000, output: 4096 } },
     } },
   })
@@ -53,6 +53,15 @@ try {
   await ctx.settings.update('opencode-go', { enabled: true, refreshMinutes: 30 })
   assert.ok(ctx.llm.listProviders().some(row => row.id === 'opencode-go'))
   assert.equal(view().value.refreshMinutes, 30)
+  assert.deepEqual(await ctx.llm.listModels('opencode-go'), [], 'deprecated models hidden by default')
+  let pickerUpdates = 0
+  ctx.on('llm/adapters-updated', () => { pickerUpdates++ })
+  await ctx.settings.update('opencode-go', { showDeprecatedModels: true })
+  assert.ok(pickerUpdates > 0, 'visibility change notifies already open session pickers')
+  assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
+  await ctx.settings.update('opencode-go', { showDeprecatedModels: false })
+  assert.deepEqual(await ctx.llm.listModels('opencode-go'), [])
+  assert.equal(entry.fiber, fiber, 'visibility changes preserve the running plugin')
   const capacity = async () => (await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow
   assert.equal(await capacity(), 100000)
   await ctx.settings.update('opencode-go', { modelLimits: { 'compat-model': { contextWindow: 50000, maxTokens: 1024 } } })

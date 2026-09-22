@@ -49,6 +49,8 @@ function clientHarness(): ClientHarness {
       }),
     },
     remote: {
+      $mount: vi.fn(async () => () => {}),
+      opencodeGoModels: { read: async () => ({ ok: true, value: [] }) },
       credentials: {
         describe: vi.fn(() => Promise.resolve({ ok: true, value: {} })),
         set: vi.fn(() => Promise.resolve({ ok: true, value: undefined })),

@@ -1,3 +1,4 @@
+import { registerGoRemotes } from '../src/remotes.ts'
 import { createServer } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import Gateway from '@deepseek-ai/dsh-api-gateway'
@@ -27,6 +28,7 @@ it('queries authenticated account usage through the actual Host RPC gateway and 
   cleanups.push(() => ctx.fiber.dispose())
   await ctx.plugin(Registry)
   await ctx.plugin(Gateway)
+  registerGoRemotes(ctx)
   let key = 'first-key'
   await ctx.plugin(GoUsageService, {
     baseURL: () => `http://127.0.0.1:${address.port}/v1`, resolveApiKey: async () => key,

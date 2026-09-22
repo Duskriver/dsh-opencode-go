@@ -118,7 +118,7 @@ describe('llm-opencode-go plugin mount', () => {
     expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
   })
 
-  it('serves the curated table when the live listing fails at request time', async () => {
+  it('refuses to call a model never confirmed by the gateway', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'test-key')
     const gateway = await mockGateway({ status: 503, body: {} })
     gateway.pushCompletions({ events: textEvents })
@@ -136,7 +136,8 @@ describe('llm-opencode-go plugin mount', () => {
       })],
     })) chunks.push(chunk)
 
-    expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+    expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'error' } })
+    expect(gateway.paths).toEqual(['/models'])
   })
 
   it('resolves the credential through the credentials seam when one is mounted', async () => {

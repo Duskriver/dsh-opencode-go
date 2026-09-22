@@ -1,5 +1,13 @@
 # Verification
 
+## Model settings layout and deprecated visibility (2026-09-22)
+
+The settings page uses the selected list/detail layout, real gateway membership, models.dev release dates and deprecation flags, and a default-off `showDeprecatedModels` switch. Deprecated models stay configurable in settings; only conversation picker membership is filtered. Existing conversations can still call a hidden model that the gateway serves. Models found only in metadata or saved overrides are not displayed. Before any successful gateway response, a network failure does not advertise built-in models.
+
+Host/client type checks, the build, and all **181 tests in 16 files** passed. Added checks cover lifecycle date boundaries and ordering, gateway removals, deprecation during metadata outages, real model RPC serialization, immediate visibility changes and picker notifications on legacy settings and the 0.1.7 profile service, and failed toggle writes without discarding other edits. All five published host targets pass the compatibility fixture. Model and usage endpoints share one package contribution so 0.1.7's registry retains both.
+
+The actual React settings component was also rendered in a separate local preview with public live API data. Preview settings remain in memory, and credentials are not read or changed. This is a component/browser check, not a manual five-version host UI matrix. No paid completion or publication was performed.
+
 ## Per-model capacities on five hosts (2026-09-22)
 
 PR #3's capacity editor is integrated on main commit `b093842`, preserving both legacy settings and the `0.1.7` profile configuration bridge. Each operation applies its captured overrides to original catalog metadata. The catalog cache remains available during outages, discovery shows the original reference values, and configured output caps also constrain explicit request budgets. Null model entries or fields explicitly restore catalog values over inherited configuration.

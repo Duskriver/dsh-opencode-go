@@ -1,7 +1,7 @@
 /**
  * Dedicated OpenCode Go adapter plugin. Registers one `opencode-go` route
- * whose catalog is the curated table intersected with the gateway's live model
- * listing, and installs the `llm-opencode-go` settings section: the Web UI
+ * whose catalog follows the gateway's live model listing and models.dev
+ * metadata, and installs the `llm-opencode-go` settings section: the Web UI
  * renders it as its own settings page where the API key and every knob are
  * edited, and a change reaches the next request without a restart. The plugin
  * exists because the gateway has wire requirements a generic pi-ai route
@@ -47,6 +47,8 @@ import {
 import { Config, PlainConfig, readConfig, assertBaseURL } from './config.ts'
 import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
+import { GoModelsService } from './models.ts'
+import { registerGoRemotes } from './remotes.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -101,6 +103,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       'MISSING_CREDENTIAL',
     )
   }
+  registerGoRemotes(ctx)
   ctx.plugin(GoUsageService, { baseURL: () => current().baseURL, resolveApiKey })
   const logger = {
     fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {
@@ -127,6 +130,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
   })
+  ctx.plugin(GoModelsService, { catalog: () => adapter.catalogOf(current()) })
+  let pickerVisibility = current().showDeprecatedModels
   let registration: AdapterRegistrationHandle | undefined
   /**
    * Register the route while the switch is on and its credential resolves, and
@@ -160,6 +165,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     }
   }
   const syncRoute = (): void => {
+    if (pickerVisibility !== current().showDeprecatedModels) {
+      pickerVisibility = current().showDeprecatedModels
+      // Replacing the owned route notifies every session picker without a restart.
+      registration?.replace([PROVIDER_ID])
+    }
     const credentials = ctx.get('credentials')
     if (credentials === undefined) {
       applyRoute(launchEnvironmentOf(ctx).get(current().apiKeyEnv)?.value !== undefined)

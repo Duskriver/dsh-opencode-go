@@ -8,6 +8,7 @@ import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.l
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
+import { sortModels, type GoModel } from './models-contract.ts'
 import type { ModelMetadata } from './model-metadata.ts'
 
 export const PROVIDER_ID = 'opencode-go'
@@ -16,6 +17,7 @@ export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
 const MODELS_FETCH_TIMEOUT_MS = 10_000
 
 export interface CatalogSnapshot {
+  readonly details: ModelMetadata['details']
   readonly models: ReadonlyMap<string, Model<Api>>
   /** Advertised ids with missing/unsupported metadata stay visible with a diagnostic. */
   readonly unavailable: ReadonlyMap<string, string>
@@ -132,9 +134,10 @@ export class OpencodeGoCatalog {
     }
     if (listing.status === 'rejected') {
       // Once observed, an outage must not resurrect retired models.
-      const models = this.served?.models ?? known
+      const models = this.served?.models ?? new Map<string, Model<Api>>()
       this.onFallback({ url: `${this.baseURL.replace(/\/+$/, '')}/models`, error: listing.reason, kept: models.size })
       return {
+        details: this.served?.details ?? new Map(),
         models, unavailable: this.served?.unavailable ?? new Map(),
         provider: buildProvider(this.baseURL, [...models.values()]), live: false, fetchedAtMs: Date.now(),
       }
@@ -152,6 +155,7 @@ export class OpencodeGoCatalog {
     }
     if (unavailable.size > 0) this.onOmitted([...unavailable.keys()])
     return {
+      details: new Map(listing.value.map(id => [id, metadata?.details.get(id) ?? {}])),
       models, unavailable, provider: buildProvider(this.baseURL, [...models.values()]),
       live: true, fetchedAtMs: Date.now(),
     }
@@ -178,10 +182,21 @@ export async function discoverCatalogModels(catalog: OpencodeGoCatalog): Promise
   if (!snapshot.live) {
     throw new LlmError('llm-opencode-go: the live model listing is unreachable; try again later', 'DISCOVERY_FAILED')
   }
+  return describeCatalog(snapshot)
+}
+
+function describeCatalog(snapshot: CatalogSnapshot): readonly LlmDiscoveredModel[] {
   return [
     ...[...snapshot.models.values()].map(model => ({
       id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
     })),
     ...[...snapshot.unavailable].map(([id, reason]) => ({ id, name: `${id} (metadata unavailable: ${reason})` })),
   ]
+}
+
+/** Settings retain deprecated gateway entries regardless of picker visibility. */
+export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promise<readonly GoModel[]> {
+  const snapshot = await catalog.snapshot(true)
+  if (!snapshot.live) throw new LlmError('llm-opencode-go: the live model listing is unreachable; try again later', 'DISCOVERY_FAILED')
+  return sortModels(describeCatalog(snapshot).map(model => ({ ...model, ...snapshot.details.get(model.id) })))
 }

@@ -184,67 +184,6 @@
   white-space: nowrap;
 }
 
-.limitsScroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 10px;
-}
-
-.limitsTable {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.limitsTable th,
-.limitsTable td {
-  padding: 10px;
-  text-align: left;
-  vertical-align: middle;
-}
-
-.limitsTable thead th {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-layer-3);
-}
-
-.limitsTable thead th:first-child {
-  width: 44%;
-}
-
-.limitsTable thead th:nth-child(2),
-.limitsTable thead th:nth-child(3) {
-  width: 22%;
-}
-
-.limitsTable thead th:last-child {
-  width: 12%;
-}
-
-.limitsTable tbody tr + tr {
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-}
-
-.limitsTable tbody tr:hover {
-  background: var(--dsw-alias-bg-layer-3);
-}
-
-.limitsTable .input {
-  width: 100%;
-  min-width: 112px;
-  box-sizing: border-box;
-}
-
-.limitsName {
-  min-width: 0;
-  font-weight: 400;
-}
-
 .limitsId,
 .limitsModelId {
   display: block;
@@ -302,3 +241,40 @@
   line-height: 1.5;
   color: var(--dsw-alias-label-error);
 }
+
+.pageTop { display: flex; align-items: flex-start; gap: 16px; }
+.pageTop .intro { flex: 1; }
+.advancedTrigger { composes: disclosure; margin-left: auto; flex-shrink: 0; }
+.advancedTrigger .label { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter { padding: 6px 9px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.filter[aria-pressed="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
+.filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }
+.modelLayout { display: grid; grid-template-columns: minmax(0, 43fr) minmax(0, 57fr); height: 530px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 10px; overflow: hidden; }
+.modelList { overflow-y: auto; min-height: 0; padding: 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
+.modelChoice { display: block; width: 100%; text-align: left; padding: 12px 9px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
+.modelChoice[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-3); }
+.modelChoice:hover { background: var(--dsw-alias-bg-layer-3); }
+.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; }
+.modelDetails { overflow-y: auto; min-width: 0; padding: 18px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.modelDetails h3 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+.modelDetails .field { border: 0; padding: 8px 0; }
+.modelDetails .input { width: 100%; box-sizing: border-box; min-width: 0; }
+.modelDetails .reset { align-self: flex-start; }
+.newBadge { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); border: 0.5px solid var(--dsw-alias-border-l4); font-size: 9px; border-radius: 4px; padding: 2px 4px; }
+.releaseDate { display: block; margin-top: 4px; font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.modelChoice:focus-visible, .filter:focus-visible, .advancedTrigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+@media (max-width: 440px) {
+  .pageTop { flex-wrap: wrap; }
+  .modelLayout { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .modelList { max-height: 240px; border-right: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+  .modelDetails { max-height: 460px; }
+}
+
+.keySection { padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.keySection summary { cursor: pointer; list-style: none; }
+.keySection summary::after { content: '⌄'; color: var(--dsw-alias-label-tertiary); }
+.keySection summary::-webkit-details-marker { display: none; }
+.keySection > .input { width: 100%; box-sizing: border-box; margin: 10px 0 6px; }
+.keySection summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.actions { position: sticky; bottom: 0; padding-bottom: 12px; background: var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-2)); }

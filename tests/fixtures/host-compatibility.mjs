@@ -40,7 +40,7 @@ globalThis.fetch = (input, init) => {
   const url = input instanceof Request ? input.url : String(input)
   if (url === 'https://models.dev/api.json') return Promise.resolve(Response.json({
     'opencode-go': { npm: '@ai-sdk/openai-compatible', models: {
-      'compat-model': { name: 'Compatibility fixture', reasoning: false,
+      'compat-model': { name: 'Compatibility fixture', reasoning: false, release_date: '2026-09-22',
         modalities: { input: ['text', 'image'] }, limit: { context: 100000, output: 4096 } },
     } },
   }))
@@ -96,6 +96,11 @@ try {
   assert.ok(ctx.llm.listProviders().some(p => p.id === 'opencode-go'))
   assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
   assert.equal((await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow, 50000)
+  if (modern) {
+    const models = await ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} })
+    assert.equal(models[0].releaseDate, '2026-09-22', 'model metadata survives the actual RPC codec')
+    assert.equal(models[0].contextWindow, 100000, 'settings show raw API capacity')
+  }
   if (modern) assert.deepEqual(await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }), usage)
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'compat-test' } })
   const request = messages => ({ provider: 'opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })

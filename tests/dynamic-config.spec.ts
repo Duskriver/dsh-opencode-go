@@ -17,6 +17,8 @@ import { apply } from '../src/index.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { configOf } from './config-of.ts'
 
+import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
+
 const NS = 'llm-opencode-go'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -236,6 +238,24 @@ describe('settings-backed configuration', () => {
     })
     // The catalog fetch precedes credential resolution; no request goes out.
     expect(gateway.paths).toEqual(['/models'])
+  })
+
+  it('updates legacy session pickers when deprecated model visibility changes', async () => {
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+      ? Promise.resolve(Response.json(metadataDocument({ old: modelMetadata({ status: 'deprecated' }) })))
+      : original(input, init))
+    const gateway = await mockGateway({ status: 200, body: listingBody(['old']) })
+    const ctx = await boot({ settingsYaml: '', credentials: { OPENCODE_API_KEY: 'test-key' }, baseURL: gateway.url })
+    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    expect(await ctx.llm.listModels('opencode-go')).toEqual([])
+    const notify = vi.fn()
+    ctx.on('llm/adapters-updated', notify)
+    await ctx.settings.update(NS, { showDeprecatedModels: true })
+    expect(notify).toHaveBeenCalled()
+    expect((await ctx.llm.listModels('opencode-go')).map(m => m.id)).toEqual(['old'])
+    await ctx.settings.update(NS, { showDeprecatedModels: false })
+    expect(await ctx.llm.listModels('opencode-go')).toEqual([])
   })
 
   it('withdraws the route and its models the moment the switch goes off, and serves again on', async () => {

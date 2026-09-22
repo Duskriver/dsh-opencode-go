@@ -20,6 +20,7 @@ import { OpencodeGoSection } from './Section.tsx'
 import type { OpencodeGoSectionInjected } from './Section.tsx'
 import { OpencodeGoSectionController, type OpencodeGoSettings } from './section-controller.ts'
 import { en, zh } from './locales.ts'
+import { goRemote } from '../remote-contract.ts'
 import { registerUsagePill } from './usage.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -55,22 +56,27 @@ export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remot
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'llm-opencode-go: copy dictionaries')
   registerUsagePill(ctx)
+  const modelsReady = ctx.remote.$mount(goRemote)
+  ctx.effect(async () => await modelsReady)
   ctx.inject(['configForms'], child => {
     const forms = child.get('configForms') as { get<T>(id: string): SettingsScope<T> }
     // Profile forms use the bundle entry id, not the legacy settings namespace.
-    mountSettings(child, forms.get<OpencodeGoSettings>('opencode-go'))
+    mountSettings(child, forms.get<OpencodeGoSettings>('opencode-go'), modelsReady)
   })
   ctx.inject(['settingsScope'], child => {
     mountSettings(child, child.settingsScope.bind({
       namespace: 'llm-opencode-go',
       decode: (section): OpencodeGoSettings | undefined =>
         typeof section === 'object' && section !== null ? section as OpencodeGoSettings : undefined,
-    }))
+    }), modelsReady)
   })
 }
 
-function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettings>): void {
-  const controller = new OpencodeGoSectionController(scope, ctx)
+function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
+  const controller = new OpencodeGoSectionController(scope, ctx, async () => {
+    await modelsReady
+    return ctx.remote.opencodeGoModels.read()
+  })
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
   const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t })

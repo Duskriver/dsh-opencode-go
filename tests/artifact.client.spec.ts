@@ -29,7 +29,7 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
       return table.get(id)
     })
     const slots = vi.fn(() => () => {})
-    const effects: Array<() => void> = []
+    const effects: Array<(() => void) | Promise<() => void>> = []
     const sharedForm = stubSettingsScope()
     const scope = sharedForm.scope
     sharedForm.publish({ status: 'ready', value: {}, base: {}, user: {}, writable: true })
@@ -40,10 +40,10 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
         if (services.includes(host === 'modern' ? 'configForms' : 'settingsScope')) callback(ctx)
       }),
       get: () => ({ get: getForm }),
-      effect: (install: () => (() => void)) => { effects.push(install()) },
+      effect: (install: () => (() => void) | Promise<() => void>) => { effects.push(install()) },
       locale: { register: () => () => {}, bind: () => (key: string) => key },
       settingsScope: { bind: bindScope },
-      remote: { $on: () => () => {}, credentials: { describe: async () => ({ ok: true, value: {} }) } },
+      remote: { $mount: async () => () => {}, opencodeGoModels: { read: async () => ({ ok: true, value: [] }) }, $on: () => () => {}, credentials: { describe: async () => ({ ok: true, value: {} }) } },
       slots: { inject: (_name: string, install: () => void) => install(), register: slots },
     }
     client.apply(ctx)
@@ -65,7 +65,7 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
     }))
     expect(markup).toContain('type="password"')
     expect(document.querySelector('style[data-plugin="dsh-opencode-go"]')).not.toBeNull()
-    for (const dispose of effects.reverse()) dispose()
+    for (const dispose of effects.reverse()) (await dispose)()
     expect(sharedForm.listenerCount()).toBe(0)
   } finally {
     for (const style of document.head.querySelectorAll('style')) if (!styles.has(style)) style.remove()

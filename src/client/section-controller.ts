@@ -11,7 +11,9 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.remote merge into this program.
-import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { GoModel } from '../models-contract.ts'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
@@ -46,6 +48,8 @@ const OPENCODE_GO_PROVIDER = 'opencode-go'
 export interface OpencodeGoSettings {
   /** Whether the adapter serves its route; false withdraws it from every picker. */
   enabled?: boolean
+  /** Include gateway-served deprecated models in conversation pickers. */
+  showDeprecatedModels?: boolean
   /** Credential reference naming the environment key. */
   apiKeyEnv?: string
   /** The gateway endpoint; also the live listing base. */
@@ -96,7 +100,7 @@ export type OpencodeGoModels =
     readonly status: 'ready'
     readonly count: number
     readonly preview: readonly string[]
-    readonly entries: readonly LlmDiscoveredModel[]
+    readonly entries: readonly GoModel[]
   }
   /** The listing could not be read; `message` is the Host's own diagnostic. */
   | { readonly status: 'failed'; readonly message: string }
@@ -109,6 +113,9 @@ export interface OpencodeGoSectionState extends FormShell {
    * a withdrawn route is what the user is trying to observe.
    */
   enabled: boolean
+  showDeprecatedModels: boolean
+  pickerSaving: boolean
+  pickerFailed: boolean
   /** Credential reference naming the environment key. */
   apiKeyEnv: FieldState
   /** The gateway endpoint. */
@@ -150,6 +157,7 @@ export interface OpencodeGoSectionFace extends FormActions {
    * @param next - the state the switch asks for.
    */
   setEnabled: (next: boolean) => void
+  setShowDeprecatedModels: (next: boolean) => void
 }
 
 /** Bridges the `llm-opencode-go` scope and the credentials domain onto the page. */
@@ -159,6 +167,8 @@ export class OpencodeGoSectionController {
   private credential: CredentialState = { ref: '', configured: false, writable: true }
   private models: OpencodeGoModels = { status: 'idle' }
   private modelsRequest = 0
+  private pickerSaving = false
+  private pickerFailed = false
   private face: OpencodeGoSectionFace | undefined
   private readonly unsubscribe: () => void
 
@@ -170,6 +180,8 @@ export class OpencodeGoSectionController {
   constructor(
     private readonly scope: SettingsScope<OpencodeGoSettings>,
     private readonly ctx: ClientContext,
+    private readonly readModels: () => Promise<RemoteResult<readonly GoModel[]>> = () =>
+      ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: OPENCODE_GO_PROVIDER }),
   ) {
     this.form = new StagedForm(
       scope as SettingsScope<Record<string, unknown>>,
@@ -204,6 +216,9 @@ export class OpencodeGoSectionController {
     return {
       ...this.form.shell(),
       enabled: this.enabled(),
+      showDeprecatedModels: this.scope.getSnapshot().value?.showDeprecatedModels ?? false,
+      pickerSaving: this.pickerSaving,
+      pickerFailed: this.pickerFailed,
       apiKeyEnv: this.form.field('apiKeyEnv'),
       baseURL: this.form.field('baseURL'),
       refreshMinutes: this.form.field('refreshMinutes'),
@@ -262,6 +277,23 @@ export class OpencodeGoSectionController {
     void this.scope.set('enabled', next)
   }
 
+  /** Visibility is immediate; failed writes leave the committed switch state visible. */
+  async setShowDeprecatedModels(next: boolean): Promise<void> {
+    if (this.pickerSaving || !this.scope.getSnapshot().writable) return
+    this.pickerSaving = true
+    this.pickerFailed = false
+    this.store.set(this.projection())
+    try {
+      await this.scope.set('showDeprecatedModels', next)
+      this.pickerFailed = (this.scope.getSnapshot().value?.showDeprecatedModels ?? false) !== next
+    } catch {
+      this.pickerFailed = true
+    } finally {
+      this.pickerSaving = false
+      this.store.set(this.projection())
+    }
+  }
+
   /**
    * Read the gateway's model listing through the Host's discovery for this
    * adapter. Called when the page mounts and again from its refresh control.
@@ -275,7 +307,7 @@ export class OpencodeGoSectionController {
     this.store.set(this.projection())
     // A later read owns the page: an answer or rejection for an earlier one
     // would report a listing the user already replaced.
-    void this.ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: OPENCODE_GO_PROVIDER })
+    void this.readModels()
       .then((response) => {
         if (request !== this.modelsRequest) return
         this.models = response.ok
@@ -349,6 +381,7 @@ export class OpencodeGoSectionController {
       hooks: { opencodeGo: this.store },
       loadModels: () => { this.loadModels() },
       setEnabled: (next) => { this.setEnabled(next) },
+      setShowDeprecatedModels: (next) => { void this.setShowDeprecatedModels(next) },
       ...this.form.actions(),
     }
     return this.face

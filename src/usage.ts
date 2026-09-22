@@ -1,9 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type {} from '@deepseek-ai/dsh-typert-registry'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { assertBaseURL } from './config.ts'
-import { parseGoUsage, usageRemote, type GoUsage } from './usage-contract.ts'
+import { parseGoUsage, type GoUsage } from './usage-contract.ts'
 
 interface UsageOptions {
   baseURL: () => string
@@ -14,12 +13,6 @@ interface UsageOptions {
 export class GoUsageService extends TypertRemoteService {
   constructor(ctx: Context, private readonly options: UsageOptions) {
     super(ctx, 'opencodeGoUsage')
-    ctx.inject(['typert'], scope => {
-      scope.effect(() => scope.typert.register({
-        package: usageRemote.package, face: 'host', schemas: [],
-        model: { services: [], events: [], objects: [] }, invocations: usageRemote.descriptors,
-      }))
-    })
   }
 
   async read(): Promise<GoUsage> {

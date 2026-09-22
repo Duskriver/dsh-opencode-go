@@ -52,6 +52,8 @@ export interface OpencodeGoConfig {
    * false registers nothing.
    */
   enabled: boolean
+  /** Include models marked deprecated by models.dev in conversation pickers. */
+  showDeprecatedModels: boolean
   /** Credential reference: the environment variable the key resolves from. */
   apiKeyEnv: string
   /** The gateway endpoint; also the base of the live model listing. */
@@ -73,6 +75,7 @@ export interface OpencodeGoConfig {
 /** Runtime schema for {@link OpencodeGoConfig}. */
 const fields = {
   enabled: z.boolean().default(true),
+  showDeprecatedModels: z.boolean().default(false),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
