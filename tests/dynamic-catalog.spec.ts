@@ -64,6 +64,28 @@ describe('runtime model metadata', () => {
     }
   })
 
+  it('declares a default effort drawn from the levels the model actually offers', async () => {
+    metadataReplies(() => Response.json(metadataDocument({
+      'deepseek-v4-flash': modelMetadata({
+        name: 'DeepSeek V4 Flash',
+        family: 'deepseek-flash',
+        modalities: { input: ['text'] },
+      }),
+      'low-only': modelMetadata({
+        name: 'Low only',
+        family: 'deepseek-flash',
+        reasoning_options: [{ type: 'effort', values: ['low'] }],
+      }),
+    })))
+    const gateway = await mockGateway({ status: 200, body: listingBody(['low-only']) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
+
+    const resolved = await adapter.resolveModel('opencode-go', 'low-only')
+
+    expect(resolved.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', 'low'])
+    expect(resolved.reasoning?.defaultEffort).toBe('low')
+  })
+
   it('discovers union-alpha without a pi-ai entry', async () => {
     expect(getBuiltinModels('opencode-go').some(model => model.id === 'union-alpha')).toBe(false)
     const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })
