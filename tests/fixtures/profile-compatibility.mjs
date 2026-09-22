@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { useModernHost } from './modern-host.mjs'
 
-await useModernHost()
+await useModernHost(process.argv[2])
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const { default: Settings } = await import('@deepseek-ai/dsh-settings')

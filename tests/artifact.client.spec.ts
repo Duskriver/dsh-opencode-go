@@ -7,15 +7,23 @@ import * as jsx from 'react/jsx-runtime'
 import * as store from '@deepseek-ai/dsh-client-store'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import * as modernPrimitives from './hosts/v017/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'
+import * as alpha2Primitives from './hosts/v017-alpha2/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'
+import * as modernStore from './hosts/v017/node_modules/@deepseek-ai/dsh-client-store/lib/index.js'
+import * as alpha2Store from './hosts/v017-alpha2/node_modules/@deepseek-ai/dsh-client-store/lib/index.js'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
 import { stubSettingsScope } from './support/client.ts'
 
-it.each(['legacy', 'modern'])('loads the built client and registers settings with the %s service', async (host) => {
+it.each([
+  ['legacy', store, primitives],
+  ['0.1.7-alpha.1', modernStore, modernPrimitives],
+  ['0.1.7-alpha.2', alpha2Store, alpha2Primitives],
+] as const)('loads the built client and registers settings with the %s service', async (host, hostStore, hostPrimitives) => {
+  const modern = host !== 'legacy'
   const table = new Map<string, unknown>([
     ['react', React], ['react/jsx-runtime', jsx],
-    ['@deepseek-ai/dsh-client-store', store],
-    ['@deepseek-ai/dsh-client-ui-primitives', host === 'modern' ? modernPrimitives : primitives],
+    ['@deepseek-ai/dsh-client-store', hostStore],
+    ['@deepseek-ai/dsh-client-ui-primitives', hostPrimitives],
   ])
   let registration: { id: string; factory: (require: (id: string) => unknown) => { apply: (ctx: unknown) => void } } | undefined
   const styles = new Set(document.head.querySelectorAll('style'))
@@ -37,7 +45,7 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
     const bindScope = vi.fn(() => scope)
     const ctx = {
       inject: vi.fn((services: string[], callback: (child: unknown) => void) => {
-        if (services.includes(host === 'modern' ? 'configForms' : 'settingsScope')) callback({
+        if (services.includes(modern ? 'configForms' : 'settingsScope')) callback({
           ...ctx,
           remote: new Proxy(ctx.remote, {
             get(target, key: keyof typeof ctx.remote) {
@@ -58,7 +66,7 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
     }
     client.apply(ctx)
     await Promise.resolve()
-    if (host === 'modern') {
+    if (modern) {
       expect(getForm).toHaveBeenCalledWith('opencode-go')
       expect(bindScope).not.toHaveBeenCalled()
     } else {
