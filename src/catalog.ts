@@ -1,5 +1,4 @@
 /** Runtime discovery: gateway availability plus online protocol and capability metadata. */
-import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib'
 import { createProvider } from '@earendil-works/pi-ai'
 import type { Api, Model, Provider } from '@earendil-works/pi-ai'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
@@ -11,11 +10,14 @@ import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
 import { sortModels, type GoModel } from './models-contract.ts'
 import type { ModelMetadata } from './model-metadata.ts'
+import { readJsonResponse } from './json-response.ts'
 
 export const PROVIDER_ID = 'opencode-go'
 export const DISPLAY_NAME = 'OpenCode Go'
 export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
 const MODELS_FETCH_TIMEOUT_MS = 10_000
+const MODEL_LISTING_MAX_BYTES = 1024 * 1024
+const MODEL_METADATA_MAX_BYTES = 16 * 1024 * 1024
 
 export interface CatalogSnapshot {
   readonly details: ModelMetadata['details']
@@ -46,23 +48,6 @@ export function readLiveModelIds(body: unknown): readonly string[] {
   return [...new Set(ids)]
 }
 
-async function readJsonResponse<T>(response: Response): Promise<T> {
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  const parse = (data: Uint8Array): T => JSON.parse(new TextDecoder().decode(data)) as T
-  try {
-    return parse(bytes)
-  } catch (error) {
-    for (const decompress of [brotliDecompressSync, gunzipSync, inflateSync]) {
-      try {
-        return parse(decompress(bytes))
-      } catch {
-        // Try the next supported compression format.
-      }
-    }
-    throw error
-  }
-}
-
 async function fetchLiveModelIds(baseURL: string): Promise<readonly string[]> {
   const url = `${baseURL.replace(/\/+$/, '')}/models`
   let response: Response
@@ -76,7 +61,7 @@ async function fetchLiveModelIds(baseURL: string): Promise<readonly string[]> {
     throw new LlmError(`could not reach ${url}`, 'DISCOVERY_FAILED', { cause: error })
   }
   if (!response.ok) throw new LlmError(`${url} answered ${response.status}`, 'DISCOVERY_FAILED')
-  return readLiveModelIds(await readJsonResponse(response))
+  return readLiveModelIds(await readJsonResponse(response, MODEL_LISTING_MAX_BYTES))
 }
 
 /** The adapter resolves and passes credentials for each generation request. */
@@ -133,7 +118,7 @@ export class OpencodeGoCatalog {
     })
     if (response.status === 304 && this.metadata !== undefined) return this.metadata
     if (!response.ok) throw new Error(`models.dev answered ${response.status}`)
-    const metadata = readModelMetadata(await readJsonResponse(response), this.baseURL, builtin)
+    const metadata = readModelMetadata(await readJsonResponse(response, MODEL_METADATA_MAX_BYTES), this.baseURL, builtin)
     this.metadata = metadata
     this.metadataETag = response.headers.get('etag') ?? undefined
     return metadata

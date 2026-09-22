@@ -1,5 +1,13 @@
 # Verification
 
+## Bounded model discovery responses (2026-09-23)
+
+Model discovery accepts ordinary JSON and Brotli, gzip, or deflate JSON whose `Content-Encoding` header is missing. Correctly labeled responses continue through Fetch's automatic decoding. The shared reader counts actual streamed bytes and cancels oversized bodies; fallback decoders run asynchronously with `maxOutputLength`. Both delivered bytes and fallback output are limited to 1 MiB for the gateway listing and 16 MiB for models.dev metadata. These are payload limits, not total process-memory or CPU-time budgets. Failed recovery preserves the original JSON error and each decoder's cause.
+
+Host/Client type checks and the build passed, followed by all **212 tests in 17 files**, on macOS / Node.js 24.14.1 using the existing installed dependencies. Ten new resource-limit and diagnostic tests failed against the original parser before passing with the bounded reader. Real local HTTP tests cover both discovery sources, correctly labeled and unlabeled compression, corruption, cached fallback, and each source's limit exceeded by exactly one byte. The upstream UI primitives packages still emit missing-source-map warnings; all assertions pass.
+
+The missing-header failure is reproduced with controlled HTTP fixtures. A read-only direct check of the two public endpoints returned HTTP 200 with correct `Content-Encoding: br` headers and valid JSON after Node's automatic decoding; models.dev was approximately 4.6 MiB decoded. This does not establish why the original reporter's proxy environment failed: response headers, a raw response sample, and the relevant proxy/runtime configuration are still needed. Curl's automatic decoding also relies on `Content-Encoding`, so successful curl access alone does not establish the reported root cause. Usage fetching is outside this change.
+
 ## Release 0.1.8 (2026-09-22)
 
 Host/client type checks, the build, and all **181 tests in 16 files** pass on macOS / Node.js 24.14.1. Coverage includes the five supported host versions, deprecated-model visibility, model remote injection, and CSS composition in the distributed client. The upstream UI primitives packages still emit missing-source-map warnings; all assertions pass. This release also synchronizes the English README with the simplified Chinese guide and updates installation examples to 0.1.8.
