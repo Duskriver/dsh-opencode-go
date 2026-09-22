@@ -10,7 +10,7 @@
 
 插件 `0.1.7` 兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` 和 `0.1.7-alpha.1`，旧版 DSH 用户无需升级宿主。
 
-`0.1.7` 为本次源码中的待发布版本；npm 发布前可在本项目构建后安装本地包：
+如需从源码构建并安装本地包：
 
 ```sh
 npm ci --legacy-peer-deps
@@ -24,7 +24,7 @@ dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz
 ### Web
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go
+dsh plugin --profile web add dsh-opencode-go@0.1.7
 ```
 
 安装后启动或重启 `dsh web`，然后：
@@ -38,7 +38,7 @@ dsh plugin --profile web add dsh-opencode-go
 安装到 Headless profile：
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go
+dsh plugin --profile headless add dsh-opencode-go@0.1.7
 ```
 
 将以下内容保存为 `headless.patch.yml`，选择默认模型：
@@ -125,7 +125,7 @@ DSH `0.1.7` 将设置改存到当前 profile 的 `cordis.patch.yml`，本插件�
 插件 `0.1.0`–`0.1.4` 使用了 DSH `0.1.6` 新增的图片接口，在旧版 DSH 上可能出现 `IMAGE_OFFLOAD_REQUIRED_CODE` 导出不存在的启动错误。升级插件到 `0.1.5` 或更新版本后重启即可：
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.6
+dsh plugin --profile web add dsh-opencode-go@0.1.7
 ```
 
 Headless 用户将 `web` 换成 `headless`。修复保留了两版宿主的图片处理方式：DSH `0.1.5` 在请求超过图片预算时将最旧图片转成占位文本，DSH `0.1.6` 继续由宿主记录并处理图片卸载。

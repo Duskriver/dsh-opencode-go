@@ -10,12 +10,12 @@ The plugin adds the session headers required by OpenCode Go, reads the gateway m
 
 Plugin `0.1.7` supports DSH `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, and `0.1.7-alpha.1`.
 
-This source version is not yet published. Build and install locally with `npm ci --legacy-peer-deps`, `npm pack`, then `dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz`. The development dependency tree intentionally includes multiple DSH generations.
+To build from source and install locally, use `npm ci --legacy-peer-deps`, `npm pack`, then `dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz`. The development dependency tree intentionally includes multiple DSH generations.
 
 ### Web
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go
+dsh plugin --profile web add dsh-opencode-go@0.1.7
 ```
 
 Start or restart `dsh web`, then:
@@ -29,7 +29,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go
+dsh plugin --profile headless add dsh-opencode-go@0.1.7
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -95,12 +95,16 @@ Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web
 
 ## FAQ
 
+### Advanced settings after upgrading to DSH 0.1.7
+
+DSH `0.1.7` stores settings in the current profile’s `cordis.patch.yml`, using entry ID `opencode-go`. Older hosts use the `llm-opencode-go` section in `settings.yaml`. The upstream importer does not map these different names automatically. If advanced settings return to defaults, copy the relevant values from `settings.yaml.imported` (or `settings.yaml` before import) into the new settings page or the existing `opencode-go` profile entry. Preserve other profile entries and any custom `apiKeyEnv` value. API keys remain in the credentials service; Web and Headless configurations are now independent.
+
 ### DSH 0.1.5 cannot start after installing the plugin
 
 Plugin versions `0.1.0`–`0.1.4` used an image API introduced in DSH `0.1.6`. On an older DSH version this could produce an `IMAGE_OFFLOAD_REQUIRED_CODE` startup error for a missing export. Upgrade to plugin `0.1.5` or newer and restart:
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.6
+dsh plugin --profile web add dsh-opencode-go@0.1.7
 ```
 
 For Headless, replace `web` with `headless`. The fix preserves both host behaviors: DSH `0.1.5` turns the oldest image into placeholder text when the request exceeds the image budget, while DSH `0.1.6` continues to record and handle image offloading through the host.
