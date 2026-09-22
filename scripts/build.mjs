@@ -21,7 +21,12 @@ const cssPlugin = {
     build.onResolve({ filter: /\.module\.css$/ }, args => ({ path: resolve(args.resolveDir, args.path), namespace: 'plugin-css' }))
     build.onLoad({ filter: /.*/, namespace: 'plugin-css' }, async args => {
       const result = transform({ filename: args.path, code: await readFile(args.path), cssModules: { pattern: '[hash]_[local]' }, minify: true })
-      const classes = Object.fromEntries(Object.entries(result.exports).map(([key, value]) => [key, value.name]))
+      const classes = Object.fromEntries(Object.entries(result.exports).map(([key, value]) => [key,
+        [value.name, ...value.composes.map(item => {
+          if (item.type === 'dependency') throw new Error(`External CSS composition is unsupported: ${item.name}`)
+          return item.name
+        })].join(' '),
+      ]))
       return { loader: 'js', contents: `const id = ${JSON.stringify(pkg.name + '/' + basename(args.path))}; if (!document.querySelector('style[data-plugin-css=' + JSON.stringify(id) + ']')) { const style = document.createElement('style'); style.dataset.plugin = ${JSON.stringify(pkg.name)}; style.dataset.pluginCss = id; style.textContent = ${JSON.stringify(result.code.toString())}; document.head.appendChild(style); } export default ${JSON.stringify(classes)};` }
     })
   },

@@ -178,7 +178,8 @@ function Loaded(props: {
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
     || state.requestImageMaxBytes.overridden
   return (
-    <div>
+    <div className={css.page}>
+      <div className={css.pageBody}>
       <div className={css.pageTop}>
         <p className={css.intro}>{t('intro')}</p>
         <button
@@ -340,6 +341,8 @@ function Loaded(props: {
         <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} disabled={disabled || state.saving}
           onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
       </div>
+      {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
+      </div>
       <div className={css.actions}>
         <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving} onClick={props.save}>
           {state.saving ? t('saving') : t('save')}
@@ -349,7 +352,6 @@ function Loaded(props: {
         </Button>
         {state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
       </div>
-      {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
     </div>
   )
 }

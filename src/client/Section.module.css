@@ -1,5 +1,22 @@
 /* OpenCode Go settings page: field rows, badges, hints, and actions. */
 
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  container-type: size;
+}
+
+.pageBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -230,9 +247,12 @@
 
 .actions {
   display: flex;
+  flex: none;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding-top: 12px;
+  padding: 12px 0;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
 
 .failedNote {
@@ -250,7 +270,7 @@
 .filter { padding: 6px 9px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .filter[aria-pressed="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
 .filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }
-.modelLayout { display: grid; grid-template-columns: minmax(0, 43fr) minmax(0, 57fr); height: 530px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 10px; overflow: hidden; }
+.modelLayout { display: grid; grid-template-columns: minmax(0, 43fr) minmax(0, 57fr); height: clamp(240px, calc(100cqh - 460px), 480px); border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 10px; overflow: hidden; }
 .modelList { overflow-y: auto; min-height: 0; padding: 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
 .modelChoice { display: block; width: 100%; text-align: left; padding: 12px 9px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
 .modelChoice[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-3); }
@@ -258,13 +278,14 @@
 .modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; }
 .modelDetails { overflow-y: auto; min-width: 0; padding: 18px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .modelDetails h3 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+.modelHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .modelDetails .field { border: 0; padding: 8px 0; }
 .modelDetails .input { width: 100%; box-sizing: border-box; min-width: 0; }
 .modelDetails .reset { align-self: flex-start; }
 .newBadge { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); border: 0.5px solid var(--dsw-alias-border-l4); font-size: 9px; border-radius: 4px; padding: 2px 4px; }
 .releaseDate { display: block; margin-top: 4px; font-size: 10px; color: var(--dsw-alias-label-tertiary); }
 .modelChoice:focus-visible, .filter:focus-visible, .advancedTrigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
-@media (max-width: 440px) {
+@container (max-width: 440px) {
   .pageTop { flex-wrap: wrap; }
   .modelLayout { grid-template-columns: minmax(0, 1fr); height: auto; }
   .modelList { max-height: 240px; border-right: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
@@ -277,4 +298,3 @@
 .keySection summary::-webkit-details-marker { display: none; }
 .keySection > .input { width: 100%; box-sizing: border-box; margin: 10px 0 6px; }
 .keySection summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
-.actions { position: sticky; bottom: 0; padding-bottom: 12px; background: var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-2)); }

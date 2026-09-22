@@ -76,6 +76,17 @@ it.each(['legacy', 'modern'])('loads the built client and registers settings wit
       ...face, useOpencodeGo: () => face.hooks.opencodeGo.getSnapshot(),
     }))
     expect(markup).toContain('type="password"')
+    const preview = document.createElement('div')
+    preview.innerHTML = markup
+    document.body.appendChild(preview)
+    try {
+      const advanced = preview.querySelector('[aria-controls="opencode-go-advanced"]')!
+      // The distributed CSS mapping must retain inherited disclosure styles.
+      expect(getComputedStyle(advanced).display).toBe('flex')
+      expect(getComputedStyle(advanced).cursor).toBe('pointer')
+    } finally {
+      preview.remove()
+    }
     expect(document.querySelector('style[data-plugin="dsh-opencode-go"]')).not.toBeNull()
     for (const dispose of effects.reverse()) (await dispose)()
     expect(sharedForm.listenerCount()).toBe(0)

@@ -68,8 +68,10 @@ export function ModelEditor({ models, draft, t, disabled, onEdit }: {
             </button>)}
           </nav>
           <section className={css.modelDetails} aria-label={t('modelDetails')}>
-            <h3>{model.name ?? model.id}</h3>
-            <div className={css.badges}>{badges(model)}</div>
+            <div className={css.modelHeading}>
+              <h3>{model.name ?? model.id}</h3>
+              {badges(model)}
+            </div>
             <code className={css.limitsModelId} translate="no">{model.id}</code>
             {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
             <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} disabled={disabled} onChange={write} />
