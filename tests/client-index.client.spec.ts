@@ -29,7 +29,9 @@ function clientHarness(): ClientHarness {
   const credentialListeners: Array<(ref: string) => void> = []
   let injectCallback: (() => unknown) | undefined
   const ctx = {
-    inject: vi.fn(),
+    inject: vi.fn((services: string[], callback: (child: unknown) => void) => {
+      if (services.includes('settingsScope')) callback(ctx)
+    }),
     effect: (fn: () => unknown) => {
       fn()
       return () => {}

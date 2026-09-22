@@ -8,7 +8,8 @@
 
 import { useEffect, useState } from 'react'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, IconChevronDownOutline14, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   OpencodeGoModels,
   OpencodeGoSectionFace,
@@ -16,6 +17,11 @@ import type {
 } from './section-controller.ts'
 import type { en } from './locales.ts'
 import css from './Section.module.css'
+
+// 0.1.7 names icons by stroke weight; older hosts name them by pixel size.
+const ChevronDown = (primitives as typeof primitives & {
+  IconChevronDownOutlineRegular?: typeof primitives.IconChevronDownOutline14
+}).IconChevronDownOutlineRegular ?? primitives.IconChevronDownOutline14
 
 export type { OpencodeGoSectionState } from './section-controller.ts'
 
@@ -234,7 +240,7 @@ function Loaded(props: {
           aria-controls="opencode-go-advanced"
           onClick={() => { setAdvanced(!advanced) }}
         >
-          <IconChevronDownOutline14 className={advanced ? css.chevronOpen : css.chevron} />
+          <ChevronDown className={advanced ? css.chevronOpen : css.chevron} />
           <span className={css.label}>{t('advancedLabel')}</span>
           {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
         </button>

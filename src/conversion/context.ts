@@ -36,10 +36,22 @@ function toolResultText(blocks: readonly ContentBlock[]): string {
     : block.type === 'tool-result' ? toolResultText(block.content) : '').join('')
 }
 
+interface ToolMessage {
+  toolCallId: ToolCallId
+  content: readonly ContentBlock[]
+  isError?: boolean
+}
+
+/** DSH 0.1.7 moved tool results out of user content into their own role. */
+function toolMessage(message: Message): ToolMessage | undefined {
+  if ((message as { role: string }).role !== 'tool') return undefined
+  return message as unknown as ToolMessage
+}
+
 /** Reject image roles that pi-ai cannot replay before request-size offloading can replace them. */
 function assertSupportedImageRoles(messages: readonly Message[]): void {
   for (const message of messages) {
-    if (message.role !== 'user' && contentHasImage(message.content)) {
+    if (message.role !== 'user' && !toolMessage(message) && contentHasImage(message.content)) {
       throw new LlmError(
         `pi-ai cannot represent an image in an in-history ${message.role} message`,
         'UNSUPPORTED_CONTENT',
@@ -188,6 +200,16 @@ function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: st
     if (contentHasImage(message.content)) {
       throw new LlmError('pi-ai image conversion requires the durable attachment service', 'UNSUPPORTED_CONTENT')
     }
+    const tool = toolMessage(message)
+    if (tool) {
+      messages.push({
+        role: 'toolResult', toolCallId: tool.toolCallId,
+        toolName: toolNames.get(tool.toolCallId) ?? 'unknown',
+        content: [{ type: 'text', text: toolResultText(tool.content) || '(no output)' }],
+        isError: tool.isError ?? false, timestamp: 0,
+      })
+      continue
+    }
     if (message.role === 'system') {
       // pi-ai has a single systemPrompt slot; a system message that did not
       // supply it folds into a user message to preserve order.
@@ -320,6 +342,17 @@ async function toPiContextWithImages(
   const messages: PiMessage[] = []
 
   for (const message of exactMessages) {
+    const tool = toolMessage(message)
+    if (tool) {
+      const content = await userContent(tool.content, requestImages, resolveImageAccess)
+      messages.push({
+        role: 'toolResult', toolCallId: tool.toolCallId,
+        toolName: toolNames.get(tool.toolCallId) ?? 'unknown',
+        content: typeof content === 'string' ? [{ type: 'text', text: content || '(no output)' }] : content,
+        isError: tool.isError ?? false, timestamp: 0,
+      })
+      continue
+    }
     if (message.role === 'system') {
       // pi-ai has a single systemPrompt slot; a system message that did not
       // supply it folds into a user message to preserve order.

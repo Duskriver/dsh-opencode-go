@@ -75,6 +75,30 @@ function history(role: 'system' | 'assistant', content: ContentBlock[]): Message
 }
 
 describe('pi-ai request context conversion', () => {
+  it('preserves 0.1.7 tool identity, failure status and images in both conversion paths', async () => {
+    const callId = ToolCallId('modern-call')
+    const call = history('assistant', [{ type: 'tool-call', id: callId, name: 'lookup', arguments: '{}' }])
+    const result = {
+      id: 'modern-result', role: 'tool', toolCallId: callId,
+      source: { kind: 'tool', callId }, isError: true,
+      content: [{ type: 'text', text: 'lookup failed' }],
+    } as unknown as Message
+    expect(toPiContext(request([call, result])).messages[1]).toMatchObject({
+      role: 'toolResult', toolCallId: callId, toolName: 'lookup', isError: true,
+      content: [{ type: 'text', text: 'lookup failed' }],
+    })
+    const imageResult = { ...result, content: [{ type: 'image', attachment: ref }] } as Message
+    const images: PiImageRequestContext = {
+      attachments: { readImageRequest: async () => requestImage(ref, Uint8Array.of(1)) } as unknown as AttachmentStore,
+      resolveImageAccess: () => undefined,
+    }
+    const converted = await toPiContext(request([call, imageResult]), images)
+    expect(converted.messages[1]).toMatchObject({
+      role: 'toolResult', toolCallId: callId, toolName: 'lookup', isError: true,
+      content: expect.arrayContaining([{ type: 'image', data: 'AQ==', mimeType: 'image/png' }]),
+    })
+  })
+
   it('omits absent and empty request-level optional fields', () => {
     const base = { provider: 'openai', model: 'gpt-4.1', messages: [] }
     expect(toPiContext(base)).toEqual({ messages: [] })

@@ -8,9 +8,8 @@
  * cannot express: a mandatory per-conversation `x-opencode-session` routing
  * header and a model list that rotates faster than any shipped catalog.
  *
- * Configuration layers like every settings-backed plugin: a `cordis.yml`
- * entry supplies the composition base and the settings document overrides it
- * field by field.
+ * DSH 0.1.5/0.1.6 layer the settings document over the composition entry;
+ * 0.1.7 edits live configuration fields on the profile entry directly.
  *
  * ```yaml
  * - id: llm-opencode-go
@@ -45,9 +44,15 @@ import {
   PROVIDER_ID,
   discoverCatalogModels,
 } from './catalog.ts'
-import { Config, assertBaseURL } from './config.ts'
-import type { OpencodeGoConfig } from './config.ts'
+import { Config, PlainConfig, readConfig, assertBaseURL } from './config.ts'
+import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'loader/volatile-update'(paths: readonly (readonly string[])[]): void
+  }
+}
 
 export { OpencodeGoAdapter } from './adapter.ts'
 export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess } from './adapter.ts'
@@ -59,7 +64,7 @@ export {
   discoverCatalogModels,
   readLiveModelIds,
 } from './catalog.ts'
-export { Config, assertBaseURL } from './config.ts'
+export { Config, PlainConfig, assertBaseURL } from './config.ts'
 export type { OpencodeGoConfig } from './config.ts'
 
 export const name = 'llm-opencode-go'
@@ -74,12 +79,13 @@ export const NS = 'llm-opencode-go'
  * replaced by the settings section's resolved value once the settings
  * provider attaches; the adapter re-reads it at every operation.
  */
-export function apply(ctx: Context, raw?: OpencodeGoConfig): void {
-  const entry = Config(raw)
+export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
+  const config = raw && typeof raw.enabled === 'object' ? raw as LiveConfig : Config(raw)
+  const entry = readConfig(config)
   // Self-contained misconfiguration fails at load; a bad stored value instead
   // refuses the write through the section's validate hook.
   assertBaseURL(entry.baseURL)
-  let current: () => OpencodeGoConfig = () => entry
+  let current: () => OpencodeGoConfig = () => readConfig(config)
 
   const resolveApiKey = async (): Promise<string | undefined> => {
     const ref = current().apiKeyEnv
@@ -186,7 +192,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig): void {
   // entry as its base layer and follows the settings provider while attached.
   // Without a settings provider the plugin still loads and serves the entry.
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, NS, Config, entry, {
+    if ('configure' in settingsCtx.settings) {
+      const settings = settingsCtx.settings as unknown as {
+        configure(policy: { auto: boolean }, owner: typeof ctx.fiber): () => void
+      }
+      settingsCtx.effect(() => settings.configure({ auto: false }, ctx.fiber))
+      return
+    }
+    settingsCtx.settings.installSection(ctx, NS, PlainConfig, entry, {
       validate: (value) => {
         assertBaseURL(value.baseURL)
       },
@@ -200,6 +213,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig): void {
       },
     })
   })
+  // Validate before 0.1.7 persists a profile edit, then follow committed refs.
+  ctx.on('internal/config', function (_raw, next) {
+    const value = next()
+    if (this === ctx.fiber) assertBaseURL(PlainConfig(value).baseURL)
+    return value
+  })
+  // The event is absent on older Loaders; registering it is harmless there.
+  ctx.on('loader/volatile-update', syncRoute)
   // A key stored or removed anywhere — the settings page's write-only control
   // included — flips the route's presence; the event names the reference.
   ctx.inject(['credentials'], (credentialsCtx) => {

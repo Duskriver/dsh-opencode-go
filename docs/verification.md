@@ -1,5 +1,22 @@
 # Verification
 
+## DSH 0.1.7 compatibility (plugin 0.1.7)
+
+Verified on macOS / Node.js 24.14.1 against published DSH `0.1.7-alpha.1`, while retaining the four previously tested hosts (`0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`). The independent npm workspace at `tests/hosts/v017` keeps the new Cordis/Loader and DSH service identities separate from the legacy test dependencies. Install development dependencies with `npm ci --legacy-peer-deps`; the aliases deliberately contain incompatible peer ranges from different host generations.
+
+The failures reproduced before their fixes were:
+
+- `engines.dsh` rejected `0.1.7-alpha.1`.
+- The real new settings service did not expose OpenCode Go because `installSection` was removed and the profile form requires volatile Config fields.
+- New `role: 'tool'` history was sent as user text, losing its tool-call identity; tool-result images were rejected.
+- The real Web settings page crashed with React error 130 because the host removed `IconChevronDownOutline14`.
+
+Validation: Host/Client type checks and all **151 tests in 14 files** pass. The fresh-process host matrix exercises the built artifact, real LLM/attachment implementations, text streaming, tool history, image resizing and offload limits. The modern fixture additionally exercises the real usage RPC gateway. The profile-settings fixture uses the real Loader and settings service with an in-memory editor, and verifies live updates without remounting, toggling the route, and invalid-URL rejection. The browser artifact test now renders the actual page against both published UI primitive generations; merely checking registration had missed the removed icon.
+
+An isolated npm consumer with the official `0.1.7-alpha.1` CLI passed `verify:installed` and `verify:headless` against a local fixture gateway. The final browser factory was also checked in that consumer's Web profile: the settings page renders, advanced fields are editable, saving `refreshMinutes: 30` and switching `enabled: false` persist in the real profile patch and survive a full page reload, with no new console errors. No real API key or paid model generation was used. Older custom settings may require the explicit migration described in README because the upstream importer does not map this plugin's legacy namespace to its bundle entry id.
+
+The verification history below describes earlier releases; their live-provider results do not imply live-provider testing of this release.
+
 Verified on macOS with Node.js 24.14.1 and npm-installed DSH 0.1.6-alpha.1. The plugin's dependencies came from npm, with no workspace aliases, symlinks into a checkout, or unpublished DSH exports.
 
 ## Local checks

@@ -14,7 +14,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
 import {
   StagedForm,
   booleanField,
@@ -137,6 +137,7 @@ export class OpencodeGoSectionController {
   private models: OpencodeGoModels = { status: 'idle' }
   private modelsRequest = 0
   private face: OpencodeGoSectionFace | undefined
+  private readonly unsubscribe: () => void
 
   /**
    * @param scope - the bound settings scope for the `llm-opencode-go` namespace.
@@ -164,8 +165,15 @@ export class OpencodeGoSectionController {
       [{ field: API_KEY_FIELD, write: text => this.writeKey(text) }],
     )
     this.store = this.form.bind(() => this.projection())
-    scope.subscribe(() => { void this.readCredential() })
+    this.unsubscribe = scope.subscribe(() => { void this.readCredential() })
     void this.readCredential()
+  }
+
+  /** Release subscriptions without disposing the host's shared form. */
+  dispose(): void {
+    this.modelsRequest++
+    this.unsubscribe()
+    this.form.dispose()
   }
 
   private projection(): OpencodeGoSectionState {

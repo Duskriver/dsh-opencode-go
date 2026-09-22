@@ -6,7 +6,13 @@ import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { useModernHost } from './modern-host.mjs'
 
+const modern = process.argv[2] === 'v017'
+if (modern) {
+  await useModernHost()
+  process.argv[2] = '@deepseek-ai/dsh-llm'
+}
 const legacy = process.argv[2].startsWith('dsh-llm-v015')
 const llmURL = import.meta.resolve(process.argv[2])
 const aliased = process.argv[2].startsWith('dsh-llm-')
@@ -26,6 +32,8 @@ const llm = await import('@deepseek-ai/dsh-llm')
 const plugin = await import('../../lib/index.js')
 const { LocalAttachmentStore } = await import(localPackage)
 const sharp = createRequire(import.meta.resolve(localPackage))('sharp')
+const usage = Object.fromEntries(['rolling', 'weekly', 'monthly'].map(key => [key,
+  { status: 'ok', percent: 12, resetsAt: '2026-10-01T00:00:00Z' }]))
 const bodies = []
 const networkFetch = globalThis.fetch
 globalThis.fetch = (input, init) => {
@@ -43,6 +51,12 @@ const server = createServer((request, response) => {
   let body = ''
   request.on('data', chunk => { body += chunk })
   request.on('end', () => {
+    if (request.url === '/usage') {
+      assert.equal(request.headers.authorization, 'Bearer fixture-key')
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ usage }))
+      return
+    }
     if (request.url === '/models') {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ data: [{ id: 'compat-model' }] }))
@@ -66,21 +80,36 @@ process.env.OPENCODE_GO_COMPAT_KEY = 'fixture-key'
 try {
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
-  const config = plugin.Config({ apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY',
+  const config = plugin.PlainConfig({ apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY',
     baseURL: `http://127.0.0.1:${server.address().port}`, maxRequestImageBytes: 8 })
   ctx.baseUrl = new URL('../../package.json', import.meta.url).href
   await ctx.plugin(Loader)
+  if (modern) {
+    await ctx.plugin((await import('@deepseek-ai/dsh-typert-registry')).default)
+    await ctx.plugin((await import('@deepseek-ai/dsh-api-gateway')).default)
+  }
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const id = await ctx.loader.create({ name: new URL('../../lib/index.js', import.meta.url).href, config })
   await ctx.loader.await()
   assert.ok(ctx.loader.resolve(id).fiber, 'plugin mounts through the real Loader')
   assert.ok(ctx.llm.listProviders().some(p => p.id === 'opencode-go'))
   assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
+  if (modern) assert.deepEqual(await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }), usage)
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'compat-test' } })
   const request = messages => ({ provider: 'opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })
   const drain = async stream => { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks }
   const text = await drain(ctx.llm.stream(request([user([{ type: 'text', text: 'hello' }])])))
   assert.ok(text.some(c => c.type === 'text-delta' && c.text === 'compat-ok'))
+  if (modern) {
+    const messages = [
+      { id: 'assistant-tool-call', role: 'assistant', source: { kind: 'model', provider: 'opencode-go', model: 'compat-model' },
+        content: [{ type: 'tool-call', id: 'call', name: 'lookup', arguments: '{}' }] },
+      llm.createToolResultMessage({ callId: 'call', content: [{ type: 'text', text: 'tool-result-ok' }], isError: true }),
+    ]
+    await drain(ctx.llm.stream(request(messages)))
+    assert.ok(bodies.at(-1).messages.some(m => m.role === 'tool' && m.tool_call_id === 'call' && m.content.includes('tool-result-ok')),
+      '0.1.7 tool-role results must answer their tool call, not become user messages')
+  }
 
   // Exercise the real attachment policy validation, resizing and encoding (#2).
   // The original image-transport mock below ignores the second argument entirely.
@@ -141,7 +170,9 @@ try {
   // Oldest nested image exceeds the budget. Legacy hosts project it before reading;
   // modern hosts ask the surface to persist an offload event, without sending a request.
   const old = image('a')
-  const messages = [user([{ type: 'tool-result', toolCallId: 'call', content: [old] }]), user([recent, recent])]
+  const messages = [modern
+    ? llm.createToolResultMessage({ callId: 'call', content: [old], isError: false })
+    : user([{ type: 'tool-result', toolCallId: 'call', content: [old] }]), user([recent, recent])]
   const original = JSON.stringify(messages)
   if (legacy) {
     await drain(adapter.stream(request(messages)))

@@ -1,8 +1,8 @@
 /**
  * Configuration schema for the OpenCode Go adapter plugin. The section is
- * installed under the `llm-opencode-go` settings namespace: a cordis.yml
- * entry supplies the composition base and the settings document overrides it
- * field by field, hot-reloaded without a restart. Self-contained constraints
+ * installed under the `llm-opencode-go` settings namespace on DSH 0.1.5/0.1.6.
+ * DSH 0.1.7 edits the `opencode-go` profile entry through live references.
+ * Both paths update field by field without a restart. Self-contained constraints
  * (URL shape, numeric bounds) fail at load for the composition layer and
  * refuse the write for the settings layer.
  *
@@ -54,7 +54,7 @@ export interface OpencodeGoConfig {
 }
 
 /** Runtime schema for {@link OpencodeGoConfig}. */
-export const Config: z<OpencodeGoConfig> = z.object({
+const fields = {
   enabled: z.boolean().default(true),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string().default(DEFAULT_BASE_URL),
@@ -65,7 +65,21 @@ export const Config: z<OpencodeGoConfig> = z.object({
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   requestImagePixelBudget: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
   requestImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
-})
+}
+
+/** Plain values used by the adapter and by pre-0.1.7 settings documents. */
+export const PlainConfig: z<OpencodeGoConfig> = z.object(fields)
+
+/** 0.1.7's Loader retains these references when profile fields change. */
+export type LiveConfig = { [K in keyof OpencodeGoConfig]: { get(): OpencodeGoConfig[K] } }
+export const Config = z.object(Object.fromEntries(
+  Object.entries(fields).map(([key, schema]) => [key, schema.volatile()]),
+)) as z<Partial<OpencodeGoConfig>, LiveConfig>
+
+/** Keep the Loader's references: reparsing them would detach live updates. */
+export function readConfig(config: LiveConfig): OpencodeGoConfig {
+  return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, value.get()])) as unknown as OpencodeGoConfig
+}
 
 /**
  * Accept only an http(s) base without a query or fragment. Runs at load for

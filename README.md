@@ -9,7 +9,17 @@
 
 ## 安装与使用
 
-兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1` 和 `0.1.6-alpha.2`
+插件 `0.1.7` 兼容 DSH `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` 和 `0.1.7-alpha.1`，旧版 DSH 用户无需升级宿主。
+
+`0.1.7` 为本次源码中的待发布版本；npm 发布前可在本项目构建后安装本地包：
+
+```sh
+npm ci --legacy-peer-deps
+npm pack
+dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz
+```
+
+开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
 
 
 ### Web
@@ -73,6 +83,22 @@ dsh plugin --profile web update dsh-opencode-go --latest
 Web 用户可直接在 **设置 → OpenCode Go** 中修改配置。
 
 ## 常见问题
+
+### 升级到 DSH 0.1.7 后的高级设置
+
+DSH `0.1.7` 将设置改存到当前 profile 的 `cordis.patch.yml`，本插件的条目 ID 为 `opencode-go`；旧宿主继续使用 `settings.yaml` 中的 `llm-opencode-go` 分区。API Key 仍由 credentials 服务保存。
+
+上游的一次性设置导入无法自动把第三方插件的旧分区名映射到不同的条目 ID。如果升级后高级配置恢复默认值，可从 DSH home 下的 `settings.yaml.imported`（尚未导入时为 `settings.yaml`）找到 `llm-opencode-go`，在新设置页重新保存其中的配置；也可以将这些字段合并到目标 profile 的已有条目中，保留其他配置：
+
+```yaml
+- id: opencode-go
+  config:
+    # 将旧 llm-opencode-go 分区中需要保留的字段放在这里
+    apiKeyEnv: OPENCODE_API_KEY
+    refreshMinutes: 60
+```
+
+如果使用了自定义 API Key 引用，须保留原来的 `apiKeyEnv` 值。Web 和 Headless 的配置现在各自独立。
 
 ### DSH 0.1.5 安装插件后无法启动
 

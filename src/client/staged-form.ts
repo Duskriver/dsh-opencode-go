@@ -18,7 +18,7 @@
  */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
 
 /** The write one field's staged text performs when the page is saved. */
 export type FieldWrite =
@@ -183,6 +183,7 @@ export class StagedForm {
   private readonly secretSpecs: Map<string, SecretSpec>
   private readonly staged = new Map<string, StagedEdit>()
   private readonly listeners = new Set<() => void>()
+  private readonly unsubscribe: () => void
   private saving = false
   private failed = false
 
@@ -198,7 +199,13 @@ export class StagedForm {
   ) {
     this.specs = new Map(specs.map(spec => [spec.field, spec]))
     this.secretSpecs = new Map(secrets.map(spec => [spec.field, spec]))
-    scope.subscribe(() => { this.publish() })
+    this.unsubscribe = scope.subscribe(() => { this.publish() })
+  }
+
+  /** Shared 0.1.7 forms outlive individual settings pages. */
+  dispose(): void {
+    this.unsubscribe()
+    this.listeners.clear()
   }
 
   /**
