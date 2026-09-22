@@ -12,7 +12,19 @@ Plugin `0.1.7` supports DSH `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-
 
 To build from source and install locally, use `npm ci --legacy-peer-deps`, `npm pack`, then `dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz`. The development dependency tree intentionally includes multiple DSH generations.
 
-### Web
+### Install from DSH (recommended)
+
+1. Open the **Plugins** page in DSH and click **Add plugin** in the top-right corner.
+2. Enter `dsh-opencode-go` and click **Install**.
+3. If prompted after installation, click **Enable now**.
+
+![Add, install, and enable dsh-opencode-go from DSH (Chinese UI)](docs/assets/install-via-dsh.gif)
+
+Then open **Settings → OpenCode Go**, enter and save your API key, and select an OpenCode Go model in a conversation.
+
+If your DSH version does not have an **Add plugin** entry, use the command-line method below.
+
+### Command-line installation (alternative)
 
 ```sh
 dsh plugin --profile web add dsh-opencode-go@0.1.7

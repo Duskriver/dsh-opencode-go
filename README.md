@@ -11,7 +11,20 @@
 兼容清单：
  `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2` 和 `0.1.7-alpha.1`
 
-### 一键安装
+### 在 DSH 中安装（推荐）
+
+1. 打开 DSH 的 **插件** 页面，点击右上角 **添加插件**。
+2. 输入 `dsh-opencode-go`，点击 **安装**。
+3. 安装成功后，如果出现 **立即启用**，点击即可。
+
+![在 DSH 插件页添加、安装并启用 dsh-opencode-go](docs/assets/install-via-dsh.gif)
+
+然后打开 **设置 → OpenCode Go**，填入 API Key 并保存，即可在会话中选择 OpenCode Go 模型。
+
+若当前 DSH 没有「添加插件」入口，可使用下面的命令行方式。
+
+### 命令行安装（备选）
+
 ```sh
 dsh plugin --profile web add dsh-opencode-go@0.1.7
 ```
