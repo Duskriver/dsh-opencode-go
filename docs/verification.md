@@ -1,5 +1,21 @@
 # Verification
 
+## DSH 0.1.7-alpha.2 compatibility (plugin 0.1.9, 2026-09-23)
+
+The package now declares DSH `0.1.7-alpha.2` and Cordis `4.0.4` support while retaining the five previously supported hosts. Before the change, the SemVer regression rejected the new host in `engines.dsh`; the DSH and Cordis peer ranges also excluded its published versions. `engines.dsh` is declarative in the current upstream installer, so it must not be confused with an enforced loader check. The peer ranges affect dependency resolution. Unverified future prereleases remain outside the declared range.
+
+Review of the [upstream release diff](https://github.com/deepseek-ai/deepseek-harness/compare/dsh-v0.1.7-alpha.1...dsh-v0.1.7-alpha.2) and tests with the published packages found no required change to the adapter or settings implementation. The new `tests/hosts/v017-alpha2` workspace pins the DSH services, Cordis `4.0.4`, Loader `1.0.5`, Include `1.0.9`, and Schemastery `3.18.4` separately from the older host fixtures.
+
+Validation on macOS / Node.js 24.14.1:
+
+- Host/client type checks, build, and **191 tests in 17 files** pass. The six-host matrix covers artifact loading, Loader activation, catalog and usage RPCs on modern hosts, streaming, capacities, real image resizing, offload limits, and immutable history. Modern hosts also verify mixed tool-result text and image delivery.
+- Both `0.1.7` prereleases pass the real profile settings fixture, including live updates without remounting, visibility changes, capacity reset, route toggling, and validation.
+- The distributed browser factory renders against the legacy UI packages and both `0.1.7` prereleases' actual store and primitives packages. Model loading, settings registration, CSS composition, and cleanup pass. Published UI primitives still emit missing-source-map warnings.
+- The tarball installs into a separate official `@deepseek-ai/dsh@0.1.7-alpha.2` npm consumer without `--force` or `--legacy-peer-deps`. Its resolved Cordis, LLM, settings, and attachment packages match the target versions. `verify:installed` passes package resolution, catalog, streaming, session headers, authorization, and unload checks.
+- `verify:headless` passes through the official launcher with the installed bundle selected in an isolated profile. The first `dsh plugin add` stopped on pnpm's build-policy decisions for `@google/genai` and `protobufjs`. Both were explicitly disabled in that temporary profile's `allowBuilds`, then installation was retried. Because the interrupted operation had already written the dependency, the retry retained its disabled state; adding `dsh-opencode-go` to that profile's existing `dsh.profile.bundles` enabled it before the successful smoke test.
+
+Development dependencies are reproducible with `npm ci --legacy-peer-deps --ignore-scripts`. Completion requests use a loopback gateway and fake credentials. This verification does not cover the full Web/Desktop UI, other operating systems, or live paid model calls.
+
 ## Release 0.1.8 (2026-09-22)
 
 Host/client type checks, the build, and all **181 tests in 16 files** pass on macOS / Node.js 24.14.1. Coverage includes the five supported host versions, deprecated-model visibility, model remote injection, and CSS composition in the distributed client. The upstream UI primitives packages still emit missing-source-map warnings; all assertions pass. This release also synchronizes the English README with the simplified Chinese guide and updates installation examples to 0.1.8.

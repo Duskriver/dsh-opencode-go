@@ -8,9 +8,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { useModernHost } from './modern-host.mjs'
 
-const modern = process.argv[2] === 'v017'
+const modern = ['v017', 'v017-alpha2'].includes(process.argv[2])
 if (modern) {
-  await useModernHost()
+  await useModernHost(process.argv[2])
   process.argv[2] = '@deepseek-ai/dsh-llm'
 }
 const legacy = process.argv[2].startsWith('dsh-llm-v015')
@@ -165,6 +165,24 @@ try {
     assert.ok(encoded.length <= maxBytes)
     if (width === 800) assert.deepEqual([metadata.width, metadata.height], [width, height])
     else assert.ok(metadata.width < width && metadata.height < height)
+
+    // 0.1.7-alpha.2 retains mixed tool output in order; preserve the retained
+    // text and image when the host hands it to this third-party adapter.
+    if (modern && width === 800) {
+      await drain(realAdapter.stream(request([
+        { id: 'image-tool-call', role: 'assistant', source: { kind: 'model', provider: 'opencode-go', model: 'compat-model' },
+          content: [{ type: 'tool-call', id: 'image-call', name: 'lookup', arguments: '{}' }] },
+        llm.createToolResultMessage({ callId: 'image-call', isError: false, content: [
+          { type: 'text', text: 'retained-head' }, { type: 'image', attachment }, { type: 'text', text: 'retained-tail' },
+        ] }),
+      ])))
+      const history = bodies.at(-1).messages
+      const result = history.find(m => m.role === 'tool' && m.tool_call_id === 'image-call')
+      assert.match(result?.content ?? '', /retained-head[\s\S]*retained-tail/)
+      const images = history.flatMap(m => Array.isArray(m.content) ? m.content : []).filter(c => c.type === 'image_url')
+      assert.equal(images.length, 1, 'retained tool-result image reaches the provider')
+      assert.deepEqual(Buffer.from(images[0].image_url.url.split(',')[1], 'base64'), encoded)
+    }
   }
 
   const reads = []
