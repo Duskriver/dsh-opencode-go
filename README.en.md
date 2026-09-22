@@ -4,13 +4,19 @@
 
 Use OpenCode Go subscription models in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), with streaming replies, tool calls, and image input.
 
-The plugin adds the session headers required by OpenCode Go, reads the gateway model catalog, and displays subscription usage.
+The plugin automatically adds the session headers required by OpenCode Go, reads the gateway model catalog, and displays subscription usage. There is no need to configure model protocols, modalities, context windows, or maximum output tokens manually.
+
+## Features
+
+- **Session headers**: Every request includes the Harness User-Agent and `x-opencode-session`. A session keeps the same ID to maximize cache hits.
+- **Streaming and history**: Supports streaming output, tool calls, and history replay through pi-ai.
+- **Image input**: Supports models that advertise image capability in the catalog.
+- **Model capacity overrides**: Override the context window and maximum output per model, with blank values inheriting the online catalog.
+- **Prompt and caching**: The plugin does not add hidden system prompts; the session ID is used for gateway routing.
 
 ## Installation and usage
 
-Plugin `0.1.7` supports DSH `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, and `0.1.7-alpha.1`.
-
-To build from source and install locally, use `npm ci --legacy-peer-deps`, `npm pack`, then `dsh plugin --profile web add ./dsh-opencode-go-0.1.7.tgz`. The development dependency tree intentionally includes multiple DSH generations.
+Supported DSH versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, and `0.1.7-alpha.1`.
 
 ### Install from DSH (recommended)
 
@@ -27,7 +33,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.7
+dsh plugin --profile web add dsh-opencode-go@0.1.8
 ```
 
 Start or restart `dsh web`, then:
@@ -41,7 +47,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.7
+dsh plugin --profile headless add dsh-opencode-go@0.1.8
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -63,37 +69,15 @@ dsh --profile headless --patch ./headless.patch.yml "Hello"
 
 The model ID must be available in the current gateway catalog. Web and Headless use separate profiles, so install the plugin in each profile you use.
 
-## Model capacity settings
+To build from source and install a local package:
 
-In Web, open **Settings → OpenCode Go**, select a model on the left, and edit its capacities on the right. Advanced settings are collapsed behind the top-right control. You can:
-
-- Search by model name or ID, or filter recent releases, customized models, and deprecated models.
-- Set the **context window** and **maximum output**.
-- See the catalog-advertised capacities as a reference.
-- Click **Use catalog** for one model or clear all overrides.
-
-Blank fields inherit the catalog values. Positive integers are passed directly to the adapter; the plugin does not clamp them to the provider's actual capabilities, so values above the upstream limit may be rejected by the gateway. Changes use the settings page's **Save** / **Discard** flow and take effect on the next request or model read without a restart.
-
-Only models returned by the Go gateway's `/models` endpoint appear. Entries found only in models.dev or saved capacity overrides do not establish membership. NEW uses models.dev `release_date` and the last seven UTC calendar days; recent releases sort first. Missing dates are not guessed. Models with models.dev `status: deprecated` sort last in settings and remain configurable and callable.
-
-**Show deprecated models in conversations** is off by default (`showDeprecatedModels: false`). Toggling it immediately updates conversation model pickers without a separate Save. Hiding a model does not interrupt existing conversations using it. This switch is independent of staged capacity edits.
-
-Headless or profile patches can also configure `modelLimits` directly:
-
-```yaml
-- id: opencode-go
-  config:
-    modelLimits:
-      deepseek-v4.1-flash:
-        contextWindow: 262144
-        maxTokens: 32768
+```sh
+npm ci --legacy-peer-deps
+npm pack
+dsh plugin --profile web add ./dsh-opencode-go-0.1.8.tgz
 ```
 
-Each model may set only one field. Omitted fields inherit existing configuration, falling back to the catalog when no override exists. `maxTokens` also caps explicit request budgets while preserving smaller budgets.
-
-Set a model entry or an individual field to `null` to explicitly select the catalog value even when a lower profile layer supplies an override. The Web reset and clear actions save this marker automatically. Changing limits preserves learned catalog metadata; the reference values always show the original catalog capacities.
-
-DSH `0.1.5` / `0.1.6` use the legacy settings interface; `0.1.7-alpha.1` uses profile configuration. Changes take effect without restarting on all five supported versions.
+The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.
 
 ## Updating the plugin
 
@@ -111,20 +95,6 @@ Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web
 
 ## FAQ
 
-### Advanced settings after upgrading to DSH 0.1.7
-
-DSH `0.1.7` stores settings in the current profile’s `cordis.patch.yml`, using entry ID `opencode-go`. Older hosts use the `llm-opencode-go` section in `settings.yaml`. The upstream importer does not map these different names automatically. If advanced settings return to defaults, copy the relevant values from `settings.yaml.imported` (or `settings.yaml` before import) into the new settings page or the existing `opencode-go` profile entry. Preserve other profile entries and any custom `apiKeyEnv` value. API keys remain in the credentials service; Web and Headless configurations are now independent.
-
-### DSH 0.1.5 cannot start after installing the plugin
-
-Plugin versions `0.1.0`–`0.1.4` used an image API introduced in DSH `0.1.6`. On an older DSH version this could produce an `IMAGE_OFFLOAD_REQUIRED_CODE` startup error for a missing export. Upgrade to plugin `0.1.5` or newer and restart:
-
-```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.7
-```
-
-For Headless, replace `web` with `headless`. The fix preserves both host behaviors: DSH `0.1.5` turns the oldest image into placeholder text when the request exceeds the image budget, while DSH `0.1.6` continues to record and handle image offloading through the host.
-
 ### The `opencode-go` route is already in use
 
 Only one adapter in a profile can provide the `opencode-go` route. If another plugin or a generic pi-ai configuration already connects OpenCode Go, disable that configuration first. Other providers can continue to run.
@@ -140,14 +110,6 @@ A gateway model ID with no usable protocol or capability configuration is shown 
 A reasoning-capable model without adjustable reasoning levels (for example, `union-alpha`) remains selectable and usable; it simply has no reasoning-strength control.
 
 If the online configuration is temporarily unavailable, the plugin prefers a configuration fetched successfully earlier in the process and falls back to pi-ai's built-in metadata. If the gateway catalog is unavailable, existing requests can use the last catalog; a Settings refresh reports the failure instead of presenting stale data as current. `refreshMinutes` controls the cache lifetime for ongoing model requests, but does not prevent an explicit model-list read from fetching fresh data.
-
-## Features
-
-- **Session headers**: Every request includes the Harness User-Agent and `x-opencode-session`. A session keeps one ID; requests without a session ID receive an independent random value.
-- **Streaming and history**: Supports streaming output, tool calls, and history replay through pi-ai.
-- **Image input**: Supports models that advertise image capability; the DSH attachment service is required.
-- **Model capacity overrides**: Override the context window and maximum output per model, with blank values inheriting the online catalog.
-- **Prompt and caching**: The plugin does not add hidden system prompts; the session ID is used for gateway routing.
 
 ## Uninstall
 
