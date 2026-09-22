@@ -45,7 +45,18 @@ import type { PiImageRequestContext } from './conversion/index.ts'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog } from './catalog.ts'
 import { assertBaseURL } from './config.ts'
-import type { OpencodeGoConfig } from './config.ts'
+import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
+
+/** Apply one request's capacities without changing the shared catalog or its fallbacks. */
+function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
+  const limit = limits[model.id]
+  if (limit == null) return model
+  return {
+    ...model,
+    contextWindow: limit.contextWindow ?? model.contextWindow,
+    maxTokens: limit.maxTokens ?? model.maxTokens,
+  }
+}
 
 /**
  * The attachment-service bridges one image request reads. Construction-time
@@ -114,9 +125,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * The catalog resolver for one configuration, rebuilding on the facts it
    * owns. Public for the plugin's discovery registration, which resolves the
    * current configuration the same way the adapter does.
-   * @param config - the configuration whose endpoint and refresh interval the
-   *   resolver serves; a change to either yields a fresh resolver.
-   * @returns the resolver caching one snapshot per endpoint/refresh pair.
+   * @param config - the endpoint and refresh interval for the raw catalog.
+   * @returns the resolver caching catalog values, independent of deployment limits.
    */
   catalogOf(config: OpencodeGoConfig): OpencodeGoCatalog {
     const key = `${config.baseURL}|${String(config.refreshMinutes)}`
@@ -157,12 +167,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: string,
     _signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    const snapshot = await this.catalogOf(this.options.config()).forModel(model)
+    const config = this.options.config()
+    const snapshot = await this.catalogOf(config).forModel(model)
     const resolved = snapshot.models.get(model)
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
     }
-    return this.modelInfo(resolved)
+    return this.modelInfo(withModelLimit(resolved, config.modelLimits))
   }
 
   /** Describe one model: capacities plus the reasoning levels it actually offers. */
@@ -209,10 +220,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
     }
     const config = this.options.config()
     const snapshot = await this.catalogOf(config).forModel(options.model)
-    const model = snapshot.models.get(options.model)
-    if (model === undefined) {
+    const advertised = snapshot.models.get(options.model)
+    if (advertised === undefined) {
       throw new LlmError(`opencode-go has no model "${options.model}"`, 'UNKNOWN_MODEL')
     }
+    const model = withModelLimit(advertised, config.modelLimits)
+    const outputLimit = config.modelLimits[model.id]?.maxTokens
+    const maxTokens = outputLimit == null ? options.maxTokens : Math.min(options.maxTokens ?? outputLimit, outputLimit)
     const apiKey = await this.options.resolveApiKey()
     if (apiKey === undefined || apiKey.length === 0) {
       throw new LlmError('llm-opencode-go: no credential resolved for the route', 'MISSING_CREDENTIAL')
@@ -262,7 +276,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         apiKey,
         ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
-        ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
+        ...maxTokens === undefined ? {} : { maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
         // Harness-owned request identity: the gateway refuses requests without

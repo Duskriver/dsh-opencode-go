@@ -11,10 +11,13 @@ import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
+  OpencodeGoModelLimit,
+  OpencodeGoModelLimits,
   OpencodeGoModels,
   OpencodeGoSectionFace,
   OpencodeGoSectionState,
 } from './section-controller.ts'
+import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import type { en } from './locales.ts'
 import css from './Section.module.css'
 
@@ -53,6 +56,7 @@ interface ValueFieldProps {
 
 /** One staged value field: label, override badge with reset, control, and hint. */
 function ValueField(props: ValueFieldProps) {
+  const hintId = `${props.id}-hint`
   return (
     <div className={css.field}>
       <div className={css.head}>
@@ -75,15 +79,18 @@ function ValueField(props: ValueFieldProps) {
       </div>
       <input
         id={props.id}
+        name={props.id}
+        autoComplete="off"
+        aria-describedby={hintId}
         className={props.field.invalid ? css.inputInvalid : css.input}
-        type="text"
+        type={props.numeric === true ? 'number' : 'text'}
         {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
         {...props.field.invalid ? { 'aria-invalid': true } : {}}
         value={props.field.text}
         disabled={props.disabled}
         onChange={(event) => { props.onEdit(event.target.value) }}
       />
-      <p className={props.field.invalid ? css.invalid : css.hint}>
+      <p id={hintId} className={props.field.invalid ? css.invalid : css.hint}>
         {props.field.invalid ? props.invalidLabel : props.hint}
       </p>
     </div>
@@ -94,7 +101,8 @@ function ValueField(props: ValueFieldProps) {
  * The gateway's model listing in the state the page last read.
  * @param props.models - the listing state the controller published.
  * @param props.t - section copy.
- * @returns the listing body: a progress line, the Host diagnostic, or the names.
+ * @returns the listing body: a progress line, the Host diagnostic, or an empty
+ *   body once the capacity table can show the complete model list.
  */
 function ModelsBody({ models, t }: {
   models: OpencodeGoModels
@@ -103,18 +111,208 @@ function ModelsBody({ models, t }: {
   if (models.status === 'failed') {
     return (
       <>
-        <p className={css.failedNote}>{t('modelsFailed')}</p>
+        <p className={css.failedNote} role="alert">{t('modelsFailed')}</p>
         <p className={css.hint}>{models.message}</p>
       </>
     )
   }
-  if (models.status !== 'ready') return <p className={css.hint}>{t('modelsLoading')}</p>
+  if (models.status !== 'ready') return <p className={css.hint} role="status" aria-live="polite">{t('modelsLoading')}</p>
   if (models.count === 0) return <p className={css.hint}>{t('modelsEmpty')}</p>
+  return null
+}
+
+/**
+ * The searchable per-model capacity editor. It keeps the visible table backed
+ * by the same staged JSON field as the rest of the form, so Save and Discard
+ * retain one predictable write path.
+ */
+function LimitsTable({ models, draft, t, disabled, onEdit }: {
+  models: OpencodeGoModels
+  draft: OpencodeGoModelLimits
+  t: SectionTranslate
+  disabled: boolean
+  onEdit: (next: OpencodeGoModelLimits) => void
+}) {
+  const [query, setQuery] = useState('')
+  const known = new Map((models.status === 'ready' ? models.entries : []).map(model => [model.id, model]))
+  for (const [id, limit] of Object.entries(draft)) {
+    if (hasCapacityOverride(limit) && !known.has(id)) known.set(id, { id })
+  }
+  if (known.size === 0) return <p className={css.hint}>{t('limitsEmpty')}</p>
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const entries = [...known.values()].filter((model) => {
+    if (normalizedQuery === '') return true
+    return `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalizedQuery)
+  })
+  const customizedCount = Object.values(draft).filter(hasCapacityOverride).length
+
+  const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | undefined): void => {
+    // Editing a model after a full reset must not revive its inherited second field.
+    const current = draft[id] === null ? { contextWindow: null, maxTokens: null } : draft[id] ?? {}
+    const merged = { ...current }
+    merged[field] = value ?? null
+    const next = { ...draft, [id]: merged }
+    onEdit(next)
+  }
+  const clearModel = (id: string): void => {
+    const next = { ...draft }
+    next[id] = null
+    onEdit(next)
+  }
+
   return (
-    <div className={css.chips}>
-      {models.preview.map(name => <Tag key={name} tone="outline">{name}</Tag>)}
+    <div className={css.limitsEditor}>
+      <div className={css.limitsToolbar}>
+        <label className={css.limitsFilterLabel} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
+        <input
+          id="opencode-go-model-filter"
+          className={css.input}
+          type="search"
+          name="model-filter"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={t('limitsFilterPlaceholder')}
+          value={query}
+          onChange={(event) => { setQuery(event.target.value) }}
+        />
+        <span className={css.limitsSummary} role="status" aria-live="polite">
+          {t('limitsSummary', { count: customizedCount })}
+        </span>
+      </div>
+      {entries.length === 0
+        ? <p className={css.hint}>{t('limitsNoMatches', { query })}</p>
+        : (
+          <div className={css.limitsScroll}>
+            <table className={css.limitsTable}>
+              <caption className={css.visuallyHidden}>{t('limitsLabel')}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">{t('limitsModel')}</th>
+                  <th scope="col">{t('limitsContext')}</th>
+                  <th scope="col">{t('limitsOutput')}</th>
+                  <th scope="col"><span className={css.visuallyHidden}>{t('limitsResetModel')}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((model) => (
+                  <LimitRow
+                    key={model.id}
+                    model={model}
+                    limit={draft[model.id]}
+                    disabled={disabled}
+                    t={t}
+                    onChange={write}
+                    onReset={clearModel}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      {customizedCount > 0
+        ? (
+          <button type="button" className={css.reset} disabled={disabled} onClick={() => { onEdit(Object.fromEntries(Object.keys(draft).map(id => [id, null]))) }}>
+            {t('limitsResetAll')}
+          </button>
+        )
+        : null}
     </div>
   )
+}
+
+/** One capacity row with catalog reference values and accessible numeric inputs. */
+function LimitRow({ model, limit, disabled, t, onChange, onReset }: {
+  model: LlmDiscoveredModel
+  limit: OpencodeGoModelLimit | null | undefined
+  disabled: boolean
+  t: SectionTranslate
+  onChange: (id: string, field: keyof OpencodeGoModelLimit, value: number | undefined) => void
+  onReset: (id: string) => void
+}) {
+  const name = model.name ?? model.id
+  const contextId = `opencode-go-context-${inputKey(model.id)}`
+  const outputId = `opencode-go-output-${inputKey(model.id)}`
+  return (
+    <tr>
+      <th scope="row" className={css.limitsName}>
+        <span className={css.limitsId} translate="no">{name}</span>
+        {model.name !== undefined && model.name !== model.id
+          ? <code className={css.limitsModelId} translate="no">{model.id}</code>
+          : null}
+        <span className={css.hint}>
+          {t('limitsAdvertised', { context: capacityLabel(model.contextWindow), output: capacityLabel(model.maxTokens) })}
+        </span>
+      </th>
+      <td>
+        <label className={css.visuallyHidden} htmlFor={contextId}>{t('limitsContextLabel', { name })}</label>
+        <input
+          id={contextId}
+          className={css.input}
+          type="number"
+          name={contextId}
+          autoComplete="off"
+          inputMode="numeric"
+          min={1}
+          step={1}
+          value={limit?.contextWindow ?? ''}
+          disabled={disabled}
+          onChange={(event) => {
+            const text = event.target.value.trim()
+            if (text === '') onChange(model.id, 'contextWindow', undefined)
+            else {
+              const value = positiveInteger(text)
+              if (value !== undefined) onChange(model.id, 'contextWindow', value)
+            }
+          }}
+        />
+      </td>
+      <td>
+        <label className={css.visuallyHidden} htmlFor={outputId}>{t('limitsOutputLabel', { name })}</label>
+        <input
+          id={outputId}
+          className={css.input}
+          type="number"
+          name={outputId}
+          autoComplete="off"
+          inputMode="numeric"
+          min={1}
+          step={1}
+          value={limit?.maxTokens ?? ''}
+          disabled={disabled}
+          onChange={(event) => {
+            const text = event.target.value.trim()
+            if (text === '') onChange(model.id, 'maxTokens', undefined)
+            else {
+              const value = positiveInteger(text)
+              if (value !== undefined) onChange(model.id, 'maxTokens', value)
+            }
+          }}
+        />
+      </td>
+      <td>
+        {hasCapacityOverride(limit)
+          ? <button type="button" className={css.reset} disabled={disabled} onClick={() => { onReset(model.id) }}>{t('limitsResetModel')}</button>
+          : null}
+      </td>
+    </tr>
+  )
+}
+
+function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefined): boolean {
+  return limit?.contextWindow != null || limit?.maxTokens != null
+}
+
+function positiveInteger(value: string): number | undefined {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function capacityLabel(value: number | undefined): string {
+  return value === undefined ? '—' : String(value)
+}
+
+function inputKey(value: string): string {
+  return encodeURIComponent(value)
 }
 
 /**
@@ -154,6 +352,7 @@ function Loaded(props: {
 }) {
   const { t, state, loadModels } = props
   const [advanced, setAdvanced] = useState(false)
+  const [limitsOpen, setLimitsOpen] = useState(false)
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
@@ -173,6 +372,7 @@ function Loaded(props: {
     || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
     || state.requestImageMaxBytes.overridden
+  const customizedModels = Object.values(state.modelLimitDraft).filter(hasCapacityOverride).length
   return (
     <div>
       <p className={css.intro}>{t('intro')}</p>
@@ -201,9 +401,11 @@ function Loaded(props: {
         </div>
         <input
           id="opencode-go-key"
+          name="api-key"
           className={css.input}
           type="password"
           autoComplete="off"
+          aria-describedby="opencode-go-key-hint"
           value={state.apiKey.text}
           // The credentials domain accepts a key even when the settings document
           // itself is read-only; its own writability is what disables this
@@ -211,7 +413,7 @@ function Loaded(props: {
           disabled={!state.apiKeyWritable}
           onChange={(event) => { props.edit('apiKey', event.target.value) }}
         />
-        <p className={css.hint}>{state.apiKeyWritable ? t('keyHint') : t('keyNotWritable')}</p>
+        <p id="opencode-go-key-hint" className={css.hint}>{state.apiKeyWritable ? t('keyHint') : t('keyNotWritable')}</p>
       </div>
       <div className={css.field}>
         <div className={css.head}>
@@ -231,6 +433,35 @@ function Loaded(props: {
           </span>
         </div>
         <ModelsBody models={state.models} t={t} />
+      </div>
+      <div className={css.field}>
+        <button
+          type="button"
+          className={css.disclosure}
+          aria-expanded={limitsOpen}
+          aria-controls="opencode-go-model-limits"
+          onClick={() => { setLimitsOpen(!limitsOpen) }}
+        >
+          <ChevronDown aria-hidden="true" className={limitsOpen ? css.chevronOpen : css.chevron} />
+          <span className={css.label}>{t('limitsLabel')}</span>
+          {customizedModels > 0
+            ? <Tag tone="neutral">{t('limitsSummary', { count: customizedModels })}</Tag>
+            : null}
+        </button>
+        <p className={css.hint}>{t('limitsHint')}</p>
+        {limitsOpen
+          ? (
+            <div id="opencode-go-model-limits">
+              <LimitsTable
+                models={state.models}
+                draft={state.modelLimitDraft}
+                t={t}
+                disabled={disabled}
+                onEdit={(next) => { props.edit('modelLimits', JSON.stringify(next)) }}
+              />
+            </div>
+          )
+          : null}
       </div>
       <div className={css.field}>
         <button

@@ -212,18 +212,25 @@ describe('new models use the declared protocol', () => {
     { npm: '@ai-sdk/anthropic', path: '/v1/messages', events: anthropicEvents, namedEvents: true },
     { npm: '@ai-sdk/openai-compatible', path: '/v1/chat/completions', events: textEvents, namedEvents: false },
     { npm: '@ai-sdk/openai', path: '/v1/responses', events: responseEvents, namedEvents: false },
-  ])('streams a never-seen model via $path', async ({ npm, path, events, namedEvents }) => {
+  ].flatMap(protocol => [undefined, 1024].map(cap => ({ ...protocol, cap }))))('streams a never-seen model via $path with output cap $cap', async ({ npm, path, events, namedEvents, cap }) => {
     metadataReplies(() => Response.json(metadataDocument({ 'future-unseen-model': modelMetadata({ provider: { npm }, reasoning_options: [] }) })))
     const gateway = await mockGateway({ status: 200, body: listingBody(['future-unseen-model']) })
     gateway.pushCompletions({ events, namedEvents })
-    const adapter = new OpencodeGoAdapter({ config: () => configOf(`${gateway.url}/v1`), resolveApiKey: async () => 'test-key' })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(`${gateway.url}/v1`, {
+      modelLimits: cap === undefined ? {} : { 'future-unseen-model': { maxTokens: cap } },
+    }), resolveApiKey: async () => 'test-key' })
     const chunks = []
     for await (const chunk of adapter.stream({
       provider: 'opencode-go', model: 'future-unseen-model', sessionId: 'new-model-session' as never,
+      ...(cap === undefined ? {} : { maxTokens: 8192 }),
       messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'test' } })],
     })) chunks.push(chunk)
     expect(gateway.paths.map(value => new URL(value, gateway.url).pathname)).toEqual(['/v1/models', path])
     expect(gateway.bodies[0]).toMatchObject({ model: 'future-unseen-model' })
+    if (cap !== undefined) {
+      const body = gateway.bodies[0] as Record<string, unknown>
+      expect(body.max_tokens ?? body.max_completion_tokens ?? body.max_output_tokens).toBe(cap)
+    }
     expect(gateway.headers[1]?.['x-opencode-session']).toBe('new-model-session')
     expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'hello' }))
     expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })

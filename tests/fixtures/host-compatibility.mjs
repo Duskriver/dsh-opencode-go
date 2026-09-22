@@ -81,7 +81,8 @@ try {
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const config = plugin.PlainConfig({ apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY',
-    baseURL: `http://127.0.0.1:${server.address().port}`, maxRequestImageBytes: 8 })
+    baseURL: `http://127.0.0.1:${server.address().port}`, maxRequestImageBytes: 8,
+    modelLimits: { 'compat-model': { contextWindow: 50000, maxTokens: 1024 } } })
   ctx.baseUrl = new URL('../../package.json', import.meta.url).href
   await ctx.plugin(Loader)
   if (modern) {
@@ -94,12 +95,29 @@ try {
   assert.ok(ctx.loader.resolve(id).fiber, 'plugin mounts through the real Loader')
   assert.ok(ctx.llm.listProviders().some(p => p.id === 'opencode-go'))
   assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
+  assert.equal((await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow, 50000)
   if (modern) assert.deepEqual(await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }), usage)
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'compat-test' } })
   const request = messages => ({ provider: 'opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })
   const drain = async stream => { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks }
-  const text = await drain(ctx.llm.stream(request([user([{ type: 'text', text: 'hello' }])])))
+  const text = await drain(ctx.llm.stream({ ...request([user([{ type: 'text', text: 'hello' }])]), maxTokens: 8192 }))
   assert.ok(text.some(c => c.type === 'text-delta' && c.text === 'compat-ok'))
+  assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 1024)
+  // Every host reads the next configuration without mutating catalog references.
+  let limitsConfig = { ...config }
+  const limitsAdapter = new plugin.OpencodeGoAdapter({ config: () => limitsConfig, resolveApiKey: async () => 'fixture-key' })
+  const discovered = await plugin.discoverCatalogModels(limitsAdapter.catalogOf(limitsConfig))
+  assert.equal(discovered[0].contextWindow, 100000)
+  assert.equal(discovered[0].maxTokens, 4096)
+  assert.equal((await limitsAdapter.resolveModel('opencode-go', 'compat-model')).context.contextWindow, 50000)
+  limitsConfig = { ...limitsConfig, modelLimits: { 'compat-model': { contextWindow: 60000, maxTokens: 512 } } }
+  assert.equal((await limitsAdapter.resolveModel('opencode-go', 'compat-model')).context.contextWindow, 60000)
+  await drain(limitsAdapter.stream({ ...request([]), maxTokens: 8192 }))
+  assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 512)
+  limitsConfig = { ...limitsConfig, modelLimits: { 'compat-model': null } }
+  assert.equal((await limitsAdapter.resolveModel('opencode-go', 'compat-model')).context.contextWindow, 100000)
+  await drain(limitsAdapter.stream(request([])))
+  assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 4096)
   if (modern) {
     const messages = [
       { id: 'assistant-tool-call', role: 'assistant', source: { kind: 'model', provider: 'opencode-go', model: 'compat-model' },
@@ -198,7 +216,7 @@ try {
     await assert.rejects(() => drain(adapter.stream(request([user([recent])]))),
       error => error.code === 'IMAGE_OFFLOAD_REQUIRED')
   }
-  console.log(`PASS: host compatibility (${process.argv[2]}): ESM, Loader, catalog, text, real images, resizing, image bounds, history`)
+  console.log(`PASS: host compatibility (${process.argv[2]}): ESM, Loader, catalog, capacities, hot updates, reset, text, real images, resizing, image bounds, history`)
 } finally {
   await ctx.fiber.dispose()
   await rm(attachmentHome, { recursive: true, force: true })

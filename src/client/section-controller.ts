@@ -11,13 +11,14 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.remote merge into this program.
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
 import {
   StagedForm,
   booleanField,
+  jsonField,
   numberField,
   textField,
   type FieldState,
@@ -59,7 +60,17 @@ export interface OpencodeGoSettings {
   requestImagePixelBudget?: number
   /** Raw encoded-byte target for one request image. */
   requestImageMaxBytes?: number
+  /** Per-model capacity overrides, keyed by the gateway model id. */
+  modelLimits?: OpencodeGoModelLimits
 }
+
+/** The two capacity values the settings table can override. */
+export interface OpencodeGoModelLimit {
+  contextWindow?: number | null
+  maxTokens?: number | null
+}
+
+export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
 
 /** What the credentials domain last reported, and for which reference. */
 interface CredentialState {
@@ -77,8 +88,16 @@ export type OpencodeGoModels =
   | { readonly status: 'idle' }
   /** A listing request is outstanding. */
   | { readonly status: 'loading' }
-  /** The gateway answered: how many models it serves, and a preview of their names. */
-  | { readonly status: 'ready'; readonly count: number; readonly preview: readonly string[] }
+  /**
+   * The gateway answered: a count/preview for the compact summary plus every
+   * discovered entry used by the capacity editor.
+   */
+  | {
+    readonly status: 'ready'
+    readonly count: number
+    readonly preview: readonly string[]
+    readonly entries: readonly LlmDiscoveredModel[]
+  }
   /** The listing could not be read; `message` is the Host's own diagnostic. */
   | { readonly status: 'failed'; readonly message: string }
 
@@ -112,6 +131,10 @@ export interface OpencodeGoSectionState extends FormShell {
   apiKeyWritable: boolean
   /** The gateway's current model listing. */
   models: OpencodeGoModels
+  /** The staged JSON field backing the capacity table. */
+  modelLimits: FieldState
+  /** The parsed overrides currently shown by the capacity table. */
+  modelLimitDraft: OpencodeGoModelLimits
 }
 
 /** The registration-side face the page's slot entry injects. */
@@ -161,6 +184,7 @@ export class OpencodeGoSectionController {
         numberField('maxRequestImageBytes'),
         numberField('requestImagePixelBudget'),
         numberField('requestImageMaxBytes'),
+        jsonField('modelLimits'),
       ],
       [{ field: API_KEY_FIELD, write: text => this.writeKey(text) }],
     )
@@ -191,7 +215,27 @@ export class OpencodeGoSectionController {
       apiKeyConfigured: this.credential.configured,
       apiKeyWritable: this.credential.writable,
       models: this.models,
+      modelLimits: this.form.field('modelLimits'),
+      modelLimitDraft: this.limitDraft(),
     }
+  }
+
+  /**
+   * Read the overrides as the page currently shows them. A staged JSON draft
+   * wins while it is valid; malformed text falls back to the last accepted
+   * settings value so the table never renders phantom rows.
+   */
+  private limitDraft(): OpencodeGoModelLimits {
+    const staged = this.form.field('modelLimits')
+    if (staged.invalid) return modelLimitsOf(this.scope.getSnapshot().value?.modelLimits)
+    if (staged.overridden || this.form.shell().dirty) {
+      try {
+        return modelLimitsOf(JSON.parse(staged.text) as unknown)
+      } catch {
+        return modelLimitsOf(this.scope.getSnapshot().value?.modelLimits)
+      }
+    }
+    return modelLimitsOf(this.scope.getSnapshot().value?.modelLimits)
   }
 
   /**
@@ -239,6 +283,7 @@ export class OpencodeGoSectionController {
             status: 'ready',
             count: response.value.length,
             preview: response.value.map(model => model.name ?? model.id),
+            entries: response.value,
           }
           : { status: 'failed', message: response.error.message }
         this.store.set(this.projection())
@@ -321,6 +366,31 @@ export class OpencodeGoSectionController {
     await this.readCredential()
     return this.credential.configured
   }
+}
+
+/**
+ * Read a stored override map without trusting its hand-editable shape. Only
+ * positive safe integers and explicit catalog resets are accepted by the table.
+ */
+function modelLimitsOf(value: unknown): OpencodeGoModelLimits {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
+  const limits: OpencodeGoModelLimits = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry === null) { limits[id] = null; continue }
+    if (typeof entry !== 'object' || Array.isArray(entry)) continue
+    const fields = entry as Record<string, unknown>
+    const limit: OpencodeGoModelLimit = {}
+    if (fields.contextWindow === null) limit.contextWindow = null
+    if (fields.maxTokens === null) limit.maxTokens = null
+    if (typeof fields.contextWindow === 'number' && Number.isSafeInteger(fields.contextWindow) && fields.contextWindow > 0) {
+      limit.contextWindow = fields.contextWindow
+    }
+    if (typeof fields.maxTokens === 'number' && Number.isSafeInteger(fields.maxTokens) && fields.maxTokens > 0) {
+      limit.maxTokens = fields.maxTokens
+    }
+    if (limit.contextWindow !== undefined || limit.maxTokens !== undefined) limits[id] = limit
+  }
+  return limits
 }
 
 /**

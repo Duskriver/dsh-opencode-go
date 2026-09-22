@@ -1,5 +1,23 @@
 # Verification
 
+## Per-model capacities on five hosts (2026-09-22)
+
+PR #3's capacity editor is integrated on main commit `b093842`, preserving both legacy settings and the `0.1.7` profile configuration bridge. Each operation applies its captured overrides to original catalog metadata. The catalog cache remains available during outages, discovery shows the original reference values, and configured output caps also constrain explicit request budgets. Null model entries or fields explicitly restore catalog values over inherited configuration.
+
+The built Host artifact passes the existing compatibility fixture with real published LLM/attachment packages for all five targets:
+
+| DSH target | Capacities, output caps, hot update and reset | Text, image resizing and history checks |
+| --- | --- | --- |
+| 0.1.5-rc.1 | Pass | Pass |
+| 0.1.5-rc.2 | Pass | Pass |
+| 0.1.6-alpha.1 | Pass | Pass |
+| 0.1.6-alpha.2 | Pass | Pass |
+| 0.1.7-alpha.1 | Pass | Pass |
+
+The `0.1.7` fixture uses its actual Loader and settings service to edit and reset capacities without replacing the plugin fiber. Legacy settings tests verify null overrides of inherited capacities. Regressions also cover catalog references, metadata outages, concurrent configuration changes, and explicit output caps across Chat Completions, Responses and Anthropic Messages. Client tests cover Save/Discard, reset followed by another edit, customized counts, and offline reset; the distributed client mounts against both UI primitive generations.
+
+Validation: Host/Client type checks, all **175 tests in 15 files**, build and `npm pack` pass on macOS / Node.js 24.14.1. Dependencies install with `npm ci --legacy-peer-deps` using main's unchanged lock. The older host matrix selects matching LLM/attachment packages through resolution hooks, with other services from the development tree; the `0.1.7` host uses its separately pinned workspace. UI validation is automated component/factory testing, not a manual five-version browser or Desktop matrix. All completions use a loopback fixture and fake credentials; no paid generation or npm publication was performed.
+
 ## DSH 0.1.7 compatibility (plugin 0.1.7)
 
 Verified on macOS / Node.js 24.14.1 against published DSH `0.1.7-alpha.1`, while retaining the four previously tested hosts (`0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`). The independent npm workspace at `tests/hosts/v017` keeps the new Cordis/Loader and DSH service identities separate from the legacy test dependencies. Install development dependencies with `npm ci --legacy-peer-deps`; the aliases deliberately contain incompatible peer ranges from different host generations.

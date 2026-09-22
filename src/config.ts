@@ -27,6 +27,21 @@ export const DEFAULT_REFRESH_MINUTES = 60
 /** Default maximum idle interval while a stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 
+/**
+ * One model's configured capacities. Every field is optional so a deployment
+ * can override only the value it needs. Null explicitly selects the catalog
+ * value even when a lower profile/settings layer supplies an override.
+ */
+export interface OpencodeGoModelLimit {
+  /** Context window in tokens, overriding what the catalog advertised. */
+  contextWindow?: number | null
+  /** Output cap per request, overriding what the catalog advertised. */
+  maxTokens?: number | null
+}
+
+/** Per-model capacities; a null entry selects both original catalog values. */
+export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
+
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
   /**
@@ -51,6 +66,8 @@ export interface OpencodeGoConfig {
   requestImagePixelBudget: number
   /** Raw encoded-byte target for one request image before base64 expansion. */
   requestImageMaxBytes: number
+  /** Per-model capacity overrides; an absent field inherits the catalog value. */
+  modelLimits: OpencodeGoModelLimits
 }
 
 /** Runtime schema for {@link OpencodeGoConfig}. */
@@ -65,6 +82,11 @@ const fields = {
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   requestImagePixelBudget: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
   requestImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
+  // null explicitly selects catalog values, overriding even inherited profile limits.
+  modelLimits: z.dict(z.union([z.const(null), z.object({
+    contextWindow: z.union([z.const(null), z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)]),
+    maxTokens: z.union([z.const(null), z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)]),
+  })])).default({}),
 }
 
 /** Plain values used by the adapter and by pre-0.1.7 settings documents. */

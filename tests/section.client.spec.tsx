@@ -30,6 +30,7 @@ function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = 
 
 type SectionField = 'baseURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
   | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'apiKey' | 'models'
+  | 'modelLimits' | 'modelLimitDraft'
 
 const settled: Omit<OpencodeGoSectionState, SectionField> = {
   available: true,
@@ -43,6 +44,17 @@ const settled: Omit<OpencodeGoSectionState, SectionField> = {
   apiKeyWritable: true,
 }
 
+type ModelEntry = { id: string; name?: string; contextWindow?: number; maxTokens?: number }
+
+function listing(entries: readonly ModelEntry[]) {
+  return {
+    status: 'ready' as const,
+    count: entries.length,
+    preview: entries.map(entry => entry.name ?? entry.id),
+    entries,
+  }
+}
+
 function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSectionState {
   return {
     ...settled,
@@ -54,6 +66,8 @@ function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSec
     requestImagePixelBudget: field('4194304'),
     requestImageMaxBytes: field('1048576'),
     apiKey: field(''),
+    modelLimits: field(''),
+    modelLimitDraft: {},
     models: { status: 'idle' },
     ...overrides,
   }
@@ -87,6 +101,11 @@ function openAdvanced(): void {
   fireEvent.click(screen.getByText(en.advancedLabel))
 }
 
+/** The model-capacity disclosure starts collapsed; open it before its table. */
+function openModelLimits(): void {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.limitsLabel) }))
+}
+
 describe('OpencodeGoSection', () => {
   it('renders nothing until every injected seat is present', () => {
     const { container } = render(<OpencodeGoSection t={t} />)
@@ -108,7 +127,7 @@ describe('OpencodeGoSection', () => {
 
     cleanup()
     const held = actions()
-    renderSection(stateOf({ models: { status: 'ready', count: 1, preview: ['DeepSeek V4.1 Flash'] } }), held)
+    renderSection(stateOf({ models: listing([{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }]) }), held)
     expect(held.loadModels).not.toHaveBeenCalled()
   })
 
@@ -143,13 +162,106 @@ describe('OpencodeGoSection', () => {
   it('shows the key state and the models the gateway serves', () => {
     renderSection(stateOf({
       apiKeyConfigured: true,
-      models: { status: 'ready', count: 37, preview: ['DeepSeek V4.1 Flash', 'Kimi K2'] },
+      models: listing([
+        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+        { id: 'kimi-k2', name: 'Kimi K2' },
+      ]),
     }))
 
     expect(screen.getByText(en.keyConfigured)).toBeTruthy()
-    expect(screen.getByText(t('modelsCount', { count: 37 }))).toBeTruthy()
-    expect(screen.getByText('DeepSeek V4.1 Flash')).toBeTruthy()
-    expect(screen.getByText('Kimi K2')).toBeTruthy()
+    expect(screen.getByText(t('modelsCount', { count: 2 }))).toBeTruthy()
+    openModelLimits()
+    expect(screen.getByRole('row', { name: /DeepSeek V4\.1 Flash/ })).toBeTruthy()
+    expect(screen.getByRole('row', { name: /Kimi K2/ })).toBeTruthy()
+  })
+
+  it('keeps model capacities collapsed until the disclosure is opened', () => {
+    renderSection(stateOf({ models: listing([{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }]) }))
+
+    const trigger = screen.getByRole('button', { name: en.limitsLabel })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(trigger.getAttribute('aria-controls')).toBe('opencode-go-model-limits')
+    expect(screen.queryByRole('table')).toBeNull()
+
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('table')).toBeTruthy()
+  })
+
+  it('makes model capacities searchable and stages numeric edits', () => {
+    const edits = actions()
+    renderSection(stateOf({
+      models: listing([
+        { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 262_144, maxTokens: 32_768 },
+        { id: 'kimi-k2', name: 'Kimi K2', contextWindow: 131_072, maxTokens: 16_384 },
+      ]),
+      modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
+    }), edits)
+
+    openModelLimits()
+    expect(screen.getByRole('table')).toBeTruthy()
+    const context = screen.getByLabelText(t('limitsContextLabel', { name: 'DeepSeek V4.1 Flash' })) as HTMLInputElement
+    expect(context.type).toBe('number')
+    expect(context.value).toBe('131072')
+
+    fireEvent.change(context, { target: { value: '262144' } })
+    expect(edits.edit).toHaveBeenCalledWith(
+      'modelLimits',
+      '{"deepseek-v4.1-flash":{"contextWindow":262144}}',
+    )
+
+    const filter = screen.getByLabelText(en.limitsFilterLabel)
+    fireEvent.change(filter, { target: { value: 'kimi' } })
+    expect(screen.queryByRole('row', { name: /DeepSeek V4\.1 Flash/ })).toBeNull()
+    expect(screen.getByRole('row', { name: /Kimi K2/ })).toBeTruthy()
+
+    fireEvent.change(filter, { target: { value: 'not-there' } })
+    expect(screen.getByText(t('limitsNoMatches', { query: 'not-there' }))).toBeTruthy()
+  })
+
+  it('offers a clear action that returns a model to its catalog capacities', () => {
+    const edits = actions()
+    renderSection(stateOf({
+      models: listing([{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 262_144 }]),
+      modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
+    }), edits)
+
+    openModelLimits()
+    fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
+    expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"deepseek-v4.1-flash":null}')
+  })
+
+  it('stages clearing one field without dropping the other or restoring an inherited value', () => {
+    const edits = actions()
+    renderSection(stateOf({
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 123456, maxTokens: 1024 }, previous: null },
+    }), edits)
+    openModelLimits()
+    fireEvent.change(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })), { target: { value: '' } })
+    expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"m":{"contextWindow":null,"maxTokens":1024},"previous":null}')
+    fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+    expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"m":null,"previous":null}')
+  })
+
+  it('does not count explicit catalog resets as customized models', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]), modelLimitDraft: { m: null } }))
+    openModelLimits()
+    expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: en.limitsResetModel })).toBeNull()
+    expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
+  })
+
+  it('counts only numeric overrides in the collapsed summary and permits offline resets', () => {
+    const edits = actions()
+    renderSection(stateOf({ models: { status: 'failed', message: 'offline' },
+      modelLimitDraft: { retired: { maxTokens: 1024 }, reset: null },
+    }), edits)
+    expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
+    openModelLimits()
+    expect(screen.getAllByText(t('limitsSummary', { count: 1 }))).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+    expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"retired":null,"reset":null}')
   })
 
   it('reports a reading listing, an empty listing, and a failed one', () => {
@@ -157,7 +269,7 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(en.modelsLoading)).toBeTruthy()
 
     cleanup()
-    renderSection(stateOf({ models: { status: 'ready', count: 0, preview: [] } }))
+    renderSection(stateOf({ models: listing([]) }))
     expect(screen.getByText(en.modelsEmpty)).toBeTruthy()
 
     cleanup()
@@ -168,7 +280,7 @@ describe('OpencodeGoSection', () => {
 
   it('re-reads the listing on demand, and refuses a second read while one is outstanding', () => {
     const reading = actions()
-    renderSection(stateOf({ models: { status: 'ready', count: 3, preview: ['a'] } }), reading)
+    renderSection(stateOf({ models: listing([{ id: 'a' }]) }), reading)
     fireEvent.click(screen.getByText(en.modelsRefresh))
     expect(reading.loadModels).toHaveBeenCalledTimes(1)
 
@@ -273,8 +385,10 @@ describe('OpencodeGoSection', () => {
     fields.forEach(([label, name, numeric], index) => {
       const input = screen.getByLabelText(label) as HTMLInputElement
       expect(input.inputMode).toBe(numeric ? 'numeric' : '')
-      fireEvent.change(input, { target: { value: `edited-${name}` } })
-      expect(edits.edit).toHaveBeenCalledWith(name, `edited-${name}`)
+      expect(input.type).toBe(numeric ? 'number' : 'text')
+      const nextValue = numeric ? '123' : `edited-${name}`
+      fireEvent.change(input, { target: { value: nextValue } })
+      expect(edits.edit).toHaveBeenCalledWith(name, nextValue)
       fireEvent.click(resets[index] as Element)
       expect(edits.resetField).toHaveBeenCalledWith(name)
     })
@@ -307,6 +421,52 @@ describe('OpencodeGoSection', () => {
 })
 
 describe('OpencodeGoSectionController through the component', () => {
+  it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    host.set.mockImplementation((field: string, value: unknown) => {
+      host.publish({
+        value: { ...host.scope.getSnapshot().value, [field]: structuredClone(value) },
+        user: { ...host.scope.getSnapshot().user as object, [field]: structuredClone(value) },
+      })
+    })
+    const controller = new OpencodeGoSectionController(host.scope, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      llm: { discoverModels: async () => ({ ok: true, value: [{ id: 'm', name: 'Model', contextWindow: 262144, maxTokens: 32768 }] }) },
+    } } as never)
+    host.publish({ status: 'ready', writable: true,
+      value: { modelLimits: { m: { contextWindow: 100000, maxTokens: 1024 } } }, user: {} })
+    render(<OpencodeGoSection {...controller.inject()} t={t}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    try {
+      await act(async () => { await Promise.resolve() })
+      openModelLimits()
+      const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+      fireEvent.change(input(), { target: { value: '200000' } })
+      expect(host.set).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByText(en.discard))
+      expect(input().value).toBe('100000')
+      fireEvent.change(input(), { target: { value: '200000' } })
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.scope.getSnapshot().value?.modelLimits?.m?.contextWindow).toBe(200000)
+      expect(screen.getByText(t('limitsAdvertised', { context: 262144, output: 32768 }))).toBeTruthy()
+      expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
+
+      fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
+      expect(input().value).toBe('')
+      fireEvent.click(screen.getByText(en.discard))
+      expect(input().value).toBe('200000')
+      fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ m: null })
+      expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
+      fireEvent.change(input(), { target: { value: '150000' } })
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ m: { contextWindow: 150000, maxTokens: null } })
+    } finally {
+      controller.dispose()
+    }
+  })
+
   it('drives a staged edit end to end against the stub scope', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     host.set.mockImplementation((field: string, value: unknown) => {

@@ -171,6 +171,28 @@ export function textField(field: string): FieldSpec {
 }
 
 /**
+ * A structured field edited as JSON text. Empty text clears the field and
+ * malformed JSON blocks the save instead of reaching the Host as a string.
+ * @param field - field name inside the namespace section.
+ * @returns the field's conversion spec.
+ */
+export function jsonField(field: string): FieldSpec {
+  return {
+    field,
+    format: value => value === undefined || value === null ? '' : JSON.stringify(value, undefined, 2),
+    parse: (text) => {
+      const trimmed = text.trim()
+      if (trimmed === '') return { kind: 'clear' }
+      try {
+        return { kind: 'set', value: JSON.parse(trimmed) as unknown }
+      } catch {
+        return undefined
+      }
+    },
+  }
+}
+
+/**
  * Stages the page's edits over the `llm-opencode-go` namespace and writes them
  * on save.
  *
@@ -339,7 +361,7 @@ export class StagedForm {
 
   private async store(field: string, value: unknown): Promise<boolean> {
     await this.scope.set(field, value)
-    return this.userLayer()?.[field] === value
+    return sameJsonValue(this.userLayer()?.[field], value)
   }
 
   private stage(field: string, edit: StagedEdit): void {
@@ -380,4 +402,20 @@ export class StagedForm {
   private publish(): void {
     for (const listener of this.listeners) listener()
   }
+}
+
+/** Compare JSON-shaped settings values after a Host round-trip clone. */
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+    return left.every((value, index) => sameJsonValue(value, right[index]))
+  }
+  const leftRecord = left as Record<string, unknown>
+  const rightRecord = right as Record<string, unknown>
+  const leftKeys = Object.keys(leftRecord)
+  const rightKeys = Object.keys(rightRecord)
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(key => Object.hasOwn(rightRecord, key) && sameJsonValue(leftRecord[key], rightRecord[key]))
 }
