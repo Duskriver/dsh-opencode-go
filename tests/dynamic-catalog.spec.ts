@@ -64,6 +64,46 @@ describe('runtime model metadata', () => {
     }
   })
 
+  it.each([
+    { values: ['low'], expected: 'low' },
+    { values: ['low', 'medium'], expected: 'medium' },
+    { values: ['low', 'max'], expected: 'max' },
+    { values: ['low', 'high', 'max'], expected: 'high' },
+  ])('defaults to $expected when the model offers $values', async ({ values, expected }) => {
+    metadataReplies(() => Response.json(metadataDocument({
+      'deepseek-v4-flash': modelMetadata({
+        name: 'DeepSeek V4 Flash',
+        family: 'deepseek-flash',
+        modalities: { input: ['text'] },
+      }),
+      'fallback-model': modelMetadata({
+        name: 'Fallback model',
+        family: 'deepseek-flash',
+        reasoning_options: [{ type: 'effort', values }],
+      }),
+    })))
+    const gateway = await mockGateway({ status: 200, body: listingBody(['fallback-model']) })
+    gateway.pushCompletions({ events: textEvents })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['opencode-go'], adapter)
+    try {
+      const resolved = await ctx.llm.resolveModelInfo('opencode-go', 'fallback-model')
+      expect(resolved.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', ...values])
+      expect.soft(resolved.reasoning?.defaultEffort).toBe(expected)
+      for await (const _chunk of ctx.llm.stream({
+        provider: 'opencode-go', model: 'fallback-model',
+        messages: [createUserMessage({
+          content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' },
+        })],
+      })) { /* Validate the request after DSH resolves its default effort. */ }
+      expect(gateway.bodies[0]).toMatchObject({ thinking: { type: 'enabled' }, reasoning_effort: expected })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('discovers union-alpha without a pi-ai entry', async () => {
     expect(getBuiltinModels('opencode-go').some(model => model.id === 'union-alpha')).toBe(false)
     const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })

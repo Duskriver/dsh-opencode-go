@@ -118,6 +118,30 @@ describe('llm-opencode-go plugin mount', () => {
     expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
   })
 
+  it('keeps thinking on when the picker is left on the provider default', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    gateway.pushCompletions({ events: textEvents })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    apply(ctx, configOf(gateway.url))
+
+    // No `reasoningEffort`: this is the "Default" entry of the model picker.
+    for await (const _chunk of ctx.llm.stream({
+      provider: 'opencode-go',
+      model: 'deepseek-v4.1-flash',
+      messages: [createUserMessage({
+        content: [{ type: 'text', text: 'hi' }],
+        source: { kind: 'plugin', plugin: 'test' },
+      })],
+      sessionId: 'default-effort' as never,
+    })) { /* drain the stream: only the request body is asserted */ }
+
+    // Without the declared default this body carries `thinking: { type: 'disabled' }`,
+    // which lands the model's reasoning in ordinary content instead of a reasoning block.
+    expect(gateway.bodies[0]).toMatchObject({ thinking: { type: 'enabled' } })
+  })
+
   it('refuses to call a model never confirmed by the gateway', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'test-key')
     const gateway = await mockGateway({ status: 503, body: {} })

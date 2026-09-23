@@ -33,7 +33,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.9
+dsh plugin --profile web add dsh-opencode-go@0.1.10
 ```
 
 Start or restart `dsh web`, then:
@@ -47,7 +47,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.9
+dsh plugin --profile headless add dsh-opencode-go@0.1.10
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -74,7 +74,7 @@ To build from source and install a local package:
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.9.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.10.tgz
 ```
 
 The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.
@@ -108,6 +108,8 @@ Models that are present in the gateway and have an entry using Anthropic Message
 A gateway model ID with no usable protocol or capability configuration is shown in Settings with a configuration-unavailable diagnostic and is kept out of the conversation picker, so one unconfigured model cannot block the rest of the list. Direct requests report the reason. Refresh after the upstream configuration is corrected. A model ID alone is not enough to reliably infer its transport; new protocols or protocol-specific exceptions may still require adapter changes.
 
 A reasoning-capable model without adjustable reasoning levels (for example, `union-alpha`) remains selectable and usable; it simply has no reasoning-strength control.
+
+A model that does offer adjustable levels also declares a default effort (`high` when the model offers it, otherwise the highest level it offers) whenever its transport would answer an unset effort with an explicit disable (`deepseek`, `zai`, `qwen`, `qwen-chat-template`). DSH uses that default when no level has been chosen, so leaving the control unset still sends a reasoning level instead of turning thinking off. Transports that leave the choice to the provider declare no default and are unchanged, and an explicitly chosen level always wins.
 
 If the online configuration is temporarily unavailable, the plugin prefers a configuration fetched successfully earlier in the process and falls back to pi-ai's built-in metadata. If the gateway catalog is unavailable, existing requests can use the last catalog; a Settings refresh reports the failure instead of presenting stale data as current. `refreshMinutes` controls the cache lifetime for ongoing model requests, but does not prevent an explicit model-list read from fetching fresh data.
 

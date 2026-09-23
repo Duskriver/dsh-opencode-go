@@ -47,6 +47,14 @@ import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog } from './catalog.ts'
 import { assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 
+/**
+ * pi-ai thinking formats that answer an unset effort with an explicit disable
+ * (`thinking: { type: 'disabled' }`, `enable_thinking: false`). Every other
+ * format omits the parameter and lets the provider decide, so a default effort
+ * is only needed here.
+ */
+const DISABLES_THINKING_WHEN_UNSET: ReadonlySet<string> = new Set(['deepseek', 'zai', 'qwen', 'qwen-chat-template'])
+
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
   const limit = limits[model.id]
@@ -186,11 +194,23 @@ export class OpencodeGoAdapter extends LlmAdapter {
     // Intrinsic reasoning does not imply adjustable efforts. DSH requires a
     // nonempty choices list whenever reasoning controls are exposed.
     if (levels.length > 0) {
+      // DSH resolves an unset effort through `defaultEffort` (`dsh-llm`'s
+      // resolveCallWithInfo). Formats listed above would otherwise send an
+      // explicit disable for exactly that case, so a model offering levels
+      // would silently lose its reasoning — and its thinking would land in the
+      // normal content instead of a reasoning block. `high` mirrors the
+      // fallback @deepseek-ai/dsh-llm-deepseek uses. Formats that leave the
+      // choice to the provider keep no default: there is nothing to correct.
+      const format = (model.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat
+      const fallback = format !== undefined && DISABLES_THINKING_WHEN_UNSET.has(format)
+        ? levels.includes('high') ? 'high' : levels.findLast(level => level !== 'off')
+        : undefined
       reasoning.reasoning = {
         efforts: levels.map(level => ({
           id: ReasoningEffortId(level),
           name: `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
         })),
+        ...fallback === undefined ? {} : { defaultEffort: ReasoningEffortId(fallback) },
       }
     }
     return {
