@@ -1,5 +1,15 @@
 # Verification
 
+## Default reasoning effort (plugin 0.1.10, 2026-09-23)
+
+PR #6 declares a default effort for the pi-ai transports that explicitly disable thinking when the effort is unset: `deepseek`, `zai`, `qwen`, and `qwen-chat-template`. Models offering `high` default to it; otherwise the highest supported non-`off` effort is selected. Explicit choices, including `off`, still take precedence. Other transports and models without adjustable efforts retain their existing behavior.
+
+Review found that the original fallback selected the first non-`off` effort from pi-ai's ascending list. End-to-end regressions failed with `low` in the outgoing request for models offering `low/medium` or `low/max`, then passed after selecting the last supported effort. The same cases cover `low` alone and the preference for `high` over `max` when both are offered.
+
+Host/Client type checks, the build, and all **233 tests in 18 files** pass on macOS / Node.js 24.14.1 using the existing installed dependencies. Permanent compatibility coverage adds 42 local HTTP requests through the built plugin and all six supported DSH runtimes, verifying default effort resolution, explicit `low` and `off`, Qwen's thinking switch, provider-decides models, and reasoning/text stream conversion. Published UI primitives still emit missing-source-map warnings; all assertions pass. Completion requests use local fixtures and test credentials, with no paid model calls or manual Web/Desktop verification.
+
+This release also includes PR #5's bounded compressed-response recovery described below, which was merged after the 0.1.9 release.
+
 ## Bounded model discovery responses (2026-09-23)
 
 Model discovery accepts ordinary JSON and Brotli, gzip, or deflate JSON whose `Content-Encoding` header is missing. Correctly labeled responses continue through Fetch's automatic decoding. The shared reader counts actual streamed bytes and cancels oversized bodies; fallback decoders run asynchronously with `maxOutputLength`. Both delivered bytes and fallback output are limited to 1 MiB for the gateway listing and 16 MiB for models.dev metadata. These are payload limits, not total process-memory or CPU-time budgets. Failed recovery preserves the original JSON error and each decoder's cause.
