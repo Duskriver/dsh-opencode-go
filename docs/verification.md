@@ -1,5 +1,11 @@
 # Verification
 
+## Unknown profile fields during activation (2026-09-23)
+
+A real Loader composition reproduced `TypeError: value.get is not a function` when the plugin entry contained an additional configuration field. Schemastery preserves fields outside the schema as plain values; the plugin incorrectly called `.get()` on every entry. Configuration reads now dereference only declared schema fields, preserving their live references and leaving stored profile data intact.
+
+The regression failed before the fix and passes afterward, covering extra scalar, null, array, and object values alongside a working endpoint and model-capacity override. The built artifact also mounts with an extra field across all six supported host fixtures; both 0.1.7 fixtures verify live settings changes still work without remounting and retain the extra profile field. The build's Host/Client type checks and all **234 tests in 18 files** pass on macOS / Node.js 24.14.1. Upstream UI primitives still emit missing-source-map warnings. No live model requests were made. The currently installed artifact differs from the reported stack's line numbers, so the original triggering field is not established.
+
 ## Default reasoning effort (plugin 0.1.10, 2026-09-23)
 
 PR #6 declares a default effort for the pi-ai transports that explicitly disable thinking when the effort is unset: `deepseek`, `zai`, `qwen`, and `qwen-chat-template`. Models offering `high` default to it; otherwise the highest supported non-`off` effort is selected. Explicit choices, including `off`, still take precedence. Other transports and models without adjustable efforts retain their existing behavior.

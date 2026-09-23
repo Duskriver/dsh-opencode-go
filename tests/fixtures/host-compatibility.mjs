@@ -90,7 +90,10 @@ try {
     await ctx.plugin((await import('@deepseek-ai/dsh-api-gateway')).default)
   }
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
-  const id = await ctx.loader.create({ name: new URL('../../lib/index.js', import.meta.url).href, config })
+  // Persisted fields from another plugin version stay plain after schema validation.
+  // They must not prevent the current adapter from mounting through the Loader.
+  const id = await ctx.loader.create({ name: new URL('../../lib/index.js', import.meta.url).href,
+    config: { ...config, legacyOption: true } })
   await ctx.loader.await()
   assert.ok(ctx.loader.resolve(id).fiber, 'plugin mounts through the real Loader')
   assert.ok(ctx.llm.listProviders().some(p => p.id === 'opencode-go'))

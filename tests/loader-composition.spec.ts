@@ -70,6 +70,34 @@ async function loadComposition(lines: readonly string[]): Promise<Context> {
 }
 
 describe('llm-opencode-go through a real Loader composition', () => {
+  it('loads profile entries with fields outside the plugin schema', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'loader-key')
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    const ctx = await loadComposition([
+      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: 'dsh-opencode-go'",
+      '  config:',
+      `    baseURL: ${gateway.url}`,
+      '    modelLimits:',
+      '      deepseek-v4.1-flash:',
+      '        contextWindow: 123456',
+      // Schemastery preserves unknown profile fields without wrapping them
+      // in volatile references. None of these values has a callable get().
+      '    provider: opencode-go',
+      '    legacyEnabled: true',
+      '    legacyLimit: 42',
+      '    legacyOption: null',
+      '    legacyModels: []',
+      '    legacySettings: { get: false }',
+    ])
+
+    await expect.poll(() => ctx.llm.listProviders())
+      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    expect((await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
+      .toBe(123456)
+    expect(gateway.paths).toEqual(['/models'])
+  })
+
   it('serves the gateway catalog and routes a stream with the session header', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'loader-key')
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })

@@ -103,7 +103,10 @@ export const Config = z.object(Object.fromEntries(
 
 /** Keep the Loader's references: reparsing them would detach live updates. */
 export function readConfig(config: LiveConfig): OpencodeGoConfig {
-  return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, value.get()])) as unknown as OpencodeGoConfig
+  // Schemastery preserves unknown profile fields as plain values. Only the
+  // fields declared above are volatile references owned by this plugin.
+  return Object.fromEntries((Object.keys(fields) as Array<keyof OpencodeGoConfig>)
+    .map(key => [key, config[key].get()])) as unknown as OpencodeGoConfig
 }
 
 /**

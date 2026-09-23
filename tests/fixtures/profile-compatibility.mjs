@@ -24,7 +24,7 @@ try {
   await ctx.plugin(Loader)
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const id = await ctx.loader.create({ id: 'opencode-go', name: new URL('../../lib/index.js', import.meta.url).href,
-    config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY' } })
+    config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY', legacyOption: true } })
   await ctx.loader.await()
   const entry = ctx.loader.resolve(id)
   assert.ok(entry.fiber, 'plugin mounts')
@@ -73,6 +73,7 @@ try {
   assert.equal(entry.fiber, fiber, 'reset must preserve the running plugin')
   await assert.rejects(ctx.settings.update('opencode-go', { baseURL: 'not-a-url' }), /not a valid URL/)
   assert.equal(entry.fiber, fiber)
+  assert.equal(entry.options.config.legacyOption, true, 'unknown profile fields survive live updates without breaking reads')
   console.log('PASS: profile settings, live updates, capacities, reset, route toggle, validation')
 } finally {
   await ctx.fiber.dispose()
