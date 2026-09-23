@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
-import { discoverCatalogModels } from '../src/catalog.ts'
+import { discoverCatalogModels, discoverSettingsModels } from '../src/catalog.ts'
 import { PlainConfig } from '../src/config.ts'
 import { configOf } from './config-of.ts'
 import { closeMockGateways, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
@@ -46,7 +46,10 @@ it('retains last known online metadata when limits change during an outage', asy
   config = { ...config, modelLimits: { 'union-alpha': { contextWindow: 123456 } } }
   await expect(adapter.resolveModel('opencode-go', 'union-alpha')).resolves.toMatchObject({ context: { contextWindow: 123456 } })
   // An explicit refresh must preserve the learned model too, not just the TTL hit.
-  await adapter.listModels('opencode-go')
+  expect((await discoverSettingsModels(adapter.catalogOf(config))).models).toContainEqual(expect.objectContaining({
+    id: 'union-alpha', contextWindow: 262144,
+  }))
+  expect(gateway.modelListings).toBe(2)
   config = { ...config, modelLimits: {} }
   expect((await adapter.resolveModel('opencode-go', 'union-alpha')).context?.contextWindow).toBe(262144)
 })

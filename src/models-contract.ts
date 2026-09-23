@@ -8,6 +8,25 @@ export interface GoModel {
   maxTokens?: number
   deprecated?: boolean
   releaseDate?: string
+  /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
+  configurationMissing?: boolean
+}
+
+/** A failed refresh retains the Host's last successful listing with an explicit diagnostic. */
+export interface GoModelCatalog {
+  readonly models: readonly GoModel[]
+  readonly stale: boolean
+  readonly error?: string
+}
+
+/** Missing configuration cannot be enabled; configured models follow explicit switches or lifecycle defaults. */
+export function isModelEnabled(
+  model: Pick<GoModel, 'id' | 'deprecated' | 'configurationMissing'>,
+  modelVisibility?: Readonly<Record<string, boolean>>,
+): boolean {
+  if (model.configurationMissing) return false
+  const enabled = modelVisibility && Object.hasOwn(modelVisibility, model.id) ? modelVisibility[model.id] : undefined
+  return typeof enabled === 'boolean' ? enabled : !model.deprecated
 }
 
 export function validReleaseDate(value: unknown): value is string {
@@ -40,18 +59,31 @@ export function parseGoModels(value: unknown): GoModel[] {
       if (typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] > 0) model[key] = row[key]
     }
     if (typeof row.deprecated === 'boolean') model.deprecated = row.deprecated
+    if (typeof row.configurationMissing === 'boolean') model.configurationMissing = row.configurationMissing
     if (validReleaseDate(row.releaseDate)) model.releaseDate = row.releaseDate
     return model
   })
 }
 
-declare module '@deepseek-ai/dsh-typert-protocol' {
-  interface TypertRemoteNamespaceMap {
-    opencodeGoModels: { read(): Promise<RemoteResult<readonly GoModel[]>> }
+export function parseGoModelCatalog(value: unknown): GoModelCatalog {
+  if (!value || typeof value !== 'object') throw new Error('Invalid OpenCode Go model catalog')
+  const catalog = value as Record<string, unknown>
+  if (typeof catalog.stale !== 'boolean' || (catalog.error !== undefined && typeof catalog.error !== 'string')) {
+    throw new Error('Invalid OpenCode Go model catalog status')
+  }
+  return {
+    models: parseGoModels(catalog.models), stale: catalog.stale,
+    ...(catalog.error === undefined ? {} : { error: catalog.error as string }),
   }
 }
-const codec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#GoModels',
-  schema: { parse: parseGoModels }, create: () => ({ parse: parseGoModels }) }
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface TypertRemoteNamespaceMap {
+    opencodeGoModels: { read(): Promise<RemoteResult<GoModelCatalog>> }
+  }
+}
+const codec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#GoModelCatalog',
+  schema: { parse: parseGoModelCatalog }, create: () => ({ parse: parseGoModelCatalog }) }
 export const modelsRemote: TypertRemoteContribution = {
   package: 'dsh-opencode-go',
   descriptors: [{ id: 'dsh-opencode-go#opencodeGoModels/read', service: 'opencodeGoModels',

@@ -38,6 +38,7 @@ function clientHarness(): ClientHarness {
     },
     locale: {
       register: localeRegister,
+      getLocale: () => ({ active: 'en' }),
       bind: () => (key: string) => en[key as keyof typeof en] ?? key,
     },
     settingsScope: {
@@ -50,7 +51,7 @@ function clientHarness(): ClientHarness {
     },
     remote: {
       $mount: vi.fn(async () => () => {}),
-      opencodeGoModels: { read: async () => ({ ok: true, value: [] }) },
+      opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
       credentials: {
         describe: vi.fn(() => Promise.resolve({ ok: true, value: {} })),
         set: vi.fn(() => Promise.resolve({ ok: true, value: undefined })),
@@ -104,11 +105,12 @@ describe('client entry', () => {
       name: string
       id: string
       label: () => string
-      inject: () => { t: (key: string) => string; loadModels: () => void }
+      inject: () => { t: (key: string) => string; loadModels: () => void; getLocale: () => string }
     }
     expect(registration).toMatchObject({ name: 'settings.section', id: 'opencode-go' })
     expect(registration.label()).toBe(en.nav)
     expect(registration.inject().t('nav')).toBe(en.nav)
+    expect(registration.inject().getLocale()).toBe('en')
     expect(registration.inject().loadModels).toBeTypeOf('function')
     expect(harness.slotsRegister.mock.calls[0]?.[1]).toBe(OpencodeGoSection)
   })

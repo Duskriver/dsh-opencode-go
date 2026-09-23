@@ -33,6 +33,8 @@ type SectionTranslate = (key: keyof typeof en, params?: Record<string, unknown>)
 export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
   /** Section copy. */
   t: SectionTranslate
+  /** Read at render time because the Host caches injected values across locale changes. */
+  getLocale?: () => string
 }
 
 /** Props delivered by the slot outlet: the inject face spread flat. */
@@ -110,11 +112,16 @@ function ModelsBody({ models, t }: {
     return (
       <>
         <p className={css.failedNote} role="alert">{t('modelsFailed')}</p>
-        <p className={css.hint}>{models.message}</p>
+        {models.message ? <p className={css.hint}>{models.message}</p> : null}
       </>
     )
   }
   if (models.status !== 'ready') return <p className={css.hint} role="status" aria-live="polite">{t('modelsLoading')}</p>
+  if (models.refreshing) return <p className={css.hint} role="status">{t('modelsRefreshing')}</p>
+  if (models.stale) return <>
+    <p className={css.failedNote} role="alert">{t('modelsStale')}</p>
+    {models.message ? <p className={css.hint}>{models.message}</p> : null}
+  </>
   if (models.count === 0) return <p className={css.hint}>{t('modelsEmpty')}</p>
   return null
 }
@@ -125,21 +132,22 @@ function ModelsBody({ models, t }: {
  * @returns the section.
  */
 export function OpencodeGoSection(props: OpencodeGoSectionProps) {
-  const { useOpencodeGo, edit, resetField, save, discard, loadModels, setEnabled, setShowDeprecatedModels, t } = props
+  const { useOpencodeGo, edit, resetField, save, discard, loadModels, setEnabled, setModelEnabled, t } = props
   if (useOpencodeGo === undefined || edit === undefined || resetField === undefined
     || save === undefined || discard === undefined || loadModels === undefined
-    || setEnabled === undefined || setShowDeprecatedModels === undefined || t === undefined) return null
+    || setEnabled === undefined || setModelEnabled === undefined || t === undefined) return null
   return (
     <Loaded
       state={useOpencodeGo(snapshot => snapshot)}
       t={t}
+      locale={props.getLocale?.()}
       edit={edit}
       resetField={resetField}
       save={save}
       discard={discard}
       loadModels={loadModels}
       setEnabled={setEnabled}
-      setShowDeprecatedModels={setShowDeprecatedModels}
+      setModelEnabled={setModelEnabled}
     />
   )
 }
@@ -148,13 +156,14 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
 function Loaded(props: {
   state: OpencodeGoSectionState
   t: SectionTranslate
+  locale?: string
   edit: (field: string, text: string) => void
   resetField: (field: string) => void
   save: () => void
   discard: () => void
   loadModels: () => void
   setEnabled: (next: boolean) => void
-  setShowDeprecatedModels: (next: boolean) => void
+  setModelEnabled: (id: string, next: boolean) => void
 }) {
   const { t, state, loadModels } = props
   const [advanced, setAdvanced] = useState(false)
@@ -279,7 +288,7 @@ function Loaded(props: {
             label={t('enabledLabel')}
             // The settings document being read-only is what locks the switch;
             // the credential's own writability is unrelated to this field.
-            disabled={disabled}
+            disabled={disabled || state.saving || state.pickerSaving}
             onChange={props.setEnabled}
           />
         </div>
@@ -321,7 +330,7 @@ function Loaded(props: {
             <button
               type="button"
               className={css.reset}
-              disabled={state.models.status === 'loading'}
+              disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
               onClick={loadModels}
             >
               {t('modelsRefresh')}
@@ -331,20 +340,16 @@ function Loaded(props: {
         <ModelsBody models={state.models} t={t} />
       </div>
       <div className={css.field}>
-        <div className={css.head}>
-          <span className={css.label}>{t('showDeprecatedLabel')}</span>
-          <Switch checked={state.showDeprecatedModels} label={t('showDeprecatedLabel')}
-            disabled={disabled || state.pickerSaving} onChange={props.setShowDeprecatedModels} />
-        </div>
-        <p className={css.hint}>{t('showDeprecatedHint')}</p>
         {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
-        <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} disabled={disabled || state.saving}
+        <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
+          modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+          onModelEnabled={props.setModelEnabled}
           onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
       </div>
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>
       <div className={css.actions}>
-        <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving} onClick={props.save}>
+        <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving || state.pickerSaving} onClick={props.save}>
           {state.saving ? t('saving') : t('save')}
         </Button>
         <Button variant="outline" size="md" disabled={disabled || !state.dirty || state.saving} onClick={props.discard}>

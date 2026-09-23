@@ -7,14 +7,15 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { GoModelsService } from '../src/models.ts'
 import { PlainConfig } from '../src/config.ts'
-import { isNewModel, sortModels } from '../src/models-contract.ts'
+import { discoverSettingsModels } from '../src/catalog.ts'
+import { isModelEnabled, isNewModel, sortModels, type GoModelCatalog } from '../src/models-contract.ts'
 import { closeMockGateways, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 import { configOf } from './config-of.ts'
 
 afterEach(closeMockGateways)
 
-it('keeps settings gateway-only and filters deprecated picker entries without disabling their requests', async () => {
+it('uses independent model switches while keeping settings and existing requests available', async () => {
   const original = globalThis.fetch
   let metadataDown = false
   vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
@@ -24,8 +25,9 @@ it('keeps settings gateway-only and filters deprecated picker entries without di
       absent: modelMetadata({ status: 'deprecated' }),
     }))) : original(input, init))
   const gateway = await mockGateway({ status: 200, body: listingBody(['current', 'old']) })
-  const config = configOf(`${gateway.url}/v1`)
-  expect(PlainConfig({}).showDeprecatedModels).toBe(false)
+  // Old fields can survive a profile update but no longer impose another visibility gate.
+  const config = Object.assign(configOf(`${gateway.url}/v1`), { showDeprecatedModels: true, visibleModelIds: [] })
+  expect(PlainConfig({}).modelVisibility).toEqual({})
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
   const ctx = new Context()
   await ctx.plugin(Registry)
@@ -33,28 +35,61 @@ it('keeps settings gateway-only and filters deprecated picker entries without di
   registerGoRemotes(ctx)
   await ctx.plugin(GoModelsService, { catalog: () => adapter.catalogOf(config) })
   try {
-    const read = () => ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} })
-    expect(await read()).toEqual([
+    const read = async () => await ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} }) as GoModelCatalog
+    expect(await read()).toEqual({ stale: false, models: [
       expect.objectContaining({ id: 'current', releaseDate: '2026-09-22', contextWindow: 262144 }),
       expect.objectContaining({ id: 'old', deprecated: true }),
-    ])
+    ] })
     expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current'])
-    config.showDeprecatedModels = true
+    config.modelVisibility = { old: true }
     expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current', 'old'])
-    config.showDeprecatedModels = false
+    config.modelVisibility = { current: false, old: true, absent: true }
+    expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['old'])
+    // The complete settings list stays available for changing the selection.
+    expect((await read()).models.map(m => m.id)).toEqual(['current', 'old'])
+    config.modelVisibility = { current: false, old: false }
+    expect(await adapter.listModels('opencode-go')).toEqual([])
     // Hiding affects pickers; existing conversations can keep using the served model.
     gateway.pushCompletions({ events: textEvents })
     const chunks = []
     for await (const chunk of adapter.stream({ provider: 'opencode-go', model: 'old',
       messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'test' } })] })) chunks.push(chunk)
     expect(chunks.length).toBeGreaterThan(0)
+    config.modelVisibility = {}
     metadataDown = true
     expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current'])
-    config.showDeprecatedModels = true
+    config.modelVisibility = { old: true }
     gateway.setModelListing(200, listingBody(['current']))
-    expect((await read() as Array<{ id: string }>).map(m => m.id)).toEqual(['current'])
+    expect((await read()).models.map(m => m.id)).toEqual(['current'])
     expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current'])
   } finally { await ctx.fiber.dispose() }
+})
+
+it('applies lifecycle defaults to new models and retains overrides for returning models', async () => {
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+    ? Promise.resolve(Response.json(metadataDocument({ first: modelMetadata(), second: modelMetadata(),
+      old: modelMetadata({ status: 'deprecated' }), returning: modelMetadata({ status: 'deprecated' }),
+    })))
+    : original(input, init))
+  const gateway = await mockGateway({ status: 200, body: listingBody(['first']) })
+  const config = configOf(gateway.url, { modelVisibility: { first: false, returning: true } })
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+  expect(await adapter.listModels('opencode-go')).toEqual([])
+  gateway.setModelListing(200, listingBody(['first', 'second', 'old', 'returning']))
+  await discoverSettingsModels(adapter.catalogOf(config))
+  expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['second', 'returning'])
+  config.modelVisibility = {}
+  expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['first', 'second'])
+})
+
+it('uses only own boolean overrides and rejects non-boolean configuration', () => {
+  expect(isModelEnabled({ id: 'normal' })).toBe(true)
+  expect(isModelEnabled({ id: 'old', deprecated: true })).toBe(false)
+  expect(isModelEnabled({ id: 'toString', deprecated: true }, {})).toBe(false)
+  expect(isModelEnabled({ id: 'old', deprecated: true }, Object.create({ old: true }) as Record<string, boolean>)).toBe(false)
+  expect(isModelEnabled({ id: '__proto__', deprecated: true }, JSON.parse('{"__proto__":true}') as Record<string, boolean>)).toBe(true)
+  expect(() => PlainConfig({ modelVisibility: { normal: 'yes' } } as never)).toThrow()
 })
 
 it('uses actual release dates for the seven-day badge and sorts deprecated models last', () => {

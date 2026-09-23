@@ -7,6 +7,8 @@ export interface UsageWindow {
 }
 
 export interface GoUsage {
+  /** Opaque Host identity for this endpoint/account; never a credential or its hash. */
+  source?: string
   rolling: UsageWindow
   weekly: UsageWindow
   monthly: UsageWindow
@@ -17,6 +19,12 @@ export function parseGoUsage(value: unknown): GoUsage {
   if (!value || typeof value !== 'object') throw new Error('Invalid OpenCode Go usage response')
   const source = value as Record<string, unknown>
   const result = {} as GoUsage
+  if (source.source !== undefined) {
+    if (typeof source.source !== 'string' || source.source.length === 0 || source.source.length > 128) {
+      throw new Error('Invalid OpenCode Go usage source')
+    }
+    result.source = source.source
+  }
   for (const key of ['rolling', 'weekly', 'monthly'] as const) {
     const row = source[key] as Partial<UsageWindow> | undefined
     if (!row || (row.status !== 'ok' && row.status !== 'rate-limited')
@@ -30,6 +38,13 @@ export function parseGoUsage(value: unknown): GoUsage {
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    'opencode-go/usage-unavailable': {
+      readonly retryable: boolean
+      readonly retainPrevious: boolean
+      readonly source?: string
+    }
+  }
   interface TypertRemoteNamespaceMap {
     opencodeGoUsage: { read(): Promise<RemoteResult<GoUsage>> }
   }

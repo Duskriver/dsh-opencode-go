@@ -130,9 +130,13 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
   })
-  ctx.plugin(GoModelsService, { catalog: () => adapter.catalogOf(current()) })
-  let pickerVisibility = current().showDeprecatedModels
   let registration: AdapterRegistrationHandle | undefined
+  ctx.plugin(GoModelsService, {
+    catalog: () => adapter.catalogOf(current()),
+    onRefresh: () => { registration?.replace([PROVIDER_ID]) },
+  })
+  const pickerVisibilityOf = (): string => JSON.stringify(current().modelVisibility ?? {})
+  let pickerVisibility = pickerVisibilityOf()
   /**
    * Register the route while the switch is on and its credential resolves, and
    * drop it when either says no. A route with no key would otherwise sit in
@@ -165,8 +169,9 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     }
   }
   const syncRoute = (): void => {
-    if (pickerVisibility !== current().showDeprecatedModels) {
-      pickerVisibility = current().showDeprecatedModels
+    const visibility = pickerVisibilityOf()
+    if (pickerVisibility !== visibility) {
+      pickerVisibility = visibility
       // Replacing the owned route notifies every session picker without a restart.
       registration?.replace([PROVIDER_ID])
     }

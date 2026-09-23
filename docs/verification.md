@@ -1,10 +1,38 @@
 # Verification
 
+## Individual model switches and cached Settings discovery (2026-09-23)
+
+`modelVisibility` stores explicit booleans by model ID. An absent override enables an ordinary model and disables a model marked deprecated. A `true` override can enable a deprecated model without a second global condition; `false` can hide an ordinary model. The Host and Client share `isModelEnabled`, including own-property checks for IDs that match JavaScript prototype keys. Older `showDeprecatedModels` and `visibleModelIds` fields remain loadable as unknown configuration but no longer impose a visibility condition.
+
+Each model has one switch that writes immediately and refreshes conversation pickers. Capacity and credential edits retain Save/Discard behavior. Hidden models stay available in Settings and existing conversations can continue requesting models the gateway serves. Newly discovered models follow their lifecycle default unless an override already exists for their ID.
+
+Picker reads now reuse the catalog for `refreshMinutes`, so visibility changes do not trigger another network refresh while that snapshot is cached. `GoModelsService.read()` still forces discovery, then notifies any registered picker on both successful and failed refreshes. The picker consumes the same committed or retained snapshot; explicit Settings refreshes discover new and removed models, and direct requests for unknown IDs retain their immediate discovery behavior.
+
+Settings discovery now returns `GoModelCatalog` with `models`, `stale`, and an optional safe error message. If a refresh fails after a successful listing, Settings keeps the cached entries and shows a warning with the failure cause. Client transport failures also retain the last successful view. A failure without any cached listing shows an error; a successful empty listing stays empty. Explicit generic discovery retains its strict failure behavior.
+
+The final `npm test` run passed Host/Client type checks, the production build, and **246 tests in 20 files**. Coverage includes lifecycle defaults, individual overrides, returning and newly discovered models, non-boolean configuration rejection, unchanged existing-model requests, TTL expiry, and real Settings RPC notifications without redundant picker requests, including failed refreshes. The 0.1.7 profile fixtures verify the new switches and retained legacy fields without remounting; client tests verify immediate switches and cached-list warnings. The earlier browser result below predates this UI revision and does not establish its visual behavior in a live DSH installation.
+
+## Issue #7: transport verification, usage, diagnostics and model selection (2026-09-23)
+
+An isolated local HTTPS/HTTP2 reproduction used the reporter's exact Node 24.19.0 (bundled Undici 7.29.0) and npm Undici 8.11.0 global dispatcher. The server supplied correctly labeled compressed JSON. HTTP/1.1 worked; HTTP/2 lost all response headers and native `response.json()` failed on compressed bytes. The same failure occurred on Node 24.14.1 (bundled Undici 7.24.4). These tests ran on macOS, not WSL2, and used local fixtures without real credentials or paid requests.
+
+Undici 8's HTTP/2 path passes a header object through the legacy dispatcher bridge where the older fetch expects an alternating header array ([request.js](https://github.com/nodejs/undici/blob/v8.11.0/lib/core/request.js#L328), [dispatcher1-wrapper.js](https://github.com/nodejs/undici/blob/v8.11.0/lib/dispatcher/dispatcher1-wrapper.js#L24)). The 0.1.10 reader was verified to recover this payload, but the final implementation adopts the issue reporter's simpler recommendation: `/models`, models.dev and `/usage` explicitly request `accept-encoding: identity`. The manual Brotli/gzip/deflate guessing loop has been removed. The reader only bounds delivered bytes and parses JSON; normally labeled compressed responses remain Fetch's responsibility. Requests keep using the host's global fetch and dispatcher.
+
+The final identity implementation passed actual catalog and usage RPC reads through one unchanged Undici 8.11.0 global ProxyAgent and a CONNECT tunnel to a real TLS/HTTP2 server, under Node 24.19.0. The control request without identity failed; identity returned plain JSON and all three code paths succeeded. Public read-only identity requests also succeeded: `/models` returned HTTP 200, 3,309 bytes and 40 model IDs; models.dev returned HTTP 200, 4,884,187 bytes and valid metadata. Neither response was compressed. The tradeoff is the larger metadata transfer; identity does not fix the underlying loss of ETag headers. No observed endpoint required manually decoding compressed responses despite identity, so an artificial server ignoring the header is not used to justify that fallback.
+
+Usage uses the shared reader with a 1 MiB limit on delivered bytes; listing and metadata limits remain 1 MiB and 16 MiB. Real HTTP regressions model an upstream that honors identity and a host that loses encoding headers: removing identity breaks the actual catalog/usage read, while identity succeeds. Correctly labeled Fetch-decoded compression and oversized responses remain covered. Model discovery retains the failure cause and gives both discovery entry points a URL plus HTTP status, network error code, JSON decoding failure or invalid listing shape. Public messages omit response bodies; a successful refresh clears the previous failure.
+
+The initial picker-selection implementation used a saved allowlist and a separate deprecated-model option. It has been replaced by the individual switches described above.
+
+Before the individual-switch and cached-discovery revision, the identity implementation passed `npm test`: Host/Client type checks, the production build and **240 tests in 19 files**, including all six supported host fixtures. Obsolete manual-decompression tests were replaced by request-negotiation and bounded JSON parsing coverage. Browser verification at that checkpoint used the actual settings component and controller with a local in-memory settings scope: selecting one model, saving, restoring all, and discarding behaved correctly; the 390 px viewport had no horizontal overflow and no browser errors were reported. This preview was not a live DSH Web deployment. The existing upstream missing-source-map warnings remain.
+
 ## Unknown profile fields during activation (2026-09-23)
 
 A real Loader composition reproduced `TypeError: value.get is not a function` when the plugin entry contained an additional configuration field. Schemastery preserves fields outside the schema as plain values; the plugin incorrectly called `.get()` on every entry. Configuration reads now dereference only declared schema fields, preserving their live references and leaving stored profile data intact.
 
-The regression failed before the fix and passes afterward, covering extra scalar, null, array, and object values alongside a working endpoint and model-capacity override. The built artifact also mounts with an extra field across all six supported host fixtures; both 0.1.7 fixtures verify live settings changes still work without remounting and retain the extra profile field. The build's Host/Client type checks and all **234 tests in 18 files** pass on macOS / Node.js 24.14.1. Upstream UI primitives still emit missing-source-map warnings. No live model requests were made. The currently installed artifact differs from the reported stack's line numbers, so the original triggering field is not established.
+The regression failed before the fix and passes afterward, covering extra scalar, null, array, and object values alongside a working endpoint and model-capacity override. The built artifact also mounts with an extra field across all six supported host fixtures; both 0.1.7 fixtures verify live settings changes still work without remounting and retain the extra profile field. The build's Host/Client type checks and all **234 tests in 18 files** pass on macOS / Node.js 24.14.1. Upstream UI primitives still emit missing-source-map warnings. No live model requests were made during those tests.
+
+The reported failure was subsequently reproduced by disabling and enabling the component in the user's running DSH Web process. A debugger breakpoint identified `showDeprecatedModels` as the failing field: its value was a boolean and its `get` property was undefined. The process's loaded plugin source matched the local `dsh-opencode-go-0.1.7.tgz` artifact byte for byte (SHA-256 `07422ad73df69896e2c3eafa1a07481cedd2945ed53dc59f09657abf1c8faa27`), including stack lines 1007 and 1305; that schema predates this field. The installed files were already 0.1.10 and recognized it. The process started at 18:30:41, before the replacement package directory was created at 18:31:45. Component toggles reimport the same cached module; the host's package manager requires a restart after replacing an installed dependency. Thus the actual trigger was a newer saved setting reaching an older module still loaded in memory, not a manually added invalid setting. A complete DSH restart loaded the existing 0.1.10 files with the same configuration: the component changed from failed to running, and the selected model and subscription usage became available. No package replacement or settings removal was needed, and no paid generation was sent.
 
 ## Default reasoning effort (plugin 0.1.10, 2026-09-23)
 
@@ -16,7 +44,7 @@ Host/Client type checks, the build, and all **233 tests in 18 files** pass on ma
 
 This release also includes PR #5's bounded compressed-response recovery described below, which was merged after the 0.1.9 release.
 
-## Bounded model discovery responses (2026-09-23)
+## Bounded model discovery responses (0.1.10; superseded by identity requests above)
 
 Model discovery accepts ordinary JSON and Brotli, gzip, or deflate JSON whose `Content-Encoding` header is missing. Correctly labeled responses continue through Fetch's automatic decoding. The shared reader counts actual streamed bytes and cancels oversized bodies; fallback decoders run asynchronously with `maxOutputLength`. Both delivered bytes and fallback output are limited to 1 MiB for the gateway listing and 16 MiB for models.dev metadata. These are payload limits, not total process-memory or CPU-time budgets. Failed recovery preserves the original JSON error and each decoder's cause.
 
@@ -44,7 +72,7 @@ Development dependencies are reproducible with `npm ci --legacy-peer-deps --igno
 
 Host/client type checks, the build, and all **181 tests in 16 files** pass on macOS / Node.js 24.14.1. Coverage includes the five supported host versions, deprecated-model visibility, model remote injection, and CSS composition in the distributed client. The upstream UI primitives packages still emit missing-source-map warnings; all assertions pass. This release also synchronizes the English README with the simplified Chinese guide and updates installation examples to 0.1.8.
 
-## Model settings layout and deprecated visibility (2026-09-22)
+## Model settings layout and deprecated visibility (2026-09-22; superseded by individual switches above)
 
 The settings page uses the selected list/detail layout, real gateway membership, models.dev release dates and deprecation flags, and a default-off `showDeprecatedModels` switch. Deprecated models stay configurable in settings; only conversation picker membership is filtered. Existing conversations can still call a hidden model that the gateway serves. Models found only in metadata or saved overrides are not displayed. Before any successful gateway response, a network failure does not advertise built-in models.
 
@@ -216,3 +244,27 @@ Total: four additional live completion requests and 3,092 reported tokens, inclu
 The settings build was also loaded in the user's running local `0.1.7-alpha.1` Web profile. This exposed a missing `remote.opencodeGoModels` injection in the browser settings scope; both legacy and modern settings bindings now declare it, and the distributed-client regression checks exercise model loading under that injection requirement. After rebuilding and restarting the Host, the real settings page loaded 40 gateway models, including 3 recent releases and 8 deprecated entries, with the deprecated-model switch off. No completion request was sent during this check.
 
 Local Web layout checks also cover the settings panel's independent scroll body and reserved save/discard footer. The model panel now uses the settings container's available height and stacks at narrow container widths. At a 600×780 viewport, browser geometry confirmed no footer overlap or horizontal overflow and a visible action row. The client artifact test checks inherited disclosure styles because the CSS-module build previously omitted `composes` entries.
+
+
+## Per-model switches in the installed Web profile (2026-09-23)
+
+The revised local package was installed into the user's Web profile and the source Harness restarted. Installed host and client JavaScript matched the local build byte for byte. In the authenticated page, settings displayed 40 gateway entries, including 8 deprecated entries whose switches were off by default. Disabling MiMo-V2.6-Pro removed it from both the live session model catalog and the actual conversation picker; enabling the deprecated MiniMax-M2.5 added it to both without pressing Save. The temporary overrides were then removed through the revision-fenced settings API, restoring normal-model visibility and deprecated-model defaults. No completion was submitted. Browser errors were empty, and the settings layout was visually checked at the user's 1077×1324 viewport.
+
+Timeout retention was verified deterministically through the real Host RPC and component/controller tests: success, timeout with retained entries and an explicit warning, then recovery. The installed live check does not establish that upstream network timeouts can no longer occur.
+
+
+## Missing model configuration (2026-09-23)
+
+Settings now carries `configurationMissing` as structured model state. Models without usable Go configuration retain their raw names, show “配置缺失”, and have an unchecked, disabled switch even if an earlier visibility override is true. A real Host RPC regression covers missing configuration followed by metadata recovery, and the component regression covers the disabled switch and its recovery. The complete suite passed 248 tests in 20 files, along with the host and client type checks.
+
+After installing and restarting the user's Web profile, the actual `deepseek-flash` and `hy3-preview` rows both displayed “配置缺失”, `aria-checked=false`, and a disabled switch. Neither name contained the previous English diagnostic. No user settings or model generations were changed during this check.
+
+## Intermittent network resets and usage recovery (2026-09-23)
+
+The subsequent `ECONNRESET` report is distinct from Issue #7's compressed JSON failure. Public `/models` probes with `accept-encoding: identity` reproduced resets before response headers, including in Node 24.14.1's unmodified built-in fetch without Harness or an Undici 8 dispatcher. Fifteen sequential native requests produced ten successes, one reset and four 10-second timeouts. A separate five-request probe through the configured local proxy with HTTP/2 disabled produced two successes, one reset and two timeouts. Successful responses were HTTP/1.1, HTTP 200 and 40 models. This rules out JSON parsing and HTTP/2 as necessary causes of this failure; it does not identify whether the local forwarding layer or the upstream path caused each reset. No proxy setting was changed and no completion was sent.
+
+Read-only JSON requests now retry connection reset/socket closure/temporary DNS errors at most once after 150 ms, including failures during body reading. Both attempts and the delay share the original timeout signal. HTTP failures, malformed or oversized JSON, and TLS certificate errors are not automatically retried. Loopback HTTP tests exercise a dropped first connection followed by recovery, persistent failures, body truncation, HTTP failures, and cancellation during backoff. The real catalog and usage RPC paths also exercise recovery.
+
+Usage failures now carry safe Host diagnostics through the Remote error contract. The UI retains a prior reading only when its opaque account/endpoint source matches the failed request, labels it as old data, and shows its original timestamp and a manual retry. Authentication failures and different/missing source identities clear old data. A source is a Host-generated random identifier, never a credential or credential hash. Polling and manual retries coalesce. These changes improve recovery and diagnostics; they cannot guarantee availability during a network outage.
+
+Validation: 289 tests in 22 files and both Host/Client type checks passed, including the published-host compatibility fixtures and the real usage RPC codec.

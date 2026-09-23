@@ -59,9 +59,9 @@ it.each([
       }),
       get: () => ({ get: getForm }),
       effect: (install: () => (() => void) | Promise<() => void>) => { effects.push(install()) },
-      locale: { register: () => () => {}, bind: () => (key: string) => key },
+      locale: { getLocale: () => ({ active: 'en' }), register: () => () => {}, bind: () => (key: string) => key },
       settingsScope: { bind: bindScope },
-      remote: { $mount: async () => () => {}, opencodeGoModels: { read: async () => ({ ok: true, value: [] }) }, $on: () => () => {}, credentials: { describe: async () => ({ ok: true, value: {} }) } },
+      remote: { $mount: async () => () => {}, opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) }, $on: () => () => {}, credentials: { describe: async () => ({ ok: true, value: {} }) } },
       slots: { inject: (_name: string, install: () => void) => install(), register: slots },
     }
     client.apply(ctx)

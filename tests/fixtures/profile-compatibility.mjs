@@ -24,7 +24,8 @@ try {
   await ctx.plugin(Loader)
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const id = await ctx.loader.create({ id: 'opencode-go', name: new URL('../../lib/index.js', import.meta.url).href,
-    config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY', legacyOption: true } })
+    config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY', legacyOption: true,
+      showDeprecatedModels: true, visibleModelIds: ['compat-model'] } })
   await ctx.loader.await()
   const entry = ctx.loader.resolve(id)
   assert.ok(entry.fiber, 'plugin mounts')
@@ -53,15 +54,21 @@ try {
   await ctx.settings.update('opencode-go', { enabled: true, refreshMinutes: 30 })
   assert.ok(ctx.llm.listProviders().some(row => row.id === 'opencode-go'))
   assert.equal(view().value.refreshMinutes, 30)
-  assert.deepEqual(await ctx.llm.listModels('opencode-go'), [], 'deprecated models hidden by default')
+  assert.deepEqual(await ctx.llm.listModels('opencode-go'), [], 'legacy visibility fields do not override the deprecated default')
   let pickerUpdates = 0
   ctx.on('llm/adapters-updated', () => { pickerUpdates++ })
-  await ctx.settings.update('opencode-go', { showDeprecatedModels: true })
-  assert.ok(pickerUpdates > 0, 'visibility change notifies already open session pickers')
-  assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
-  await ctx.settings.update('opencode-go', { showDeprecatedModels: false })
+  await ctx.settings.update('opencode-go', { modelVisibility: { 'compat-model': true, missing: true } })
+  assert.ok(pickerUpdates > 0, 'enabling a model notifies already open session pickers')
+  assert.deepEqual((await ctx.llm.listModels('opencode-go')).map(model => model.id), ['compat-model'],
+    'explicitly enabling a deprecated model does not manufacture unknown gateway models')
+  assert.equal(view().value.modelVisibility['compat-model'], true)
+  assert.equal(entry.fiber, fiber, 'enabling a model preserves the running plugin')
+  pickerUpdates = 0
+  await ctx.settings.update('opencode-go', { modelVisibility: { 'compat-model': false, missing: true } })
+  assert.ok(pickerUpdates > 0, 'disabling a model notifies already open session pickers')
   assert.deepEqual(await ctx.llm.listModels('opencode-go'), [])
-  assert.equal(entry.fiber, fiber, 'visibility changes preserve the running plugin')
+  assert.equal(view().value.modelVisibility['compat-model'], false)
+  assert.equal(entry.fiber, fiber, 'disabling a model preserves the running plugin')
   const capacity = async () => (await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow
   assert.equal(await capacity(), 100000)
   await ctx.settings.update('opencode-go', { modelLimits: { 'compat-model': { contextWindow: 50000, maxTokens: 1024 } } })
@@ -74,6 +81,8 @@ try {
   await assert.rejects(ctx.settings.update('opencode-go', { baseURL: 'not-a-url' }), /not a valid URL/)
   assert.equal(entry.fiber, fiber)
   assert.equal(entry.options.config.legacyOption, true, 'unknown profile fields survive live updates without breaking reads')
+  assert.equal(entry.options.config.showDeprecatedModels, true, 'the legacy toggle remains an inert unknown profile field')
+  assert.deepEqual(entry.options.config.visibleModelIds, ['compat-model'], 'the legacy selection remains an inert unknown profile field')
   console.log('PASS: profile settings, live updates, capacities, reset, route toggle, validation')
 } finally {
   await ctx.fiber.dispose()

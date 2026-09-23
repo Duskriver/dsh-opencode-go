@@ -46,6 +46,7 @@ import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog } from './catalog.ts'
 import { assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
+import { isModelEnabled } from './models-contract.ts'
 
 /**
  * pi-ai thinking formats that answer an unset effort with an explicit disable
@@ -160,11 +161,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
     const config = this.options.config()
-    const snapshot = await this.catalogOf(config).snapshot(true)
+    // Picker notifications only change local visibility. Settings discovery
+    // explicitly refreshes this same catalog before notifying open pickers.
+    const snapshot = await this.catalogOf(config).snapshot()
     // DSH resolves every listed model before showing the provider. Unconfigured
     // ids belong in settings discovery diagnostics, not this selectable list.
     return [...snapshot.models.values()]
-      .filter(model => config.showDeprecatedModels || !snapshot.details.get(model.id)?.deprecated)
+      .filter(model => isModelEnabled({ id: model.id, ...snapshot.details.get(model.id) }, config.modelVisibility))
       .map(model => ({
         provider: PROVIDER_ID,
         id: model.id,

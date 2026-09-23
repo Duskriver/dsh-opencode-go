@@ -8,9 +8,9 @@ import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.l
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
-import { sortModels, type GoModel } from './models-contract.ts'
+import { sortModels, type GoModelCatalog } from './models-contract.ts'
 import type { ModelMetadata } from './model-metadata.ts'
-import { readJsonResponse } from './json-response.ts'
+import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-response.ts'
 
 export const PROVIDER_ID = 'opencode-go'
 export const DISPLAY_NAME = 'OpenCode Go'
@@ -26,6 +26,8 @@ export interface CatalogSnapshot {
   readonly unavailable: ReadonlyMap<string, string>
   readonly provider: Provider
   readonly live: boolean
+  /** Retained for explicit discovery; runtime callers may still use the last catalog. */
+  readonly listingFailure?: unknown
   readonly fetchedAtMs: number
 }
 
@@ -50,18 +52,29 @@ export function readLiveModelIds(body: unknown): readonly string[] {
 
 async function fetchLiveModelIds(baseURL: string): Promise<readonly string[]> {
   const url = `${baseURL.replace(/\/+$/, '')}/models`
-  let response: Response
+  const endpoint = diagnosticURL(url)
+  let result: Awaited<ReturnType<typeof fetchJsonResponse>>
   try {
-    response = await fetch(url, {
+    result = await fetchJsonResponse(url, {
       method: 'GET', cache: 'no-cache',
-      headers: { accept: 'application/json', ...attributionHeaders() },
+      headers: { ...attributionHeaders(), accept: 'application/json' },
       signal: AbortSignal.timeout(MODELS_FETCH_TIMEOUT_MS),
-    })
+    }, MODEL_LISTING_MAX_BYTES)
   } catch (error: unknown) {
-    throw new LlmError(`could not reach ${url}`, 'DISCOVERY_FAILED', { cause: error })
+    const detail = error instanceof SyntaxError
+      ? 'invalid JSON response'
+      : error instanceof RangeError ? `response exceeds the ${MODEL_LISTING_MAX_BYTES} byte limit`
+        : transportFailure(error)
+    const action = error instanceof SyntaxError || error instanceof RangeError ? 'read' : 'reach'
+    throw new LlmError(`could not ${action} ${endpoint}: ${detail}`, 'DISCOVERY_FAILED', { cause: error })
   }
-  if (!response.ok) throw new LlmError(`${url} answered ${response.status}`, 'DISCOVERY_FAILED')
-  return readLiveModelIds(await readJsonResponse(response, MODEL_LISTING_MAX_BYTES))
+  const { response, body } = result
+  if (!response.ok) throw new LlmError(`${endpoint} answered HTTP ${response.status}`, 'DISCOVERY_FAILED')
+  try {
+    return readLiveModelIds(body)
+  } catch (error: unknown) {
+    throw new LlmError(`${endpoint} returned an invalid model listing: expected a "data" array`, 'DISCOVERY_FAILED', { cause: error })
+  }
 }
 
 /** The adapter resolves and passes credentials for each generation request. */
@@ -111,14 +124,14 @@ export class OpencodeGoCatalog {
 
   /** Conditional HTTP requests save bandwidth while still checking for updated metadata. */
   private async refreshMetadata(builtin: ReadonlyMap<string, Model<Api>>): Promise<ModelMetadata> {
-    const response = await fetch(MODEL_METADATA_URL, {
-      headers: { accept: 'application/json', ...attributionHeaders(),
+    const { response, body } = await fetchJsonResponse(MODEL_METADATA_URL, {
+      headers: { ...attributionHeaders(), accept: 'application/json',
         ...(this.metadataETag === undefined ? {} : { 'if-none-match': this.metadataETag }) },
       cache: 'no-cache', signal: AbortSignal.timeout(MODELS_FETCH_TIMEOUT_MS),
-    })
+    }, MODEL_METADATA_MAX_BYTES)
     if (response.status === 304 && this.metadata !== undefined) return this.metadata
     if (!response.ok) throw new Error(`models.dev answered ${response.status}`)
-    const metadata = readModelMetadata(await readJsonResponse(response, MODEL_METADATA_MAX_BYTES), this.baseURL, builtin)
+    const metadata = readModelMetadata(body, this.baseURL, builtin)
     this.metadata = metadata
     this.metadataETag = response.headers.get('etag') ?? undefined
     return metadata
@@ -143,6 +156,7 @@ export class OpencodeGoCatalog {
         details: this.served?.details ?? new Map(),
         models, unavailable: this.served?.unavailable ?? new Map(),
         provider: buildProvider(this.baseURL, [...models.values()]), live: false, fetchedAtMs: Date.now(),
+        listingFailure: listing.reason,
       }
     }
     const models = new Map<string, Model<Api>>()
@@ -151,7 +165,7 @@ export class OpencodeGoCatalog {
       const error = metadata?.errors.get(id)
       const model = known.get(id)
       if (error !== undefined || model === undefined) {
-        unavailable.set(id, error ?? 'model metadata has not been published on models.dev yet')
+        unavailable.set(id, error ?? 'no usable configuration was found for this OpenCode Go model')
       } else {
         models.set(id, model)
       }
@@ -182,24 +196,43 @@ export class OpencodeGoCatalog {
 /** Explicit discovery always revalidates both sources, including during the runtime TTL. */
 export async function discoverCatalogModels(catalog: OpencodeGoCatalog): Promise<readonly LlmDiscoveredModel[]> {
   const snapshot = await catalog.snapshot(true)
-  if (!snapshot.live) {
-    throw new LlmError('llm-opencode-go: the live model listing is unreachable; try again later', 'DISCOVERY_FAILED')
-  }
+  requireLiveListing(snapshot)
   return describeCatalog(snapshot)
+}
+
+function requireLiveListing(snapshot: CatalogSnapshot): void {
+  if (snapshot.live) return
+  throw listingError(snapshot)
+}
+
+function listingError(snapshot: CatalogSnapshot): LlmError {
+  const detail = snapshot.listingFailure instanceof LlmError
+    ? snapshot.listingFailure.message : 'the live model listing is unreachable'
+  return new LlmError(`llm-opencode-go: ${detail}; refresh the model list to retry`, 'DISCOVERY_FAILED', { cause: snapshot.listingFailure })
+}
+
+function describeConfiguredModels(snapshot: CatalogSnapshot): readonly LlmDiscoveredModel[] {
+  return [...snapshot.models.values()].map(model => ({
+    id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
+  }))
 }
 
 function describeCatalog(snapshot: CatalogSnapshot): readonly LlmDiscoveredModel[] {
   return [
-    ...[...snapshot.models.values()].map(model => ({
-      id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
-    })),
+    ...describeConfiguredModels(snapshot),
     ...[...snapshot.unavailable].map(([id, reason]) => ({ id, name: `${id} (metadata unavailable: ${reason})` })),
   ]
 }
 
-/** Settings retain deprecated gateway entries regardless of picker visibility. */
-export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promise<readonly GoModel[]> {
+/** Settings expose the same retained catalog as requests, with a failed-refresh diagnostic. */
+export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promise<GoModelCatalog> {
   const snapshot = await catalog.snapshot(true)
-  if (!snapshot.live) throw new LlmError('llm-opencode-go: the live model listing is unreachable; try again later', 'DISCOVERY_FAILED')
-  return sortModels(describeCatalog(snapshot).map(model => ({ ...model, ...snapshot.details.get(model.id) })))
+  return {
+    models: sortModels([
+      ...describeConfiguredModels(snapshot),
+      ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
+    ].map(model => ({ ...model, ...snapshot.details.get(model.id) }))),
+    stale: !snapshot.live,
+    ...(snapshot.live ? {} : { error: listingError(snapshot).message }),
+  }
 }

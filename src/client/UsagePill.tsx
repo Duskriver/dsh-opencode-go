@@ -8,6 +8,27 @@ export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
   readUsage: () => Promise<GoUsage>
   t: (key: string) => string
+  getLocale?: () => string
+}
+
+interface UsageFailure {
+  message?: string
+  retainPrevious: boolean
+  source?: string
+}
+
+/** Only the Host's domain failure message is approved for display. */
+function usageFailure(error: unknown): UsageFailure {
+  if (error && typeof error === 'object' && 'code' in error && error.code === 'opencode-go/usage-unavailable'
+    && 'details' in error && error.details && typeof error.details === 'object') {
+    const details = error.details as Record<string, unknown>
+    return {
+      ...('message' in error && typeof error.message === 'string' ? { message: error.message } : {}),
+      retainPrevious: details.retryable === true && details.retainPrevious === true,
+      ...(typeof details.source === 'string' ? { source: details.source } : {}),
+    }
+  }
+  return { retainPrevious: false }
 }
 
 /** Only the selected Go provider mounts a poller, so other models send no usage traffic. */
@@ -16,29 +37,53 @@ export function UsagePill({ directory, ...props }: UsagePillProps) {
   return state.current?.provider === 'opencode-go' ? <ActiveUsage {...props} /> : null
 }
 
-function ActiveUsage({ readUsage, t }: Omit<UsagePillProps, 'directory'>) {
-  const [usage, setUsage] = useState<GoUsage | null>(null)
-  const [failed, setFailed] = useState(false)
+function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'directory'>) {
+  const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
+  const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLSpanElement>(null)
+  const retry = useRef<() => void>(() => {})
   useEffect(() => {
     let alive = true
     let busy = false
-    const refresh = async () => {
-      if (busy || document.visibilityState === 'hidden') return
+    setSnapshot(null)
+    setFailed(null)
+    setRefreshing(false)
+    const refresh = async (manual = false) => {
+      if (busy || !manual && document.visibilityState === 'hidden') return
       busy = true
+      setRefreshing(true)
       try {
         const value = await readUsage()
-        if (alive) { setUsage(value); setFailed(false) }
-      } catch {
-        if (alive) { setUsage(null); setFailed(true) }
-      } finally { busy = false }
+        if (alive) {
+          setSnapshot({ reader: readUsage, usage: value, updatedAt: Date.now() })
+          setFailed(null)
+        }
+      } catch (error: unknown) {
+        if (alive) {
+          const failure = usageFailure(error)
+          setFailed({ reader: readUsage, failure })
+          setSnapshot(previous => previous?.reader === readUsage && failure.retainPrevious
+            && typeof previous.usage.source === 'string' && previous.usage.source.length > 0
+            && previous.usage.source === failure.source ? previous : null)
+        }
+      } finally {
+        busy = false
+        if (alive) setRefreshing(false)
+      }
     }
+    retry.current = () => { void refresh(true) }
     void refresh()
     const timer = setInterval(() => { void refresh() }, 60_000)
     const visible = () => { void refresh() }
     document.addEventListener('visibilitychange', visible)
-    return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
+    return () => {
+      alive = false
+      retry.current = () => {}
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', visible)
+    }
   }, [readUsage])
   useEffect(() => {
     if (!open) return
@@ -48,19 +93,32 @@ function ActiveUsage({ readUsage, t }: Omit<UsagePillProps, 'directory'>) {
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', click); document.removeEventListener('keydown', key) }
   }, [open])
-  const label = usage ? `Go · 5h ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%` : `Go · ${failed ? t('usageUnavailable') : '…'}`
+  const current = snapshot?.reader === readUsage ? snapshot : null
+  const usage = current?.usage
+  const failure = failed?.reader === readUsage ? failed.failure : null
+  const label = usage
+    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}`
+    : `Go · ${failure ? t('usageUnavailable') : '…'}`
   return <span className={css.root} ref={root}>
     <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog"
       aria-label={`${t('usageTitle')}: ${label}`} onClick={() => { setOpen(!open) }}>{label}</button>
-    {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')}>
+    {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
       <strong>{t('usageTitle')}</strong>
       <p className={css.hint}>{t('usageHint')}</p>
+      {failure ? <div className={css.warning} role="alert">
+        <strong>{t('usageRefreshFailed')}</strong>
+        <p>{failure.message ?? t('usageUnavailable')}</p>
+        {usage ? <p>{t('usageStaleHint')}</p> : null}
+      </div> : null}
+      {failure ? <button type="button" className={css.retry} disabled={refreshing}
+        onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRetry')}</button> : null}
+      {current ? <p className={css.hint}>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</p> : null}
       {usage ? (['rolling', 'weekly', 'monthly'] as const).map(key => <div className={css.window} key={key}>
         <div className={css.row}><span>{t(`usage_${key}`)}</span><strong>{usage[key].percent}%</strong></div>
         <progress aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
-        <div className={css.hint}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString()}</div>
+        <div className={css.hint}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
         {usage[key].status === 'rate-limited' && <div>{t('usageLimited')}</div>}
-      </div>) : <p>{failed ? t('usageUnavailable') : t('usageLoading')}</p>}
+      </div>) : failure ? null : <p>{t('usageLoading')}</p>}
     </div>}
   </span>
 }

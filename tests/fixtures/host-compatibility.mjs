@@ -100,11 +100,17 @@ try {
   assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
   assert.equal((await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow, 50000)
   if (modern) {
-    const models = await ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} })
+    const catalog = await ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} })
+    assert.equal(catalog.stale, false, 'settings report a live catalog')
+    const models = catalog.models
     assert.equal(models[0].releaseDate, '2026-09-22', 'model metadata survives the actual RPC codec')
     assert.equal(models[0].contextWindow, 100000, 'settings show raw API capacity')
   }
-  if (modern) assert.deepEqual(await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }), usage)
+  if (modern) {
+    const { source, ...reading } = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
+    assert.deepEqual(reading, usage)
+    assert.match(source, /^[0-9a-f-]{36}$/, 'opaque account identity survives the actual RPC codec')
+  }
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'compat-test' } })
   const request = messages => ({ provider: 'opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })
   const drain = async stream => { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks }

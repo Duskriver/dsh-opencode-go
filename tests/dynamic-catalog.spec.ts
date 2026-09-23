@@ -6,7 +6,7 @@ import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { readModelMetadata } from '../src/model-metadata.ts'
 import { configOf } from './config-of.ts'
-import { OpencodeGoCatalog, discoverCatalogModels } from '../src/catalog.ts'
+import { OpencodeGoCatalog, discoverCatalogModels, discoverSettingsModels } from '../src/catalog.ts'
 import { closeMockGateways, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
@@ -193,14 +193,56 @@ describe('runtime model metadata', () => {
     expect([...old.models.keys()]).toEqual(['union-alpha'])
   })
 
-  it('rechecks availability on every picker read, independently of the runtime TTL', async () => {
+  it('reuses the picker catalog during its TTL and reads new and empty catalogs after explicit settings refreshes', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['kimi-k3']) })
-    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
+    const config = configOf(gateway.url)
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
     expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
     gateway.setModelListing(200, listingBody(['union-alpha']))
+    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+    expect(gateway.modelListings).toBe(1)
+
+    expect((await discoverSettingsModels(adapter.catalogOf(config))).models.map(model => model.id)).toEqual(['union-alpha'])
     expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+    expect(gateway.modelListings).toBe(2)
     gateway.setModelListing(200, listingBody([]))
+    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+    expect(await discoverSettingsModels(adapter.catalogOf(config))).toEqual({ models: [], stale: false })
     expect(await adapter.listModels('opencode-go')).toEqual([])
+    expect(gateway.modelListings).toBe(3)
+  })
+
+  it('revalidates the picker catalog when the configured refresh interval expires', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(['kimi-k3']) })
+    const config = configOf(gateway.url, { refreshMinutes: 1 })
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+    const first = await adapter.catalogOf(config).snapshot()
+    gateway.setModelListing(200, listingBody(['union-alpha']))
+    const now = vi.spyOn(Date, 'now')
+    try {
+      now.mockReturnValue(first.fetchedAtMs + 59_999)
+      expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+      expect(gateway.modelListings).toBe(1)
+      now.mockReturnValue(first.fetchedAtMs + 60_000)
+      expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+      expect(gateway.modelListings).toBe(2)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  it('discovers a directly requested unknown model immediately despite a fresh picker cache', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })
+    const config = configOf(gateway.url)
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+    metadataReplies(() => Response.json(metadataDocument({ 'future-model': modelMetadata() })))
+    gateway.setModelListing(200, listingBody(['future-model']))
+
+    await expect(adapter.resolveModel('opencode-go', 'future-model')).resolves.toMatchObject({ id: 'future-model' })
+    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['future-model'])
+    expect(gateway.modelListings).toBe(2)
   })
 
   it('isolates malformed or unsupported entries and never takes the request origin from metadata', () => {

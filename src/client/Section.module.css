@@ -272,7 +272,9 @@
 .filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }
 .modelLayout { display: grid; grid-template-columns: minmax(0, 43fr) minmax(0, 57fr); height: clamp(240px, calc(100cqh - 460px), 480px); border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 10px; overflow: hidden; }
 .modelList { overflow-y: auto; min-height: 0; padding: 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
-.modelChoice { display: block; width: 100%; text-align: left; padding: 12px 9px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
+.modelRow { display: flex; align-items: center; gap: 8px; padding-right: 6px; }
+.modelRow > [role="switch"] { flex-shrink: 0; }
+.modelChoice { display: block; flex: 1; min-width: 0; text-align: left; padding: 12px 9px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
 .modelChoice[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-3); }
 .modelChoice:hover { background: var(--dsw-alias-bg-layer-3); }
 .modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; }

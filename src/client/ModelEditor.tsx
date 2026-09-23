@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { isNewModel, sortModels, type GoModel } from '../models-contract.ts'
+import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { isModelEnabled, isNewModel, sortModels, type GoModel } from '../models-contract.ts'
 import type { OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels } from './section-controller.ts'
 import type { en } from './locales.ts'
 import css from './Section.module.css'
@@ -10,13 +10,17 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
   return limit?.contextWindow != null || limit?.maxTokens != null
 }
 
-/** One gateway-backed list and its selected model's staged capacity settings. */
-export function ModelEditor({ models, draft, t, disabled, onEdit }: {
+/** Per-model switches apply immediately; capacity edits stay in the staged form. */
+export function ModelEditor({ models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
+  modelVisibility: Readonly<Record<string, boolean>>
   t: Translate
+  locale?: string
   disabled: boolean
+  visibilitySaving: boolean
   onEdit: (next: OpencodeGoModelLimits) => void
+  onModelEnabled: (id: string, enabled: boolean) => void
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
@@ -33,6 +37,7 @@ export function ModelEditor({ models, draft, t, disabled, onEdit }: {
     && (filter === 'all' || filter === 'new' && isNewModel(model, now)
       || filter === 'custom' && hasCapacityOverride(draft[model.id]) || filter === 'deprecated' && model.deprecated))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
+  const visibilityDisabled = disabled || visibilitySaving
   const customized = all.filter(entry => hasCapacityOverride(draft[entry.id])).length
   const filters = [
     ['all', 'filterAll', all.length],
@@ -45,11 +50,13 @@ export function ModelEditor({ models, draft, t, disabled, onEdit }: {
     onEdit({ ...draft, [id]: { ...current, [field]: value ?? null } })
   }
   const badges = (entry: GoModel) => <>
-    {isNewModel(entry, now) ? <span className={css.newBadge} title={t('newHint')}>NEW</span> : null}
+    {entry.configurationMissing ? <Tag tone="warning">{t('configurationMissing')}</Tag> : null}
+    {isNewModel(entry, now) ? <span className={css.newBadge} title={t('newHint')}>{t('newBadge')}</span> : null}
     {entry.deprecated ? <Tag tone="warning">{t('deprecatedBadge')}</Tag> : null}
   </>
   return (
     <div className={css.limitsEditor}>
+      <p className={css.hint}>{t('visibilityHint')}</p>
       <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
       <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
         placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
@@ -60,12 +67,17 @@ export function ModelEditor({ models, draft, t, disabled, onEdit }: {
       {model ? (
         <div className={css.modelLayout}>
           <nav className={css.modelList} aria-label={t('modelsLabel')}>
-            {entries.map(entry => <button key={entry.id} type="button" className={css.modelChoice}
-              aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
-              <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
-              <code className={css.limitsModelId} translate="no">{entry.id}</code>
-              {isNewModel(entry, now) ? <span className={css.releaseDate}>{t('releasedOn', { date: entry.releaseDate })}</span> : null}
-            </button>)}
+            {entries.map(entry => <div key={entry.id} className={css.modelRow}>
+              <button type="button" className={css.modelChoice}
+                aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
+                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
+                <code className={css.limitsModelId} translate="no">{entry.id}</code>
+                {isNewModel(entry, now) ? <span className={css.releaseDate}>{t('releasedOn', { date: entry.releaseDate })}</span> : null}
+              </button>
+              <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
+                checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
+                onChange={enabled => { onModelEnabled(entry.id, enabled) }} />
+            </div>)}
           </nav>
           <section className={css.modelDetails} aria-label={t('modelDetails')}>
             <div className={css.modelHeading}>
@@ -73,13 +85,15 @@ export function ModelEditor({ models, draft, t, disabled, onEdit }: {
               {badges(model)}
             </div>
             <code className={css.limitsModelId} translate="no">{model.id}</code>
-            {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
-            <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} disabled={disabled} onChange={write} />
-            <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} disabled={disabled} onChange={write} />
-            {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
-              onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
-            {model.releaseDate ? <p className={css.hint}>{t('releaseSource', { date: model.releaseDate })}</p> : null}
-            <p className={css.hint}>{t('limitsHint')}</p>
+            {model.configurationMissing ? <p className={css.hint}>{t('configurationMissingHint')}</p> : <>
+              {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
+              <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
+              <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
+              {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
+                onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
+              {model.releaseDate ? <p className={css.hint}>{t('releaseSource', { date: model.releaseDate })}</p> : null}
+              <p className={css.hint}>{t('limitsHint')}</p>
+            </>}
           </section>
         </div>
       ) : models.status === 'ready' && all.length > 0 ? <p className={css.hint}>{t('limitsNoMatches', { query })}</p> : null}
@@ -92,12 +106,13 @@ export function ModelEditor({ models, draft, t, disabled, onEdit }: {
   )
 }
 
-function Capacity({ model, field, limit, disabled, t, onChange }: {
+function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   model: GoModel
   field: keyof OpencodeGoModelLimit
   limit: OpencodeGoModelLimit | null | undefined
   disabled: boolean
   t: Translate
+  locale?: string
   onChange: (id: string, field: keyof OpencodeGoModelLimit, value: number | undefined) => void
 }) {
   const id = `opencode-go-${field}-${encodeURIComponent(model.id)}`
@@ -115,7 +130,7 @@ function Capacity({ model, field, limit, disabled, t, onChange }: {
         else if (Number.isSafeInteger(value) && value > 0) onChange(model.id, field, value)
       }} />
     <span id={`${id}-default`} className={css.hint}>
-      {t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString('en-US') })}
+      {t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString(locale) })}
       {limit?.[field] != null ? ` · ${t('overridden')}` : ''}
     </span>
   </div>

@@ -11,7 +11,7 @@ export function registerUsagePill(ctx: Context): void {
     scope.inject(['remote.opencodeGoUsage'], ready => {
       const readUsage = async () => {
         const result = await ready.remote.opencodeGoUsage.read()
-        if (!result.ok) throw new Error('OpenCode Go usage unavailable')
+        if (!result.ok) throw result.error
         return result.value
       }
       const translate = ready.locale.bind('settings.opencode-go')
@@ -20,6 +20,7 @@ export function registerUsagePill(ctx: Context): void {
         inject: sessionId => ({
           directory: ready.modelDirectories.directoryFor(sessionId as SessionId).store,
           readUsage,
+          getLocale: () => ready.locale.getLocale().active,
           t: (key: string) => translate(key as OpencodeGoKey),
         }),
       }, UsagePill))

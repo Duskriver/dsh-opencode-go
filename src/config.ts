@@ -21,7 +21,7 @@ import { DEFAULT_BASE_URL } from './catalog.ts'
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
 
-/** Runtime request cache lifetime; model listing/discovery always revalidates immediately. */
+/** Requests and pickers share this cache lifetime; explicit discovery revalidates immediately. */
 export const DEFAULT_REFRESH_MINUTES = 60
 
 /** Default maximum idle interval while a stream read is outstanding. */
@@ -52,13 +52,13 @@ export interface OpencodeGoConfig {
    * false registers nothing.
    */
   enabled: boolean
-  /** Include models marked deprecated by models.dev in conversation pickers. */
-  showDeprecatedModels: boolean
+  /** Per-model picker switches; absent entries default to enabled unless deprecated. */
+  modelVisibility?: Record<string, boolean>
   /** Credential reference: the environment variable the key resolves from. */
   apiKeyEnv: string
   /** The gateway endpoint; also the base of the live model listing. */
   baseURL: string
-  /** Runtime request cache lifetime in minutes; explicit catalog reads bypass it. */
+  /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */
   refreshMinutes: number
   /** Largest idle gap between stream events before the request fails. */
   streamIdleTimeoutMs: number
@@ -75,7 +75,7 @@ export interface OpencodeGoConfig {
 /** Runtime schema for {@link OpencodeGoConfig}. */
 const fields = {
   enabled: z.boolean().default(true),
-  showDeprecatedModels: z.boolean().default(false),
+  modelVisibility: z.dict(z.boolean().required()).default({}),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
@@ -96,7 +96,7 @@ const fields = {
 export const PlainConfig: z<OpencodeGoConfig> = z.object(fields)
 
 /** 0.1.7's Loader retains these references when profile fields change. */
-export type LiveConfig = { [K in keyof OpencodeGoConfig]: { get(): OpencodeGoConfig[K] } }
+export type LiveConfig = { [K in keyof OpencodeGoConfig]-?: { get(): OpencodeGoConfig[K] } }
 export const Config = z.object(Object.fromEntries(
   Object.entries(fields).map(([key, schema]) => [key, schema.volatile()]),
 )) as z<Partial<OpencodeGoConfig>, LiveConfig>

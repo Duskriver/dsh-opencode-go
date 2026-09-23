@@ -10,12 +10,15 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
+import Gateway from '@deepseek-ai/dsh-api-gateway'
+import Registry from '@deepseek-ai/dsh-typert-registry'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { LocalCredentialProvider } from '@deepseek-ai/dsh-credentials-local'
 import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import { apply } from '../src/index.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { configOf } from './config-of.ts'
+import type { GoModelCatalog } from '../src/models-contract.ts'
 
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
@@ -240,7 +243,7 @@ describe('settings-backed configuration', () => {
     expect(gateway.paths).toEqual(['/models'])
   })
 
-  it('updates legacy session pickers when deprecated model visibility changes', async () => {
+  it('updates legacy session pickers when a deprecated model is individually enabled', async () => {
     const original = globalThis.fetch
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
       ? Promise.resolve(Response.json(metadataDocument({ old: modelMetadata({ status: 'deprecated' }) })))
@@ -251,11 +254,77 @@ describe('settings-backed configuration', () => {
     expect(await ctx.llm.listModels('opencode-go')).toEqual([])
     const notify = vi.fn()
     ctx.on('llm/adapters-updated', notify)
-    await ctx.settings.update(NS, { showDeprecatedModels: true })
+    await ctx.settings.update(NS, { modelVisibility: { old: true } })
     expect(notify).toHaveBeenCalled()
     expect((await ctx.llm.listModels('opencode-go')).map(m => m.id)).toEqual(['old'])
-    await ctx.settings.update(NS, { showDeprecatedModels: false })
+    await ctx.settings.update(NS, { modelVisibility: { old: false } })
     expect(await ctx.llm.listModels('opencode-go')).toEqual([])
+    expect(gateway.modelListings).toBe(1)
+  })
+
+  it('refreshes Settings and open pickers from one catalog snapshot, including failed refreshes', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })
+    const ctx = await boot({ settingsYaml: '', credentials: { OPENCODE_API_KEY: 'test-key' }, baseURL: gateway.url })
+    cleanups.push(() => ctx.fiber.dispose())
+    await ctx.plugin(Registry)
+    await ctx.plugin(Gateway)
+    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    const pickerReads: Array<Promise<readonly { id: string }[]>> = []
+    const notify = vi.fn(() => {
+      if (ctx.llm.listProviders().some(provider => provider.id === 'opencode-go')) {
+        pickerReads.push(ctx.llm.listModels('opencode-go'))
+      }
+    })
+    ctx.on('llm/adapters-updated', notify)
+    const read = async () => await ctx.typertGateway.invoke({
+      namespace: 'opencodeGoModels', method: 'read', args: {},
+    }) as GoModelCatalog
+    expect((await read()).models.map(model => model.id)).toEqual(['union-alpha'])
+    expect((await Promise.all(pickerReads)).map(models => models.map(model => model.id))).toEqual([['union-alpha']])
+    expect(gateway.modelListings).toBe(1)
+
+    gateway.setModelListing(200, listingBody(['kimi-k3']))
+    expect((await read()).models.map(model => model.id)).toEqual(['kimi-k3'])
+    expect((await pickerReads.at(-1))?.map(model => model.id)).toEqual(['kimi-k3'])
+    expect(gateway.modelListings).toBe(2)
+
+    gateway.setModelListing(503, {})
+    const stale = await read()
+    expect(stale.stale).toBe(true)
+    expect(stale.models.map(model => model.id)).toEqual(['kimi-k3'])
+    expect(stale.error).toContain('HTTP 503')
+    expect((await pickerReads.at(-1))?.map(model => model.id)).toEqual(['kimi-k3'])
+    expect(notify).toHaveBeenCalledTimes(3)
+    expect(gateway.modelListings).toBe(3)
+
+    await ctx.settings.update(NS, { modelVisibility: { 'kimi-k3': false } })
+    expect(await pickerReads.at(-1)).toEqual([])
+    expect(gateway.modelListings).toBe(3)
+
+    await ctx.settings.update(NS, { enabled: false })
+    const notifications = notify.mock.calls.length
+    await read()
+    expect(notify).toHaveBeenCalledTimes(notifications)
+  })
+
+  it('persists individual model switches and notifies open legacy pickers without altering other models', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    const ctx = await boot({ settingsYaml: '', credentials: { OPENCODE_API_KEY: 'test-key' }, baseURL: gateway.url })
+    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    const notify = vi.fn()
+    ctx.on('llm/adapters-updated', notify)
+    await ctx.settings.update(NS, { modelVisibility: { 'deepseek-v4.1-flash': false } })
+    expect(notify).toHaveBeenCalled()
+    const otherModels = (await ctx.llm.listModels('opencode-go')).map(m => m.id)
+    expect(otherModels).not.toContain('deepseek-v4.1-flash')
+    expect(otherModels.length).toBeGreaterThan(0)
+    expect(ctx.settings.describe().find(row => row.ns === NS)?.value.modelVisibility).toEqual({ 'deepseek-v4.1-flash': false })
+    notify.mockClear()
+    await ctx.settings.update(NS, { modelVisibility: { 'deepseek-v4.1-flash': true } })
+    expect(notify).toHaveBeenCalled()
+    const restoredModels = (await ctx.llm.listModels('opencode-go')).map(m => m.id)
+    expect(restoredModels).toContain('deepseek-v4.1-flash')
+    expect(restoredModels.filter(id => id !== 'deepseek-v4.1-flash')).toEqual(otherModels)
   })
 
   it('withdraws the route and its models the moment the switch goes off, and serves again on', async () => {

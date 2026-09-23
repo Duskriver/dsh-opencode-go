@@ -466,6 +466,7 @@ describe('OpencodeGoSectionController', () => {
     // Every model is visible, including those beyond the former six-name preview.
     expect(state().models).toEqual({
       status: 'ready',
+      stale: false,
       count: 7,
       preview: ['DeepSeek V4.1 Flash', 'deepseek-v4-flash', 'kimi-k2', 'glm-5', 'qwen3-max', 'grok-5', 'gpt-6'],
       entries: [
@@ -559,11 +560,11 @@ describe('OpencodeGoSectionController', () => {
     controller.loadModels()
     controller.loadModels()
     settleSecond(discovered([{ id: 'second' }]))
-    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] }) })
+    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', stale: false, count: 1, preview: ['second'], entries: [{ id: 'second' }] }) })
 
     rejectFirst(new Error('the first read failed late'))
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] })
+    expect(state().models).toEqual({ status: 'ready', stale: false, count: 1, preview: ['second'], entries: [{ id: 'second' }] })
   })
 
   it('drops a listing answer a later read already replaced', async () => {
@@ -580,10 +581,10 @@ describe('OpencodeGoSectionController', () => {
     controller.loadModels()
     controller.loadModels()
     settleSecond(discovered([{ id: 'second' }]))
-    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] }) })
+    await vi.waitFor(() => { expect(state().models).toEqual({ status: 'ready', stale: false, count: 1, preview: ['second'], entries: [{ id: 'second' }] }) })
 
     settleFirst(discovered([{ id: 'first' }, { id: 'another' }]))
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(state().models).toEqual({ status: 'ready', count: 1, preview: ['second'], entries: [{ id: 'second' }] })
+    expect(state().models).toEqual({ status: 'ready', stale: false, count: 1, preview: ['second'], entries: [{ id: 'second' }] })
   })
 })

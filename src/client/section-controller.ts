@@ -13,7 +13,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.remote merge into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { GoModel } from '../models-contract.ts'
+import type { GoModel, GoModelCatalog } from '../models-contract.ts'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
@@ -48,8 +48,8 @@ const OPENCODE_GO_PROVIDER = 'opencode-go'
 export interface OpencodeGoSettings {
   /** Whether the adapter serves its route; false withdraws it from every picker. */
   enabled?: boolean
-  /** Include gateway-served deprecated models in conversation pickers. */
-  showDeprecatedModels?: boolean
+  /** Per-model switches; normal models default on, deprecated models default off. */
+  modelVisibility?: Record<string, boolean>
   /** Credential reference naming the environment key. */
   apiKeyEnv?: string
   /** The gateway endpoint; also the live listing base. */
@@ -101,9 +101,12 @@ export type OpencodeGoModels =
     readonly count: number
     readonly preview: readonly string[]
     readonly entries: readonly GoModel[]
+    readonly stale?: boolean
+    readonly message?: string
+    readonly refreshing?: boolean
   }
   /** The listing could not be read; `message` is the Host's own diagnostic. */
-  | { readonly status: 'failed'; readonly message: string }
+  | { readonly status: 'failed'; readonly message?: string }
 
 /** What the settings page renders. */
 export interface OpencodeGoSectionState extends FormShell {
@@ -113,7 +116,7 @@ export interface OpencodeGoSectionState extends FormShell {
    * a withdrawn route is what the user is trying to observe.
    */
   enabled: boolean
-  showDeprecatedModels: boolean
+  modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
   /** Credential reference naming the environment key. */
@@ -157,7 +160,7 @@ export interface OpencodeGoSectionFace extends FormActions {
    * @param next - the state the switch asks for.
    */
   setEnabled: (next: boolean) => void
-  setShowDeprecatedModels: (next: boolean) => void
+  setModelEnabled: (id: string, next: boolean) => void
 }
 
 /** Bridges the `llm-opencode-go` scope and the credentials domain onto the page. */
@@ -180,8 +183,10 @@ export class OpencodeGoSectionController {
   constructor(
     private readonly scope: SettingsScope<OpencodeGoSettings>,
     private readonly ctx: ClientContext,
-    private readonly readModels: () => Promise<RemoteResult<readonly GoModel[]>> = () =>
-      ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: OPENCODE_GO_PROVIDER }),
+    private readonly readModels: () => Promise<RemoteResult<GoModelCatalog>> = async () => {
+      const result = await ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: OPENCODE_GO_PROVIDER })
+      return result.ok ? { ok: true, value: { models: result.value, stale: false } } : result
+    },
   ) {
     this.form = new StagedForm(
       scope as SettingsScope<Record<string, unknown>>,
@@ -201,7 +206,17 @@ export class OpencodeGoSectionController {
       [{ field: API_KEY_FIELD, write: text => this.writeKey(text) }],
     )
     this.store = this.form.bind(() => this.projection())
-    this.unsubscribe = scope.subscribe(() => { void this.readCredential() })
+    let modelsEndpoint = scope.getSnapshot().value?.baseURL
+    this.unsubscribe = scope.subscribe(() => {
+      const endpoint = scope.getSnapshot().value?.baseURL
+      if (endpoint !== modelsEndpoint) {
+        modelsEndpoint = endpoint
+        this.modelsRequest++
+        this.models = { status: 'idle' }
+        this.store.set(this.projection())
+      }
+      void this.readCredential()
+    })
     void this.readCredential()
   }
 
@@ -216,7 +231,7 @@ export class OpencodeGoSectionController {
     return {
       ...this.form.shell(),
       enabled: this.enabled(),
-      showDeprecatedModels: this.scope.getSnapshot().value?.showDeprecatedModels ?? false,
+      modelVisibility: this.scope.getSnapshot().value?.modelVisibility ?? {},
       pickerSaving: this.pickerSaving,
       pickerFailed: this.pickerFailed,
       apiKeyEnv: this.form.field('apiKeyEnv'),
@@ -265,7 +280,7 @@ export class OpencodeGoSectionController {
   /**
    * Flip the switch by writing the field on the click itself.
    *
-   * This is the one control on the page that does not wait for Save: the point
+   * Like the per-model switches, this control does not wait for Save: the point
    * of turning it off is to watch the models leave the pickers, and the point
    * of turning it back on is to use the route again — staging either behind a
    * second gesture would report a state the Host does not hold. The write is
@@ -273,19 +288,27 @@ export class OpencodeGoSectionController {
    * failed save through the shared shell rather than a silent revert.
    * @param next - the state the switch asks for.
    */
-  setEnabled(next: boolean): void {
-    void this.scope.set('enabled', next)
+  async setEnabled(next: boolean): Promise<void> {
+    await this.writePickerSetting('enabled', next, () => this.enabled() === next)
   }
 
-  /** Visibility is immediate; failed writes leave the committed switch state visible. */
-  async setShowDeprecatedModels(next: boolean): Promise<void> {
-    if (this.pickerSaving || !this.scope.getSnapshot().writable) return
+  /** Each model switch has one committed value and takes effect without Save. */
+  async setModelEnabled(id: string, next: boolean): Promise<void> {
+    if (this.models.status === 'ready' && this.models.entries.some(model => model.id === id && model.configurationMissing)) return
+    await this.writePickerSetting('modelVisibility',
+      { ...this.scope.getSnapshot().value?.modelVisibility, [id]: next },
+      () => this.scope.getSnapshot().value?.modelVisibility?.[id] === next)
+  }
+
+  /** Serialize immediate switches with form saves; refused writes retain committed values. */
+  private async writePickerSetting(field: string, value: unknown, accepted: () => boolean): Promise<void> {
+    if (this.pickerSaving || this.form.shell().saving || !this.scope.getSnapshot().writable) return
     this.pickerSaving = true
     this.pickerFailed = false
     this.store.set(this.projection())
     try {
-      await this.scope.set('showDeprecatedModels', next)
-      this.pickerFailed = (this.scope.getSnapshot().value?.showDeprecatedModels ?? false) !== next
+      await this.scope.set(field, value)
+      this.pickerFailed = !accepted()
     } catch {
       this.pickerFailed = true
     } finally {
@@ -303,26 +326,36 @@ export class OpencodeGoSectionController {
    */
   loadModels(): void {
     const request = ++this.modelsRequest
-    this.models = { status: 'loading' }
+    const previous = this.models.status === 'ready' ? this.models : undefined
+    this.models = previous ? { ...previous, refreshing: true } : { status: 'loading' }
     this.store.set(this.projection())
-    // A later read owns the page: an answer or rejection for an earlier one
-    // would report a listing the user already replaced.
+    const failed = (message: string): void => {
+      this.models = previous
+        ? { ...previous, refreshing: false, stale: true, message }
+        : { status: 'failed', message }
+    }
+    // A later read owns the page, including its cached entries and diagnostic.
     void this.readModels()
       .then((response) => {
         if (request !== this.modelsRequest) return
-        this.models = response.ok
-          ? {
+        if (!response.ok) failed(response.error.message)
+        else if (response.value.stale && response.value.models.length === 0) {
+          this.models = { status: 'failed', ...(response.value.error ? { message: response.value.error } : {}) }
+        } else {
+          this.models = {
             status: 'ready',
-            count: response.value.length,
-            preview: response.value.map(model => model.name ?? model.id),
-            entries: response.value,
+            count: response.value.models.length,
+            preview: response.value.models.map(model => model.name ?? model.id),
+            entries: response.value.models,
+            stale: response.value.stale,
+            ...(response.value.error ? { message: response.value.error } : {}),
           }
-          : { status: 'failed', message: response.error.message }
+        }
         this.store.set(this.projection())
       })
       .catch((error: unknown) => {
         if (request !== this.modelsRequest) return
-        this.models = { status: 'failed', message: error instanceof Error ? error.message : String(error) }
+        failed(error instanceof Error ? error.message : String(error))
         this.store.set(this.projection())
       })
   }
@@ -380,8 +413,8 @@ export class OpencodeGoSectionController {
     this.face ??= {
       hooks: { opencodeGo: this.store },
       loadModels: () => { this.loadModels() },
-      setEnabled: (next) => { this.setEnabled(next) },
-      setShowDeprecatedModels: (next) => { void this.setShowDeprecatedModels(next) },
+      setEnabled: (next) => { void this.setEnabled(next) },
+      setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
       ...this.form.actions(),
     }
     return this.face

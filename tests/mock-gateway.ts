@@ -49,7 +49,7 @@ export const textEvents = [
 export async function mockGateway(modelListing: {
   status: number
   body: unknown
-  responseBodyTransform?: (body: Buffer) => Buffer
+  responseBodyTransform?: (body: Buffer, request: IncomingMessage) => Buffer
   responseHeaders?: Record<string, string>
 }): Promise<MockGateway> {
   const paths: string[] = []
@@ -72,7 +72,7 @@ export async function mockGateway(modelListing: {
       if ((request.url === '/models' || request.url === '/v1/models') && request.method === 'GET') {
         modelListings += 1
         const payload = Buffer.from(JSON.stringify(listing.body))
-        const transformed = listing.responseBodyTransform?.(payload) ?? payload
+        const transformed = listing.responseBodyTransform?.(payload, request) ?? payload
         response.writeHead(listing.status, {
           'content-type': 'application/json', 'content-length': String(transformed.byteLength), ...listing.responseHeaders,
         })

@@ -40,7 +40,7 @@ const settled: Omit<OpencodeGoSectionState, SectionField> = {
   saving: false,
   failed: false,
   enabled: true,
-  showDeprecatedModels: false,
+  modelVisibility: {},
   pickerSaving: false,
   pickerFailed: false,
   apiKeyConfigured: false,
@@ -84,7 +84,7 @@ function actions() {
     discard: vi.fn(),
     loadModels: vi.fn(),
     setEnabled: vi.fn(),
-    setShowDeprecatedModels: vi.fn(),
+    setModelEnabled: vi.fn(),
   }
 }
 
@@ -187,10 +187,10 @@ describe('OpencodeGoSection', () => {
     }), acts)
     expect(screen.queryByRole('button', { name: /absent/ })).toBeNull()
     expect(screen.getByLabelText(t('limitsOutputLabel', { name: 'Old model' })).hasAttribute('disabled')).toBe(false)
-    const toggle = screen.getByRole('switch', { name: en.showDeprecatedLabel })
+    const toggle = screen.getByRole('switch', { name: t('modelVisibleLabel', { name: 'Old model' }) })
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(toggle)
-    expect(acts.setShowDeprecatedModels).toHaveBeenCalledWith(true)
+    expect(acts.setModelEnabled).toHaveBeenCalledWith('old', true)
     expect(acts.save).not.toHaveBeenCalled()
   })
 
@@ -446,33 +446,6 @@ describe('OpencodeGoSection', () => {
 })
 
 describe('OpencodeGoSectionController through the component', () => {
-  it('persists picker visibility without saving unrelated drafts and reports refused writes', async () => {
-    const host = stubSettingsScope<OpencodeGoSettings>()
-    host.publish({ status: 'ready', writable: true, value: {}, user: {} })
-    host.set.mockImplementation((field: string, value: unknown) => {
-      host.publish({ value: { ...host.scope.getSnapshot().value, [field]: value } })
-    })
-    const controller = new OpencodeGoSectionController(host.scope, { remote: {
-      credentials: { describe: async () => ({ ok: true, value: {} }) },
-      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
-    } } as never)
-    render(<OpencodeGoSection {...controller.inject()} t={t}
-      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
-    try {
-      await act(async () => { await Promise.resolve() })
-      fireEvent.change(screen.getByLabelText(en.keyLabel), { target: { value: 'unsaved-key' } })
-      const toggle = () => screen.getByRole('switch', { name: en.showDeprecatedLabel })
-      await act(async () => { fireEvent.click(toggle()) })
-      expect(host.set).toHaveBeenCalledWith('showDeprecatedModels', true)
-      expect(toggle().getAttribute('aria-checked')).toBe('true')
-      expect(screen.getByLabelText(en.keyLabel)).toHaveProperty('value', 'unsaved-key')
-      host.set.mockRejectedValueOnce(new Error('write refused'))
-      await act(async () => { fireEvent.click(toggle()) })
-      expect(toggle().getAttribute('aria-checked')).toBe('true')
-      expect(screen.getByRole('alert').textContent).toBe(en.pickerFailed)
-    } finally { controller.dispose() }
-  })
-
   it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     host.set.mockImplementation((field: string, value: unknown) => {

@@ -79,7 +79,7 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
   })
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
-  const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t })
+  const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t, getLocale: () => ctx.locale.getLocale().active })
 
   ctx.effect(() => {
     const refresh = (ref: string): void => { controller.refreshCredential(ref) }
