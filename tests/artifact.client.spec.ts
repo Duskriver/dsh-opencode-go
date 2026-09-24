@@ -8,8 +8,12 @@ import * as store from '@deepseek-ai/dsh-client-store'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import * as modernPrimitives from './hosts/v017/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'
 import * as alpha2Primitives from './hosts/v017-alpha2/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'
+import * as rc1Primitives from './hosts/v017-rc1/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'
+import * as rc2Primitives from './hosts/v017-rc2/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/index.js'
 import * as modernStore from './hosts/v017/node_modules/@deepseek-ai/dsh-client-store/lib/index.js'
 import * as alpha2Store from './hosts/v017-alpha2/node_modules/@deepseek-ai/dsh-client-store/lib/index.js'
+import * as rc1Store from './hosts/v017-rc1/node_modules/@deepseek-ai/dsh-client-store/lib/index.js'
+import * as rc2Store from './hosts/v017-rc2/node_modules/@deepseek-ai/dsh-client-store/lib/index.js'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
 import { stubSettingsScope } from './support/client.ts'
@@ -18,6 +22,8 @@ it.each([
   ['legacy', store, primitives],
   ['0.1.7-alpha.1', modernStore, modernPrimitives],
   ['0.1.7-alpha.2', alpha2Store, alpha2Primitives],
+  ['0.1.7-rc.1', rc1Store, rc1Primitives],
+  ['0.1.7-rc.2', rc2Store, rc2Primitives],
 ] as const)('loads the built client and registers settings with the %s service', async (host, hostStore, hostPrimitives) => {
   const modern = host !== 'legacy'
   const table = new Map<string, unknown>([

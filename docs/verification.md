@@ -1,5 +1,21 @@
 # Verification
 
+## Issue #9: usage progress bar painting (plugin 0.1.12, 2026-09-24)
+
+The progress elements retained `appearance: auto`, preventing the custom WebKit fill from taking effect ([MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/::-webkit-progress-value)). The fix sets `appearance: none`, removes the native border, and gives the progress element the rounded track background. The WebKit track stays transparent to avoid applying the translucent track color twice; the existing WebKit and Firefox fill rules remain green. Percentage values and accessible progress semantics are unchanged.
+
+An isolated browser fixture mounted the actual `lib/client.js` usage slot with local usage data. On macOS / Chrome 153, the original artifact drew a thin native line with a faint fill rather than the intended 5px custom bar; this is not a reproduction of the reporter's completely gray Windows rendering. A screenshot pixel check failed before the fix (zero pixels of the intended fill color) and passed afterward, measuring 59, 101, and 84 filled pixels for 24%, 41%, and 34% of a 246px track, with the expected fill height.
+
+Browser checks also passed for light/dark themes, 0%, 50%, 100%, and a 120% usage reading clamped to a full bar, including a 320px viewport without horizontal overflow. The dialog opened and closed with Escape, and no browser errors were recorded. These checks used the production client artifact with fixture host services, not a full DSH installation; Windows, Firefox, and Safari were not exercised. The complete `npm test` run passed the Host/Client type checks, production build, and **295 tests in 22 files**.
+
+## Issue #8: DSH 0.1.7-rc.1 / rc.2 bundle admission (plugin 0.1.12, 2026-09-24)
+
+The published `@deepseek-ai/dsh-app-boot@0.1.7-rc.1` reproduced the reported `skipping profile bundle` diagnostic with the 0.1.11 manifest: all 19 DSH peer ranges exclude rc.1, so `loadProfileDirectory` removes the bundle before the provider or settings can load. The engine declaration also excluded rc.1. The subsequently published [rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-rc.2) still rejects a manifest that only declares through rc.1. Adding both exact versions to the engine and DSH peer ranges fixes admission without profile version exemptions; unverified rc.3 and 0.1.7 stable remain outside the declared range.
+
+`node --expose-internals tests/fixtures/bundle-compatibility.mjs v017-rc1` and the corresponding `v017-rc2` command failed before their manifest changes and pass afterward. They use the real startup gates against temporary Web and Headless profiles, asserting that the bundle and provider insertion survive. The rc.2 gate now returns skipped bundles for later reporting; the fixture also checks that this list is empty. Independently pinned rc.1 and rc.2 workspaces extend the existing built Host/Client tests for provider activation, catalog and usage RPC, streaming, image resizing and tool results, default/explicit reasoning, live profile settings, and client settings registration/rendering. The rc.2 UI primitives additionally require the host's new `dsh-util-code-language` module, which is supplied by the rc.2 test workspace.
+
+`npm test` passed Host/Client type checks, the production build, and **301 tests in 22 files**, covering all eight supported host fixtures on macOS / Node.js 24.14.1. The existing upstream UI source-map warnings remain. Tests use local gateways and fake credentials; they do not exercise a full running DSH Web/Desktop shell or make paid model requests.
+
 ## Individual model switches and cached Settings discovery (2026-09-23)
 
 `modelVisibility` stores explicit booleans by model ID. An absent override enables an ordinary model and disables a model marked deprecated. A `true` override can enable a deprecated model without a second global condition; `false` can hide an ordinary model. The Host and Client share `isModelEnabled`, including own-property checks for IDs that match JavaScript prototype keys. Older `showDeprecatedModels` and `visibleModelIds` fields remain loadable as unknown configuration but no longer impose a visibility condition.
