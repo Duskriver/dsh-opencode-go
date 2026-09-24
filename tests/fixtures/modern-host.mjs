@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 /** Resolve every shared identity from the independently pinned 0.1.7 host. */
 export async function useModernHost(host = 'v017') {
-  if (!['v017', 'v017-alpha2'].includes(host)) throw new Error(`Unknown modern host: ${host}`)
+  if (!['v017', 'v017-alpha2', 'v017-rc1'].includes(host)) throw new Error(`Unknown modern host: ${host}`)
   const anchor = new URL(`../hosts/${host}/package.json`, import.meta.url)
   const requireHost = createRequire(anchor)
   const manifest = JSON.parse(await readFile(anchor, 'utf8'))

@@ -6,7 +6,7 @@ import { once } from 'node:events'
 import { useModernHost } from './modern-host.mjs'
 
 const host = process.argv[2]
-const modern = ['v017', 'v017-alpha2'].includes(host)
+const modern = ['v017', 'v017-alpha2', 'v017-rc1'].includes(host)
 if (modern) await useModernHost(host)
 const llmURL = import.meta.resolve(modern ? '@deepseek-ai/dsh-llm' : host)
 registerHooks({ resolve(id, context, next) {

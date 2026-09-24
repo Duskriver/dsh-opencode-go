@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { useModernHost } from './modern-host.mjs'
 
-const modern = ['v017', 'v017-alpha2'].includes(process.argv[2])
+const modern = ['v017', 'v017-alpha2', 'v017-rc1'].includes(process.argv[2])
 if (modern) {
   await useModernHost(process.argv[2])
   process.argv[2] = '@deepseek-ai/dsh-llm'

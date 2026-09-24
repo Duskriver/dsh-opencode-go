@@ -17,7 +17,7 @@ The plugin automatically adds the session headers required by OpenCode Go, reads
 
 ## Installation and usage
 
-Supported DSH versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, and `0.1.7-alpha.2`.
+Supported DSH versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, and `0.1.7-rc.1`.
 
 ### Install from DSH (recommended)
 
@@ -34,7 +34,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.11
+dsh plugin --profile web add dsh-opencode-go@0.1.12
 ```
 
 Start or restart `dsh web`, then:
@@ -48,7 +48,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.11
+dsh plugin --profile headless add dsh-opencode-go@0.1.12
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -75,7 +75,7 @@ To build from source and install a local package:
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.11.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.12.tgz
 ```
 
 The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.

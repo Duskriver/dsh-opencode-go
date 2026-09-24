@@ -1,5 +1,20 @@
 # Verification
 
+## DSH 0.1.7-rc.1 compatibility (plugin 0.1.12, 2026-09-24)
+
+The package now declares DSH `0.1.7-rc.1` support while retaining the six previously supported hosts. The upstream installer enforces compatibility through `evaluatePluginCompatibility`, which checks every `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` peerDependency against the running runtime version; `0.1.7-rc.1` satisfied none of the declared ranges, so installation was refused as `incompatible-version`. `engines.dsh` is declarative in the same installer and does not itself gate an install, but it carries the version too. Unverified future prereleases remain outside the declared range.
+
+Reviewing the upstream release diff and the rc.1 sources found no required change to the adapter or settings implementation. The APIs this plugin consumes keep their signatures: `llm.registerAdapter` and `AdapterRegistrationHandle.replace`, `llm.registerModelDiscovery`, `resolveImageAttachmentAccess`, the `credentials/reference-updated` and `loader/volatile-update` events, and the `settings.configure({ auto: false }, fiber)` profile-settings policy. `installSection` is still absent from 0.1.7 and remains reachable only through the legacy settings path. The new `tests/hosts/v017-rc1` workspace pins the DSH services at `0.1.7-rc.1` with Cordis `4.0.4`, Loader `1.0.5`, Include `1.0.9`, and Schemastery `3.18.4`.
+
+Validation on Windows / Node.js 24.18.1:
+
+- Host/client type checks, the build, and all **293 tests in 22 files** pass. The seven-host matrix covers artifact loading, Loader activation, catalog and usage RPCs, streaming, capacities, real image resizing, offload limits, and immutable history, plus default and explicit reasoning efforts and live profile settings without remounting.
+- The `0.1.7-rc.1` fixture passes all three families: host compatibility, reasoning compatibility, and profile settings.
+- The real `0.1.7-rc.1` gate accepts the adapted `0.1.12` manifest and rejects the previously installed `0.1.9` manifest with 19 unsatisfied peers, reproducing the reported failure. The adapted manifest is still accepted on `0.1.7-alpha.2`, and `0.1.7-alpha.3` is still rejected as unverified.
+- `npm pack` produces `dsh-opencode-go-0.1.12.tgz`. Published UI primitives still emit the documented missing-source-map warnings; all assertions pass.
+
+Completion requests use loopback fixtures and fake credentials; no paid model calls were made. This verification does not cover the full Web/Desktop UI or other operating systems.
+
 ## Individual model switches and cached Settings discovery (2026-09-23)
 
 `modelVisibility` stores explicit booleans by model ID. An absent override enables an ordinary model and disables a model marked deprecated. A `true` override can enable a deprecated model without a second global condition; `false` can hide an ordinary model. The Host and Client share `isModelEnabled`, including own-property checks for IDs that match JavaScript prototype keys. Older `showDeprecatedModels` and `visibleModelIds` fields remain loadable as unknown configuration but no longer impose a visibility condition.

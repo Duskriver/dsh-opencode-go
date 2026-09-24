@@ -18,7 +18,7 @@
 ## 安装与使用
 
 兼容清单：
- `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1` 和 `0.1.7-alpha.2`
+ `0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-alpha.1`、`0.1.7-alpha.2` 和 `0.1.7-rc.1`
 
 ### 在 DSH 中安装（推荐）
 
@@ -35,7 +35,7 @@
 ### 命令行安装（备选）
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.11
+dsh plugin --profile web add dsh-opencode-go@0.1.12
 ```
 
 安装后启动或重启 `dsh web`，然后：
@@ -49,7 +49,7 @@ dsh plugin --profile web add dsh-opencode-go@0.1.11
 安装到 Headless profile：
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.11
+dsh plugin --profile headless add dsh-opencode-go@0.1.12
 ```
 
 将以下内容保存为 `headless.patch.yml`，选择默认模型：
@@ -76,7 +76,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.11.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.12.tgz
 ```
 
 开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
