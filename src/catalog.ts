@@ -16,8 +16,12 @@ export const PROVIDER_ID = 'opencode-go'
 export const DISPLAY_NAME = 'OpenCode Go'
 export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
 const MODELS_FETCH_TIMEOUT_MS = 10_000
+const METADATA_FETCH_TIMEOUT_MS = 30_000
+const STALE_WHILE_REVALIDATE_MS = 5 * 60_000
 const MODEL_LISTING_MAX_BYTES = 1024 * 1024
 const MODEL_METADATA_MAX_BYTES = 16 * 1024 * 1024
+const RETRY_MIN_MS = 5_000
+const RETRY_MAX_MS = 60_000
 
 export interface CatalogSnapshot {
   readonly details: ModelMetadata['details']
@@ -26,9 +30,34 @@ export interface CatalogSnapshot {
   readonly unavailable: ReadonlyMap<string, string>
   readonly provider: Provider
   readonly live: boolean
+  readonly metadataLive: boolean
   /** Retained for explicit discovery; runtime callers may still use the last catalog. */
   readonly listingFailure?: unknown
+  readonly metadataFailure?: unknown
+  /** Last successful fetch or revalidation, not the time of a failed attempt. */
+  readonly listingUpdatedAtMs?: number
+  readonly metadataUpdatedAtMs?: number
   readonly fetchedAtMs: number
+}
+
+/** Cancelling one waiter must not cancel a catalog refresh shared with other calls. */
+function waitForSnapshot(pending: Promise<CatalogSnapshot>, signal?: AbortSignal): Promise<CatalogSnapshot> {
+  if (signal === undefined) return pending
+  return new Promise((resolve, reject) => {
+    const abort = (): void => {
+      signal.removeEventListener('abort', abort)
+      reject(new LlmError('opencode-go catalog request aborted by caller', 'ABORTED', { cause: signal.reason }))
+    }
+    pending.then(value => {
+      signal.removeEventListener('abort', abort)
+      resolve(value)
+    }, error => {
+      signal.removeEventListener('abort', abort)
+      reject(error)
+    })
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+  })
 }
 
 /** Built-ins are outage fallbacks and compatibility hints, never a membership whitelist. */
@@ -103,6 +132,9 @@ export class OpencodeGoCatalog {
   private pending: Promise<CatalogSnapshot> | undefined
   private metadata: ModelMetadata | undefined
   private metadataETag: string | undefined
+  private metadataUpdatedAtMs: number | undefined
+  private failures = 0
+  private refreshAtMs = 0
 
   constructor(
     private readonly baseURL: string,
@@ -112,14 +144,24 @@ export class OpencodeGoCatalog {
     private readonly onOmitted: (ids: readonly string[]) => void,
   ) {}
 
-  snapshot(force = false): Promise<CatalogSnapshot> {
-    if (!force && this.served !== undefined && Date.now() - this.served.fetchedAtMs < this.refreshMs) {
+  snapshot(force = false, signal?: AbortSignal): Promise<CatalogSnapshot> {
+    if (signal?.aborted) {
+      return Promise.reject(new LlmError('opencode-go catalog request aborted by caller', 'ABORTED', { cause: signal.reason }))
+    }
+    if (!force && this.served !== undefined && Date.now() < this.refreshAtMs) {
       return Promise.resolve(this.served)
     }
     this.pending ??= this.build()
-      .then((snapshot) => { this.served = snapshot; return snapshot })
+      .then((snapshot) => {
+        this.served = snapshot
+        this.failures = snapshot.live && snapshot.metadataLive ? 0 : Math.min(this.failures + 1, 5)
+        const lifetime = this.failures === 0 ? this.refreshMs
+          : Math.min(this.refreshMs, RETRY_MIN_MS * 2 ** (this.failures - 1), RETRY_MAX_MS)
+        this.refreshAtMs = snapshot.fetchedAtMs + lifetime
+        return snapshot
+      })
       .finally(() => { this.pending = undefined })
-    return this.pending
+    return waitForSnapshot(this.pending, signal)
   }
 
   /** Conditional HTTP requests save bandwidth while still checking for updated metadata. */
@@ -127,13 +169,22 @@ export class OpencodeGoCatalog {
     const { response, body } = await fetchJsonResponse(MODEL_METADATA_URL, {
       headers: { ...attributionHeaders(), accept: 'application/json',
         ...(this.metadataETag === undefined ? {} : { 'if-none-match': this.metadataETag }) },
-      cache: 'no-cache', signal: AbortSignal.timeout(MODELS_FETCH_TIMEOUT_MS),
+      cache: 'no-cache', signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS),
     }, MODEL_METADATA_MAX_BYTES)
-    if (response.status === 304 && this.metadata !== undefined) return this.metadata
-    if (!response.ok) throw new Error(`models.dev answered ${response.status}`)
-    const metadata = readModelMetadata(body, this.baseURL, builtin)
+    if (response.status === 304 && this.metadata !== undefined) {
+      this.metadataUpdatedAtMs = Date.now()
+      return this.metadata
+    }
+    if (!response.ok) throw new LlmError(`${MODEL_METADATA_URL} answered HTTP ${response.status}`, 'DISCOVERY_FAILED')
+    let metadata: ModelMetadata
+    try {
+      metadata = readModelMetadata(body, this.baseURL, builtin)
+    } catch (error) {
+      throw new LlmError(`${MODEL_METADATA_URL} returned invalid model configuration`, 'DISCOVERY_FAILED', { cause: error })
+    }
     this.metadata = metadata
     this.metadataETag = response.headers.get('etag') ?? undefined
+    this.metadataUpdatedAtMs = Date.now()
     return metadata
   }
 
@@ -141,9 +192,14 @@ export class OpencodeGoCatalog {
   private async build(): Promise<CatalogSnapshot> {
     const builtin = builtinModels(this.baseURL)
     const [listing, metadataResult] = await Promise.allSettled([
-      fetchLiveModelIds(this.baseURL), this.refreshMetadata(builtin),
+      fetchLiveModelIds(this.baseURL).then(ids => ({ ids, updatedAtMs: Date.now() })), this.refreshMetadata(builtin),
     ])
     const metadata = metadataResult.status === 'fulfilled' ? metadataResult.value : this.metadata
+    const metadataStatus = {
+      metadataLive: metadataResult.status === 'fulfilled',
+      ...this.metadataUpdatedAtMs === undefined ? {} : { metadataUpdatedAtMs: this.metadataUpdatedAtMs },
+      ...metadataResult.status === 'rejected' ? { metadataFailure: metadataResult.reason } : {},
+    }
     const known = new Map([...builtin, ...(this.served?.models ?? []), ...(metadata?.models ?? [])])
     if (metadataResult.status === 'rejected') {
       this.onFallback({ url: MODEL_METADATA_URL, error: metadataResult.reason, kept: known.size })
@@ -156,12 +212,14 @@ export class OpencodeGoCatalog {
         details: this.served?.details ?? new Map(),
         models, unavailable: this.served?.unavailable ?? new Map(),
         provider: buildProvider(this.baseURL, [...models.values()]), live: false, fetchedAtMs: Date.now(),
+        ...metadataStatus,
+        ...this.served?.listingUpdatedAtMs === undefined ? {} : { listingUpdatedAtMs: this.served.listingUpdatedAtMs },
         listingFailure: listing.reason,
       }
     }
     const models = new Map<string, Model<Api>>()
     const unavailable = new Map<string, string>()
-    for (const id of listing.value) {
+    for (const id of listing.value.ids) {
       const error = metadata?.errors.get(id)
       const model = known.get(id)
       if (error !== undefined || model === undefined) {
@@ -172,17 +230,26 @@ export class OpencodeGoCatalog {
     }
     if (unavailable.size > 0) this.onOmitted([...unavailable.keys()])
     return {
-      details: new Map(listing.value.map(id => [id, metadata?.details.get(id) ?? {}])),
+      details: new Map(listing.value.ids.map(id => [id, metadata?.details.get(id) ?? {}])),
       models, unavailable, provider: buildProvider(this.baseURL, [...models.values()]),
-      live: true, fetchedAtMs: Date.now(),
+      live: true, fetchedAtMs: Date.now(), listingUpdatedAtMs: listing.value.updatedAtMs, ...metadataStatus,
     }
   }
 
   /** New or previously unconfigured ids get a fresh lookup even during the runtime TTL. */
-  async forModel(id: string): Promise<CatalogSnapshot> {
+  async forModel(id: string, signal?: AbortSignal): Promise<CatalogSnapshot> {
     const cached = this.served
-    let snapshot = await this.snapshot()
-    if (!snapshot.models.has(id) && snapshot === cached) snapshot = await this.snapshot(true)
+    if (signal?.aborted) throw new LlmError('opencode-go catalog request aborted by caller', 'ABORTED', { cause: signal.reason })
+    // Only previously verified configurations may bypass a due/in-flight refresh.
+    // Failed attempts never extend this window; explicit discovery still waits.
+    if (cached?.models.has(id) && cached.listingUpdatedAtMs !== undefined && cached.metadataUpdatedAtMs !== undefined
+      && Date.now() < Math.min(cached.listingUpdatedAtMs, cached.metadataUpdatedAtMs) + this.refreshMs + STALE_WHILE_REVALIDATE_MS) {
+      void this.snapshot().catch(() => {})
+      return cached
+    }
+    let snapshot = await this.snapshot(false, signal)
+    if (!snapshot.models.has(id) && snapshot === cached) snapshot = await this.snapshot(true, signal)
+    if (signal?.aborted) throw new LlmError('opencode-go catalog request aborted by caller', 'ABORTED', { cause: signal.reason })
     if (snapshot.unavailable.has(id)) {
       throw new LlmError(
         `opencode-go model "${id}" is advertised but cannot be configured: ${snapshot.unavailable.get(id)}; refresh the model list to retry`,
@@ -227,12 +294,33 @@ function describeCatalog(snapshot: CatalogSnapshot): readonly LlmDiscoveredModel
 /** Settings expose the same retained catalog as requests, with a failed-refresh diagnostic. */
 export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promise<GoModelCatalog> {
   const snapshot = await catalog.snapshot(true)
+  const metadataError = snapshot.metadataLive ? undefined : metadataFailureMessage(snapshot.metadataFailure)
+  const errors = [snapshot.live ? undefined : listingError(snapshot).message, metadataError]
+    .filter((message): message is string => message !== undefined)
   return {
     models: sortModels([
       ...describeConfiguredModels(snapshot),
       ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
     ].map(model => ({ ...model, ...snapshot.details.get(model.id) }))),
-    stale: !snapshot.live,
-    ...(snapshot.live ? {} : { error: listingError(snapshot).message }),
+    stale: errors.length > 0,
+    ...(errors.length === 0 ? {} : { error: errors.join('; ') }),
+    sources: {
+      listing: {
+        ...snapshot.listingUpdatedAtMs === undefined ? {} : { updatedAt: snapshot.listingUpdatedAtMs },
+        ...snapshot.live ? {} : { error: listingError(snapshot).message },
+      },
+      metadata: {
+        ...snapshot.metadataUpdatedAtMs === undefined ? {} : { updatedAt: snapshot.metadataUpdatedAtMs },
+        ...metadataError === undefined ? {} : { error: metadataError },
+      },
+    },
   }
+}
+
+function metadataFailureMessage(error: unknown): string {
+  const detail = error instanceof LlmError ? error.message
+    : `${MODEL_METADATA_URL}: ${error instanceof SyntaxError ? 'invalid JSON response'
+      : error instanceof RangeError ? `response exceeds the ${MODEL_METADATA_MAX_BYTES} byte limit`
+        : transportFailure(error)}`
+  return `could not refresh model configuration (${detail}); using previously fetched or built-in configuration where available`
 }

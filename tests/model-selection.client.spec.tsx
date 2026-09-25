@@ -46,6 +46,88 @@ async function flip(name: string) { await act(async () => { fireEvent.click(togg
 async function refresh() { await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsRefresh })) }) }
 
 describe('per-model switches through the settings controller and component', () => {
+  it('distinguishes a metadata outage from a confirmed missing configuration and keeps the warning during retry', async () => {
+    const id = 'deepseek-v4.1-flash'
+    const missing = { id, configurationMissing: true }
+    const { read, host } = await mount({ catalog: {
+      models: [missing, ...models], stale: true, error: 'models.dev answered HTTP 503',
+      sources: { listing: { updatedAt: Date.now() }, metadata: { error: 'HTTP 503' } },
+    } })
+    expect(screen.getByRole('alert').textContent).toContain('Could not load model configuration')
+    expect(screen.getAllByText('Configuration unavailable').length).toBeGreaterThan(0)
+    expect(screen.queryByText(en.configurationMissingHint)).toBeNull()
+    expect(screen.getByText(/Check network access to models.dev from the machine running DSH/)).toBeTruthy()
+    expect(toggle(id).disabled).toBe(true)
+    expect(toggle('Alpha').disabled).toBe(false)
+    await flip(id)
+    expect(host.set).not.toHaveBeenCalled()
+
+    const pending = Promise.withResolvers<{ ok: true; value: GoModelCatalog }>()
+    read.mockImplementationOnce(() => pending.promise)
+    await refresh()
+    expect(screen.getByText(en.modelsRefreshing)).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('Could not load model configuration')
+    expect(screen.getByText('models.dev answered HTTP 503')).toBeTruthy()
+    expect(toggle('Alpha').disabled).toBe(false)
+
+    // The metadata source recovers, but it still has no configuration for this ID.
+    await act(async () => { pending.resolve({ ok: true, value: {
+      models: [missing, ...models], stale: false,
+      sources: { listing: { updatedAt: Date.now() }, metadata: { updatedAt: Date.now() } },
+    } }) })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText('Configuration unavailable')).toBeNull()
+    expect(screen.getAllByText(en.configurationMissing).length).toBeGreaterThan(0)
+    expect(screen.getByText(en.configurationMissingHint)).toBeTruthy()
+    expect(toggle(id).disabled).toBe(true)
+
+    read.mockResolvedValueOnce({ ok: true, value: {
+      models: [{ id, name: 'DeepSeek V4.1 Flash' }, ...models], stale: false,
+      sources: { listing: { updatedAt: Date.now() }, metadata: { updatedAt: Date.now() } },
+    } })
+    await refresh()
+    expect(screen.queryByText(en.configurationMissing)).toBeNull()
+    expect(toggle('DeepSeek V4.1 Flash').disabled).toBe(false)
+    expect(checked('DeepSeek V4.1 Flash')).toBe(true)
+  })
+
+  it('identifies metadata failure even when the gateway successfully returns an empty listing', async () => {
+    const { read } = await mount({ catalog: {
+      models: [], stale: true, error: 'models.dev answered HTTP 503',
+      sources: { listing: { updatedAt: Date.now() }, metadata: { error: 'HTTP 503' } },
+    } })
+    expect(screen.getByRole('alert').textContent).toContain('Could not load model configuration')
+    expect(screen.queryByText(en.modelsFailed)).toBeNull()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsRefresh }).disabled).toBe(false)
+    read.mockResolvedValueOnce({ ok: true, value: { models: [], stale: false } })
+    await refresh()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText(en.modelsEmpty)).toBeTruthy()
+  })
+
+  it('carries source diagnostics through the controller and clears them after recovery', async () => {
+    const listingTime = Date.UTC(2026, 8, 25, 10)
+    const metadataTime = listingTime - 60_000
+    const { read } = await mount({ catalog: {
+      models, stale: true, error: 'models.dev answered HTTP 503',
+      sources: { listing: { updatedAt: listingTime }, metadata: { updatedAt: metadataTime, error: 'HTTP 503' } },
+    } })
+    expect(screen.getByRole('alert').textContent).toBe(en.modelsMetadataFailed)
+    expect(screen.getByText(/Model availability: Up to date/).textContent).toContain(new Date(listingTime).toLocaleString())
+    expect(screen.getByText(/Model configuration: Refresh failed/).textContent).toContain(new Date(metadataTime).toLocaleString())
+    expect(toggle('Alpha').disabled).toBe(false)
+    // A failed RPC cannot confirm either source is still current.
+    read.mockRejectedValueOnce(new Error('Host unreachable'))
+    await refresh()
+    expect(screen.getByText('Host unreachable')).toBeTruthy()
+    expect(screen.queryByText(/Model availability: Up to date/)).toBeNull()
+    read.mockResolvedValueOnce({ ok: true, value: { models, stale: false } })
+    await refresh()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText(/Model configuration: Refresh failed/)).toBeNull()
+    expect(toggle('Alpha').disabled).toBe(false)
+  })
+
   it('defaults normal models on and deprecated models off, applying each switch immediately', async () => {
     const { host, snapshot } = await mount()
     expect(checked('Alpha')).toBe(true)

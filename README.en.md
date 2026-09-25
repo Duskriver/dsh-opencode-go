@@ -8,7 +8,7 @@ The plugin automatically adds the session headers required by OpenCode Go, reads
 
 ## Features
 
-- **Session headers**: Every request includes the Harness User-Agent and `x-opencode-session`. A session keeps the same ID to maximize cache hits.
+- **Session headers**: Every request includes the Harness User-Agent and `x-opencode-session`. A session keeps a stable ID to support gateway routing and prompt-cache optimization; actual cache hits depend on the upstream service.
 - **Streaming and history**: Supports streaming output, tool calls, and history replay through pi-ai.
 - **Image input**: Supports models that advertise image capability in the catalog.
 - **Model capacity overrides**: Override the context window and maximum output per model, with blank values inheriting the online catalog.
@@ -36,7 +36,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.12
+dsh plugin --profile web add dsh-opencode-go@0.1.13
 ```
 
 Start or restart `dsh web`, then:
@@ -50,7 +50,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.12
+dsh plugin --profile headless add dsh-opencode-go@0.1.13
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -77,7 +77,7 @@ To build from source and install a local package:
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.12.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.13.tgz
 ```
 
 The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.
@@ -95,6 +95,10 @@ Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web
 ## Subscription usage display
 
 Usage refreshes every minute. Temporary network or service errors retain the last reading for the same account, with a failure notice, timestamp, and reason; the usage panel offers an immediate retry. Initial and authentication failures do not show old usage. Catalog, metadata, and usage JSON requests retry a transient connection reset once within the original timeout budget; this cannot guarantee recovery while the network is failing.
+
+The usage panel also shows the current session's cached input share, cache read/write tokens, total input tokens, and measured response count. The formula is `cacheReadTokens / (inputTokens + cacheReadTokens + cacheWriteTokens)`, weighted by tokens and excluding output tokens. Statistics are derived from the Host's loaded session history, can be reconstructed after session restore, and add no network requests. The panel subscribes only while open. Account usage failures do not affect these statistics.
+
+Only settled Go responses with an identifiable route and valid usage are counted. Unsettled attempts and inherited fork responses are excluded; missing route/usage and incomplete history are indicated. Older Hosts without a session event feed continue to show account usage. A stable `x-opencode-session` supports routing affinity but does not establish a cache hit; actual cache reads are reported by the gateway.
 
 ![OpenCode Go usage display](image.png)
 
@@ -136,11 +140,19 @@ Models that are present in the gateway and have an entry using Anthropic Message
 
 A gateway model ID with no usable protocol or capability configuration is marked “Configuration missing” in Settings, with its switch off and disabled, and is kept out of the conversation picker, so one unconfigured model cannot block the rest of the list. Direct requests report the reason. Refresh after the upstream configuration is corrected. A model ID alone is not enough to reliably infer its transport; new protocols or protocol-specific exceptions may still require adapter changes.
 
+If online configuration cannot be loaded, models without usable cached or built-in configuration are marked “Configuration unavailable”, with the configuration source error shown on the page. Check access to `https://models.dev/api.json` from the machine running DSH and review the error details, then refresh. When retrying a retained model list, its previous failure stays visible until a successful refresh clears it; configured models remain usable.
+
 A reasoning-capable model without adjustable reasoning levels (for example, `union-alpha`) remains selectable and usable; it simply has no reasoning-strength control.
 
 A model that does offer adjustable levels also declares a default effort (`high` when the model offers it, otherwise the highest level it offers) whenever its transport would answer an unset effort with an explicit disable (`deepseek`, `zai`, `qwen`, `qwen-chat-template`). DSH uses that default when no level has been chosen, so leaving the control unset still sends a reasoning level instead of turning thinking off. Transports that leave the choice to the provider declare no default and are unchanged, and an explicitly chosen level always wins.
 
-If the online configuration is temporarily unavailable, the plugin prefers a configuration fetched successfully earlier in the process and falls back to pi-ai's built-in metadata. If a gateway catalog refresh fails, ongoing requests and Settings retain the last successful list. Settings also shows a warning and the failure cause, identifying the displayed list as cached. A first read that fails without a cache shows an error and does not invent a model list. `refreshMinutes` controls the catalog cache lifetime for ongoing model requests and conversation pickers; explicit Settings refreshes and previously unknown model requests still fetch immediately.
+If the online configuration is temporarily unavailable, the plugin prefers a configuration fetched successfully earlier in the process and falls back to pi-ai's built-in metadata. If a gateway catalog refresh fails, ongoing requests and Settings retain the last successful list. A failure from either source shows a warning, its cause, and the last successful checks of the model listing and model configuration separately. An initial failure without a cache never invents a model list.
+
+`refreshMinutes` controls the cache lifetime after a successful refresh. Failed refreshes become eligible for retry on the next read after 5, 10, 20, 40, then at most 60 seconds; there is no background polling when nothing reads the catalog. Explicit Settings refreshes and previously unknown model requests bypass this delay. Cancelling model resolution or generation immediately ends that caller's catalog wait while other callers can continue sharing the same refresh.
+
+Verified model configurations can serve generation immediately for five minutes after their cache lifetime expires, while triggering one shared background refresh. This window is measured from each source's last successful check; failed retries do not extend it. Beyond that window, requests wait for the next due refresh, retaining the existing fallback behavior if it fails. Initial loads, unknown models, and manual refreshes wait for results. Listing requests have a 10-second deadline; the larger model metadata download has its own 30-second deadline.
+
+Continuation, retries, and restored sessions reuse the Host's durable session ID. Forks and subagent sessions use their own IDs, separate from the parent. Standalone requests without a session ID receive a fresh random identifier each time.
 
 ## Uninstall
 

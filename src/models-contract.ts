@@ -12,11 +12,19 @@ export interface GoModel {
   configurationMissing?: boolean
 }
 
-/** A failed refresh retains the Host's last successful listing with an explicit diagnostic. */
+/** Last successful check of one catalog source, plus any current refresh failure. */
+export interface GoCatalogSourceStatus {
+  readonly updatedAt?: number
+  readonly error?: string
+}
+
+/** A failed refresh retains the Host's usable data with an explicit diagnostic. */
 export interface GoModelCatalog {
   readonly models: readonly GoModel[]
   readonly stale: boolean
   readonly error?: string
+  /** Optional for clients reading an older Host response. Timestamps are Unix milliseconds. */
+  readonly sources?: { readonly listing: GoCatalogSourceStatus; readonly metadata: GoCatalogSourceStatus }
 }
 
 /** Missing configuration cannot be enabled; configured models follow explicit switches or lifecycle defaults. */
@@ -74,7 +82,27 @@ export function parseGoModelCatalog(value: unknown): GoModelCatalog {
   return {
     models: parseGoModels(catalog.models), stale: catalog.stale,
     ...(catalog.error === undefined ? {} : { error: catalog.error as string }),
+    ...(catalog.sources === undefined ? {} : { sources: parseSources(catalog.sources) }),
   }
+}
+
+function parseSources(value: unknown): NonNullable<GoModelCatalog['sources']> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid OpenCode Go catalog sources')
+  const sources = value as Record<string, unknown>
+  const parse = (value: unknown): GoCatalogSourceStatus => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid OpenCode Go catalog source status')
+    const source = value as Record<string, unknown>
+    if (source.updatedAt !== undefined && (typeof source.updatedAt !== 'number'
+      || !Number.isSafeInteger(source.updatedAt) || source.updatedAt < 0 || source.updatedAt > 8_640_000_000_000_000)) {
+      throw new Error('Invalid OpenCode Go catalog source timestamp')
+    }
+    if (source.error !== undefined && typeof source.error !== 'string') throw new Error('Invalid OpenCode Go catalog source error')
+    return {
+      ...(source.updatedAt === undefined ? {} : { updatedAt: source.updatedAt as number }),
+      ...(source.error === undefined ? {} : { error: source.error as string }),
+    }
+  }
+  return { listing: parse(sources.listing), metadata: parse(sources.metadata) }
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {

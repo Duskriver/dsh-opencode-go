@@ -104,9 +104,10 @@ export type OpencodeGoModels =
     readonly stale?: boolean
     readonly message?: string
     readonly refreshing?: boolean
+    readonly sources?: GoModelCatalog['sources']
   }
   /** The listing could not be read; `message` is the Host's own diagnostic. */
-  | { readonly status: 'failed'; readonly message?: string }
+  | { readonly status: 'failed'; readonly message?: string; readonly sources?: GoModelCatalog['sources'] }
 
 /** What the settings page renders. */
 export interface OpencodeGoSectionState extends FormShell {
@@ -331,7 +332,7 @@ export class OpencodeGoSectionController {
     this.store.set(this.projection())
     const failed = (message: string): void => {
       this.models = previous
-        ? { ...previous, refreshing: false, stale: true, message }
+        ? { ...previous, refreshing: false, stale: true, message, sources: undefined }
         : { status: 'failed', message }
     }
     // A later read owns the page, including its cached entries and diagnostic.
@@ -340,7 +341,8 @@ export class OpencodeGoSectionController {
         if (request !== this.modelsRequest) return
         if (!response.ok) failed(response.error.message)
         else if (response.value.stale && response.value.models.length === 0) {
-          this.models = { status: 'failed', ...(response.value.error ? { message: response.value.error } : {}) }
+          this.models = { status: 'failed', ...(response.value.error ? { message: response.value.error } : {}),
+            ...(response.value.sources ? { sources: response.value.sources } : {}) }
         } else {
           this.models = {
             status: 'ready',
@@ -348,6 +350,7 @@ export class OpencodeGoSectionController {
             preview: response.value.models.map(model => model.name ?? model.id),
             entries: response.value.models,
             stale: response.value.stale,
+            ...(response.value.sources ? { sources: response.value.sources } : {}),
             ...(response.value.error ? { message: response.value.error } : {}),
           }
         }

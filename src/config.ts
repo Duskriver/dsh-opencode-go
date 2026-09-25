@@ -21,7 +21,7 @@ import { DEFAULT_BASE_URL } from './catalog.ts'
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
 
-/** Requests and pickers share this cache lifetime; explicit discovery revalidates immediately. */
+/** Successful refresh lifetime; failed refreshes retry sooner and explicit discovery revalidates immediately. */
 export const DEFAULT_REFRESH_MINUTES = 60
 
 /** Default maximum idle interval while a stream read is outstanding. */

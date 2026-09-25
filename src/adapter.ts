@@ -5,8 +5,8 @@
  * attribution User-Agent (`deepseek-harness/<version>`), which pi-ai's client
  * lets request headers override, and `x-opencode-session`, which the gateway
  * requires and uses to route a conversation and share its prompt cache. The
- * header value is the request's session id — stable per conversation, so
- * caching and billing attribution stay correct; a request arriving with no
+ * header value is the request's session id, stable across continuation and
+ * restore. Actual cache reads remain an upstream usage fact. A request with no
  * session id gets a fresh random value rather than a shared constant, because
  * a constant would merge unrelated traffic into one cache bucket.
  *
@@ -43,7 +43,7 @@ import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attac
 import { toPiContext, toStreamChunks } from './conversion/index.ts'
 import type { PiImageRequestContext } from './conversion/index.ts'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog } from './catalog.ts'
+import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } from './catalog.ts'
 import { assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
@@ -179,10 +179,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
   override async resolveModel(
     _provider: string,
     model: string,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
     const config = this.options.config()
-    const snapshot = await this.catalogOf(config).forModel(model)
+    const snapshot = await this.catalogOf(config).forModel(model, signal)
     const resolved = snapshot.models.get(model)
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
@@ -245,7 +245,16 @@ export class OpencodeGoAdapter extends LlmAdapter {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
     const config = this.options.config()
-    const snapshot = await this.catalogOf(config).forModel(options.model)
+    let snapshot: CatalogSnapshot
+    try {
+      snapshot = await this.catalogOf(config).forModel(options.model, options.signal)
+    } catch (error) {
+      if (!options.signal?.aborted) throw error
+      yield { type: 'finish', reason: {
+        kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' },
+      } }
+      return
+    }
     const advertised = snapshot.models.get(options.model)
     if (advertised === undefined) {
       throw new LlmError(`opencode-go has no model "${options.model}"`, 'UNKNOWN_MODEL')

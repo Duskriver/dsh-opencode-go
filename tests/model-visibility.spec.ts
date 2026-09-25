@@ -36,7 +36,7 @@ it('uses independent model switches while keeping settings and existing requests
   await ctx.plugin(GoModelsService, { catalog: () => adapter.catalogOf(config) })
   try {
     const read = async () => await ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} }) as GoModelCatalog
-    expect(await read()).toEqual({ stale: false, models: [
+    expect(await read()).toMatchObject({ stale: false, models: [
       expect.objectContaining({ id: 'current', releaseDate: '2026-09-22', contextWindow: 262144 }),
       expect.objectContaining({ id: 'old', deprecated: true }),
     ] })

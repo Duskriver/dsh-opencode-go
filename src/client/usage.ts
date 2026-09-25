@@ -4,6 +4,7 @@ import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { UsagePill } from './UsagePill.tsx'
+import { sessionEventSource } from './session-cache.ts'
 import type { OpencodeGoKey } from './locales.ts'
 
 export function registerUsagePill(ctx: Context): void {
@@ -19,6 +20,7 @@ export function registerUsagePill(ctx: Context): void {
         name: 'conversation.input.right', id: 'opencode-go-usage', order: 1000,
         inject: sessionId => ({
           directory: ready.modelDirectories.directoryFor(sessionId as SessionId).store,
+          sessionEvents: sessionEventSource(ready.get('sessions'), sessionId),
           readUsage,
           getLocale: () => ready.locale.getLocale().active,
           t: (key: string) => translate(key as OpencodeGoKey),

@@ -207,7 +207,7 @@ describe('runtime model metadata', () => {
     expect(gateway.modelListings).toBe(2)
     gateway.setModelListing(200, listingBody([]))
     expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
-    expect(await discoverSettingsModels(adapter.catalogOf(config))).toEqual({ models: [], stale: false })
+    expect(await discoverSettingsModels(adapter.catalogOf(config))).toMatchObject({ models: [], stale: false })
     expect(await adapter.listModels('opencode-go')).toEqual([])
     expect(gateway.modelListings).toBe(3)
   })

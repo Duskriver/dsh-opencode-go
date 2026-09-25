@@ -255,6 +255,25 @@
   border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
 
+.starLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.starLink svg { flex: none; }
+.starLink:hover { color: var(--dsw-alias-brand-primary); }
+.starLink:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.starLink:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
+
 .failedNote {
   margin: 0;
   font-size: 12px;

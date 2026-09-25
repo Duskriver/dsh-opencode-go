@@ -7,6 +7,7 @@ import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { PROVIDER_ID } from '../src/catalog.ts'
 import { configOf } from './config-of.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
+import { metadataDocument, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
 const IMAGE_REF: ImageAttachmentRef = {
   attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
@@ -51,6 +52,42 @@ afterEach(async () => {
 })
 
 describe('OpencodeGoAdapter stream', () => {
+  it.each(['resolve', 'stream'] as const)('cancels %s during discovery while another caller keeps the shared refresh', async (operation) => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    const original = globalThis.fetch
+    let completeMetadata!: (response: Response) => void
+    let metadataSignal: AbortSignal | null | undefined
+    const started = Promise.withResolvers<void>()
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) !== MODELS_METADATA_URL) return original(input, init)
+      metadataSignal = init?.signal
+      started.resolve()
+      return new Promise<Response>(resolve => { completeMetadata = resolve })
+    })
+    const adapter = await adapterFor(gateway.url)
+    const controller = new AbortController()
+    const cancelled = operation === 'resolve'
+      ? adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash', controller.signal)
+      : drain(adapter.stream(requestOf({ signal: controller.signal })))
+    const outcome = cancelled.then(value => ({ value }), error => ({ error }))
+    const other = adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+    await started.promise
+    controller.abort()
+    try {
+      // Observe cancellation before releasing the unrelated shared network read.
+      const result = await Promise.race([outcome, new Promise<null>(resolve => setTimeout(() => resolve(null), 100))])
+      if (operation === 'resolve') expect(result).toMatchObject({ error: { code: 'ABORTED' } })
+      else expect(result).toMatchObject({ value: [{ type: 'finish', reason: { kind: 'aborted' } }] })
+      expect(metadataSignal?.aborted).toBe(false)
+      expect(gateway.paths).not.toContain('/chat/completions')
+    } finally {
+      completeMetadata(Response.json(metadataDocument()))
+      await outcome
+      await expect(other).resolves.toMatchObject({ id: 'deepseek-v4.1-flash' })
+    }
+    expect(gateway.modelListings).toBe(1)
+  })
+
   it.each([
     { prompt_tokens_details: { cached_tokens: 80 } },
     { prompt_cache_hit_tokens: 80 },
@@ -200,6 +237,7 @@ describe('OpencodeGoAdapter stream', () => {
     expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({
       reason: { kind: 'aborted' },
     })
+    expect(gateway.paths).toEqual([])
   })
 
   it('classifies a conversion failure under a concurrent caller abort as aborted', async () => {

@@ -38,6 +38,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
       || filter === 'custom' && hasCapacityOverride(draft[model.id]) || filter === 'deprecated' && model.deprecated))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
   const visibilityDisabled = disabled || visibilitySaving
+  const metadataUnavailable = models.status === 'ready' && models.sources?.metadata.error !== undefined
   const customized = all.filter(entry => hasCapacityOverride(draft[entry.id])).length
   const filters = [
     ['all', 'filterAll', all.length],
@@ -50,7 +51,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
     onEdit({ ...draft, [id]: { ...current, [field]: value ?? null } })
   }
   const badges = (entry: GoModel) => <>
-    {entry.configurationMissing ? <Tag tone="warning">{t('configurationMissing')}</Tag> : null}
+    {entry.configurationMissing ? <Tag tone="warning">{t(metadataUnavailable ? 'configurationUnavailable' : 'configurationMissing')}</Tag> : null}
     {isNewModel(entry, now) ? <span className={css.newBadge} title={t('newHint')}>{t('newBadge')}</span> : null}
     {entry.deprecated ? <Tag tone="warning">{t('deprecatedBadge')}</Tag> : null}
   </>
@@ -85,7 +86,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
               {badges(model)}
             </div>
             <code className={css.limitsModelId} translate="no">{model.id}</code>
-            {model.configurationMissing ? <p className={css.hint}>{t('configurationMissingHint')}</p> : <>
+            {model.configurationMissing ? <p className={css.hint}>{t(metadataUnavailable ? 'configurationUnavailableHint' : 'configurationMissingHint')}</p> : <>
               {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
               <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
               <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
