@@ -17,7 +17,9 @@ The plugin automatically adds the session headers required by OpenCode Go, reads
 
 ## Installation and usage
 
-Supported DSH versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`.
+Supports DSH `0.1.5-rc.1` and later, including alpha, rc, and stable releases. Compatibility will be maintained as new host versions are released.
+
+Verified versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, and `0.1.7-rc.2`.
 
 ### Install from DSH (recommended)
 

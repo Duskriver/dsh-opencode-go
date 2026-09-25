@@ -1,5 +1,11 @@
 # Verification
 
+## Minimum-host compatibility policy (2026-09-25)
+
+The compatibility policy is DSH `0.1.5-rc.1` and later, including alpha, rc, and stable releases, with continued maintenance as the host evolves. `engines.dsh` and all 19 DSH peers now use `>=0.1.5-rc.1`; the Cordis peer uses `>=4.0.2`. The eight existing host fixtures are verified versions, not an exhaustive allowlist. This supersedes the release-specific declaration limits recorded below.
+
+DSH's published bundle gate and the market compare host ranges with `includePrerelease: true`. Declaration tests now follow that policy, rejecting hosts below the minimum and accepting later prereleases and stable releases. These checks do not use npm's default peer-range semantics. The published `0.1.7-rc.2` gate also accepted 16 current/future version strings and rejected three below the minimum; future strings check admission policy only. `npm test -- tests/package-compatibility.spec.ts tests/host-compatibility.spec.ts` passed the Host/Client build checks and all **31 tests**, including activation and streaming across the eight existing hosts and Web/Headless bundle admission on rc.1 and rc.2.
+
 ## Issue #9: usage progress bar painting (plugin 0.1.12, 2026-09-24)
 
 The progress elements retained `appearance: auto`, preventing the custom WebKit fill from taking effect ([MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Selectors/::-webkit-progress-value)). The fix sets `appearance: none`, removes the native border, and gives the progress element the rounded track background. The WebKit track stays transparent to avoid applying the translucent track color twice; the existing WebKit and Firefox fill rules remain green. Percentage values and accessible progress semantics are unchanged.
