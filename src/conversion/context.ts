@@ -48,9 +48,14 @@ function toolMessage(message: Message): ToolMessage | undefined {
   return message as unknown as ToolMessage
 }
 
-/** Reject image roles that pi-ai cannot replay before request-size offloading can replace them. */
-function assertSupportedImageRoles(messages: readonly Message[]): void {
+/** Reject unsupported roles, tool-change blocks, and image roles before replay or image offloading. */
+function assertSupportedHistory(messages: readonly Message[]): void {
   for (const message of messages) {
+    // Developer history is persisted for V4; provider serialization is intentionally deferred.
+    if ((message as { role: string }).role === 'developer') throw new LlmError('Developer messages are not supported yet', 'UNSUPPORTED_CONTENT')
+    if ((message.content as readonly { type: string }[]).some(block => block.type === 'tool-addition' || block.type === 'tool-removal')) {
+      throw new LlmError('Tool-change blocks require developer role', 'UNSUPPORTED_CONTENT')
+    }
     if (message.role !== 'user' && !toolMessage(message) && contentHasImage(message.content)) {
       throw new LlmError(
         `pi-ai cannot represent an image in an in-history ${message.role} message`,
@@ -136,6 +141,10 @@ async function prepareRequestImages(
 }
 
 function toolsOf(options: GenerateOptions): PiTool[] | undefined {
+  // Deferred definitions are persisted for V4; provider loading is intentionally deferred.
+  if ((options.tools as readonly { deferLoading?: unknown }[] | undefined)?.some(tool => tool.deferLoading === true)) {
+    throw new LlmError('Deferred tool loading is not supported yet', 'UNSUPPORTED_CONTENT')
+  }
   return options.tools?.map(tool => ({
     name: tool.name,
     description: tool.description,
@@ -192,7 +201,7 @@ function appendAssistant(
 }
 
 function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: string) => void): PiContext {
-  assertSupportedImageRoles(options.messages)
+  assertSupportedHistory(options.messages)
   const split = splitSystemPrompt(options)
   const toolNames = new Map<ToolCallId, string>()
   const messages: PiMessage[] = []
@@ -278,7 +287,7 @@ function requestImageTarget(ref: ImageAttachmentRef, budget: PiImageRequestBudge
  * @param images - absent; selects the synchronous conversion.
  * @param onReplayDegrade - forwarded to {@link toPiAssistant} for each assistant message.
  * @returns the pi-ai context; `tools` is omitted when the request declares none.
- * @throws {LlmError} `UNSUPPORTED_CONTENT` for images in any history role, including a leading system message.
+ * @throws {LlmError} `UNSUPPORTED_CONTENT` for a `developer` history message, a tool-change block, a deferred tool, or an image in any history role, including a leading system message.
  */
 export function toPiContext(
   options: GenerateOptions,
@@ -323,7 +332,7 @@ async function toPiContextWithImages(
     maxPixels: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
     maxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
   }
-  assertSupportedImageRoles(options.messages)
+  assertSupportedHistory(options.messages)
   const split = splitSystemPrompt(options)
   const projection = {
     maxBytes: maxRequestImageBytes,
