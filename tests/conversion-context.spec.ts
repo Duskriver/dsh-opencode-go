@@ -6,7 +6,7 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import { ToolCallId, createMessage, createUserMessage, offloadedImageText } from '@deepseek-ai/dsh-llm'
+import { LlmError, ToolCallId, createMessage, createUserMessage, offloadedImageText } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import { toPiContext } from '../src/conversion/context.ts'
 import type { PiImageRequestContext } from '../src/conversion/context.ts'
@@ -565,5 +565,61 @@ describe('pi-ai system prompt source', () => {
     }
     expect(toPiContext(options)).toEqual(expected)
     await expect(toPiContext(options, imageContext(attachments))).resolves.toEqual(expected)
+  })
+})
+
+describe('pi-ai unsupported history and tools', () => {
+  /**
+   * The pinned `@deepseek-ai/dsh-llm@0.1.6-alpha.1` declares no `developer` role,
+   * no tool-change block and no `deferLoading`, so these fixtures build those
+   * shapes structurally for the same reason the guards narrow structurally.
+   */
+  function undeclared<T>(shape: unknown): T {
+    return shape as T
+  }
+
+  /** Assert the synchronous conversion path rejects unsupported content with `LlmError`. */
+  function expectUnsupportedContent(run: () => unknown, message: string): void {
+    try {
+      run()
+    } catch (error) {
+      expect(error).toBeInstanceOf(LlmError)
+      expect(error).toMatchObject({ code: 'UNSUPPORTED_CONTENT', message })
+      return
+    }
+    throw new Error(`expected the synchronous conversion path to reject: ${message}`)
+  }
+
+  it('rejects a developer message on both conversion paths', async () => {
+    const developer = undeclared<Message>({ ...user([{ type: 'text', text: 'x' }]), role: 'developer' })
+    const options = request([developer])
+    expectUnsupportedContent(() => toPiContext(options), 'Developer messages are not supported yet')
+    await expect(toPiContext(options, imageContext(attachments))).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CONTENT',
+      message: 'Developer messages are not supported yet',
+    })
+  })
+
+  it('rejects tool-change blocks on both conversion paths', async () => {
+    const options = request([user(undeclared<ContentBlock[]>([{ type: 'tool-addition', toolName: 'lookup' }]))])
+    expectUnsupportedContent(() => toPiContext(options), 'Tool-change blocks require developer role')
+    await expect(toPiContext(options, imageContext(attachments))).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CONTENT',
+      message: 'Tool-change blocks require developer role',
+    })
+  })
+
+  it('rejects deferred tool loading on both conversion paths', async () => {
+    const options: GenerateOptions = {
+      ...request([user([{ type: 'text', text: 'hi' }])]),
+      tools: undeclared<GenerateOptions['tools']>([
+        { name: 'lookup', description: 'look up', parameters: { type: 'object' }, deferLoading: true },
+      ]),
+    }
+    expectUnsupportedContent(() => toPiContext(options), 'Deferred tool loading is not supported yet')
+    await expect(toPiContext(options, imageContext(attachments))).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CONTENT',
+      message: 'Deferred tool loading is not supported yet',
+    })
   })
 })
