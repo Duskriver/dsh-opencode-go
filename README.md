@@ -36,7 +36,7 @@
 ### 命令行安装（备选）
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.13
+dsh plugin --profile web add dsh-opencode-go@0.1.14
 ```
 
 安装后启动或重启 `dsh web`，然后：
@@ -50,7 +50,7 @@ dsh plugin --profile web add dsh-opencode-go@0.1.13
 安装到 Headless profile：
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.13
+dsh plugin --profile headless add dsh-opencode-go@0.1.14
 ```
 
 将以下内容保存为 `headless.patch.yml`，选择默认模型：
@@ -77,7 +77,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.13.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.14.tgz
 ```
 
 开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
@@ -95,10 +95,6 @@ dsh plugin --profile web update dsh-opencode-go --latest
 ## 订阅用量显示
 
 用量每分钟刷新。临时网络或服务错误会保留同一账号的上次数据，并标明刷新失败、更新时间和错误原因；可在用量弹层中立即重试。首次获取失败或鉴权失败时不显示旧额度。模型目录、模型配置和用量的 JSON 请求遇到短暂连接重置时会在原有超时范围内额外重试一次；这不能保证故障中的网络恢复可用。
-
-用量弹层还会显示当前会话的缓存读取比例、缓存读取/写入 tokens、总输入 tokens 和已统计响应数。计算公式为 `cacheReadTokens / (inputTokens + cacheReadTokens + cacheWriteTokens)`，按 tokens 加权，不包含输出 tokens。数据来自宿主已加载的会话历史，恢复会话后可重新计算，不增加网络请求；仅打开弹层时订阅更新。账号额度读取失败不影响这些统计。
-
-统计只包含可确定路由且有有效用量的 Go 已结算响应，排除未结算请求和分叉继承的响应；缺少路由或用量的响应会注明未统计，历史未加载完整时也会提示。不支持会话事件接口的旧宿主继续显示账号额度。稳定的 `x-opencode-session` 只支持路由保持一致，不能证明缓存命中；实际读取量由网关报告。
 
 ![OpenCode Go usage display](image.png)
 

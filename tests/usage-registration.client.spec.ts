@@ -12,7 +12,6 @@ it('preserves the usage account source and structured failures through the clien
   })
   const read = vi.fn().mockResolvedValueOnce({ ok: true, value: usage }).mockResolvedValue({ ok: false, error })
   const ctx = {
-    get: () => ({ binding: () => ({ eventSource: { getSnapshot: () => ({ entries: [] }), subscribe: () => () => {} } }) }),
     inject: (_services: unknown, callback: (scope: unknown) => void) => { callback(ctx) },
     remote: { opencodeGoUsage: { read } },
     modelDirectories: { directoryFor: () => ({ store: {} }) },
@@ -24,7 +23,6 @@ it('preserves the usage account source and structured failures through the clien
   }
   registerUsagePill(ctx as never)
   expect(props).toBeDefined()
-  expect(props!.sessionEvents!.getSnapshot()).toEqual({ entries: [] })
   await expect(props!.readUsage()).resolves.toEqual(usage)
   await expect(props!.readUsage()).rejects.toBe(error)
 })

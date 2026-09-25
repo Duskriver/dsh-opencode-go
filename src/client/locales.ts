@@ -1,17 +1,6 @@
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
 
 export const en = {
-  cacheTitle: 'Session cache reads',
-  cacheReadRatio: 'Cached input share',
-  cacheReadTokens: 'Cache read tokens',
-  cacheInputTokens: 'Total input tokens',
-  cacheWriteTokens: 'Cache write tokens',
-  cacheResponses: 'Measured responses',
-  cacheEmpty: 'No usable Go response usage in the loaded history yet.',
-  cacheExcluded: 'Responses excluded for missing route or usage:',
-  cacheScope: 'Settled Go responses in loaded history. Inherited fork responses and unsettled attempts are excluded.',
-  cacheMore: 'Older history is not fully loaded.',
-  cacheRoutingHint: 'A stable session header supports routing affinity. Cache reads are reported separately by the gateway and may remain zero.',
   usageTitle: 'OpenCode Go usage',
   usageRollingShort: '5h',
   usageHint: 'Account usage · used percentage · refreshes every minute',
@@ -122,17 +111,6 @@ export const en = {
 
 /** Chinese copy; the key set mirrors {@link en}. */
 export const zh: typeof en = {
-  cacheTitle: '会话缓存读取',
-  cacheReadRatio: '缓存读取占输入比例',
-  cacheReadTokens: '缓存读取 tokens',
-  cacheInputTokens: '总输入 tokens',
-  cacheWriteTokens: '缓存写入 tokens',
-  cacheResponses: '已统计响应数',
-  cacheEmpty: '已加载历史中暂无可用的 Go 响应用量。',
-  cacheExcluded: '因缺少路由或用量而未统计的响应：',
-  cacheScope: '统计已加载历史中的 Go 已结算响应，排除分叉继承的响应及未结算的请求。',
-  cacheMore: '更早的历史尚未全部加载。',
-  cacheRoutingHint: '稳定的会话标识有助于路由保持一致；实际缓存读取量由网关另行报告，仍可能为零。',
   usageTitle: 'OpenCode Go 用量',
   usageRollingShort: '5小时',
   usageHint: '账号额度 · 已用百分比 · 每分钟刷新',

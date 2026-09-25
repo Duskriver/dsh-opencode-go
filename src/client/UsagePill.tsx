@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage } from '../usage-contract.ts'
-import type { SessionEventSource } from './session-cache.ts'
-import { SessionCache } from './SessionCache.tsx'
 import css from './UsagePill.module.css'
 
 export interface UsagePillProps {
@@ -11,7 +9,6 @@ export interface UsagePillProps {
   readUsage: () => Promise<GoUsage>
   t: (key: string) => string
   getLocale?: () => string
-  sessionEvents?: SessionEventSource
 }
 
 interface UsageFailure {
@@ -40,7 +37,7 @@ export function UsagePill({ directory, ...props }: UsagePillProps) {
   return state.current?.provider === 'opencode-go' ? <ActiveUsage {...props} /> : null
 }
 
-function ActiveUsage({ readUsage, t, getLocale, sessionEvents }: Omit<UsagePillProps, 'directory'>) {
+function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'directory'>) {
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -122,7 +119,6 @@ function ActiveUsage({ readUsage, t, getLocale, sessionEvents }: Omit<UsagePillP
         <div className={css.hint}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
         {usage[key].status === 'rate-limited' && <div>{t('usageLimited')}</div>}
       </div>) : failure ? null : <p>{t('usageLoading')}</p>}
-      {sessionEvents && <SessionCache events={sessionEvents} t={t} getLocale={getLocale} />}
     </div>}
   </span>
 }

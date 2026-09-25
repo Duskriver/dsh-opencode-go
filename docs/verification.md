@@ -1,5 +1,13 @@
 # Verification
 
+## Account usage panel and unsupported-history guards (plugin 0.1.14, 2026-09-26)
+
+The OpenCode Go usage panel again shows only the account's rolling, weekly, and monthly limits. Session cache statistics introduced in 0.1.13 have been removed, including their event subscription, component, styles, and translations; token statistics remain available in DSH's own interface. The original account polling, refresh failure handling, and retry behavior are retained. This supersedes the session-cache panel behavior described in the earlier verification entry below.
+
+PR #11 adds explicit `UNSUPPORTED_CONTENT` errors for developer-role history, tool-addition/tool-removal blocks, and tools with `deferLoading: true`, on both text-only and image conversion paths. Existing image-role validation and normal tool conversion are retained. These guards are preventive hardening for inputs the adapter cannot represent; no known production source for those inputs was reproduced. Dependencies and the minimum Host version are unchanged.
+
+Validation: `npm test` on the combined release changes passed both TypeScript checks, the production build, and **323 tests in 23 files**, including the existing Host compatibility and distributed client fixtures. Additional in-memory checks of PR #11 passed 15 scenarios on both conversion paths, covering tool-removal, empty history with deferred tools, ordinary tools, and `deferLoading: false`. The published UI dependencies still emit their existing missing-source-map warnings. These checks use local fixtures; no installed-profile update or live inference was performed.
+
 ## Issue #14: distinguish unavailable metadata from missing model configuration (2026-09-26)
 
 The existing source diagnostics now drive a specific Settings warning when model configuration fails while the gateway listing succeeds, including an empty successful listing. Unconfigured models show “Configuration unavailable” during a metadata-source failure and explain how to check connectivity from the machine running DSH. A retained model list keeps its warning and source details visible while retrying. Successful metadata recovery clears the warning; models still absent from usable metadata return to “Configuration missing”, and models with newly usable configuration become selectable.

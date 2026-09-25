@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage } from '../src/usage-contract.ts'
@@ -31,43 +31,6 @@ const trigger = () => screen.getByRole<HTMLButtonElement>('button', { name: new 
 const percentageLabel = (value: GoUsage) => `Go · ${en.usageRollingShort} ${value.rolling.percent}% · ${en.usageWeekShort} ${value.weekly.percent}%`
 const tick = async (milliseconds = 60_000) => { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) }) }
 const showDetails = () => { fireEvent.click(trigger()) }
-
-const cacheEvents = (read = 70, input = 20, write = 10) => ({ entries: [
-  { type: 'event', event: { seq: 0, type: 'request/header', data: { header: { config: { provider: 'opencode-go' } } } } },
-  { type: 'event', event: { seq: 1, type: 'assistant/message', data: { usage: { inputTokens: input, cacheReadTokens: read, cacheWriteTokens: write } } } },
-], hasMore: true })
-
-it('shows independent session cache statistics when account usage fails, and subscribes only while open', async () => {
-  const events = createSnapshotStore<unknown>(cacheEvents())
-  const subscribe = vi.fn(events.subscribe)
-  const stop = vi.fn()
-  const sessionEvents = { getSnapshot: events.getSnapshot, subscribe: (listener: () => void) => {
-    const unsubscribe = subscribe(listener)
-    return () => { unsubscribe(); stop() }
-  } }
-  const props = { directory: directory('opencode-go'), readUsage: vi.fn().mockRejectedValue(usageError()), t, getLocale: () => 'en' }
-  let view!: ReturnType<typeof render>
-  await act(async () => { view = render(<UsagePill {...props} sessionEvents={sessionEvents} />) })
-  expect(subscribe).not.toHaveBeenCalled()
-  showDetails()
-  const cache = () => within(screen.getByRole('region', { name: en.cacheTitle }))
-  expect(cache().getByText('70%')).toBeTruthy()
-  expect(cache().getByText('100')).toBeTruthy()
-  expect(cache().getByText(en.cacheRoutingHint)).toBeTruthy()
-  expect(cache().getByText(new RegExp(en.cacheMore))).toBeTruthy()
-  expect(screen.getByText(en.usageRefreshFailed)).toBeTruthy()
-  expect(subscribe).toHaveBeenCalledOnce()
-  await act(async () => { events.set(cacheEvents(0, 100, 0)) })
-  expect(cache().getByText('0%')).toBeTruthy()
-  // A different session cannot keep the previous session's numerator or subscription.
-  const other = createSnapshotStore<unknown>({ entries: [], hasMore: false })
-  await act(async () => { view.rerender(<UsagePill {...props} sessionEvents={other} />) })
-  expect(cache().getByText('—')).toBeTruthy()
-  expect(cache().getByText(en.cacheEmpty)).toBeTruthy()
-  expect(stop).toHaveBeenCalledOnce()
-  fireEvent.keyDown(document, { key: 'Escape' })
-  expect(screen.queryByRole('region', { name: en.cacheTitle })).toBeNull()
-})
 
 it('appears only for Go, shows all account windows, and stops polling when switching away', async () => {
   const store = directory()

@@ -36,7 +36,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.13
+dsh plugin --profile web add dsh-opencode-go@0.1.14
 ```
 
 Start or restart `dsh web`, then:
@@ -50,7 +50,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.13
+dsh plugin --profile headless add dsh-opencode-go@0.1.14
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -77,7 +77,7 @@ To build from source and install a local package:
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.13.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.14.tgz
 ```
 
 The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.
@@ -95,10 +95,6 @@ Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web
 ## Subscription usage display
 
 Usage refreshes every minute. Temporary network or service errors retain the last reading for the same account, with a failure notice, timestamp, and reason; the usage panel offers an immediate retry. Initial and authentication failures do not show old usage. Catalog, metadata, and usage JSON requests retry a transient connection reset once within the original timeout budget; this cannot guarantee recovery while the network is failing.
-
-The usage panel also shows the current session's cached input share, cache read/write tokens, total input tokens, and measured response count. The formula is `cacheReadTokens / (inputTokens + cacheReadTokens + cacheWriteTokens)`, weighted by tokens and excluding output tokens. Statistics are derived from the Host's loaded session history, can be reconstructed after session restore, and add no network requests. The panel subscribes only while open. Account usage failures do not affect these statistics.
-
-Only settled Go responses with an identifiable route and valid usage are counted. Unsettled attempts and inherited fork responses are excluded; missing route/usage and incomplete history are indicated. Older Hosts without a session event feed continue to show account usage. A stable `x-opencode-session` supports routing affinity but does not establish a cache hit; actual cache reads are reported by the gateway.
 
 ![OpenCode Go usage display](image.png)
 
