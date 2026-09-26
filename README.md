@@ -36,7 +36,7 @@
 ### 命令行安装（备选）
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.14
+dsh plugin --profile web add dsh-opencode-go@0.1.15
 ```
 
 安装后启动或重启 `dsh web`，然后：
@@ -50,7 +50,7 @@ dsh plugin --profile web add dsh-opencode-go@0.1.14
 安装到 Headless profile：
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.14
+dsh plugin --profile headless add dsh-opencode-go@0.1.15
 ```
 
 将以下内容保存为 `headless.patch.yml`，选择默认模型：
@@ -77,7 +77,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.14.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
 ```
 
 开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
@@ -119,6 +119,14 @@ modelVisibility:
 只有列出的 ID 被显式覆盖。开关只影响模型选择器；已有会话仍可调用网关提供的隐藏模型，设置页也保留完整模型列表。
 
 旧配置中的 `showDeprecatedModels` 和 `visibleModelIds` 不再控制显示状态。请使用逐模型开关或 `modelVisibility`；旧字段可以保留，不会妨碍插件加载。
+
+## 图片数量上限
+
+在「设置 → OpenCode Go → 高级设置」中可以设置 `maxImages`，填写正整数后保存即可生效，无需重启。默认不设置，不限制图片张数；清空或重置会移除用户覆盖，重新继承基础配置（基础配置也未设置时没有张数上限）。
+
+数量按单次请求携带的完整历史统计，包括工具输出里的图片；同一附件出现多次也分别计数。例如设置为 `30` 时，30 张正常发送，31 张会先卸载最旧的 1 张，再继续请求。卸载将图片内容替换为文字占位，原始附件仍保留，但模型在该次请求中看不到被卸载图片的内容。
+
+DSH 0.1.5 的卸载只影响本次请求；DSH 0.1.6 及以上版本通过宿主的图片卸载机制记录卸载状态并重试，调高或清空上限不会自动恢复已卸载的历史图片。现有图片载荷、像素和单图字节预算仍独立生效，可能需要卸载更多图片。`maxImages` 是可选的兼容设置，不会改变上游服务自身的限制。
 
 ## 常见问题
 

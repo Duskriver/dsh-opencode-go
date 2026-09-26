@@ -112,12 +112,13 @@ interface PlannedWrite {
 }
 
 /**
- * A whole-number field. An empty draft clears the field; any other draft that
- * is not a finite number blocks the save.
+ * A numeric field. An empty draft clears the field; other drafts must be
+ * finite numbers and satisfy the optional constraint before saving.
  * @param field - field name inside the namespace section.
+ * @param validate - additional numeric constraint, if needed.
  * @returns the field's conversion spec.
  */
-export function numberField(field: string): FieldSpec {
+export function numberField(field: string, validate: (value: number) => boolean = () => true): FieldSpec {
   return {
     field,
     format: value => typeof value === 'number' ? String(value) : '',
@@ -125,7 +126,7 @@ export function numberField(field: string): FieldSpec {
       const trimmed = text.trim()
       if (trimmed === '') return { kind: 'clear' }
       const parsed = Number(trimmed)
-      return Number.isFinite(parsed) ? { kind: 'set', value: parsed } : undefined
+      return Number.isFinite(parsed) && validate(parsed) ? { kind: 'set', value: parsed } : undefined
     },
   }
 }

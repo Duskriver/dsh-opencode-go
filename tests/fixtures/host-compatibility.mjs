@@ -196,7 +196,8 @@ try {
 
   const reads = []
   let encodedBytes = 3
-  const adapter = new plugin.OpencodeGoAdapter({ config: () => config,
+  let requestConfig = config
+  const adapter = new plugin.OpencodeGoAdapter({ config: () => requestConfig,
     resolveApiKey: async () => 'fixture-key', imageAccess: {
       resolveImageAccess: () => undefined,
       resolveAttachments: () => ({ readImageRequest: async ref => {
@@ -248,7 +249,43 @@ try {
     await assert.rejects(() => drain(adapter.stream(request([user([recent])]))),
       error => error.code === 'IMAGE_OFFLOAD_REQUIRED')
   }
-  console.log(`PASS: host compatibility (${process.argv[2]}): ESM, Loader, catalog, capacities, hot updates, reset, text, real images, resizing, image bounds, history`)
+  // Optional occurrence cap (#16): no implicit 30, exact boundary, oldest
+  // nested occurrence offloaded, and a live reset without replacing the adapter.
+  encodedBytes = 3
+  requestConfig = { ...config, maxRequestImageBytes: 20 * 1024 * 1024 }
+  const thirty = user(Array.from({ length: 30 }, () => image('b')))
+  const thirtyOne = [messages[0], thirty]
+  const before = JSON.stringify(thirtyOne)
+  await drain(adapter.stream(request(thirtyOne)))
+  assert.equal(imagesSent().length, 31, 'default config has no image count cap')
+  requestConfig = { ...requestConfig, maxImages: 30 }
+  await drain(adapter.stream(request([thirty])))
+  assert.equal(imagesSent().length, 30, 'exactly the cap does not offload')
+  if (legacy) {
+    await drain(adapter.stream(request(thirtyOne)))
+    assert.equal(imagesSent().length, 30)
+    assert.ok(JSON.stringify(bodies.at(-1)).includes(llm.offloadedImageText(old.attachment)))
+  } else {
+    const sent = bodies.length
+    await assert.rejects(() => drain(adapter.stream(request(thirtyOne))),
+      error => error.code === 'IMAGE_OFFLOAD_REQUIRED' && error.failure.offloadImages === 1)
+    assert.equal(bodies.length, sent, 'over-budget requests wait for the host offload protocol')
+    const offloaded = { ...old, offloaded: true }
+    const retained = [modern
+      ? llm.createToolResultMessage({ callId: 'call', content: [offloaded], isError: false })
+      : user([{ type: 'tool-result', toolCallId: 'call', content: [offloaded] }]), thirty]
+    await drain(adapter.stream(request(retained)))
+    assert.equal(imagesSent().length, 30, 'retry after a host occurrence mark sends the retained images')
+    assert.ok(JSON.stringify(bodies.at(-1)).includes(llm.offloadedImageText(old.attachment)))
+  }
+  assert.equal(JSON.stringify(thirtyOne), before, 'count policy never mutates saved history')
+  delete requestConfig.maxImages
+  await drain(adapter.stream(request(thirtyOne)))
+  assert.equal(imagesSent().length, 31, 'clearing the cap affects the next request')
+  requestConfig = { ...requestConfig, maxImages: null }
+  await drain(adapter.stream(request(thirtyOne)))
+  assert.equal(imagesSent().length, 31, 'an empty YAML field does not become a zero-image cap')
+  console.log(`PASS: host compatibility (${process.argv[2]}): ESM, Loader, catalog, capacities, hot updates, reset, text, real images, resizing, image bounds, optional image count, history`)
 } finally {
   await ctx.fiber.dispose()
   await rm(attachmentHome, { recursive: true, force: true })

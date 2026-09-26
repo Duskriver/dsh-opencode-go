@@ -1,5 +1,15 @@
 # Verification
 
+## Optional request image count cap and usage panel polish (plugin 0.1.15, 2026-09-26)
+
+The OpenCode Go settings page now exposes `maxImages` as an optional positive integer. It has no default count limit, so existing image capability is unchanged until a user configures the field after an upstream image-count error. Clearing the field restores the inherited base value, or no count limit when the base has none. Counts include repeated image occurrences and images nested in tool results. The existing byte, pixel, and per-image budgets continue to apply independently.
+
+On DSH 0.1.5, excess oldest occurrences become request-local text placeholders. On newer hosts, the adapter requests durable offloading through the Host's `IMAGE_OFFLOAD_REQUIRED` protocol; raising the limit later does not restore occurrences already marked offloaded. Compatibility fixtures exercise the count boundary, nested oldest image, combined count and byte budgets, live settings updates, clearing, and both legacy and modern Host paths.
+
+The usage panel also includes PR #17's opaque background and severity colors for high and rate-limited usage windows. Its component test checks that normal, high, and limited windows receive distinct bar styles.
+
+Validation: `npm test` passed the Host/Client type checks, production build, and **338 tests in 24 files**, including the published-Host compatibility matrix. The published UI dependencies still emit missing-source-map warnings. Tests use local HTTP and attachment fixtures; no live model request was made.
+
 ## Account usage panel and unsupported-history guards (plugin 0.1.14, 2026-09-26)
 
 The OpenCode Go usage panel again shows only the account's rolling, weekly, and monthly limits. Session cache statistics introduced in 0.1.13 have been removed, including their event subscription, component, styles, and translations; token statistics remain available in DSH's own interface. The original account polling, refresh failure handling, and retry behavior are retained. This supersedes the session-cache panel behavior described in the earlier verification entry below.

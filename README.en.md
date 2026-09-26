@@ -36,7 +36,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.14
+dsh plugin --profile web add dsh-opencode-go@0.1.15
 ```
 
 Start or restart `dsh web`, then:
@@ -50,7 +50,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.14
+dsh plugin --profile headless add dsh-opencode-go@0.1.15
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -77,7 +77,7 @@ To build from source and install a local package:
 ```sh
 npm ci --legacy-peer-deps
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.14.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
 ```
 
 The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.
@@ -119,6 +119,14 @@ modelVisibility:
 Only the listed IDs receive explicit overrides. Switches affect model pickers only: existing conversations can still call hidden models served by the gateway, and Settings retains the complete model list.
 
 The older `showDeprecatedModels` and `visibleModelIds` fields no longer control visibility. Use the individual switches or `modelVisibility`; retaining old fields does not prevent the plugin from loading.
+
+## Image count cap
+
+Under **Settings → OpenCode Go → Advanced settings**, set `maxImages` to a positive integer and save; no restart is needed. It is unset by default, with no image-count cap. Clearing or resetting removes the user override and inherits the base configuration; if the base has no cap either, the count is unlimited.
+
+The count covers the full history sent in one request, including tool-result images. Repeated occurrences of the same attachment count separately. With a cap of `30`, 30 images pass through; 31 images cause the oldest occurrence to be offloaded before the request continues. Offloading replaces image content with a text placeholder and keeps the original attachment, but the model cannot see the offloaded image content in that request.
+
+DSH 0.1.5 offloads only for the current request. DSH 0.1.6 and later record offloaded occurrences and retry through the host's image-offload mechanism; raising or clearing the cap does not automatically restore images already offloaded from history. Existing payload, pixel, and per-image byte budgets still apply independently and may require more images to be offloaded. This optional compatibility setting does not change upstream service limits.
 
 ## FAQ
 

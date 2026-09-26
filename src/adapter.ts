@@ -294,6 +294,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         imageRequest = {
           attachments: store,
           resolveImageAccess: ref => access.resolveImageAccess(store, ref),
+          maxImages: config.maxImages ?? undefined,
           maxRequestImageBytes: config.maxRequestImageBytes,
           requestImagePolicy: {
             maxPixels: config.requestImagePixelBudget,

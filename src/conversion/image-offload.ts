@@ -4,6 +4,7 @@ import type { Message } from '@deepseek-ai/dsh-llm'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 
 interface ImageProjectionPolicy {
+  maxImages?: number
   maxBytes?: number
   byteLength: (ref: ImageAttachmentRef) => number
   placeholder: (ref: ImageAttachmentRef) => string
@@ -18,7 +19,7 @@ const api: Partial<Pick<typeof llm,
 >> & {
   offloadRequestImagesWithPolicy?: (
     messages: readonly Message[],
-    policy: Omit<ImageProjectionPolicy, 'exact'> & { representation: 'base64'; byteQuantum: number },
+    policy: Omit<ImageProjectionPolicy, 'exact'> & { representation: 'base64'; byteQuantum: number; countQuantum: number },
   ) => readonly Message[]
 } = llm
 
@@ -28,15 +29,15 @@ export function projectRequestImages(messages: readonly Message[], policy: Image
     // New hosts own the durable offloaded marks. The adapter must neither
     // discard images from estimates nor replace the host's retry protocol.
     if (!policy.exact) return messages
-    if (policy.maxBytes !== undefined) {
+    if (policy.maxBytes !== undefined || policy.maxImages !== undefined) {
       const offloadImages = api.requiredImageOffload(
         messages,
-        { representation: 'base64', maxBytes: policy.maxBytes },
+        { representation: 'base64', maxBytes: policy.maxBytes, maxImages: policy.maxImages, countQuantum: 1 },
         block => policy.byteLength(block.attachment),
       )
       if (offloadImages > 0) {
         throw new llm.LlmError(
-          `pi-ai request images exceed the ${policy.maxBytes}-byte base64 bound; ${offloadImages} more oldest occurrence(s) must be offloaded.`,
+          `pi-ai request images exceed the configured image count or base64 payload bound; ${offloadImages} more oldest occurrence(s) must be offloaded.`,
           api.IMAGE_OFFLOAD_REQUIRED_CODE ?? 'IMAGE_OFFLOAD_REQUIRED',
           { offloadImages },
         )
@@ -50,7 +51,7 @@ export function projectRequestImages(messages: readonly Message[], policy: Image
   // 0.1.5 has no surface handler for IMAGE_OFFLOAD_REQUIRED. Its own adapter
   // projects the oldest images to placeholders without mutating saved history.
   return api.offloadRequestImagesWithPolicy(messages, {
-    representation: 'base64', byteQuantum: 1,
+    representation: 'base64', byteQuantum: 1, countQuantum: 1, maxImages: policy.maxImages,
     maxBytes: policy.maxBytes, byteLength: policy.byteLength, placeholder: policy.placeholder,
   })
 }

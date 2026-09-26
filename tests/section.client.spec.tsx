@@ -29,6 +29,7 @@ function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = 
 }
 
 type SectionField = 'baseURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+  | 'maxImages'
   | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'apiKey' | 'models'
   | 'modelLimits' | 'modelLimitDraft'
 
@@ -65,6 +66,7 @@ function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSec
     baseURL: field('https://opencode.ai/zen/go/v1'),
     refreshMinutes: field('60'),
     streamIdleTimeoutMs: field('300000'),
+    maxImages: field(''),
     maxRequestImageBytes: field('20971520'),
     requestImagePixelBudget: field('4194304'),
     requestImageMaxBytes: field('1048576'),
@@ -387,6 +389,7 @@ describe('OpencodeGoSection', () => {
       baseURL: field('https://opencode.ai/zen/go/v1', { overridden: true }),
       refreshMinutes: field('not-a-number', { overridden: true, invalid: true }),
       streamIdleTimeoutMs: field('300000', { overridden: true }),
+      maxImages: field('30', { overridden: true }),
       maxRequestImageBytes: field('20971520', { overridden: true }),
       requestImagePixelBudget: field('4194304', { overridden: true }),
       requestImageMaxBytes: field('1048576', { overridden: true }),
@@ -401,6 +404,7 @@ describe('OpencodeGoSection', () => {
       [en.baseURLLabel, 'baseURL', false],
       [en.refreshMinutesLabel, 'refreshMinutes', true],
       [en.streamIdleTimeoutMsLabel, 'streamIdleTimeoutMs', true],
+      [en.maxImagesLabel, 'maxImages', true],
       [en.maxRequestImageBytesLabel, 'maxRequestImageBytes', true],
       [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget', true],
       [en.requestImageMaxBytesLabel, 'requestImageMaxBytes', true],
@@ -446,6 +450,64 @@ describe('OpencodeGoSection', () => {
 })
 
 describe('OpencodeGoSectionController through the component', () => {
+  it('saves an optional image count, rejects invalid counts, and clears or resets the override', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    host.set.mockImplementation((field: string, value: unknown) => {
+      host.publish({
+        value: { ...host.scope.getSnapshot().value, [field]: value },
+        user: { ...host.scope.getSnapshot().user as object, [field]: value },
+      })
+    })
+    host.unset.mockImplementation((field: string) => {
+      const user = { ...host.scope.getSnapshot().user as Record<string, unknown> }
+      delete user[field]
+      const base = host.scope.getSnapshot().base as Record<string, unknown> | undefined
+      host.publish({ value: { ...host.scope.getSnapshot().value, [field]: base?.[field] }, user })
+    })
+    const controller = new OpencodeGoSectionController(host.scope, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+    } } as never)
+    host.publish({ status: 'ready', writable: true, value: {}, base: {}, user: {} })
+    render(<OpencodeGoSection {...controller.inject()} t={t}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    try {
+      await act(async () => { await Promise.resolve() })
+      openAdvanced()
+      const input = () => screen.getByLabelText<HTMLInputElement>(en.maxImagesLabel)
+      expect(input().value).toBe('')
+      expect(screen.getByText(en.maxImagesHint)).toBeTruthy()
+      for (const value of ['0', '-1', '1.5', '9007199254740992']) {
+        fireEvent.change(input(), { target: { value } })
+        expect(input().getAttribute('aria-invalid')).toBe('true')
+        expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
+      }
+      fireEvent.change(input(), { target: { value: '30' } })
+      fireEvent.click(screen.getByText(en.discard))
+      expect(input().value).toBe('')
+      expect(host.set).not.toHaveBeenCalled()
+      fireEvent.change(input(), { target: { value: '30' } })
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.set).toHaveBeenCalledWith('maxImages', 30)
+      expect(input().value).toBe('30')
+      fireEvent.change(input(), { target: { value: '' } })
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.unset).toHaveBeenCalledWith('maxImages')
+      expect(host.scope.getSnapshot().value?.maxImages).toBeUndefined()
+      expect(input().value).toBe('')
+
+      // Reset follows the shared settings convention, including inherited caps.
+      act(() => { host.publish({ value: { maxImages: 30 }, base: { maxImages: 60 }, user: { maxImages: 30 } }) })
+      fireEvent.click(screen.getByRole('button', { name: en.reset }))
+      expect(input().value).toBe('60')
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.scope.getSnapshot().value?.maxImages).toBe(60)
+      expect(host.scope.getSnapshot().user).toEqual({})
+    } finally {
+      controller.dispose()
+    }
+  })
+
   it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     host.set.mockImplementation((field: string, value: unknown) => {

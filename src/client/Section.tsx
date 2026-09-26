@@ -201,6 +201,7 @@ function Loaded(props: {
   }
   const advancedOverridden = state.apiKeyEnv.overridden || state.baseURL.overridden
     || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
+    || state.maxImages.overridden
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
     || state.requestImageMaxBytes.overridden
   return (
@@ -262,6 +263,16 @@ function Loaded(props: {
                 {...fieldProps}
                 onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
                 onReset={() => { props.resetField('streamIdleTimeoutMs') }}
+              />
+              <ValueField
+                id="opencode-go-max-images"
+                label={t('maxImagesLabel')}
+                hint={t('maxImagesHint')}
+                field={state.maxImages}
+                numeric
+                {...fieldProps}
+                onEdit={(text) => { props.edit('maxImages', text) }}
+                onReset={() => { props.resetField('maxImages') }}
               />
               <ValueField
                 id="opencode-go-max-request-image-bytes"

@@ -255,6 +255,8 @@ export interface PiImageRequestContext {
   attachments: AttachmentStore
   /** Resolve current tool access separately from deterministic request-image versions. */
   resolveImageAccess: ImageAttachmentAccessResolver
+  /** Maximum retained image occurrences across request history; omission leaves the count unlimited. */
+  maxImages?: number
   /** Request-level bound on the base64-encoded payload of retained images; omission leaves the bound unchecked. */
   maxRequestImageBytes?: number
   /** Route pixel and raw encoded-byte budgets. */
@@ -299,7 +301,7 @@ export function toPiContext(
  * Tool result names are recovered from preceding assistant tool calls. On DSH
  * 0.1.5, oldest images over the request budget become transient placeholders.
  * On newer hosts, occurrences the surface marks offloaded become placeholders; when the
- * retained occurrences' exact base64 payload still exceeds
+ * retained occurrences exceed `maxImages` or their exact base64 payload exceeds
  * `maxRequestImageBytes`, the call fails with `IMAGE_OFFLOAD_REQUIRED` naming
  * how many more oldest occurrences must be offloaded.
  * @param options - the harness request; `options.system`, else a leading `system` message, maps to pi-ai's single `systemPrompt` slot.
@@ -327,7 +329,7 @@ async function toPiContextWithImages(
   images: PiImageRequestContext,
   onReplayDegrade?: (reason: string) => void,
 ): Promise<PiContext> {
-  const { attachments, resolveImageAccess, maxRequestImageBytes } = images
+  const { attachments, resolveImageAccess, maxImages, maxRequestImageBytes } = images
   const requestImagePolicy = images.requestImagePolicy ?? {
     maxPixels: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
     maxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
@@ -335,6 +337,7 @@ async function toPiContextWithImages(
   assertSupportedHistory(options.messages)
   const split = splitSystemPrompt(options)
   const projection = {
+    maxImages,
     maxBytes: maxRequestImageBytes,
     placeholder: (ref: ImageAttachmentRef) => offloadedImageText(ref, resolveImageAccess(ref)),
   }

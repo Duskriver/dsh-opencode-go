@@ -353,6 +353,47 @@ describe('pi-ai request context conversion', () => {
     expect(readImageRequest).toHaveBeenCalledTimes(1)
     expect(readImageRequest.mock.calls[0]?.[0]).toEqual(recent)
   })
+  it('keeps more than 30 images by default and keeps exactly the configured count', async () => {
+    for (const [count, maxImages] of [[31, undefined], [30, 30]] as const) {
+      const context = await toPiContext(request([user(Array.from({ length: count }, () => (
+        { type: 'image' as const, attachment: ref }
+      )))]), imageContext(attachments, { maxImages }))
+      expect(context.messages.flatMap(message => typeof message.content === 'string' ? [] : message.content)
+        .filter(block => block.type === 'image')).toHaveLength(count)
+    }
+  })
+
+  it('counts nested and repeated image occurrences and resumes after the host marks the oldest offloaded', async () => {
+    const oldest = { type: 'image' as const, attachment: ref }
+    const messages = [user([{ type: 'tool-result', toolCallId: ToolCallId('old-image'), content: [oldest] }]),
+      user(Array.from({ length: 30 }, () => ({ type: 'image' as const, attachment: ref })))]
+    const before = structuredClone(messages)
+    const policy = imageContext(attachments, { maxImages: 30 })
+    await expect(toPiContext(request(messages), policy)).rejects.toMatchObject({
+      code: 'IMAGE_OFFLOAD_REQUIRED', failure: { offloadImages: 1 },
+    })
+    expect(messages).toEqual(before)
+
+    // The host records an occurrence mark, not a deletion of the attachment.
+    const offloaded = [user([{ type: 'tool-result', toolCallId: ToolCallId('old-image'),
+      content: [{ ...oldest, offloaded: true }] }]), ...messages.slice(1)]
+    const context = await toPiContext(request(offloaded), policy)
+    expect(context.messages[0]).toMatchObject({
+      role: 'toolResult', content: [{ type: 'text', text: offloadedImageText(ref) }],
+    })
+    expect(context.messages.flatMap(message => typeof message.content === 'string' ? [] : message.content)
+      .filter(block => block.type === 'image')).toHaveLength(30)
+  })
+
+  it.each([[1, 12, 2], [2, 4, 2]])(
+    'satisfies both the count (%s) and byte (%s) budgets', async (maxImages, maxRequestImageBytes, offloadImages) => {
+      await expect(toPiContext(request([user(Array.from({ length: 3 }, () => (
+        { type: 'image' as const, attachment: ref }
+      )))]), imageContext(attachments, { maxImages, maxRequestImageBytes })))
+        .rejects.toMatchObject({ code: 'IMAGE_OFFLOAD_REQUIRED', failure: { offloadImages } })
+    },
+  )
+
   it('fails with the count to offload when exact encoded bytes exceed the bound', async () => {
     const sized: ImageAttachmentRef = { ...ref, bytes: 3 }
     const readImageRequest = vi.fn((value: ImageAttachmentRef) => Promise.resolve({

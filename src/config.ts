@@ -62,6 +62,8 @@ export interface OpencodeGoConfig {
   refreshMinutes: number
   /** Largest idle gap between stream events before the request fails. */
   streamIdleTimeoutMs: number
+  /** Optional retained image occurrence cap per request; omission or null leaves the count unlimited. */
+  maxImages?: number | null
   /** Request-level bound on base64-encoded image payload, in bytes. */
   maxRequestImageBytes: number
   /** Total-pixel budget for one request image. */
@@ -80,6 +82,7 @@ const fields = {
   baseURL: z.string().default(DEFAULT_BASE_URL),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+  maxImages: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
   // The image defaults are the generic pi-ai adapter's: one normalized
   // request image fits the budget, and fifteen of them fit the payload cap.
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),

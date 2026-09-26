@@ -58,6 +58,8 @@ export interface OpencodeGoSettings {
   refreshMinutes?: number
   /** Largest idle gap between stream events, in milliseconds. */
   streamIdleTimeoutMs?: number
+  /** Optional retained image occurrence cap per request. */
+  maxImages?: number | null
   /** Accumulated base64 image payload bound for one request. */
   maxRequestImageBytes?: number
   /** Total-pixel budget for one request image. */
@@ -128,6 +130,8 @@ export interface OpencodeGoSectionState extends FormShell {
   refreshMinutes: FieldState
   /** Largest idle gap between stream events, in milliseconds. */
   streamIdleTimeoutMs: FieldState
+  /** Optional retained image occurrence cap; blank inherits the base configuration. */
+  maxImages: FieldState
   /** Accumulated base64 image payload bound for one request. */
   maxRequestImageBytes: FieldState
   /** Total-pixel budget for one request image. */
@@ -199,6 +203,7 @@ export class OpencodeGoSectionController {
         textField('baseURL'),
         numberField('refreshMinutes'),
         numberField('streamIdleTimeoutMs'),
+        numberField('maxImages', value => Number.isSafeInteger(value) && value > 0),
         numberField('maxRequestImageBytes'),
         numberField('requestImagePixelBudget'),
         numberField('requestImageMaxBytes'),
@@ -239,6 +244,7 @@ export class OpencodeGoSectionController {
       baseURL: this.form.field('baseURL'),
       refreshMinutes: this.form.field('refreshMinutes'),
       streamIdleTimeoutMs: this.form.field('streamIdleTimeoutMs'),
+      maxImages: this.form.field('maxImages'),
       maxRequestImageBytes: this.form.field('maxRequestImageBytes'),
       requestImagePixelBudget: this.form.field('requestImagePixelBudget'),
       requestImageMaxBytes: this.form.field('requestImageMaxBytes'),
