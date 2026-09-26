@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { GoUsage } from '../usage-contract.ts'
+import type { GoUsage, UsageWindow } from '../usage-contract.ts'
 import css from './UsagePill.module.css'
 
 export interface UsagePillProps {
@@ -29,6 +29,12 @@ function usageFailure(error: unknown): UsageFailure {
     }
   }
   return { retainPrevious: false }
+}
+
+/** Bars turn amber near the limit and red once the window is exhausted. */
+function usageLevel(window: UsageWindow): string | undefined {
+  if (window.status === 'rate-limited' || window.percent >= 100) return css.limited
+  return window.percent >= 80 ? css.high : undefined
 }
 
 /** Only the selected Go provider mounts a poller, so other models send no usage traffic. */
@@ -115,9 +121,9 @@ function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'director
       {current ? <p className={css.hint}>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</p> : null}
       {usage ? (['rolling', 'weekly', 'monthly'] as const).map(key => <div className={css.window} key={key}>
         <div className={css.row}><span>{t(`usage_${key}`)}</span><strong>{usage[key].percent}%</strong></div>
-        <progress aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
+        <progress className={usageLevel(usage[key])} aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
         <div className={css.hint}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
-        {usage[key].status === 'rate-limited' && <div>{t('usageLimited')}</div>}
+        {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
       </div>) : failure ? null : <p>{t('usageLoading')}</p>}
     </div>}
   </span>

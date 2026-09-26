@@ -174,3 +174,15 @@ it('clears usage when its source reader changes and ignores the previous readerâ
   await act(async () => { finishOld(usage) })
   expect(trigger().textContent).toContain(percentageLabel(otherAccount))
 })
+
+it('marks windows near or at their limit so the bars are not all shown as healthy', async () => {
+  const levels = { ...usage, rolling: { ...usageWindow, percent: 20 }, weekly: { ...usageWindow, percent: 85 }, monthly: { ...usageWindow, status: 'rate-limited' as const, percent: 60 } }
+  await act(async () => { render(<UsagePill directory={directory('opencode-go')} readUsage={vi.fn().mockResolvedValue(levels)} t={t} />) })
+  showDetails()
+  const bar = (name: string) => screen.getByRole('progressbar', { name }).className
+  expect(bar(en.usage_rolling)).toBe('')
+  expect(bar(en.usage_weekly)).not.toBe('')
+  expect(bar(en.usage_monthly)).not.toBe('')
+  expect(bar(en.usage_monthly)).not.toBe(bar(en.usage_weekly))
+  expect(screen.getByText(en.usageLimited)).toBeTruthy()
+})

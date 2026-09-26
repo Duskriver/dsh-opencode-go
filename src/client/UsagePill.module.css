@@ -1,7 +1,10 @@
 .root { position: relative; display: inline-flex; min-width: 0; }
 .trigger { border: 0; background: transparent; color: inherit; opacity: .75; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
 .trigger:hover, .trigger:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
-.panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 280px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); background: var(--dsw-specific-menu, Canvas); box-shadow: 0 8px 30px #0002; font-size: 12px; }
+.panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 280px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); box-shadow: 0 8px 30px #0003; font-size: 12px; isolation: isolate;
+  /* The host menu token is translucent: tint an opaque surface with it so chat text never shows through. */
+  background-color: Canvas;
+  background-image: linear-gradient(var(--dsw-specific-menu, transparent), var(--dsw-specific-menu, transparent)), linear-gradient(var(--dsw-alias-bg-layer-2, Canvas), var(--dsw-alias-bg-layer-2, Canvas)); }
 .hint { opacity: .65; font-size: 11px; line-height: 1.6; }
 .warning { margin: 10px 0; padding: 10px; border-radius: 6px; background: color-mix(in srgb, currentColor 6%, transparent); line-height: 1.5; overflow-wrap: anywhere; }
 .warning p { margin: 5px 0 0; }
@@ -14,3 +17,8 @@
 .window progress::-webkit-progress-bar { background: transparent; border-radius: 4px; }
 .window progress::-webkit-progress-value { background: #39a878; border-radius: 4px; }
 .window progress::-moz-progress-bar { background: #39a878; border-radius: 4px; }
+.window progress.high::-webkit-progress-value { background: #e0a100; }
+.window progress.high::-moz-progress-bar { background: #e0a100; }
+.window progress.limited::-webkit-progress-value { background: #e5484d; }
+.window progress.limited::-moz-progress-bar { background: #e5484d; }
+.limitedText { margin-top: 2px; color: #e5484d; font-weight: 600; }
