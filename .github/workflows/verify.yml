@@ -86,3 +86,5 @@ jobs:
             tests/hosts/*/package-lock.json
       - run: npm ci --strict-peer-deps
       - run: npm run test:compat
+        env:
+          DSH_COMPAT_CONCURRENCY: '4'
