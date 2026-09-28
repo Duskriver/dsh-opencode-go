@@ -43,6 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        env:
+          # npm prepares Git sources inside its cache. Keep extraction on the runner's work volume.
+          npm_config_cache: ${{ runner.temp }}/npm-cache
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -57,6 +60,7 @@ jobs:
       # The runner uses only Node built-ins; the Git install must build from source itself.
       - run: npm run test:install -- ${{ matrix.manager }}
         env:
+          npm_config_cache: ${{ runner.temp }}/npm-cache
           npm_config_logs_dir: ${{ runner.temp }}/npm-install-logs
           DSH_PNPM_STORE_DIR: ${{ runner.temp }}/pnpm-store
       - name: Upload npm timing records
