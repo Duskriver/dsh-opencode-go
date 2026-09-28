@@ -68,6 +68,41 @@ it('round-trips source diagnostics, accepts older responses, and rejects invalid
   }
 })
 
+it('keeps the declared input modalities across the Host RPC result codec', () => {
+  const catalog = { models: [{ id: 'm', inputModalities: ['text', 'video'] }], stale: false }
+  expect(parseGoModelCatalog(catalog)).toEqual(catalog)
+  // An older Host omits the field entirely; the page then reports it as undeclared.
+  expect(parseGoModelCatalog({ models: [{ id: 'm' }], stale: false })).toEqual({ models: [{ id: 'm' }], stale: false })
+})
+
+it('serves the declared input modalities through the Host RPC the settings page reads', async () => {
+  const id = 'omni-model'
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+    ? Promise.resolve(Response.json(metadataDocument({
+      [id]: modelMetadata({ name: 'Omni', modalities: { input: ['video', 'text', 'image'], output: ['text'] } }),
+    })))
+    : original(input, init))
+  const gateway = await mockGateway({ status: 200, body: listingBody([id]) })
+  const config = configOf(gateway.url)
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => undefined })
+  const ctx = new Context()
+  await ctx.plugin(Registry)
+  await ctx.plugin(Gateway)
+  registerGoRemotes(ctx)
+  await ctx.plugin(GoModelsService, { catalog: () => adapter.catalogOf(config) })
+  const read = async () => await ctx.typertGateway.invoke({
+    namespace: 'opencodeGoModels', method: 'read', args: {},
+  }) as GoModelCatalog
+  try {
+    const catalog = await read()
+    expect(catalog.models).toEqual([expect.objectContaining({ id, inputModalities: ['text', 'image', 'video'] })])
+  } finally {
+    vi.stubGlobal('fetch', original)
+    await ctx.fiber.dispose()
+  }
+})
+
 it('marks missing configuration in the Host RPC and only enables the model after metadata becomes usable', async () => {
   const id = 'unconfigured-model'
   let configured = false

@@ -244,15 +244,16 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
   })
 
-  it('keeps the release date on the row of a model inside its new-model window', () => {
+  it('keeps the compact row to the model name and its badges', () => {
     const today = new Date().toISOString().slice(0, 10)
-    renderSection(stateOf({ models: listing([
-      { id: 'fresh', name: 'Fresh', releaseDate: today },
-      { id: 'settled', name: 'Settled', releaseDate: '2020-01-01' },
-    ]) }))
-    const nav = screen.getByRole('navigation', { name: en.modelsLabel })
-    expect(within(nav).getByText(t('releasedOn', { date: today }))).toBeTruthy()
-    expect(within(nav).queryByText(t('releasedOn', { date: '2020-01-01' }))).toBeNull()
+    renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
+    const row = within(screen.getByRole('navigation', { name: en.modelsLabel })).getByRole('button')
+    expect(row.textContent).toContain('Fresh')
+    expect(row.textContent).toContain(en.newBadge)
+    // The model id and the release date are the parameter card's job.
+    expect(row.textContent).not.toContain('fresh-model')
+    expect(row.textContent).not.toContain(today)
+    expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain('fresh-model')
   })
 
   it('adds the forwarding caveat only where a model declares inputs beyond text and images', () => {

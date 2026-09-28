@@ -79,9 +79,9 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
               className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
               <button type="button" className={css.modelChoice}
                 aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
+                {/* The row carries the name and its badges only; the model id and
+                    the release date belong to the parameter card. */}
                 <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
-                <code className={css.modelIdInline} translate="no">{entry.id}</code>
-                {isNewModel(entry, now) ? <span className={css.releaseDate}>{t('releasedOn', { date: entry.releaseDate })}</span> : null}
               </button>
               {hasCapacityOverride(draft[entry.id])
                 ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
