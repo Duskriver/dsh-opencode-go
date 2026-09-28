@@ -54,6 +54,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
+    "prepare": "npm run build",
     "prepack": "npm run build",
     "pretest": "npm run build",
     "verify:installed": "node --expose-internals scripts/installed-smoke.mjs",
