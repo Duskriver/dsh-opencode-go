@@ -56,6 +56,15 @@ export declare const en: {
     limitsOutput: string;
     capacityDefault: string;
     capacityMissing: string;
+    modalityLabel: string;
+    modalityText: string;
+    modalityImage: string;
+    modalityAudio: string;
+    modalityVideo: string;
+    modalityPdf: string;
+    modalityUnknown: string;
+    modalitiesSource: string;
+    modalitiesForwarding: string;
     visibilityHint: string;
     modelVisibleLabel: string;
     configurationMissing: string;
@@ -67,7 +76,6 @@ export declare const en: {
     deprecatedHint: string;
     newHint: string;
     newBadge: string;
-    releasedOn: string;
     releaseSource: string;
     modelDetails: string;
     filterLabel: string;

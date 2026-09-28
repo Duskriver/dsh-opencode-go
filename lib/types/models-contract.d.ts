@@ -7,9 +7,24 @@ export interface GoModel {
     maxTokens?: number;
     deprecated?: boolean;
     releaseDate?: string;
+    /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
+    inputModalities?: readonly InputModality[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
 }
+/**
+ * Input modalities this page can name. models.dev uses these same five tokens, so
+ * an unknown token is dropped rather than rendered as an untranslatable chip.
+ */
+export declare const INPUT_MODALITIES: readonly ["text", "image", "audio", "video", "pdf"];
+export type InputModality = typeof INPUT_MODALITIES[number];
+/**
+ * Normalize one `modalities.input` array into display order.
+ * @param value - the raw declaration read from models.dev or from a Host response.
+ * @returns the declared modalities in {@link INPUT_MODALITIES} order, or
+ *   `undefined` when nothing recognizable was declared.
+ */
+export declare function normalizeInputModalities(value: unknown): readonly InputModality[] | undefined;
 /** Last successful check of one catalog source, plus any current refresh failure. */
 export interface GoCatalogSourceStatus {
     readonly updatedAt?: number;
