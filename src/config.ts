@@ -102,7 +102,7 @@ export const PlainConfig: z<OpencodeGoConfig> = z.object(fields)
 export type LiveConfig = { [K in keyof OpencodeGoConfig]-?: { get(): OpencodeGoConfig[K] } }
 export const Config = z.object(Object.fromEntries(
   Object.entries(fields).map(([key, schema]) => [key, schema.volatile()]),
-)) as z<Partial<OpencodeGoConfig>, LiveConfig>
+)) as unknown as z<Partial<OpencodeGoConfig>, LiveConfig>
 
 /** Keep the Loader's references: reparsing them would detach live updates. */
 export function readConfig(config: LiveConfig): OpencodeGoConfig {
