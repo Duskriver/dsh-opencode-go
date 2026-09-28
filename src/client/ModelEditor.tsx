@@ -96,7 +96,14 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
               <h3>{model.name ?? model.id}</h3>
               {badges(model)}
             </div>
-            <code className={css.limitsModelId} translate="no">{model.id}</code>
+            {/* The id and its release date share one line; the full provenance of
+                the date stays in its title. */}
+            <div className={css.modelMeta}>
+              <code className={css.limitsModelId} translate="no">{model.id}</code>
+              {model.releaseDate
+                ? <span className={css.releaseDate} title={t('releaseSource', { date: model.releaseDate })}>{model.releaseDate}</span>
+                : null}
+            </div>
             {model.configurationMissing ? <p className={css.hint}>{t(metadataUnavailable ? 'configurationUnavailableHint' : 'configurationMissingHint')}</p> : <>
               {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
               <div className={css.stats}>
@@ -109,7 +116,6 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
               </div>
               {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
                 onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
-              {model.releaseDate ? <p className={css.hint}>{t('releaseSource', { date: model.releaseDate })}</p> : null}
               <p className={css.paneFoot}>
                 {t('limitsHint')} {t('modalitiesSource')}
                 {/* Only models declaring more than text and images need the caveat. */}

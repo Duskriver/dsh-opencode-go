@@ -256,6 +256,18 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain('fresh-model')
   })
 
+  it('shares one line between the model id and its release date', () => {
+    const today = new Date().toISOString().slice(0, 10)
+    renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
+    const pane = screen.getByRole('region', { name: en.modelDetails })
+    const id = pane.querySelector('code')
+    const date = within(pane).getByText(today)
+    // The date rides the id's line instead of taking a provenance row of its own.
+    expect(date.parentElement).toBe(id?.parentElement)
+    // The full provenance stays one hover away, without spending a line on it.
+    expect(date.getAttribute('title')).toBe(t('releaseSource', { date: today }))
+  })
+
   it('adds the forwarding caveat only where a model declares inputs beyond text and images', () => {
     renderSection(stateOf({ models: listing([{ id: 'omni', name: 'Omni', inputModalities: ['text', 'video'] }]) }))
     expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain(en.modalitiesForwarding)

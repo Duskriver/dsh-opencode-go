@@ -261,6 +261,27 @@
   white-space: nowrap;
 }
 
+/* The id and its release date share one line, so the card spends its height on
+   capacities and modalities rather than on a separate provenance row. */
+.modelMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.modelMeta .limitsModelId {
+  flex: 1;
+  min-width: 0;
+}
+
+.releaseDate {
+  flex: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .limitsModelId {
   display: block;
   overflow: hidden;
@@ -329,11 +350,13 @@
 .filter[aria-pressed="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
 .filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }
 
-/* Selection list 3 : parameter card 1, with the card held at a readable width. */
+/* The compact list only carries names and switches, so the parameter card takes
+   the larger share: 45 : 55. The card is a little taller than the page's own
+   content budget, because its details are what the split is for. */
 .modelLayout {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(180px, 1fr);
-  height: clamp(260px, calc(100cqh - 440px), 520px);
+  grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
+  height: clamp(260px, calc(100cqh - 380px), 560px);
   border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: 10px;
   overflow: hidden;
@@ -345,8 +368,15 @@
 .modelRowSelected { background: var(--dsw-alias-bg-layer-3); border-radius: 6px; border-top-color: transparent; }
 .modelRow > [role="switch"] { flex-shrink: 0; }
 .modelChoice { display: flex; align-items: baseline; flex: 1; min-width: 0; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
-.modelChoice:hover { background: var(--dsw-alias-bg-layer-3); }
-.modelRowSelected .modelChoice:hover { background: none; }
+/* Hover and selection cover the same whole row — name, badges, override mark and
+   switch — so a row reads as one bar instead of stopping at the switch. A
+   selected row keeps its own surface; hover stays one step lighter than it, so
+   the two states remain tellable apart. */
+.modelRow:hover:not(.modelRowSelected) {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 92%, var(--dsw-alias-label-primary));
+  border-top-color: transparent;
+  border-radius: 6px;
+}
 .modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; flex: 0 1 auto; min-width: 0; }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); }
 .modelDetails { overflow-y: auto; min-height: 0; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
