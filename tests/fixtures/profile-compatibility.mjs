@@ -1,8 +1,6 @@
 /** Real 0.1.7 Loader/settings contracts, isolated from the legacy host packages. */
 import assert from 'node:assert/strict'
-import { useModernHost } from './modern-host.mjs'
 
-await useModernHost(process.argv[2])
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const { default: Settings } = await import('@deepseek-ai/dsh-settings')
@@ -20,10 +18,10 @@ globalThis.fetch = async (input) => {
   return Response.json({ data: [{ id: 'compat-model' }] })
 }
 try {
-  ctx.baseUrl = new URL('../../package.json', import.meta.url).href
+  ctx.baseUrl = new URL('../package.json', import.meta.url).href
   await ctx.plugin(Loader)
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
-  const id = await ctx.loader.create({ id: 'opencode-go', name: new URL('../../lib/index.js', import.meta.url).href,
+  const id = await ctx.loader.create({ id: 'opencode-go', name: 'dsh-opencode-go',
     config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY', legacyOption: true,
       showDeprecatedModels: true, visibleModelIds: ['compat-model'] } })
   await ctx.loader.await()

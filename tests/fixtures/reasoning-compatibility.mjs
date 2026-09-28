@@ -1,21 +1,14 @@
 /** Verify default and explicit efforts through each real host and the shipped adapter. */
 import assert from 'node:assert/strict'
-import { registerHooks } from 'node:module'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { useModernHost } from './modern-host.mjs'
 
 const host = process.argv[2]
-const modern = ['v017', 'v017-alpha2', 'v017-rc1', 'v017-rc2'].includes(host)
-if (modern) await useModernHost(host)
-const llmURL = import.meta.resolve(modern ? '@deepseek-ai/dsh-llm' : host)
-registerHooks({ resolve(id, context, next) {
-  return id === '@deepseek-ai/dsh-llm' ? { url: llmURL, shortCircuit: true } : next(id, context)
-} })
+const modern = host.startsWith('v017')
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const llm = await import('@deepseek-ai/dsh-llm')
-const plugin = await import('../../lib/index.js')
+const plugin = await import('dsh-opencode-go')
 
 const models = {
   'deepseek-v4-flash': { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] },
@@ -64,14 +57,14 @@ try {
   await once(server, 'listening')
   const config = plugin.PlainConfig({ apiKeyEnv: 'OPENCODE_GO_REASONING_COMPAT_KEY',
     baseURL: `http://127.0.0.1:${server.address().port}` })
-  ctx.baseUrl = new URL('../../package.json', import.meta.url).href
+  ctx.baseUrl = new URL('../package.json', import.meta.url).href
   await ctx.plugin(Loader)
   if (modern) {
     await ctx.plugin((await import('@deepseek-ai/dsh-typert-registry')).default)
     await ctx.plugin((await import('@deepseek-ai/dsh-api-gateway')).default)
   }
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
-  await ctx.loader.create({ name: new URL('../../lib/index.js', import.meta.url).href, config })
+  await ctx.loader.create({ name: 'dsh-opencode-go', config })
   await ctx.loader.await()
 
   const cases = [

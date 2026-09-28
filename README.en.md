@@ -75,12 +75,23 @@ The model ID must be available in the current gateway catalog. Web and Headless 
 To build from source and install a local package:
 
 ```sh
-npm ci --legacy-peer-deps
+npm ci
 npm pack
 dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
 ```
 
-The development dependencies include real test packages from multiple DSH generations, so installation requires `--legacy-peer-deps`. For Headless, replace `web` with `headless`.
+Source installation builds the plugin automatically; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
+
+### Development and verification
+
+```sh
+npm test              # Core tests, rebuilding the plugin first
+npm run test:compat   # One tarball tested in 8 independent DSH environments
+npm run test:install  # npm / pnpm Git installation and artifact checks
+npm run verify        # All of the above
+```
+
+Compatibility and installation checks download dependencies, use system temporary directories, and clean up afterward. To check one host, run `npm run test:compat -- v017-rc2`. See the [development guide](docs/development.md) for maintaining host versions.
 
 ## Updating the plugin
 

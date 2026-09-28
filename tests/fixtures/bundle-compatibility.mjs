@@ -4,14 +4,12 @@ import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { useModernHost } from './modern-host.mjs'
 
 const host = process.argv[2] ?? 'v017-rc1'
-await useModernHost(host)
 const { getDshRuntimeVersion, loadProfileDirectory } = await import('@deepseek-ai/dsh-app-boot')
 assert.equal(getDshRuntimeVersion(), { 'v017-rc1': '0.1.7-rc.1', 'v017-rc2': '0.1.7-rc.2' }[host])
-const root = fileURLToPath(new URL('../../', import.meta.url))
-const installAnchor = fileURLToPath(new URL(`../hosts/${host}/package.json`, import.meta.url))
+const root = fileURLToPath(new URL('../node_modules/dsh-opencode-go/', import.meta.url))
+const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
 const home = await mkdtemp(join(tmpdir(), 'opencode-go-bundle-compat-'))
 try {
   for (const name of ['web', 'headless']) {

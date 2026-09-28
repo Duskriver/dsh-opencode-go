@@ -1,35 +1,20 @@
 /** Exercise the shipped artifact with real, versioned LLM packages; no mocked exports. */
 import assert from 'node:assert/strict'
-import { createRequire, registerHooks } from 'node:module'
+import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { useModernHost } from './modern-host.mjs'
 
-const modern = ['v017', 'v017-alpha2', 'v017-rc1', 'v017-rc2'].includes(process.argv[2])
-if (modern) {
-  await useModernHost(process.argv[2])
-  process.argv[2] = '@deepseek-ai/dsh-llm'
-}
-const legacy = process.argv[2].startsWith('dsh-llm-v015')
-const llmURL = import.meta.resolve(process.argv[2])
-const aliased = process.argv[2].startsWith('dsh-llm-')
-const attachmentPackage = aliased ? process.argv[2].replace('dsh-llm-', 'dsh-attachment-') : '@deepseek-ai/dsh-attachment'
-const attachmentURL = import.meta.resolve(attachmentPackage)
-const localPackage = aliased ? process.argv[2].replace('dsh-llm-', 'dsh-attachment-local-') : '@deepseek-ai/dsh-attachment-local'
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === '@deepseek-ai/dsh-llm') return { url: llmURL, shortCircuit: true }
-    if (specifier === '@deepseek-ai/dsh-attachment') return { url: attachmentURL, shortCircuit: true }
-    return nextResolve(specifier, context)
-  },
-})
+const host = process.argv[2]
+const modern = host.startsWith('v017')
+const legacy = host.startsWith('v015')
+const localPackage = '@deepseek-ai/dsh-attachment-local'
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const llm = await import('@deepseek-ai/dsh-llm')
-const plugin = await import('../../lib/index.js')
+const plugin = await import('dsh-opencode-go')
 const { LocalAttachmentStore } = await import(localPackage)
 const sharp = createRequire(import.meta.resolve(localPackage))('sharp')
 const usage = Object.fromEntries(['rolling', 'weekly', 'monthly'].map(key => [key,
@@ -83,7 +68,7 @@ try {
   const config = plugin.PlainConfig({ apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY',
     baseURL: `http://127.0.0.1:${server.address().port}`, maxRequestImageBytes: 8,
     modelLimits: { 'compat-model': { contextWindow: 50000, maxTokens: 1024 } } })
-  ctx.baseUrl = new URL('../../package.json', import.meta.url).href
+  ctx.baseUrl = new URL('../package.json', import.meta.url).href
   await ctx.plugin(Loader)
   if (modern) {
     await ctx.plugin((await import('@deepseek-ai/dsh-typert-registry')).default)
@@ -92,7 +77,7 @@ try {
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   // Persisted fields from another plugin version stay plain after schema validation.
   // They must not prevent the current adapter from mounting through the Loader.
-  const id = await ctx.loader.create({ name: new URL('../../lib/index.js', import.meta.url).href,
+  const id = await ctx.loader.create({ name: 'dsh-opencode-go',
     config: { ...config, legacyOption: true } })
   await ctx.loader.await()
   assert.ok(ctx.loader.resolve(id).fiber, 'plugin mounts through the real Loader')

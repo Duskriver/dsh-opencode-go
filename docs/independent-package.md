@@ -10,4 +10,6 @@ Published `@deepseek-ai/dsh-llm-pi-ai` versions `0.1.5-rc.2` and `0.1.6-alpha.1`
 
 The build uses esbuild and lightningcss directly. Node imports stay external; the browser factory follows DSH's `window.__ModuleLoader__.load` format, embeds CSS Modules, and allows only the declared platform module imports. A package-level builder is sufficient for this single external plugin; extracting a general DSH build-tool package would require a separate release and is not a prerequisite for installation.
 
+Multi-version host fixtures have independent manifests and lockfiles, outside the root npm dependency graph. Package installation builds only the plugin. Compatibility verification installs one generated tarball into isolated consumers and uses their ordinary module resolution; it does not substitute selected host modules into the root process. See [development and verification](development.md).
+
 The initial source derives from the user's working copy of DeepSeek Harness on branch `oh-my-dsh`, whose HEAD was `2c8555b323f3b49eac743bafd527f9f3238bf548`, including the uncommitted OpenCode Go settings changes present when this project was created. Runtime conversion modules retain their published behavior. The original checkout is unchanged by this extraction.

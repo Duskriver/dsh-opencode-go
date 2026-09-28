@@ -75,12 +75,23 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 如需从源码构建并安装本地包：
 
 ```sh
-npm ci --legacy-peer-deps
+npm ci
 npm pack
 dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
 ```
 
-开发依赖包含多代 DSH 的真实测试包，安装时需要 `--legacy-peer-deps`。Headless 用户将 `web` 换成 `headless`。
+源码安装会自动构建插件，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
+
+### 开发与验证
+
+```sh
+npm test              # 基础功能测试（自动重新构建）
+npm run test:compat   # 同一安装包在 8 套独立 DSH 环境中测试
+npm run test:install  # npm / pnpm 从 Git 安装及入口完整性检查
+npm run verify        # 执行以上全部检查
+```
+
+兼容性与安装检查会下载依赖，使用系统临时目录并在结束后清理。只检查一个宿主可运行 `npm run test:compat -- v017-rc2`。维护测试版本的方式见[开发与测试说明](docs/development.md)。
 
 ## 升级插件
 
