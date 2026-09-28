@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  core-and-install:
+  core:
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +26,47 @@ jobs:
           cache: npm
       - run: npm ci --strict-peer-deps
       - run: npm test
-      - run: npm run test:install
+
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22.19.0', '24']
+        manager: [npm, pnpm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      npm_config_prefer_offline: 'true'
+      npm_config_timing: 'true'
+      npm_config_foreground_scripts: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Cache pnpm packages
+        if: matrix.manager == 'pnpm'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pnpm-store
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-11.7.0-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pnpm-11.7.0-
+      # The runner uses only Node built-ins; the Git install must build from source itself.
+      - run: npm run test:install -- ${{ matrix.manager }}
+        env:
+          npm_config_logs_dir: ${{ runner.temp }}/npm-install-logs
+          DSH_PNPM_STORE_DIR: ${{ runner.temp }}/pnpm-store
+      - name: Upload npm timing records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: install-timings-${{ matrix.os }}-${{ matrix.node }}-${{ matrix.manager }}
+          path: ${{ runner.temp }}/npm-install-logs/*-timing.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   compatibility:
     runs-on: ubuntu-latest

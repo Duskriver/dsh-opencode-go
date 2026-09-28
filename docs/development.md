@@ -12,6 +12,7 @@ The root package contains one coherent DSH 0.1.6-alpha.1 development environment
 | `npm run test:compat` | Pack once and test the installed artifact across every supported host fixture |
 | `npm run test:compat -- v015-rc1 v017-rc2` | Test only the named fixtures; unknown names fail |
 | `npm run test:install` | Test npm and pnpm 11.7.0 Git installs from a fresh source fixture |
+| `npm run test:install -- npm` / `-- pnpm` | Run just one package manager; unknown names fail |
 | `npm run verify` | Run core, compatibility, and Git-installation checks |
 
 The checks use loopback gateways and local fixtures, not paid inference or an installed user profile. Compatibility and installation checks need registry access; installation checks also require Git. Temporary consumers are created outside the repository and removed on success or failure. Tests never implicitly skip a missing host environment.
@@ -46,4 +47,8 @@ npm install --package-lock-only --ignore-scripts --strict-peer-deps
 
 Copy the resulting lockfile back to its fixture directory. Generating it outside the checkout prevents an existing root `node_modules` from influencing resolution. Then run the selected compatibility check and the full verification before release. Root development dependency changes require the same strict resolution discipline.
 
-The GitHub workflow runs core and Git-installation checks on Linux and Windows with Node 22.19.0 and 24. The complete installed-host matrix runs separately on Linux/Node 24.
+The GitHub workflow runs core and Git-installation checks on Linux and Windows with Node 22.19.0 and 24. Core tests, npm installs, and pnpm installs run as independent jobs, so one slow installation does not consume another check's time allowance. Installation jobs need no root `npm ci`: their runner uses only Node built-ins, and the fresh Git source must install its own build dependencies. The complete installed-host matrix runs separately on Linux/Node 24.
+
+Installation jobs reuse the npm download cache and a separate pnpm store, preferring cached packages while still fetching missing data. They never restore the checkout's `node_modules` or `lib/`. CI uses `RUNNER_TEMP` for isolated consumers and `DSH_PNPM_STORE_DIR` for the cached pnpm store on the same volume; local runs use the system temporary directory and the default pnpm store unless overridden.
+
+Every Git-installation run reports fixture preparation, installation, artifact verification, cleanup, and total elapsed time. GitHub job summaries include a phase table. CI also enables npm's internal timing records and uploads the `*-timing.json` files for seven days, including records from nested Git preparation where available. These records distinguish dependency resolution/extraction from build hooks; a timeout may prevent the still-running process from writing its final timing file. The 15-minute job limit remains unchanged.
