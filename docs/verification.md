@@ -1,5 +1,13 @@
 # Verification
 
+## Bounded parallel compatibility checks (2026-09-28)
+
+The installed-host runner now tests up to four independent consumers at once in CI, using one shared package tarball. Each consumer still performs strict host installation, artifact installation, pinned-version checks, and every existing Host/Client/profile/bundle fixture. Local runs default to one worker; `DSH_COMPAT_CONCURRENCY` selects a positive worker count. The runner reports per-host results and timings, groups each host's logs, and waits for active and queued work to settle before removing temporary consumers, including after failures. CI prefers restored npm downloads and still fetches missing packages.
+
+The [serial baseline](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36438860747) spent **113 seconds** in `npm run test:compat`. The [four-worker run](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36440959685) took **74 seconds** in that step; [adding cache preference](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36441411147) reduced the observed step to **66 seconds**, including build/pack, all eight hosts, and cleanup. That is a **42% reduction** from the baseline. The latter workflow passed **13/13 jobs** in **89 seconds** from creation to its final update, compared with **171 seconds** for the baseline. The baseline also had a longer runner-provisioning wait, so the full-workflow difference is not entirely a code speedup. These are individual hosted-runner observations, not guaranteed timings.
+
+The Linux/Windows and Node 22.19.0/24 coverage, eight package-manager installation jobs, and eight compatibility hosts remain intact; no macOS CI job was added. Local validation passed the build and **314 tests in 23 files**, the full four-worker installed-host matrix, and a selected-host run with the default serial setting. Three scheduler regressions verify bounded concurrency with immediate slot reuse, draining active/queued work while preserving multiple failures, and rejecting invalid concurrency before work starts. CLI validation also rejected unknown hosts and invalid worker counts before package construction. Both measured branch workflows passed all 13 jobs.
+
 ## Parallel Git-installation CI and cache placement (2026-09-28)
 
 The first [main-branch workflow](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36411675701) passed all core tests, the eight-host compatibility matrix, and both Git installs on Linux and Windows/Node 24. Windows/Node 22.19.0 passed its npm Git install after about ten minutes, then exceeded the shared 15-minute job limit during pnpm preparation. No installation assertion failed before cancellation.
