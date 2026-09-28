@@ -81,6 +81,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
                 aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
                 <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
                 <code className={css.modelIdInline} translate="no">{entry.id}</code>
+                {isNewModel(entry, now) ? <span className={css.releaseDate}>{t('releasedOn', { date: entry.releaseDate })}</span> : null}
               </button>
               {hasCapacityOverride(draft[entry.id])
                 ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
@@ -109,7 +110,12 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
               {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
                 onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
               {model.releaseDate ? <p className={css.hint}>{t('releaseSource', { date: model.releaseDate })}</p> : null}
-              <p className={css.paneFoot}>{t('limitsHint')} {t('modalitiesSource')}</p>
+              <p className={css.paneFoot}>
+                {t('limitsHint')} {t('modalitiesSource')}
+                {/* Only models declaring more than text and images need the caveat. */}
+                {model.inputModalities?.some(modality => modality !== 'text' && modality !== 'image') === true
+                  ? ` ${t('modalitiesForwarding')}` : ''}
+              </p>
             </>}
           </section>
         </div>

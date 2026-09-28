@@ -350,6 +350,9 @@
 .modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; flex: 0 1 auto; min-width: 0; }
 .modelIdInline { flex: 0 1 auto; min-width: 40px; margin-left: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.4; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); }
+/* The release date only rides a model still inside its seven-day window, and it
+   sits at the row's trailing edge so the name and id keep the leading space. */
+.releaseDate { flex: 0 0 auto; margin-left: auto; font-size: 10px; line-height: 1.4; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
 .modelDetails { overflow-y: auto; min-height: 0; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .modelDetails h3 { font-size: 14px; margin: 0; overflow-wrap: anywhere; }
 .modelHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }

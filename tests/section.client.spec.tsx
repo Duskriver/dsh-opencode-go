@@ -244,6 +244,26 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
   })
 
+  it('keeps the release date on the row of a model inside its new-model window', () => {
+    const today = new Date().toISOString().slice(0, 10)
+    renderSection(stateOf({ models: listing([
+      { id: 'fresh', name: 'Fresh', releaseDate: today },
+      { id: 'settled', name: 'Settled', releaseDate: '2020-01-01' },
+    ]) }))
+    const nav = screen.getByRole('navigation', { name: en.modelsLabel })
+    expect(within(nav).getByText(t('releasedOn', { date: today }))).toBeTruthy()
+    expect(within(nav).queryByText(t('releasedOn', { date: '2020-01-01' }))).toBeNull()
+  })
+
+  it('adds the forwarding caveat only where a model declares inputs beyond text and images', () => {
+    renderSection(stateOf({ models: listing([{ id: 'omni', name: 'Omni', inputModalities: ['text', 'video'] }]) }))
+    expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain(en.modalitiesForwarding)
+
+    cleanup()
+    renderSection(stateOf({ models: listing([{ id: 'vision', name: 'Vision', inputModalities: ['text', 'image'] }]) }))
+    expect(screen.getByRole('region', { name: en.modelDetails }).textContent).not.toContain(en.modalitiesForwarding)
+  })
+
   it('makes model capacities searchable and stages numeric edits', () => {
     const edits = actions()
     renderSection(stateOf({
