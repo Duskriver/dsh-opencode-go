@@ -1,5 +1,15 @@
 # Verification
 
+## Issue #19: isolate compatibility fixtures from plugin builds (2026-09-28)
+
+The root package now has one coherent development dependency tree and installs with `npm ci --strict-peer-deps`. The eight published-Host fixtures have independent manifests and lockfiles outside npm workspaces. Git installation builds the plugin through `prepare`; it does not install the compatibility fixtures. This supersedes the workspace, dependency-alias, JavaScript resolution-hook, and root `--legacy-peer-deps` instructions in earlier entries.
+
+`npm run test:compat` builds one tarball and installs that same artifact into eight temporary consumers outside the checkout. Each host dependency tree is first installed with strict peer validation. Only the subsequent plugin artifact installation uses `--legacy-peer-deps` to accommodate the difference between npm's prerelease range semantics and DSH's `includePrerelease` admission policy; the runner then checks that the pinned DSH versions have not changed. These checks establish runtime compatibility with those hosts, not strict npm peer-range acceptance for every prerelease host.
+
+Validation passed on macOS with Node.js **22.19.0** and **24.14.1**: Host/Client type checks and build, **311 core tests in 22 files**, all **eight installed-package Host/Client compatibility environments**, and clean Git installations with **npm 11.11.0** and **pnpm 11.7.0**. The minimum-version Node 22.19.0 run passed the complete `npm run verify` command. Both installation regressions use a source repository with the entire `tests/` directory removed, then check the installed entrypoints, declarations, build metadata, and ESM loading. Existing compatibility assertions were moved into the isolated runners, and distributed-client coverage increased from five host versions to eight.
+
+Published UI dependencies still emit missing-source-map warnings, and pnpm reports upstream peer warnings while installation and artifact checks pass. CI now covers Linux and Windows on Node 22.19.0 and 24, plus the eight-host matrix on Linux. Windows and the new GitHub workflow have not been executed locally. Tests use local fixtures; no live model request or package publication was performed.
+
 ## Optional request image count cap and usage panel polish (plugin 0.1.15, 2026-09-26)
 
 The OpenCode Go settings page now exposes `maxImages` as an optional positive integer. It has no default count limit, so existing image capability is unchanged until a user configures the field after an upstream image-count error. Clearing the field restores the inherited base value, or no count limit when the base has none. Counts include repeated image occurrences and images nested in tool results. The existing byte, pixel, and per-image budgets continue to apply independently.
