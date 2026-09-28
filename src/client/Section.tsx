@@ -323,12 +323,21 @@ function Loaded(props: {
         <p className={css.hint}>{state.enabled ? t('enabledHint') : t('enabledOff')}</p>
       </div>
       <details className={css.keySection} open={!state.apiKeyConfigured || state.apiKey.text.length > 0}>
-        <summary className={css.head}>
+        <summary>
+          {/* Inline so every supported Host shows the same glyph, like the GitHub mark below. */}
+          <span className={css.slot} aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" focusable="false">
+              <circle cx="5.4" cy="8" r="3.1" />
+              <path d="M8.5 8h5.3M11.9 8v2.2M10.2 8v1.6" />
+            </svg>
+          </span>
           <span className={css.label}>{t('keyLabel')}</span>
-          <span className={css.badges}>
+          {/* Badge and chevron share one trailing line so their centres agree. */}
+          <span className={css.trailing}>
             <Tag tone={state.apiKeyConfigured ? 'success' : 'warning'}>
               {state.apiKeyConfigured ? t('keyConfigured') : t('keyMissing')}
             </Tag>
+            <span className={css.chevronSlot} aria-hidden="true"><ChevronDown /></span>
           </span>
         </summary>
         <input

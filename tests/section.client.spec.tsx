@@ -216,6 +216,34 @@ describe('OpencodeGoSection', () => {
     expect(screen.queryByRole('button', { name: en.limitsLabel })).toBeNull()
   })
 
+  it('names every input modality in catalog order, including the ones the model does not accept', () => {
+    renderSection(stateOf({ models: listing([
+      { id: 'omni', name: 'Omni', contextWindow: 1_000_000, maxTokens: 131_072, inputModalities: ['text', 'image', 'video'] },
+    ]) }))
+    const text = screen.getByRole('region', { name: en.modelDetails }).textContent ?? ''
+    const labels = [en.modalityText, en.modalityImage, en.modalityAudio, en.modalityVideo, en.modalityPdf]
+    labels.forEach(label => { expect(text).toContain(label) })
+    const positions = labels.map(label => text.indexOf(label))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  })
+
+  it('falls back to an undeclared posture when the catalog carries no modalities', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    const pane = screen.getByRole('region', { name: en.modelDetails })
+    expect(within(pane).getByText(en.modalityUnknown)).toBeTruthy()
+    expect(within(pane).queryByText(en.modalityVideo)).toBeNull()
+  })
+
+  it('marks a model carrying a capacity override in the compact list', () => {
+    renderSection(stateOf({
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 1024 } },
+    }))
+    const nav = screen.getByRole('navigation', { name: en.modelsLabel })
+    expect(nav.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
+    expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
+  })
+
   it('makes model capacities searchable and stages numeric edits', () => {
     const edits = actions()
     renderSection(stateOf({

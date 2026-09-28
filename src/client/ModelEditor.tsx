@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { isModelEnabled, isNewModel, sortModels, type GoModel } from '../models-contract.ts'
+import { INPUT_MODALITIES, isModelEnabled, isNewModel, sortModels, type GoModel, type InputModality } from '../models-contract.ts'
 import type { OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels } from './section-controller.ts'
 import type { en } from './locales.ts'
 import css from './Section.module.css'
 
 type Translate = (key: keyof typeof en, params?: Record<string, unknown>) => string
+
+/** Chip copy for each token models.dev can declare. */
+const MODALITY_COPY = {
+  text: 'modalityText', image: 'modalityImage', audio: 'modalityAudio',
+  video: 'modalityVideo', pdf: 'modalityPdf',
+} as const satisfies Record<InputModality, keyof typeof en>
+
 export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefined): boolean {
   return limit?.contextWindow != null || limit?.maxTokens != null
 }
@@ -68,13 +75,16 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
       {model ? (
         <div className={css.modelLayout}>
           <nav className={css.modelList} aria-label={t('modelsLabel')}>
-            {entries.map(entry => <div key={entry.id} className={css.modelRow}>
+            {entries.map(entry => <div key={entry.id}
+              className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
               <button type="button" className={css.modelChoice}
                 aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
                 <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
-                <code className={css.limitsModelId} translate="no">{entry.id}</code>
-                {isNewModel(entry, now) ? <span className={css.releaseDate}>{t('releasedOn', { date: entry.releaseDate })}</span> : null}
+                <code className={css.modelIdInline} translate="no">{entry.id}</code>
               </button>
+              {hasCapacityOverride(draft[entry.id])
+                ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
+                : null}
               <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
                 onChange={enabled => { onModelEnabled(entry.id, enabled) }} />
@@ -88,12 +98,18 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
             <code className={css.limitsModelId} translate="no">{model.id}</code>
             {model.configurationMissing ? <p className={css.hint}>{t(metadataUnavailable ? 'configurationUnavailableHint' : 'configurationMissingHint')}</p> : <>
               {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
-              <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
-              <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
+              <div className={css.stats}>
+                <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
+                <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
+                <div className={css.stat}>
+                  <span className={css.statLabel}>{t('modalityLabel')}</span>
+                  <Modalities model={model} t={t} />
+                </div>
+              </div>
               {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
                 onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
               {model.releaseDate ? <p className={css.hint}>{t('releaseSource', { date: model.releaseDate })}</p> : null}
-              <p className={css.hint}>{t('limitsHint')}</p>
+              <p className={css.paneFoot}>{t('limitsHint')} {t('modalitiesSource')}</p>
             </>}
           </section>
         </div>
@@ -107,6 +123,21 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
   )
 }
 
+/**
+ * Declared input modalities as chips, in catalog order. An undeclared modality
+ * stays visible but dashed: the model simply does not accept that input.
+ */
+function Modalities({ model, t }: { model: GoModel; t: Translate }) {
+  const declared = model.inputModalities
+  if (declared === undefined || declared.length === 0) return <span className={css.hint}>{t('modalityUnknown')}</span>
+  return <span className={css.modalities}>
+    {INPUT_MODALITIES.map(modality => <span key={modality}
+      className={declared.includes(modality) ? css.modality : css.modalityOff}>
+      {t(MODALITY_COPY[modality])}
+    </span>)}
+  </span>
+}
+
 function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   model: GoModel
   field: keyof OpencodeGoModelLimit
@@ -118,8 +149,8 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
 }) {
   const id = `opencode-go-${field}-${encodeURIComponent(model.id)}`
   const defaultValue = model[field]
-  return <div className={css.field}>
-    <label className={css.label} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
+  return <div className={css.stat}>
+    <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
     <input id={id} className={css.input} type="number" min={1} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
       aria-describedby={`${id}-default`} value={limit?.[field] ?? ''}
