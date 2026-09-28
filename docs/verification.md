@@ -1,5 +1,15 @@
 # Verification
 
+## Git installation without plugin build approval (2026-09-28)
+
+DSH Desktop's pnpm 11.7.0 rejected commit `68e5840` with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`: the Git source declared `prepare`, while the desktop profile had no build approval for this plugin. The earlier CI explicitly approved its Git fixture, so it established installation after approval rather than the default user experience. Removing that approval from `npm run test:install -- pnpm` reproduced the same error in 1.4 seconds. This entry supersedes the earlier policy of building the plugin during Git installation.
+
+The default branch now includes the 30 prebuilt Host/Client/declaration files under `lib/` and declares no Git-preparation or dependency-installation hooks. The explicit maintainer build is named `compile`, also avoiding npm's special treatment of a script named `build`. CI independently rebuilds into a temporary directory and compares every file before running the core suite; the npm publish hook performs the same check. CSS module paths and export ordering, plus declaration line endings, are deterministic across checkouts and operating systems. Controlled checks rejected changed content, a missing declaration, and an extra empty artifact without overwriting them.
+
+Local validation passed **314 tests in 23 files**, all **eight installed-host environments**, and both npm and pnpm Git installations from a fixture with no source, build scripts, test fixtures, or plugin build approval. The [branch workflow](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36445611175) passed **13/13 jobs** in **89 seconds**, including artifact freshness and core checks on Linux/Windows with Node 22.19.0/24, plus the unchanged installation and compatibility matrix.
+
+A separate cold-store test used Desktop's bundled Node 24.21.0 and pnpm 11.7.0 to install the real GitHub URL at commit `22c6d38`. Its temporary consumer copied the desktop profile's linker, peer-installation, and build-trust settings, with no `dsh-opencode-go` approval. Installation passed in **8.7 seconds**, and its Host/Client entrypoints, declarations, and build metadata matched the verified artifact byte for byte. The user's desktop profile was not changed. This fixes future default-branch Git installs; URLs pinned to older source-only commits retain the older behavior. No new npm version was published.
+
 ## Bounded parallel compatibility checks (2026-09-28)
 
 The installed-host runner now tests up to four independent consumers at once in CI, using one shared package tarball. Each consumer still performs strict host installation, artifact installation, pinned-version checks, and every existing Host/Client/profile/bundle fixture. Local runs default to one worker; `DSH_COMPAT_CONCURRENCY` selects a positive worker count. The runner reports per-host results and timings, groups each host's logs, and waits for active and queued work to settle before removing temporary consumers, including after failures. CI prefers restored npm downloads and still fetches missing packages.
