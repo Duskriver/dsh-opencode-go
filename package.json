@@ -51,16 +51,18 @@
     }
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "compile": "node scripts/build.mjs",
+    "check:dist": "node scripts/build.mjs --check",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
-    "pretest": "npm run build",
+    "pretest": "npm run compile",
+    "test:ci": "npm run check:dist && vitest run",
     "verify:installed": "node --expose-internals scripts/installed-smoke.mjs",
     "verify:headless": "node scripts/headless-smoke.mjs",
-    "prepare": "npm run build",
+    "prepublishOnly": "npm run check:dist",
     "test:compat": "node scripts/test-compat.mjs",
     "test:install": "node scripts/test-install.mjs",
-    "verify": "npm test && npm run test:compat && npm run test:install"
+    "verify": "npm run test:ci && npm run test:compat && npm run test:install"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.2",

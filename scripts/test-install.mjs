@@ -1,4 +1,4 @@
-/** Regression for Git installs: no lib/, test hosts, or node_modules in the source fixture. */
+/** Install the shipped Git artifacts without source, build tools, or plugin build approval. */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -40,7 +40,7 @@ try {
     await mkdir(source)
     const { stdout } = await exec('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root })
     for (const path of new Set(stdout.split('\0').filter(Boolean))) {
-      if (path.startsWith('tests/')) continue
+      if (['tests/', 'src/', 'scripts/'].some(prefix => path.startsWith(prefix))) continue
       const destination = join(source, path)
       await mkdir(dirname(destination), { recursive: true })
       try { await copyFile(join(root, path), destination) }
@@ -58,7 +58,7 @@ try {
     return { manifest, gitURL }
   })
   for (const manager of managers) {
-    console.log(`\nChecking ${manager} Git installation without compatibility fixtures`)
+    console.log(`\nChecking ${manager} Git installation from prebuilt artifacts`)
     const consumer = join(scratch, manager)
     await mkdir(consumer)
     await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: `install-test-${manager}`, private: true }))
@@ -66,9 +66,10 @@ try {
       await measure('npm Git installation', () => npm(['install', '--no-audit', '--no-fund', gitURL], consumer))
     } else {
       await writeFile(join(consumer, 'pnpm-workspace.yaml'), [
-        'allowBuilds:', `  ${JSON.stringify(`${manifest.name}@${gitURL}`)}: true`,
+        'allowBuilds:',
         '  "@google/genai": false', '  protobufjs: false', '',
       ].join('\n'))
+      // No plugin allowBuilds entry: users must be able to install with the default trust policy.
       // Pin the same pnpm generation used by DSH desktop; npm exec works on Windows too.
       const store = process.env.DSH_PNPM_STORE_DIR ? ['--store-dir', process.env.DSH_PNPM_STORE_DIR] : []
       await measure('pnpm Git installation', () => npm([
@@ -78,7 +79,7 @@ try {
     await copyFile(join(root, 'tests/fixtures/installation.mjs'), join(consumer, 'installation.mjs'))
     await measure(`${manager} artifact verification`, () => run(process.execPath, ['installation.mjs'], { cwd: consumer }))
   }
-  console.log(`\nPASS: ${managers.join(' and ')} Git installation without test-host dependencies`)
+  console.log(`\nPASS: ${managers.join(' and ')} Git installation without source builds or plugin build approval`)
 } finally {
   try {
     await measure('Clean temporary consumers', () => rm(scratch, { recursive: true, force: true }))

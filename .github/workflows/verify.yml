@@ -25,7 +25,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --strict-peer-deps
-      - run: npm test
+      - run: npm run test:ci
 
   install:
     strategy:
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         env:
-          # npm prepares Git sources inside its cache. Keep extraction on the runner's work volume.
+          # Keep package extraction on the runner's work volume.
           npm_config_cache: ${{ runner.temp }}/npm-cache
         with:
           node-version: ${{ matrix.node }}
@@ -57,7 +57,7 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-pnpm-11.7.0-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-pnpm-11.7.0-
-      # The runner uses only Node built-ins; the Git install must build from source itself.
+      # The runner uses only Node built-ins; Git consumers install committed artifacts without builds.
       - run: npm run test:install -- ${{ matrix.manager }}
         env:
           npm_config_cache: ${{ runner.temp }}/npm-cache

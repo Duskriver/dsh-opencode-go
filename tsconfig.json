@@ -18,6 +18,7 @@
       "ES2024",
       "DOM",
       "DOM.Iterable"
-    ]
+    ],
+    "newLine": "lf"
   }
 }

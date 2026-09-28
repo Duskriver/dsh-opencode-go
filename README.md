@@ -31,6 +31,14 @@
 
 然后打开 **设置 → OpenCode Go**，填入 API Key 并保存，即可在会话中选择 OpenCode Go 模型。
 
+也支持在添加插件时直接输入 Git 仓库地址：
+
+```text
+https://github.com/Duskriver/dsh-opencode-go
+```
+
+当前主分支附带编译好的插件，安装时无需本地构建，也无需为本插件修改 `allowBuilds`。固定到旧提交的 Git 地址仍沿用旧提交的安装方式，请更新到当前主分支。
+
 若当前 DSH 没有「添加插件」入口，可使用下面的命令行方式。
 
 ### 命令行安装（备选）
@@ -76,18 +84,21 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 
 ```sh
 npm ci
+npm run compile
 npm pack
 dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
 ```
 
-源码安装会自动构建插件，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
+源码开发时显式运行 `npm run compile`；普通用户直接安装预编译产物，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
 
 ### 开发与验证
 
 ```sh
+npm run compile       # 更新 lib/，与源码一起提交
 npm test              # 基础功能测试（自动重新构建）
+npm run check:dist    # 检查已提交产物是否与源码一致
 npm run test:compat   # 同一安装包在 8 套独立 DSH 环境中测试
-npm run test:install  # npm / pnpm 从 Git 安装及入口完整性检查
+npm run test:install  # npm / pnpm 无额外构建授权的 Git 安装检查
 npm run verify        # 执行以上全部检查
 ```
 

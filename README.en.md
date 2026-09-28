@@ -31,6 +31,14 @@ Verified versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`,
 
 Then open **Settings → OpenCode Go**, enter and save your API key, and select an OpenCode Go model in a conversation.
 
+The plugin can also be installed by entering this Git repository URL:
+
+```text
+https://github.com/Duskriver/dsh-opencode-go
+```
+
+The current default branch includes the compiled plugin. Installation needs neither a local build nor a plugin-specific `allowBuilds` entry. URLs pinned to older commits retain those commits' installation behavior; update them to the current branch.
+
 If your DSH version does not have an **Add plugin** entry, use the command-line method below.
 
 ### Command-line installation (alternative)
@@ -76,18 +84,21 @@ To build from source and install a local package:
 
 ```sh
 npm ci
+npm run compile
 npm pack
 dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
 ```
 
-Source installation builds the plugin automatically; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
+Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
 
 ### Development and verification
 
 ```sh
+npm run compile       # Regenerate lib/ and commit it with source changes
 npm test              # Core tests, rebuilding the plugin first
+npm run check:dist    # Verify shipped artifacts match the source
 npm run test:compat   # One tarball tested in 8 independent DSH environments
-npm run test:install  # npm / pnpm Git installation and artifact checks
+npm run test:install  # npm / pnpm Git installs without plugin build approval
 npm run verify        # All of the above
 ```
 
