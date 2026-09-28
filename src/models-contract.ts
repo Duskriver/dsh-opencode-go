@@ -8,8 +8,32 @@ export interface GoModel {
   maxTokens?: number
   deprecated?: boolean
   releaseDate?: string
+  /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
+  inputModalities?: readonly InputModality[]
   /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
   configurationMissing?: boolean
+}
+
+/**
+ * Input modalities this page can name. models.dev uses these same five tokens, so
+ * an unknown token is dropped rather than rendered as an untranslatable chip.
+ */
+export const INPUT_MODALITIES = ['text', 'image', 'audio', 'video', 'pdf'] as const
+export type InputModality = typeof INPUT_MODALITIES[number]
+
+/**
+ * Normalize one `modalities.input` array into display order.
+ * @param value - the raw declaration read from models.dev or from a Host response.
+ * @returns the declared modalities in {@link INPUT_MODALITIES} order, or
+ *   `undefined` when nothing recognizable was declared.
+ */
+export function normalizeInputModalities(value: unknown): readonly InputModality[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const declared = new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.toLowerCase()))
+  const ordered = INPUT_MODALITIES.filter(modality => declared.has(modality))
+  return ordered.length === 0 ? undefined : ordered
 }
 
 /** Last successful check of one catalog source, plus any current refresh failure. */
@@ -69,6 +93,8 @@ export function parseGoModels(value: unknown): GoModel[] {
     if (typeof row.deprecated === 'boolean') model.deprecated = row.deprecated
     if (typeof row.configurationMissing === 'boolean') model.configurationMissing = row.configurationMissing
     if (validReleaseDate(row.releaseDate)) model.releaseDate = row.releaseDate
+    const modalities = normalizeInputModalities(row.inputModalities)
+    if (modalities !== undefined) model.inputModalities = modalities
     return model
   })
 }

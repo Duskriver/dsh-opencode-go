@@ -269,6 +269,18 @@ describe('runtime model metadata', () => {
     expect(model.cost.tiers).toEqual([{ input: 3, output: 4, cacheRead: 0, cacheWrite: 0, inputTokensAbove: 200000 }])
     expect(getSupportedThinkingLevels(result.models.get('always-thinking')!)).toEqual([])
   })
+
+  it('keeps the declared input modalities in display order and drops tokens the page cannot name', () => {
+    const result = readModelMetadata(metadataDocument({
+      omni: modelMetadata({ modalities: { input: ['video', 'text', 'file', 'audio'], output: ['text'] } }),
+      image: modelMetadata({ modalities: { input: ['text', 'image'], output: ['text'] } }),
+    }), 'https://gateway.example/v1', new Map())
+    expect(result.details.get('omni')?.inputModalities).toEqual(['text', 'audio', 'video'])
+    expect(result.details.get('image')?.inputModalities).toEqual(['text', 'image'])
+    // The display list is informational: the adapter still forwards images only.
+    expect(result.models.get('omni')?.input).toEqual(['text'])
+    expect(result.models.get('image')?.input).toEqual(['text', 'image'])
+  })
 })
 
 const anthropicEvents = [
