@@ -1,5 +1,15 @@
 # Verification
 
+## Parallel Git-installation CI and cache placement (2026-09-28)
+
+The first [main-branch workflow](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36411675701) passed all core tests, the eight-host compatibility matrix, and both Git installs on Linux and Windows/Node 24. Windows/Node 22.19.0 passed its npm Git install after about ten minutes, then exceeded the shared 15-minute job limit during pnpm preparation. No installation assertion failed before cancellation.
+
+Core tests, npm installs, and pnpm installs now run in independent jobs across the same Linux/Windows and Node 22.19.0/24 matrix. The installation runner accepts an optional package manager, uses no checkout dependencies, and reports preparation, installation, artifact validation, and cleanup times in job summaries. CI restores package downloads, adds a pnpm-store cache, prefers cached downloads, and uploads npm's internal timing JSON. The fresh Git source still excludes `tests/`, `node_modules/`, and `lib/`; all installed-artifact and ESM checks remain enabled.
+
+The [first instrumented run](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36437774394) passed all 13 jobs. Its Windows/Node 22.19.0 npm preparation spent **129.1 seconds** unpacking dependencies in the system-drive cache, while builds took about six seconds. Moving only the installation jobs' npm cache to `RUNNER_TEMP` also moved npm's internal Git preparation onto the work volume. In the [subsequent run](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36438357442), that unpack phase took **9.5 seconds**, the complete npm install phase took **38.4 seconds**, and the npm installation/validation/cleanup script took **40.1 seconds**. Its npm cache was a miss, so this reduction did not depend on an already-restored npm cache. The Windows/Node 22.19.0 pnpm check completed in **34.3 seconds**. These are individual hosted-runner observations; VM and cache conditions vary.
+
+The subsequent run passed **13/13 jobs** in about **91 seconds** from the first job start to the last completion, including **311 core tests in 22 files** on all four OS/Node combinations, all eight installed-host environments, and all eight OS/Node/package-manager installation checks. The 15-minute per-job limit is unchanged. Local validation also passed both package managers with a new pnpm store, produced phase summaries and nested npm timing files, and rejected an unsupported package-manager argument before creating a fixture.
+
 ## Issue #19: isolate compatibility fixtures from plugin builds (2026-09-28)
 
 The root package now has one coherent development dependency tree and installs with `npm ci --strict-peer-deps`. The eight published-Host fixtures have independent manifests and lockfiles outside npm workspaces. Git installation builds the plugin through `prepare`; it does not install the compatibility fixtures. This supersedes the workspace, dependency-alias, JavaScript resolution-hook, and root `--legacy-peer-deps` instructions in earlier entries.
