@@ -38,6 +38,8 @@ async function mount(options: { value?: OpencodeGoSettings; writable?: boolean; 
   const face = controller.inject()
   render(<OpencodeGoSection {...face} t={t} useOpencodeGo={bindSnapshotSelector(face.hooks.opencodeGo)} />)
   await act(async () => { await Promise.resolve() })
+  // The model card ships folded; these tests read the list and its switches.
+  await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
   return { host, read, snapshot: face.hooks.opencodeGo.getSnapshot }
 }
 const toggle = (name: string): HTMLButtonElement => screen.getByRole('switch', { name: t('modelVisibleLabel', { name }) })

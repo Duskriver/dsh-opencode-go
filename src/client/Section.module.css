@@ -206,12 +206,6 @@
   flex: none;
 }
 
-/* Folded away, the model card is a header again: it stops growing, so the space
-   it was holding goes back to the page. */
-.cardFolded {
-  flex: none;
-  max-height: none;
-}
 
 .card + .card,
 .card + .cardModels,
@@ -230,6 +224,13 @@
   flex-direction: column;
   flex: 1 0 auto;
   max-height: 760px;
+}
+/* Folded away, the model card is a header again: it stops growing, so the space
+   it was holding goes back to the page. Declared after .cardModels on purpose:
+   both are single-class rules, and source order is what settles them. */
+.cardFolded {
+  flex: none;
+  max-height: none;
 }
 
 .cardHead {

@@ -185,9 +185,9 @@ function Loaded(props: {
 }) {
   const { t, state, loadModels } = props
   const [advanced, setAdvanced] = useState(false)
-  // The model card is the page's subject, so it starts open; it folds away for
-  // a reader who only came for the connection.
-  const [modelsOpen, setModelsOpen] = useState(true)
+  // The list is the page's largest block and the tuning fields sit under it, so
+  // it ships folded: a reader opens it when they came to change models.
+  const [modelsOpen, setModelsOpen] = useState(false)
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {

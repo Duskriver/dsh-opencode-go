@@ -90,7 +90,11 @@ function actions() {
   }
 }
 
-function renderSection(state: OpencodeGoSectionState, overrides: Partial<ReturnType<typeof actions>> = {}) {
+function renderSection(
+  state: OpencodeGoSectionState,
+  overrides: Partial<ReturnType<typeof actions>> = {},
+  options: { foldedModels?: boolean } = {},
+) {
   const store = createSnapshotStore(state)
   const props = {
     ...actions(),
@@ -99,6 +103,9 @@ function renderSection(state: OpencodeGoSectionState, overrides: Partial<ReturnT
     useOpencodeGo: bindSnapshotSelector(store),
   } as unknown as OpencodeGoSectionProps
   render(<OpencodeGoSection {...props} />)
+  // The page ships with the model card folded; most of these tests are about what
+  // is inside it, so they open it the way a reader would.
+  if (options.foldedModels !== true) openModelLimits()
   return store
 }
 
@@ -107,10 +114,11 @@ function openAdvanced(): void {
   fireEvent.click(screen.getByText(en.advancedLabel))
 }
 
-/** The model-capacity disclosure starts collapsed; open it before its table. */
-function openModelLimits() {
-  // Capacity editing is always visible in the combined model list.
-
+/** The model card ships folded; open it before its list and its capacities. */
+function openModelLimits(): void {
+  // Nothing is served in the unavailable posture, and then there is no card.
+  const trigger = document.querySelector('[aria-controls="opencode-go-models"]')
+  if (trigger !== null) fireEvent.click(trigger)
 }
 
 describe('OpencodeGoSection', () => {
@@ -179,7 +187,6 @@ describe('OpencodeGoSection', () => {
     // The listing's size shows on the filter that selects all of it, not in the
     // card header it used to be repeated in.
     expect(screen.getByRole('button', { name: en.filterAll + ' 2' })).toBeTruthy()
-    openModelLimits()
     expect(screen.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Kimi K2/ })).toBeTruthy()
   })
@@ -289,7 +296,6 @@ describe('OpencodeGoSection', () => {
       modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
     }), edits)
 
-    openModelLimits()
     expect(screen.getByRole('region', { name: en.modelDetails })).toBeTruthy()
     const context = screen.getByLabelText(t('limitsContextLabel', { name: 'DeepSeek V4.1 Flash' })) as HTMLInputElement
     expect(context.type).toBe('number')
@@ -317,7 +323,6 @@ describe('OpencodeGoSection', () => {
       modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
     }), edits)
 
-    openModelLimits()
     fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
     expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"deepseek-v4.1-flash":null}')
   })
@@ -328,7 +333,6 @@ describe('OpencodeGoSection', () => {
       models: listing([{ id: 'm', name: 'Model' }]),
       modelLimitDraft: { m: { contextWindow: 123456, maxTokens: 1024 }, previous: null },
     }), edits)
-    openModelLimits()
     fireEvent.change(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })), { target: { value: '' } })
     expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"m":{"contextWindow":null,"maxTokens":1024},"previous":null}')
     fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
@@ -337,26 +341,26 @@ describe('OpencodeGoSection', () => {
 
   it('does not count explicit catalog resets as customized models', () => {
     renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]), modelLimitDraft: { m: null } }))
-    openModelLimits()
     expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
     expect(screen.queryByRole('button', { name: en.limitsResetModel })).toBeNull()
     expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
   })
 
-  it('folds the model card away and back like the tuning card', () => {
-    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+  it('ships the model card folded and opens it on demand', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
     const trigger = screen.getByRole('button', { name: en.modelsLabel })
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
-    expect(document.getElementById('opencode-go-models')).not.toBeNull()
-
-    fireEvent.click(trigger)
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(document.getElementById('opencode-go-models')).toBeNull()
     expect(screen.queryByRole('navigation', { name: en.modelsLabel })).toBeNull()
 
     fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
     expect(document.getElementById('opencode-go-models')).not.toBeNull()
     expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById('opencode-go-models')).toBeNull()
   })
 
   it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {

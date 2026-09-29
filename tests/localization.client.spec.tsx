@@ -104,6 +104,8 @@ async function mountSurfaces(locale: HostLocaleRuntime) {
     </>
   }
   await act(async () => { render(<Surfaces />) })
+  // The model card ships folded; the copy checks read the list inside it.
+  await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
   return { snapshot: face.hooks.opencodeGo.getSnapshot, readModels, readUsage }
 }
 
