@@ -1,5 +1,9 @@
 # Verification
 
+## Release 0.1.16 integration (2026-09-29)
+
+The metadata-cache fix was rebased onto the merged settings-page changes from PR #21. The combined release passed Host/Client type checks and the production build, **347 tests in 24 files**, artifact freshness checks, all **eight installed-host generations**, and **npm/pnpm Git installation without plugin build approval**. Validation ran on macOS / Node 24.14.1 using isolated consumers and fixture endpoints. The earlier 336-test result below describes the cache change before integrating the latest main branch.
+
 ## Issue #22: persistent model metadata (2026-09-29)
 
 Public models.dev metadata now survives process restarts in `DSH_HOME/cache/dsh-opencode-go/models.dev.api.json` (default home: `~/.dsh`). The versioned record contains the source URL, raw document, ETag, and last successful download/revalidation time. Reads validate the envelope, bound both the file size and bytes read, and run the document through the existing metadata converter for the current gateway. Unique temporary files and atomic rename prevent concurrent writers from publishing partial JSON. Cache read/write failures cannot discard a usable online result. Gateway listings and credentials are not persisted.
