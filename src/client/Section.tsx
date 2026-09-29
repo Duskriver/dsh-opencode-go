@@ -188,6 +188,16 @@ function Loaded(props: {
   // The list is the page's largest block and the tuning fields sit under it, so
   // it ships folded: a reader opens it when they came to change models.
   const [modelsOpen, setModelsOpen] = useState(false)
+  // What the card has to report — the listing's own diagnostics and a refused
+  // switch write — is not part of the fold. A failure the reader cannot see is
+  // worse than a folded list, and the connection switch that can fail lives in
+  // the card above, so the notices render under the header either way.
+  const modelNotices = (
+    <>
+      <ModelsBody models={state.models} t={t} locale={props.locale} />
+      {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
+    </>
+  )
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
@@ -271,7 +281,9 @@ function Loaded(props: {
       {/* The model card takes whatever height the page has left: its list and its
           parameter card are the reason the page is open. It folds away exactly
           like the tuning card does, and the listing's own refresh sits with the
-          filters it re-reads rather than in this header. */}
+          filters it re-reads rather than in this header. Its notices stay out of
+          the fold: a refused switch write or an unreachable gateway is news
+          whether or not the list is open. */}
       <section className={modelsOpen ? css.cardModels : css.cardModels + ' ' + css.cardFolded}>
         <button
           type="button"
@@ -286,8 +298,7 @@ function Loaded(props: {
         {modelsOpen
           ? (
             <div id="opencode-go-models" className={css.cardBody}>
-              <ModelsBody models={state.models} t={t} locale={props.locale} />
-              {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
+              {modelNotices}
               <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
                 modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
                 filterAction={(
@@ -304,7 +315,7 @@ function Loaded(props: {
                 onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
             </div>
           )
-          : null}
+          : <div className={css.cardNotes}>{modelNotices}</div>}
       </section>
       {/* Everything a working setup never needs stays folded at the foot of the
           page, under the card that owns the values it inherits. */}

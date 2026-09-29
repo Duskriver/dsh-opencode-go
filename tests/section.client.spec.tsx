@@ -363,6 +363,26 @@ describe('OpencodeGoSection', () => {
     expect(document.getElementById('opencode-go-models')).toBeNull()
   })
 
+  it('keeps what the model card reports out of the fold', () => {
+    // The card ships folded, so a notice behind it is a notice nobody reads:
+    // the refused switch write and the listing's own diagnostics both show.
+    renderSection(stateOf({ pickerFailed: true, models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+    expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByText(en.pickerFailed)).toBeTruthy()
+
+    cleanup()
+    renderSection(stateOf({ models: { status: 'failed', message: 'offline' } }), {}, { foldedModels: true })
+    expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByText(en.modelsFailed)).toBeTruthy()
+    expect(screen.getByText('offline')).toBeTruthy()
+
+    // A healthy listing still leaves the folded card with nothing to say.
+    cleanup()
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+  })
+
   it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {
     renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
     expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)

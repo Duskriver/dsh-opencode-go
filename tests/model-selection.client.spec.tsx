@@ -38,9 +38,19 @@ async function mount(options: { value?: OpencodeGoSettings; writable?: boolean; 
   const face = controller.inject()
   render(<OpencodeGoSection {...face} t={t} useOpencodeGo={bindSnapshotSelector(face.hooks.opencodeGo)} />)
   await act(async () => { await Promise.resolve() })
-  // The model card ships folded; these tests read the list and its switches.
-  await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
   return { host, read, snapshot: face.hooks.opencodeGo.getSnapshot }
+}
+
+/** Open the model card the way a reader does, for the tests that read inside it. */
+async function openModels(): Promise<void> {
+  await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
+}
+
+/** The shipped posture is folded; most of these tests read the list and its switches. */
+async function mountOpen(options: Parameters<typeof mount>[0] = {}) {
+  const mounted = await mount(options)
+  await openModels()
+  return mounted
 }
 const toggle = (name: string): HTMLButtonElement => screen.getByRole('switch', { name: t('modelVisibleLabel', { name }) })
 const checked = (name: string) => toggle(name).getAttribute('aria-checked') === 'true'
@@ -51,7 +61,7 @@ describe('per-model switches through the settings controller and component', () 
   it('distinguishes a metadata outage from a confirmed missing configuration and keeps the warning during retry', async () => {
     const id = 'deepseek-v4.1-flash'
     const missing = { id, configurationMissing: true }
-    const { read, host } = await mount({ catalog: {
+    const { read, host } = await mountOpen({ catalog: {
       models: [missing, ...models], stale: true, error: 'models.dev answered HTTP 503',
       sources: { listing: { updatedAt: Date.now() }, metadata: { error: 'HTTP 503' } },
     } })
@@ -94,7 +104,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('identifies metadata failure even when the gateway successfully returns an empty listing', async () => {
-    const { read } = await mount({ catalog: {
+    const { read } = await mountOpen({ catalog: {
       models: [], stale: true, error: 'models.dev answered HTTP 503',
       sources: { listing: { updatedAt: Date.now() }, metadata: { error: 'HTTP 503' } },
     } })
@@ -110,7 +120,7 @@ describe('per-model switches through the settings controller and component', () 
   it('carries source diagnostics through the controller and clears them after recovery', async () => {
     const listingTime = Date.UTC(2026, 8, 25, 10)
     const metadataTime = listingTime - 60_000
-    const { read } = await mount({ catalog: {
+    const { read } = await mountOpen({ catalog: {
       models, stale: true, error: 'models.dev answered HTTP 503',
       sources: { listing: { updatedAt: listingTime }, metadata: { updatedAt: metadataTime, error: 'HTTP 503' } },
     } })
@@ -131,7 +141,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('defaults normal models on and deprecated models off, applying each switch immediately', async () => {
-    const { host, snapshot } = await mount()
+    const { host, snapshot } = await mountOpen()
     expect(checked('Alpha')).toBe(true)
     expect(checked('Beta')).toBe(true)
     expect(checked('Old')).toBe(false)
@@ -150,7 +160,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('preserves unrelated drafts and committed switch values when a write fails', async () => {
-    const { host, snapshot } = await mount()
+    const { host, snapshot } = await mountOpen()
     fireEvent.change(screen.getByLabelText(en.keyLabel), { target: { value: 'unsaved-key' } })
     await flip('Old')
     expect(screen.getByLabelText(en.keyLabel)).toHaveProperty('value', 'unsaved-key')
@@ -164,7 +174,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('preserves absent overrides and applies defaults to newly discovered models', async () => {
-    const { host, read } = await mount({ value: { modelVisibility: { missing: false, old: true } } })
+    const { host, read } = await mountOpen({ value: { modelVisibility: { missing: false, old: true } } })
     await flip('Beta')
     read.mockResolvedValueOnce({ ok: true, value: { models: [...models, { id: 'new', name: 'New' }, { id: 'older', name: 'Older', deprecated: true }], stale: false } })
     await refresh()
@@ -176,7 +186,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('disables switches while a write is pending and for a read-only profile', async () => {
-    const { host } = await mount()
+    const { host } = await mountOpen()
     let finish!: () => void
     host.set.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
     fireEvent.change(screen.getByLabelText(en.keyLabel), { target: { value: 'draft' } })
@@ -193,7 +203,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('keeps the catalog and switches visible during refresh and after a transport failure', async () => {
-    const { read, snapshot } = await mount()
+    const { read, snapshot } = await mountOpen()
     let reject!: (error: Error) => void
     read.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
     fireEvent.click(screen.getByRole('button', { name: en.modelsRefresh }))
@@ -211,7 +221,7 @@ describe('per-model switches through the settings controller and component', () 
   })
 
   it('shows the Host cached list on first opening after a timeout and clears it on a confirmed empty catalog', async () => {
-    const { read } = await mount({ catalog: { models, stale: true, error: 'request timed out' } })
+    const { read } = await mountOpen({ catalog: { models, stale: true, error: 'request timed out' } })
     expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
     expect(checked('Alpha')).toBe(true)
     expect(screen.getByText('request timed out')).toBeTruthy()
@@ -221,7 +231,7 @@ describe('per-model switches through the settings controller and component', () 
     expect(screen.queryByRole('switch', { name: t('modelVisibleLabel', { name: 'Alpha' }) })).toBeNull()
   })
   it('drops the previous gateway cache when the endpoint changes, including late responses', async () => {
-    const { host, read, snapshot } = await mount()
+    const { host, read, snapshot } = await mountOpen()
     let finishOld!: (value: { ok: true; value: GoModelCatalog }) => void
     read.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
     fireEvent.click(screen.getByRole('button', { name: en.modelsRefresh }))
@@ -235,7 +245,7 @@ describe('per-model switches through the settings controller and component', () 
 
   it('marks missing configuration and prevents enabling it even with a saved true override', async () => {
     const missing = { id: 'missing-model', name: 'missing-model', configurationMissing: true }
-    const { host, read } = await mount({
+    const { host, read } = await mountOpen({
       value: { modelVisibility: { 'missing-model': true } },
       catalog: { models: [missing], stale: false },
     })
@@ -253,6 +263,23 @@ describe('per-model switches through the settings controller and component', () 
     expect(toggle('Ready model').disabled).toBe(false)
     expect(checked('Ready model')).toBe(true)
     expect(screen.queryByText('Configuration missing')).toBeNull()
+  })
+
+  it('carries a refused switch write while the model card is still folded', async () => {
+    const { host } = await mount()
+    host.set.mockRejectedValueOnce(new Error('write refused'))
+    // The switch that can fail on its own lives in the connection card, above
+    // the fold: its refusal has to reach the reader without opening the list.
+    await act(async () => { fireEvent.click(screen.getByRole('switch', { name: en.enabledLabel })) })
+    expect(screen.getByRole('alert').textContent).toBe(en.pickerFailed)
+    expect(document.getElementById('opencode-go-models')).toBeNull()
+  })
+
+  it('reports an unreachable listing without opening the card', async () => {
+    await mount({ catalog: { models, stale: true, error: 'request timed out' } })
+    expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
+    expect(screen.getByText('request timed out')).toBeTruthy()
+    expect(document.getElementById('opencode-go-models')).toBeNull()
   })
 
 })

@@ -125,6 +125,12 @@ try {
   // shrink: a page that needs more room than it has scrolls, while a card
   // allowed to compress spills its footer over the card below it.
   assert.match(pluginCss, /\.\w*cardModels\{[^}]*flex:1 0 auto/)
+  // It carries no ceiling of its own: the listing's diagnostics are part of its
+  // height, so a clamp below that spills the list and the footer over the card
+  // below. Its notices sit outside the fold, and an empty notice block — the
+  // healthy, folded card — takes no room at all.
+  assert.doesNotMatch(pluginCss, /\.\w*cardModels\{[^}]*max-height/)
+  assert.match(pluginCss, /\.\w*cardNotes:empty\{display:none\}/)
   // The override tally closes the card on a ruled footer row of its own.
   assert.match(pluginCss, /\.\w*limitsFoot\{[^}]*border-top/)
   for (const dispose of effects.splice(0).reverse()) (await dispose)()

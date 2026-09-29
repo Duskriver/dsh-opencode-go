@@ -218,21 +218,20 @@
 /* The model card grows into the leftover height instead of being fixed at a
    height guessed from the window. It must never shrink: a page whose cards need
    more room than it has scrolls, while a card allowed to compress spills its
-   footer row over the card below it. The ceiling stays above the tallest the
-   card can get — a 560px model area plus this card's own header and footer — so
-   the clamp never squeezes the content it is meant to cap. */
+   footer row over the card below it. It carries no ceiling of its own either:
+   the listing's diagnostics are part of its height, so a clamp below the tallest
+   the card can get — measured with those diagnostics showing — spills the list
+   and the footer over the card below it the same way. */
 .cardModels {
   display: flex;
   flex-direction: column;
   flex: 1 0 auto;
-  max-height: 760px;
 }
 /* Folded away, the model card is a header again: it stops growing, so the space
    it was holding goes back to the page. Declared after .cardModels on purpose:
    both are single-class rules, and source order is what settles them. */
 .cardFolded {
   flex: none;
-  max-height: none;
 }
 
 .cardHead {
@@ -276,6 +275,17 @@
 .cardModels > .cardBody {
   flex: 1 0 auto;
 }
+
+/* Folded, the card still speaks: what its body would have reported renders here
+   instead of behind the fold. An empty block takes no room at all. */
+.cardNotes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 14px 2px;
+}
+
+.cardNotes:empty { display: none; }
 
 .cardDivider {
   margin: 10px 14px;
@@ -520,8 +530,7 @@
 @container (max-width: 440px) {
   .advancedGrid { grid-template-columns: minmax(0, 1fr); }
   /* One column cannot stretch: the list and the card stack, and each keeps its
-     own ceiling instead of sharing the model card's. */
-  .cardModels { max-height: none; }
+     own ceiling. */
   .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); }
   .modelList { max-height: 240px; border-right: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
   .modelDetails { max-height: 460px; }
