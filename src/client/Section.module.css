@@ -213,14 +213,16 @@
 }
 
 /* The model card grows into the leftover height instead of being fixed at a
-   height guessed from the window: flex-grow only, so a page whose cards need
-   more room than it has scrolls rather than crushing the list. The ceiling
-   keeps a very tall window from ballooning the list past what a list is for. */
+   height guessed from the window. It must never shrink: a page whose cards need
+   more room than it has scrolls, while a card allowed to compress spills its
+   footer row over the card below it. The ceiling stays above the tallest the
+   card can get — a 560px model area plus this card's own header and footer — so
+   the clamp never squeezes the content it is meant to cap. */
 .cardModels {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  max-height: 720px;
+  flex: 1 0 auto;
+  max-height: 760px;
 }
 
 .cardHead {
@@ -262,7 +264,7 @@
 }
 
 .cardModels > .cardBody {
-  flex: 1 1 auto;
+  flex: 1 0 auto;
 }
 
 .cardDivider {
@@ -310,7 +312,7 @@
 .limitsEditor {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   gap: 10px;
   padding-top: 4px;
 }
