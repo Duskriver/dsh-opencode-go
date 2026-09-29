@@ -315,8 +315,21 @@
   padding-top: 4px;
 }
 
+/* The model card's footer. The negative side margins cancel the card's own
+   padding so the rule runs edge to edge and the tally reads as a section of the
+   card rather than a line squeezed under the list. */
+.limitsFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px -14px 0;
+  padding: 10px 14px 0;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
 .limitsSummary {
-  padding-bottom: 8px;
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);

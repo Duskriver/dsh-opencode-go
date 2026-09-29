@@ -341,6 +341,28 @@ describe('OpencodeGoSection', () => {
     expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
   })
 
+  it('closes the model card with the tally on its own row beside the clear action', () => {
+    renderSection(stateOf({
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 1024 } },
+    }))
+    const tally = screen.getByText(t('limitsSummary', { count: 1 }))
+    const action = screen.getByRole('button', { name: en.limitsResetAll })
+    // One row of its own, under the model area, tally left of the action.
+    expect(tally.parentElement).toBe(action.parentElement)
+    expect(tally.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The action is a control, not decoration: live while the document is.
+    expect(action.hasAttribute('disabled')).toBe(false)
+
+    cleanup()
+    renderSection(stateOf({
+      writable: false,
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 1024 } },
+    }))
+    expect(screen.getByRole('button', { name: en.limitsResetAll }).hasAttribute('disabled')).toBe(true)
+  })
+
   it('never invents gateway membership from offline saved overrides, but permits clearing them', () => {
     const edits = actions()
     renderSection(stateOf({ models: { status: 'failed', message: 'offline' },

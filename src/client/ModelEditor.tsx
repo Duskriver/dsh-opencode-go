@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { INPUT_MODALITIES, isModelEnabled, isNewModel, sortModels, type GoModel, type InputModality } from '../models-contract.ts'
 import type { OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels } from './section-controller.ts'
 import type { en } from './locales.ts'
@@ -126,10 +126,12 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
           </section>
         </div>
       ) : models.status === 'ready' && all.length > 0 ? <p className={css.hint}>{t('limitsNoMatches', { query })}</p> : null}
-      <div className={css.head}>
+      {/* The tally is not a footnote to the list: it closes the card on a line
+          of its own, with the one action that clears the overrides beside it. */}
+      <div className={css.limitsFoot}>
         <span className={css.limitsSummary}>{t('limitsSummary', { count: customized })}</span>
-        {Object.values(draft).some(hasCapacityOverride) ? <button type="button" className={css.reset} disabled={disabled}
-          onClick={() => { onEdit(Object.fromEntries(Object.keys(draft).map(id => [id, null]))) }}>{t('limitsResetAll')}</button> : null}
+        {Object.values(draft).some(hasCapacityOverride) ? <Button variant="outline" size="sm" disabled={disabled}
+          onClick={() => { onEdit(Object.fromEntries(Object.keys(draft).map(id => [id, null]))) }}>{t('limitsResetAll')}</Button> : null}
       </div>
     </div>
   )
