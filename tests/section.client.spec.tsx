@@ -403,6 +403,35 @@ describe('OpencodeGoSection', () => {
     expect(document.getElementById('opencode-go-advanced')).not.toBeNull()
   })
 
+  it('reads down the page as connection, models, then tuning', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(en.titleLabel)
+    // The page's order is the product decision: enable, key, models, tuning.
+    const sequence = [
+      screen.getByRole('switch', { name: en.enabledLabel }),
+      screen.getByLabelText(en.keyLabel),
+      screen.getByRole('navigation', { name: en.modelsLabel }),
+      screen.getByText(en.advancedLabel),
+    ]
+    for (let index = 1; index < sequence.length; index += 1) {
+      const relation = sequence[index - 1].compareDocumentPosition(sequence[index])
+      expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    // The tuning card is the last thing on the page, under the list it tunes.
+    const tuning = screen.getByText(en.advancedLabel).closest('section') as HTMLElement
+    expect(tuning.parentElement?.lastElementChild).toBe(tuning)
+  })
+
+  it('keeps the switch and the key control in one connection card', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    const connection = screen.getByRole('switch', { name: en.enabledLabel }).closest('section') as HTMLElement
+    expect(connection).toBeTruthy()
+    expect(within(connection).getByLabelText(en.keyLabel)).toBeTruthy()
+    // The models card is a card of its own, not a stray block on the page.
+    const models = screen.getByRole('navigation', { name: en.modelsLabel }).closest('section') as HTMLElement
+    expect(models).toBeTruthy()
+    expect(models).not.toBe(connection)
+  })
   it('stages edits through the injected actions and resets on demand', () => {
     const edits = actions()
     renderSection(stateOf({ refreshMinutes: field('60', { overridden: true }) }), edits)

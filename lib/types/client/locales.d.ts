@@ -19,6 +19,7 @@ export declare const en: {
     usageRefreshing: string;
     nav: string;
     title: string;
+    titleLabel: string;
     intro: string;
     starProject: string;
     starProjectTitle: string;
@@ -89,6 +90,7 @@ export declare const en: {
     limitsEmpty: string;
     limitsContextLabel: string;
     limitsOutputLabel: string;
+    advancedSummary: string;
     advancedLabel: string;
     advancedHint: string;
     apiKeyEnvLabel: string;

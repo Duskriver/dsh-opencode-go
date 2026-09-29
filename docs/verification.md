@@ -1,5 +1,13 @@
 # Verification
 
+## Settings page cards with the tuning fields last (2026-09-29)
+
+The settings page now reads top to bottom as the values a user has to supply. The first card carries the connection: the enable switch and the API key together, because the switch decides whether the provider is served at all and the key is what it authenticates with. The second card carries the gateway listing and its capacity editor. The adapter tuning fields, the credential reference among them, sit in a collapsed card at the foot of the page instead of a disclosure in the title row, and the model card takes whatever height is left instead of a height guessed from the window.
+
+Measured on the shipped client artifact rendered at the section's slot: the model area is **650 × 334 px**, where the previous layout held it at **378 px** in the same window, and that height is now the parameter card's own content rather than a constant subtracted from the container. The page content measures **887 px** against the reference window's **828 px** viewport, so the page scrolls about **59 px** to reach the tuning card; a taller window removes that scroll and gives the extra height to the model area, capped at 560 px. The tuning grid reports two equal **315.8 px** columns when opened. The collapsed card keeps one row whose `aria-controls` target the client compatibility fixture still holds to `display: flex` and `cursor: pointer`.
+
+`npm test` passes **325 tests in 23 files** — the section suite grew by two, one holding the page order (switch, key, model list, tuning) and one holding the switch and the key control inside a single card — `npm run typecheck` passes, and `npm run check:dist` reports all **30** shipped build files matching the source.
+
 ## Git installation without plugin build approval (2026-09-28)
 
 DSH Desktop's pnpm 11.7.0 rejected commit `68e5840` with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`: the Git source declared `prepare`, while the desktop profile had no build approval for this plugin. The earlier CI explicitly approved its Git fixture, so it established installation after approval rather than the default user experience. Removing that approval from `npm run test:install -- pnpm` reproduced the same error in 1.4 seconds. This entry supersedes the earlier policy of building the plugin during Git installation.

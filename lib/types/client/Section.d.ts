@@ -1,9 +1,10 @@
 /**
- * The OpenCode Go settings section. It leads with the one value a user has to
- * supply — the API key, stored write-only through the credentials domain — and
- * the models the gateway currently serves, then keeps the credential
- * reference, the endpoint, and the adapter tuning fields in the
- * `llm-opencode-go` namespace behind a collapsed disclosure.
+ * The OpenCode Go settings page. Three cards carry the page's whole order — the
+ * connection (the switch that routes the provider plus the API key it
+ * authenticates with), the models the gateway currently serves and their
+ * capacities, and the adapter tuning fields behind a collapsed disclosure at the
+ * foot. The credential reference, the endpoint, and the tuning knobs all live in
+ * the `llm-opencode-go` namespace, so every card writes the same document.
  */
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots';
 import type { OpencodeGoSectionFace } from './section-controller.ts';
