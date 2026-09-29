@@ -100,6 +100,8 @@ export interface OpencodeGoAdapterOptions {
   onOmitted?: (ids: readonly string[]) => void
   /** Observe assistant history degrading to provider-neutral conversion. */
   onReplayDegrade?: (reason: string) => void
+  /** Re-read picker models after a background catalog refresh commits. */
+  onCatalogRefresh?: () => void
 }
 
 /**
@@ -140,17 +142,19 @@ export class OpencodeGoAdapter extends LlmAdapter {
   catalogOf(config: OpencodeGoConfig): OpencodeGoCatalog {
     const key = `${config.baseURL}|${String(config.refreshMinutes)}`
     if (this.catalogCache?.key !== key) {
-      this.catalogCache = {
-        key,
-        catalog: new OpencodeGoCatalog(
-          assertBaseURL(config.baseURL),
-          config.refreshMinutes * 60_000,
-          /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
-          this.options.onFallback ?? (() => {}),
-          /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
-          this.options.onOmitted ?? (() => {}),
-        ),
-      }
+      const catalog = new OpencodeGoCatalog(
+        assertBaseURL(config.baseURL),
+        config.refreshMinutes * 60_000,
+        /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
+        this.options.onFallback ?? (() => {}),
+        /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
+        this.options.onOmitted ?? (() => {}),
+        () => {
+          // Late results from a replaced configuration cannot invalidate the current picker.
+          if (this.catalogCache?.catalog === catalog) this.options.onCatalogRefresh?.()
+        },
+      )
+      this.catalogCache = { key, catalog }
     }
     return this.catalogCache.catalog
   }

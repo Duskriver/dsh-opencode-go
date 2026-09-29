@@ -90,6 +90,7 @@ async function testHost({ id, version }, tarball, stdio) {
   for (const fixture of fixtures) {
     await run(process.execPath, ['--expose-internals', join(consumer, 'fixtures', `${fixture}.mjs`), id, version], {
       cwd: consumer, timeout: 30_000, stdio,
+      env: { ...process.env, DSH_HOME: join(consumer, `home-${fixture}`) },
     })
   }
 }

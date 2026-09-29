@@ -62,6 +62,8 @@ export interface OpencodeGoAdapterOptions {
     onOmitted?: (ids: readonly string[]) => void;
     /** Observe assistant history degrading to provider-neutral conversion. */
     onReplayDegrade?: (reason: string) => void;
+    /** Re-read picker models after a background catalog refresh commits. */
+    onCatalogRefresh?: () => void;
 }
 /**
  * The single route's adapter. The catalog snapshot freezes at each operation,

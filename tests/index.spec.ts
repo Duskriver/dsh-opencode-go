@@ -14,6 +14,8 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { configOf } from './config-of.ts'
+import { OpencodeGoCatalog } from '../src/catalog.ts'
+import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
 const HOST_IMAGE_PATH = '/host/.dsh/attachments/objects/aa/object'
 const MODEL_IMAGE_PATH = '/model/.dsh/attachments/objects/aa/object'
@@ -45,6 +47,34 @@ class StubAdapter extends LlmAdapter {
 }
 
 describe('llm-opencode-go plugin mount', () => {
+  it('notifies the host picker when a disk-backed startup finishes refreshing metadata', async () => {
+    const id = 'persisted-model'
+    const gateway = await mockGateway({ status: 200, body: listingBody([id, 'new-model']) })
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+      ? Promise.resolve(Response.json(metadataDocument({ [id]: modelMetadata() }))) : original(input, init))
+    await new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {}).snapshot(true)
+    const metadata = Promise.withResolvers<Response>()
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+      ? metadata.promise : original(input, init))
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    apply(ctx, configOf(gateway.url))
+    const updated = vi.fn()
+    ctx.on('llm/adapters-updated', updated)
+    try {
+      expect((await ctx.llm.listModels('opencode-go')).map(model => model.id)).toEqual([id])
+      expect(updated).not.toHaveBeenCalled()
+      metadata.resolve(Response.json(metadataDocument({ [id]: modelMetadata(), 'new-model': modelMetadata() })))
+      await expect.poll(() => updated.mock.calls.length).toBe(1)
+      expect((await ctx.llm.listModels('opencode-go')).map(model => model.id)).toEqual([id, 'new-model'])
+    } finally {
+      metadata.resolve(Response.json(metadataDocument()))
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('registers the route and answers model discovery from the live listing', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     const ctx = new Context()

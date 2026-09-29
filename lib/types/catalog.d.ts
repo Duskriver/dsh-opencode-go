@@ -30,9 +30,15 @@ export declare class OpencodeGoCatalog {
     private readonly onFallback;
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
     private readonly onOmitted;
+    private readonly onRefresh;
     private served;
     private pending;
+    /** A cold runtime read can use disk metadata while the shared online refresh runs. */
+    private cachedPending;
+    private initialized;
+    private readonly cachePath;
     private metadata;
+    private metadataBody;
     private metadataETag;
     private metadataUpdatedAtMs;
     private failures;
@@ -43,10 +49,15 @@ export declare class OpencodeGoCatalog {
         kept: number;
     }) => void, 
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
-    onOmitted: (ids: readonly string[]) => void);
+    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void);
     snapshot(force?: boolean, signal?: AbortSignal): Promise<CatalogSnapshot>;
+    private restoreMetadata;
+    private readSnapshot;
+    private currentSnapshot;
+    private startRefresh;
     /** Conditional HTTP requests save bandwidth while still checking for updated metadata. */
     private refreshMetadata;
+    private persistMetadata;
     /** Gateway ids decide membership; online metadata decides how to call each model. */
     private build;
     /** New or previously unconfigured ids get a fresh lookup even during the runtime TTL. */

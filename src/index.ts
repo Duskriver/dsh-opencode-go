@@ -113,6 +113,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       ctx.logger.warn(`llm-opencode-go: gateway models awaiting usable online metadata: ${ids.join(', ')}`)
     },
   }
+  let registration: AdapterRegistrationHandle | undefined
   const adapter = new OpencodeGoAdapter({
     config: () => current(),
     resolveApiKey,
@@ -126,11 +127,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     },
     onFallback: logger.fallback,
     onOmitted: logger.omitted,
+    onCatalogRefresh: () => { registration?.replace([PROVIDER_ID]) },
     onReplayDegrade: (reason) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
   })
-  let registration: AdapterRegistrationHandle | undefined
   ctx.plugin(GoModelsService, {
     catalog: () => adapter.catalogOf(current()),
     onRefresh: () => { registration?.replace([PROVIDER_ID]) },
@@ -200,6 +201,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   ctx.effect(() => () => {
     /* v8 ignore start -- plugin unload never runs in tests: no Context disposal API is exercised */
     registration?.()
+    registration = undefined
     undiscover()
     /* v8 ignore stop */
   })
