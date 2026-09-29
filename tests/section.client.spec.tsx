@@ -176,7 +176,9 @@ describe('OpencodeGoSection', () => {
     }))
 
     expect(screen.getByText(en.keyConfigured)).toBeTruthy()
-    expect(screen.getByText(t('modelsCount', { count: 2 }))).toBeTruthy()
+    // The listing's size shows on the filter that selects all of it, not in the
+    // card header it used to be repeated in.
+    expect(screen.getByRole('button', { name: en.filterAll + ' 2' })).toBeTruthy()
     openModelLimits()
     expect(screen.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Kimi K2/ })).toBeTruthy()
@@ -339,6 +341,31 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
     expect(screen.queryByRole('button', { name: en.limitsResetModel })).toBeNull()
     expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
+  })
+
+  it('folds the model card away and back like the tuning card', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    const trigger = screen.getByRole('button', { name: en.modelsLabel })
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById('opencode-go-models')).not.toBeNull()
+
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById('opencode-go-models')).toBeNull()
+    expect(screen.queryByRole('navigation', { name: en.modelsLabel })).toBeNull()
+
+    fireEvent.click(trigger)
+    expect(document.getElementById('opencode-go-models')).not.toBeNull()
+    expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+  })
+
+  it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+
+    const refresh = screen.getByRole('button', { name: en.modelsRefresh })
+    const filters = screen.getByRole('group', { name: en.filterLabel })
+    expect(filters.contains(refresh)).toBe(true)
   })
 
   it('closes the model card with the tally on its own row beside the clear action', () => {

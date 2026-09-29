@@ -46,7 +46,6 @@ export declare const en: {
     modelsSourceUpdated: string;
     modelsRefreshing: string;
     modelsEmpty: string;
-    modelsCount: string;
     limitsLabel: string;
     limitsHint: string;
     limitsFilterLabel: string;

@@ -206,6 +206,13 @@
   flex: none;
 }
 
+/* Folded away, the model card is a header again: it stops growing, so the space
+   it was holding goes back to the page. */
+.cardFolded {
+  flex: none;
+  max-height: none;
+}
+
 .card + .card,
 .card + .cardModels,
 .cardModels + .card {
@@ -450,7 +457,10 @@
   transform: rotate(-90deg);
 }
 
-.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* The control the row ends with — the listing refresh — rides the same line as
+   the filters when there is room, and wraps under them when there is not. */
+.filterAction { display: inline-flex; align-items: center; margin-left: auto; }
 .filter { padding: 6px 9px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .filter[aria-pressed="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
 .filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }

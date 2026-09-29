@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { INPUT_MODALITIES, isModelEnabled, isNewModel, sortModels, type GoModel, type InputModality } from '../models-contract.ts'
 import type { OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels } from './section-controller.ts'
@@ -18,7 +18,7 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
 }
 
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
-export function ModelEditor({ models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
+export function ModelEditor({ models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
   modelVisibility: Readonly<Record<string, boolean>>
@@ -26,6 +26,8 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
   locale?: string
   disabled: boolean
   visibilitySaving: boolean
+  /** Optional control pinned to the right of the filter row, such as a refresh. */
+  filterAction?: ReactNode
   onEdit: (next: OpencodeGoModelLimits) => void
   onModelEnabled: (id: string, enabled: boolean) => void
 }) {
@@ -71,6 +73,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
       <div className={css.filters} role="group" aria-label={t('filterLabel')}>
         {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
           aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
+        {filterAction ? <span className={css.filterAction}>{filterAction}</span> : null}
       </div>
       {model ? (
         <div className={css.modelLayout}>

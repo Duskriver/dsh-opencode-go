@@ -185,6 +185,9 @@ function Loaded(props: {
 }) {
   const { t, state, loadModels } = props
   const [advanced, setAdvanced] = useState(false)
+  // The model card is the page's subject, so it starts open; it folds away for
+  // a reader who only came for the connection.
+  const [modelsOpen, setModelsOpen] = useState(true)
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
@@ -266,32 +269,42 @@ function Loaded(props: {
         </div>
       </section>
       {/* The model card takes whatever height the page has left: its list and its
-          parameter card are the reason the page is open. */}
-      <section className={css.cardModels}>
-        <div className={css.cardHead}>
-          <h3 className={css.cardTitle}>{t('modelsLabel')}</h3>
-          <span className={css.trailing}>
-            {state.models.status === 'ready'
-              ? <Tag tone="neutral">{t('modelsCount', { count: state.models.count })}</Tag>
-              : null}
-            <button
-              type="button"
-              className={css.reset}
-              disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
-              onClick={loadModels}
-            >
-              {t('modelsRefresh')}
-            </button>
-          </span>
-        </div>
-        <div className={css.cardBody}>
-          <ModelsBody models={state.models} t={t} locale={props.locale} />
-          {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
-          <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
-            modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-            onModelEnabled={props.setModelEnabled}
-            onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
-        </div>
+          parameter card are the reason the page is open. It folds away exactly
+          like the tuning card does, and the listing's own refresh sits with the
+          filters it re-reads rather than in this header. */}
+      <section className={modelsOpen ? css.cardModels : css.cardModels + ' ' + css.cardFolded}>
+        <button
+          type="button"
+          className={css.cardTrigger}
+          aria-expanded={modelsOpen}
+          aria-controls="opencode-go-models"
+          onClick={() => { setModelsOpen(!modelsOpen) }}
+        >
+          <span className={css.cardTitle}>{t('modelsLabel')}</span>
+          <ChevronDown className={modelsOpen ? css.chevronOpen : css.chevron} />
+        </button>
+        {modelsOpen
+          ? (
+            <div id="opencode-go-models" className={css.cardBody}>
+              <ModelsBody models={state.models} t={t} locale={props.locale} />
+              {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
+              <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
+                modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+                filterAction={(
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
+                    onClick={loadModels}
+                  >
+                    {t('modelsRefresh')}
+                  </Button>
+                )}
+                onModelEnabled={props.setModelEnabled}
+                onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
+            </div>
+          )
+          : null}
       </section>
       {/* Everything a working setup never needs stays folded at the foot of the
           page, under the card that owns the values it inherits. */}
