@@ -1,4 +1,5 @@
-/* OpenCode Go settings page: field rows, badges, hints, and actions. */
+/* OpenCode Go settings page: page header, section cards, field rows, badges,
+   hints, and actions. */
 
 .page {
   display: flex;
@@ -9,12 +10,54 @@
   container-type: size;
 }
 
+/* A column, so the model card can take whatever height is left once the
+   connection card and the advanced card have claimed theirs. */
 .pageBody {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding-right: 4px;
+}
+
+/* One slim scrollbar for every scroller on this page: an 8px rounded thumb on a
+   transparent track, instead of the platform bar with its arrow buttons. */
+.pageBody,
+.modelList,
+.modelDetails {
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsw-alias-border-l3) transparent;
+}
+
+.pageBody::-webkit-scrollbar,
+.modelList::-webkit-scrollbar,
+.modelDetails::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.pageBody::-webkit-scrollbar-track,
+.modelList::-webkit-scrollbar-track,
+.modelDetails::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pageBody::-webkit-scrollbar-thumb,
+.modelList::-webkit-scrollbar-thumb,
+.modelDetails::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--dsw-alias-border-l3);
+  background-clip: content-box;
+}
+
+.pageBody:hover::-webkit-scrollbar-thumb,
+.modelList:hover::-webkit-scrollbar-thumb,
+.modelDetails:hover::-webkit-scrollbar-thumb {
+  background: var(--dsw-alias-label-tertiary);
+  background-clip: content-box;
 }
 
 .field {
@@ -49,6 +92,15 @@
   gap: 8px;
 }
 
+/* A trailing group keeps every right-hand mark — badges, the refresh action,
+   and the disclosure chevron — on one centred line. */
+.trailing {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+}
+
 .reset {
   border: none;
   background: none;
@@ -69,7 +121,7 @@
 }
 
 .reset:focus-visible,
-.disclosure:focus-visible {
+.cardTrigger:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 3px;
 }
@@ -116,81 +168,151 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* The page's own name and one-sentence purpose, above every card. */
+.pageTop {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 0 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-primary);
+}
+
 .intro {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 13px;
   line-height: 1.5;
   color: var(--dsw-alias-label-secondary);
 }
 
-/* The advanced-settings header: a full-width row that reads as one control. */
-.disclosure {
+/* One card per concern. The tint is the layer-3 surface at 40%, which reads as
+   a card above the settings page without competing with the controls inside it
+   (they use layer-3 at full strength). */
+.card,
+.cardModels {
+  padding: 8px 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 40%, transparent);
+}
+
+.card {
+  flex: none;
+}
+
+.card + .card,
+.card + .cardModels,
+.cardModels + .card {
+  margin-top: 8px;
+}
+
+/* The model card grows into the leftover height instead of being fixed at a
+   height guessed from the window: flex-grow only, so a page whose cards need
+   more room than it has scrolls rather than crushing the list. The ceiling
+   keeps a very tall window from ballooning the list past what a list is for. */
+.cardModels {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  max-height: 720px;
+}
+
+.cardHead {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 24px;
+  padding: 0 14px;
+}
+
+.cardTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The one-line inventory of a collapsed card, so the fold still says what it
+   is hiding. */
+.cardSub {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 14px 0;
+}
+
+.cardBody > .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cardModels > .cardBody {
+  flex: 1 1 auto;
+}
+
+.cardDivider {
+  margin: 10px 14px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* A card header that is also the disclosure for the region below it. */
+.cardTrigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 24px;
   margin: 0;
-  padding: 0;
+  padding: 0 14px;
   border: none;
   background: none;
   font: inherit;
   text-align: left;
+  color: inherit;
   cursor: pointer;
 }
 
-.disclosure:hover .label {
+.cardTrigger:hover .cardTitle {
   color: var(--dsw-alias-brand-primary);
 }
 
-.chevron,
-.chevronOpen {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  color: var(--dsw-alias-label-tertiary);
+/* Tuning fields pair up inside the advanced card, and every divider they carry
+   as a stacked field is dropped: the grid gap does that job here. */
+.advancedGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 18px;
 }
 
-.chevron {
-  transform: rotate(-90deg);
+.advancedGrid .field {
+  padding: 0;
 }
 
-/* Tuning fields sit indented under the disclosure that owns them. */
-.advanced {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 0 0 22px;
-}
-
-.advanced .field + .field {
+.advancedGrid .field + .field {
   border-top: none;
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .limitsEditor {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   gap: 10px;
   padding-top: 4px;
-}
-
-.limitsToolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 6px 10px;
-}
-
-.limitsFilterLabel {
-  grid-column: 1 / -1;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
-  color: var(--dsw-alias-label-secondary);
 }
 
 .limitsSummary {
@@ -201,22 +323,32 @@
   white-space: nowrap;
 }
 
-.limitsId,
+/* The id and its release date share one line, so the card spends its height on
+   capacities and modalities rather than on a separate provenance row. */
+.modelMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.modelMeta .limitsModelId {
+  flex: 1;
+  min-width: 0;
+}
+
+.releaseDate {
+  flex: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .limitsModelId {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.limitsId {
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--dsw-alias-label-primary);
-}
-
-.limitsModelId {
-  margin-top: 2px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   line-height: 1.4;
@@ -233,16 +365,6 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-@media (max-width: 560px) {
-  .limitsToolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .limitsSummary {
-    padding-bottom: 0;
-  }
 }
 
 .actions {
@@ -281,41 +403,103 @@
   color: var(--dsw-alias-label-error);
 }
 
-.pageTop { display: flex; align-items: flex-start; gap: 16px; }
-.pageTop .intro { flex: 1; }
-.advancedTrigger { composes: disclosure; margin-left: auto; flex-shrink: 0; }
-.advancedTrigger .label { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+/* The 16px leading box every DSH row reserves for its glyph. */
+.slot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.slot svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* The disclosure chevron: an icon in its own 16px box, so its centre lines up
+   with the mark beside it instead of sitting on a text baseline. Collapsed
+   points right, open points down — the icon carries the state. */
+.chevron,
+.chevronOpen {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 150ms ease;
+}
+
+.chevron {
+  transform: rotate(-90deg);
+}
+
 .filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .filter { padding: 6px 9px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .filter[aria-pressed="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
 .filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }
-.modelLayout { display: grid; grid-template-columns: minmax(0, 43fr) minmax(0, 57fr); height: clamp(240px, calc(100cqh - 460px), 480px); border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 10px; overflow: hidden; }
-.modelList { overflow-y: auto; min-height: 0; padding: 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
+
+/* The compact list only carries names and switches, so the parameter card takes
+   the larger share: 45 : 55. The pair then stretches to whatever the model card
+   has left, between a floor that keeps the list usable and the ceiling the old
+   fixed clamp held. */
+.modelLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
+  flex: 1 1 auto;
+  min-height: 260px;
+  max-height: 560px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
 .modelRow { display: flex; align-items: center; gap: 8px; padding-right: 6px; }
+.modelRow + .modelRow { border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.modelRowSelected { background: var(--dsw-alias-bg-layer-3); border-radius: 6px; border-top-color: transparent; }
 .modelRow > [role="switch"] { flex-shrink: 0; }
-.modelChoice { display: block; flex: 1; min-width: 0; text-align: left; padding: 12px 9px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
-.modelChoice[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-3); }
-.modelChoice:hover { background: var(--dsw-alias-bg-layer-3); }
-.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; }
-.modelDetails { overflow-y: auto; min-width: 0; padding: 18px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
-.modelDetails h3 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+.modelChoice { display: flex; align-items: baseline; flex: 1; min-width: 0; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
+/* Hover and selection cover the same whole row — name, badges, override mark and
+   switch — so a row reads as one bar instead of stopping at the switch. A
+   selected row keeps its own surface; hover stays one step lighter than it, so
+   the two states remain tellable apart. */
+.modelRow:hover:not(.modelRowSelected) {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 92%, var(--dsw-alias-label-primary));
+  border-top-color: transparent;
+  border-radius: 6px;
+}
+.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; flex: 0 1 auto; min-width: 0; }
+.overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); }
+.modelDetails { overflow-y: auto; min-height: 0; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.modelDetails h3 { font-size: 14px; margin: 0; overflow-wrap: anywhere; }
 .modelHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.modelDetails .field { border: 0; padding: 8px 0; }
-.modelDetails .input { width: 100%; box-sizing: border-box; min-width: 0; }
+.stats { display: flex; flex-direction: column; gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 4px; }
+.statLabel { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.modelDetails .input { width: 100%; box-sizing: border-box; min-width: 0; height: 30px; padding: 0 9px; font-size: 12px; }
+.modalities { display: flex; flex-wrap: wrap; gap: 4px; }
+.modality,
+.modalityOff { padding: 2px 7px; border-radius: 6px; font-size: 11px; line-height: 1.5; }
+.modality { background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-secondary); }
+.modalityOff { border: 0.5px dashed var(--dsw-alias-border-l4); color: var(--dsw-alias-label-tertiary); }
 .modelDetails .reset { align-self: flex-start; }
+.paneFoot { margin: auto 0 0; font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
 .newBadge { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); border: 0.5px solid var(--dsw-alias-border-l4); font-size: 9px; border-radius: 4px; padding: 2px 4px; }
-.releaseDate { display: block; margin-top: 4px; font-size: 10px; color: var(--dsw-alias-label-tertiary); }
-.modelChoice:focus-visible, .filter:focus-visible, .advancedTrigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+.modelChoice:focus-visible, .filter:focus-visible, .cardTrigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+
 @container (max-width: 440px) {
-  .pageTop { flex-wrap: wrap; }
-  .modelLayout { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .advancedGrid { grid-template-columns: minmax(0, 1fr); }
+  /* One column cannot stretch: the list and the card stack, and each keeps its
+     own ceiling instead of sharing the model card's. */
+  .cardModels { max-height: none; }
+  .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); }
   .modelList { max-height: 240px; border-right: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
   .modelDetails { max-height: 460px; }
 }
 
-.keySection { padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
-.keySection summary { cursor: pointer; list-style: none; }
-.keySection summary::after { content: '⌄'; color: var(--dsw-alias-label-tertiary); }
-.keySection summary::-webkit-details-marker { display: none; }
-.keySection > .input { width: 100%; box-sizing: border-box; margin: 10px 0 6px; }
-.keySection summary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .chevron,
+  .chevronOpen { transition: none; }
+}

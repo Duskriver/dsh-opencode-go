@@ -2,9 +2,11 @@
 import type { Api, Model } from '@earendil-works/pi-ai';
 import { type GoModel } from './models-contract.ts';
 export declare const MODEL_METADATA_URL = "https://models.dev/api.json";
+/** Lifecycle and capability data the online catalog adds to a gateway listing. */
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'>;
 export interface ModelMetadata {
     readonly models: ReadonlyMap<string, Model<Api>>;
-    readonly details: ReadonlyMap<string, Pick<GoModel, 'deprecated' | 'releaseDate'>>;
+    readonly details: ReadonlyMap<string, ModelDetails>;
     readonly errors: ReadonlyMap<string, string>;
 }
 /** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */

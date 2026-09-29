@@ -1,9 +1,10 @@
 /**
- * The OpenCode Go settings section. It leads with the one value a user has to
- * supply — the API key, stored write-only through the credentials domain — and
- * the models the gateway currently serves, then keeps the credential
- * reference, the endpoint, and the adapter tuning fields in the
- * `llm-opencode-go` namespace behind a collapsed disclosure.
+ * The OpenCode Go settings page. Three cards carry the page's whole order — the
+ * connection (the switch that routes the provider plus the API key it
+ * authenticates with), the models the gateway currently serves and their
+ * capacities, and the adapter tuning fields behind a collapsed disclosure at the
+ * foot. The credential reference, the endpoint, and the tuning knobs all live in
+ * the `llm-opencode-go` namespace, so every card writes the same document.
  */
 
 import { useEffect, useState } from 'react'
@@ -56,7 +57,7 @@ interface ValueFieldProps {
 
 /** One staged value field: label, override badge with reset, control, and hint. */
 function ValueField(props: ValueFieldProps) {
-  const hintId = `${props.id}-hint`
+  const hintId = props.id + '-hint'
   return (
     <div className={css.field}>
       <div className={css.head}>
@@ -208,109 +209,16 @@ function Loaded(props: {
     <div className={css.page}>
       <div className={css.pageBody}>
       <div className={css.pageTop}>
+        <h2 className={css.title}>{t('titleLabel')}</h2>
         <p className={css.intro}>{t('intro')}</p>
-        <button
-          type="button"
-          className={css.advancedTrigger}
-          aria-expanded={advanced}
-          aria-controls="opencode-go-advanced"
-          onClick={() => { setAdvanced(!advanced) }}
-        >
-          <ChevronDown className={advanced ? css.chevronOpen : css.chevron} />
-          <span className={css.label}>{t('advancedLabel')}</span>
-          {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
-        </button>
       </div>
-      <div className={advanced ? css.field : undefined}>
-        {advanced
-          ? (
-            <div id="opencode-go-advanced" className={css.advanced}>
-              <p className={css.hint}>{t('advancedHint')}</p>
-              <ValueField
-                id="opencode-go-api-key-env"
-                label={t('apiKeyEnvLabel')}
-                hint={t('apiKeyEnvHint')}
-                field={state.apiKeyEnv}
-                {...fieldProps}
-                onEdit={(text) => { props.edit('apiKeyEnv', text) }}
-                onReset={() => { props.resetField('apiKeyEnv') }}
-              />
-              <ValueField
-                id="opencode-go-base-url"
-                label={t('baseURLLabel')}
-                hint={t('baseURLHint')}
-                field={state.baseURL}
-                {...fieldProps}
-                onEdit={(text) => { props.edit('baseURL', text) }}
-                onReset={() => { props.resetField('baseURL') }}
-              />
-              <ValueField
-                id="opencode-go-refresh-minutes"
-                label={t('refreshMinutesLabel')}
-                hint={t('refreshMinutesHint')}
-                field={state.refreshMinutes}
-                numeric
-                {...fieldProps}
-                onEdit={(text) => { props.edit('refreshMinutes', text) }}
-                onReset={() => { props.resetField('refreshMinutes') }}
-              />
-              <ValueField
-                id="opencode-go-stream-idle"
-                label={t('streamIdleTimeoutMsLabel')}
-                hint={t('streamIdleTimeoutMsHint')}
-                field={state.streamIdleTimeoutMs}
-                numeric
-                {...fieldProps}
-                onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
-                onReset={() => { props.resetField('streamIdleTimeoutMs') }}
-              />
-              <ValueField
-                id="opencode-go-max-images"
-                label={t('maxImagesLabel')}
-                hint={t('maxImagesHint')}
-                field={state.maxImages}
-                numeric
-                {...fieldProps}
-                onEdit={(text) => { props.edit('maxImages', text) }}
-                onReset={() => { props.resetField('maxImages') }}
-              />
-              <ValueField
-                id="opencode-go-max-request-image-bytes"
-                label={t('maxRequestImageBytesLabel')}
-                hint={t('maxRequestImageBytesHint')}
-                field={state.maxRequestImageBytes}
-                numeric
-                {...fieldProps}
-                onEdit={(text) => { props.edit('maxRequestImageBytes', text) }}
-                onReset={() => { props.resetField('maxRequestImageBytes') }}
-              />
-              <ValueField
-                id="opencode-go-image-pixel-budget"
-                label={t('requestImagePixelBudgetLabel')}
-                hint={t('requestImagePixelBudgetHint')}
-                field={state.requestImagePixelBudget}
-                numeric
-                {...fieldProps}
-                onEdit={(text) => { props.edit('requestImagePixelBudget', text) }}
-                onReset={() => { props.resetField('requestImagePixelBudget') }}
-              />
-              <ValueField
-                id="opencode-go-image-max-bytes"
-                label={t('requestImageMaxBytesLabel')}
-                hint={t('requestImageMaxBytesHint')}
-                field={state.requestImageMaxBytes}
-                numeric
-                {...fieldProps}
-                onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
-                onReset={() => { props.resetField('requestImageMaxBytes') }}
-              />
-            </div>
-          )
-          : null}
-      </div>
-      <div className={css.field}>
-        <div className={css.head}>
-          <span className={css.label}>{t('enabledLabel')}</span>
+      {/* One card carries both halves of the connection: the switch that decides
+          whether the provider is served at all, and the key it authenticates
+          with. They are the two values a user has to get right, so they sit
+          together at the top instead of being split across the page. */}
+      <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('enabledLabel')}</h3>
           <Switch
             checked={state.enabled}
             label={t('enabledLabel')}
@@ -320,38 +228,49 @@ function Loaded(props: {
             onChange={props.setEnabled}
           />
         </div>
-        <p className={css.hint}>{state.enabled ? t('enabledHint') : t('enabledOff')}</p>
-      </div>
-      <details className={css.keySection} open={!state.apiKeyConfigured || state.apiKey.text.length > 0}>
-        <summary className={css.head}>
-          <span className={css.label}>{t('keyLabel')}</span>
-          <span className={css.badges}>
+        <div className={css.cardBody}>
+          <p className={css.hint}>{state.enabled ? t('enabledHint') : t('enabledOff')}</p>
+        </div>
+        <div className={css.cardDivider} />
+        <div className={css.cardHead}>
+          {/* Inline so every supported Host shows the same glyph. */}
+          <span className={css.slot} aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" focusable="false">
+              <circle cx="5.4" cy="8" r="3.1" />
+              <path d="M8.5 8h5.3M11.9 8v2.2M10.2 8v1.6" />
+            </svg>
+          </span>
+          <label className={css.label} htmlFor="opencode-go-key">{t('keyLabel')}</label>
+          <span className={css.trailing}>
             <Tag tone={state.apiKeyConfigured ? 'success' : 'warning'}>
               {state.apiKeyConfigured ? t('keyConfigured') : t('keyMissing')}
             </Tag>
           </span>
-        </summary>
-        <input
-          id="opencode-go-key"
-          aria-label={t('keyLabel')}
-          name="api-key"
-          className={css.input}
-          type="password"
-          autoComplete="off"
-          aria-describedby="opencode-go-key-hint"
-          value={state.apiKey.text}
-          // The credentials domain accepts a key even when the settings document
-          // itself is read-only; its own writability is what disables this
-          // control — a key sourced from the environment cannot be written here.
-          disabled={!state.apiKeyWritable}
-          onChange={(event) => { props.edit('apiKey', event.target.value) }}
-        />
-        <p id="opencode-go-key-hint" className={css.hint}>{state.apiKeyWritable ? t('keyHint') : t('keyNotWritable')}</p>
-      </details>
-      <div className={css.field}>
-        <div className={css.head}>
-          <span className={css.label}>{t('modelsLabel')}</span>
-          <span className={css.badges}>
+        </div>
+        <div className={css.cardBody}>
+          <input
+            id="opencode-go-key"
+            name="api-key"
+            className={css.input}
+            type="password"
+            autoComplete="off"
+            aria-describedby="opencode-go-key-hint"
+            value={state.apiKey.text}
+            // The credentials domain accepts a key even when the settings document
+            // itself is read-only; its own writability is what disables this
+            // control — a key sourced from the environment cannot be written here.
+            disabled={!state.apiKeyWritable}
+            onChange={(event) => { props.edit('apiKey', event.target.value) }}
+          />
+          <p id="opencode-go-key-hint" className={css.hint}>{state.apiKeyWritable ? t('keyHint') : t('keyNotWritable')}</p>
+        </div>
+      </section>
+      {/* The model card takes whatever height the page has left: its list and its
+          parameter card are the reason the page is open. */}
+      <section className={css.cardModels}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('modelsLabel')}</h3>
+          <span className={css.trailing}>
             {state.models.status === 'ready'
               ? <Tag tone="neutral">{t('modelsCount', { count: state.models.count })}</Tag>
               : null}
@@ -365,15 +284,118 @@ function Loaded(props: {
             </button>
           </span>
         </div>
-        <ModelsBody models={state.models} t={t} locale={props.locale} />
-      </div>
-      <div className={css.field}>
-        {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
-        <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
-          modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-          onModelEnabled={props.setModelEnabled}
-          onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
-      </div>
+        <div className={css.cardBody}>
+          <ModelsBody models={state.models} t={t} locale={props.locale} />
+          {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
+          <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
+            modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+            onModelEnabled={props.setModelEnabled}
+            onEdit={next => { props.edit('modelLimits', JSON.stringify(next)) }} />
+        </div>
+      </section>
+      {/* Everything a working setup never needs stays folded at the foot of the
+          page, under the card that owns the values it inherits. */}
+      <section className={css.card}>
+        <button
+          type="button"
+          className={css.cardTrigger}
+          aria-expanded={advanced}
+          aria-controls="opencode-go-advanced"
+          onClick={() => { setAdvanced(!advanced) }}
+        >
+          <span className={css.cardTitle}>{t('advancedLabel')}</span>
+          <span className={css.cardSub}>{t('advancedSummary')}</span>
+          {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
+          <ChevronDown className={advanced ? css.chevronOpen : css.chevron} />
+        </button>
+        {advanced
+          ? (
+            <div id="opencode-go-advanced" className={css.cardBody}>
+              <p className={css.hint}>{t('advancedHint')}</p>
+              <div className={css.advancedGrid}>
+                <ValueField
+                  id="opencode-go-api-key-env"
+                  label={t('apiKeyEnvLabel')}
+                  hint={t('apiKeyEnvHint')}
+                  field={state.apiKeyEnv}
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('apiKeyEnv', text) }}
+                  onReset={() => { props.resetField('apiKeyEnv') }}
+                />
+                <ValueField
+                  id="opencode-go-base-url"
+                  label={t('baseURLLabel')}
+                  hint={t('baseURLHint')}
+                  field={state.baseURL}
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('baseURL', text) }}
+                  onReset={() => { props.resetField('baseURL') }}
+                />
+                <ValueField
+                  id="opencode-go-refresh-minutes"
+                  label={t('refreshMinutesLabel')}
+                  hint={t('refreshMinutesHint')}
+                  field={state.refreshMinutes}
+                  numeric
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('refreshMinutes', text) }}
+                  onReset={() => { props.resetField('refreshMinutes') }}
+                />
+                <ValueField
+                  id="opencode-go-stream-idle"
+                  label={t('streamIdleTimeoutMsLabel')}
+                  hint={t('streamIdleTimeoutMsHint')}
+                  field={state.streamIdleTimeoutMs}
+                  numeric
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
+                  onReset={() => { props.resetField('streamIdleTimeoutMs') }}
+                />
+                <ValueField
+                  id="opencode-go-max-images"
+                  label={t('maxImagesLabel')}
+                  hint={t('maxImagesHint')}
+                  field={state.maxImages}
+                  numeric
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('maxImages', text) }}
+                  onReset={() => { props.resetField('maxImages') }}
+                />
+                <ValueField
+                  id="opencode-go-max-request-image-bytes"
+                  label={t('maxRequestImageBytesLabel')}
+                  hint={t('maxRequestImageBytesHint')}
+                  field={state.maxRequestImageBytes}
+                  numeric
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('maxRequestImageBytes', text) }}
+                  onReset={() => { props.resetField('maxRequestImageBytes') }}
+                />
+                <ValueField
+                  id="opencode-go-image-pixel-budget"
+                  label={t('requestImagePixelBudgetLabel')}
+                  hint={t('requestImagePixelBudgetHint')}
+                  field={state.requestImagePixelBudget}
+                  numeric
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('requestImagePixelBudget', text) }}
+                  onReset={() => { props.resetField('requestImagePixelBudget') }}
+                />
+                <ValueField
+                  id="opencode-go-image-max-bytes"
+                  label={t('requestImageMaxBytesLabel')}
+                  hint={t('requestImageMaxBytesHint')}
+                  field={state.requestImageMaxBytes}
+                  numeric
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
+                  onReset={() => { props.resetField('requestImageMaxBytes') }}
+                />
+              </div>
+            </div>
+          )
+          : null}
+      </section>
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>
       <div className={css.actions}>

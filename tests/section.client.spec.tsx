@@ -216,6 +216,67 @@ describe('OpencodeGoSection', () => {
     expect(screen.queryByRole('button', { name: en.limitsLabel })).toBeNull()
   })
 
+  it('names every input modality in catalog order, including the ones the model does not accept', () => {
+    renderSection(stateOf({ models: listing([
+      { id: 'omni', name: 'Omni', contextWindow: 1_000_000, maxTokens: 131_072, inputModalities: ['text', 'image', 'video'] },
+    ]) }))
+    const text = screen.getByRole('region', { name: en.modelDetails }).textContent ?? ''
+    const labels = [en.modalityText, en.modalityImage, en.modalityAudio, en.modalityVideo, en.modalityPdf]
+    labels.forEach(label => { expect(text).toContain(label) })
+    const positions = labels.map(label => text.indexOf(label))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+  })
+
+  it('falls back to an undeclared posture when the catalog carries no modalities', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    const pane = screen.getByRole('region', { name: en.modelDetails })
+    expect(within(pane).getByText(en.modalityUnknown)).toBeTruthy()
+    expect(within(pane).queryByText(en.modalityVideo)).toBeNull()
+  })
+
+  it('marks a model carrying a capacity override in the compact list', () => {
+    renderSection(stateOf({
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 1024 } },
+    }))
+    const nav = screen.getByRole('navigation', { name: en.modelsLabel })
+    expect(nav.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
+    expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
+  })
+
+  it('keeps the compact row to the model name and its badges', () => {
+    const today = new Date().toISOString().slice(0, 10)
+    renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
+    const row = within(screen.getByRole('navigation', { name: en.modelsLabel })).getByRole('button')
+    expect(row.textContent).toContain('Fresh')
+    expect(row.textContent).toContain(en.newBadge)
+    // The model id and the release date are the parameter card's job.
+    expect(row.textContent).not.toContain('fresh-model')
+    expect(row.textContent).not.toContain(today)
+    expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain('fresh-model')
+  })
+
+  it('shares one line between the model id and its release date', () => {
+    const today = new Date().toISOString().slice(0, 10)
+    renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
+    const pane = screen.getByRole('region', { name: en.modelDetails })
+    const id = pane.querySelector('code')
+    const date = within(pane).getByText(today)
+    // The date rides the id's line instead of taking a provenance row of its own.
+    expect(date.parentElement).toBe(id?.parentElement)
+    // The full provenance stays one hover away, without spending a line on it.
+    expect(date.getAttribute('title')).toBe(t('releaseSource', { date: today }))
+  })
+
+  it('adds the forwarding caveat only where a model declares inputs beyond text and images', () => {
+    renderSection(stateOf({ models: listing([{ id: 'omni', name: 'Omni', inputModalities: ['text', 'video'] }]) }))
+    expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain(en.modalitiesForwarding)
+
+    cleanup()
+    renderSection(stateOf({ models: listing([{ id: 'vision', name: 'Vision', inputModalities: ['text', 'image'] }]) }))
+    expect(screen.getByRole('region', { name: en.modelDetails }).textContent).not.toContain(en.modalitiesForwarding)
+  })
+
   it('makes model capacities searchable and stages numeric edits', () => {
     const edits = actions()
     renderSection(stateOf({
@@ -342,6 +403,35 @@ describe('OpencodeGoSection', () => {
     expect(document.getElementById('opencode-go-advanced')).not.toBeNull()
   })
 
+  it('reads down the page as connection, models, then tuning', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(en.titleLabel)
+    // The page's order is the product decision: enable, key, models, tuning.
+    const sequence = [
+      screen.getByRole('switch', { name: en.enabledLabel }),
+      screen.getByLabelText(en.keyLabel),
+      screen.getByRole('navigation', { name: en.modelsLabel }),
+      screen.getByText(en.advancedLabel),
+    ]
+    for (let index = 1; index < sequence.length; index += 1) {
+      const relation = sequence[index - 1].compareDocumentPosition(sequence[index])
+      expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    // The tuning card is the last thing on the page, under the list it tunes.
+    const tuning = screen.getByText(en.advancedLabel).closest('section') as HTMLElement
+    expect(tuning.parentElement?.lastElementChild).toBe(tuning)
+  })
+
+  it('keeps the switch and the key control in one connection card', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    const connection = screen.getByRole('switch', { name: en.enabledLabel }).closest('section') as HTMLElement
+    expect(connection).toBeTruthy()
+    expect(within(connection).getByLabelText(en.keyLabel)).toBeTruthy()
+    // The models card is a card of its own, not a stray block on the page.
+    const models = screen.getByRole('navigation', { name: en.modelsLabel }).closest('section') as HTMLElement
+    expect(models).toBeTruthy()
+    expect(models).not.toBe(connection)
+  })
   it('stages edits through the injected actions and resets on demand', () => {
     const edits = actions()
     renderSection(stateOf({ refreshMinutes: field('60', { overridden: true }) }), edits)

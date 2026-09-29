@@ -1,13 +1,16 @@
 /** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
 import type { Api, Model, ModelCost, ModelThinkingLevel, ThinkingLevelMap } from '@earendil-works/pi-ai'
 
-import { validReleaseDate, type GoModel } from './models-contract.ts'
+import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
 
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
+/** Lifecycle and capability data the online catalog adds to a gateway listing. */
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'>
+
 export interface ModelMetadata {
   readonly models: ReadonlyMap<string, Model<Api>>
-  readonly details: ReadonlyMap<string, Pick<GoModel, 'deprecated' | 'releaseDate'>>
+  readonly details: ReadonlyMap<string, ModelDetails>
   readonly errors: ReadonlyMap<string, string>
 }
 
@@ -75,11 +78,13 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
   const entries = record(provider.models)
   const models = new Map<string, Model<Api>>()
   const errors = new Map<string, string>()
-  const details = new Map<string, Pick<GoModel, 'deprecated' | 'releaseDate'>>()
+  const details = new Map<string, ModelDetails>()
   for (const [id, value] of Object.entries(entries)) {
     const data = record(value)
+    const inputModalities = normalizeInputModalities(record(data.modalities).input)
     details.set(id, { deprecated: data.status === 'deprecated',
-      ...(validReleaseDate(data.release_date) ? { releaseDate: data.release_date } : {}) })
+      ...(validReleaseDate(data.release_date) ? { releaseDate: data.release_date } : {}),
+      ...(inputModalities === undefined ? {} : { inputModalities }) })
     try {
       const metadata = record(value)
       const npm = record(metadata.provider).npm ?? provider.npm

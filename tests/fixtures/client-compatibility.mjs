@@ -110,7 +110,17 @@ try {
   assert.ok(advanced)
   assert.equal(getComputedStyle(advanced).display, 'flex')
   assert.equal(getComputedStyle(advanced).cursor, 'pointer')
-  assert.ok(document.querySelector('style[data-plugin="dsh-opencode-go"]'))
+  const pluginStyles = document.querySelector('style[data-plugin="dsh-opencode-go"]')
+  assert.ok(pluginStyles)
+  // The row highlight and the model-area split are pure CSS, so the shape of the
+  // distributed stylesheet is the only thing a DOM-level check can hold to: hover
+  // must cover the same whole row as the selection, and the parameter card must
+  // take the larger share of the split.
+  const pluginCss = pluginStyles.textContent
+  assert.match(pluginCss, /\.\w*modelRow:hover:not\(\.\w*modelRowSelected\)\{[^}]*background/)
+  assert.doesNotMatch(pluginCss, /\.\w*modelChoice:hover\{[^}]*background/)
+  assert.match(pluginCss, /\.\w*modelRowSelected\{[^}]*background:var\(--dsw-alias-bg-layer-3\)/)
+  assert.match(pluginCss, /grid-template-columns:minmax\(0,45fr\) minmax\(0,55fr\)/)
   for (const dispose of effects.splice(0).reverse()) (await dispose)()
   assert.equal(listeners.size, 0, 'client cleanup releases settings subscriptions')
   console.log(`PASS: client compatibility (${host}): module table, settings, catalog injection, rendering, CSS, cleanup`)
