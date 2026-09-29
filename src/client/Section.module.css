@@ -19,7 +19,9 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding-right: 4px;
+  /* Room under the last card: without it a scrolled-to-end page lands the card's
+     bottom edge exactly on the action bar's rule, which reads as a clipped card. */
+  padding: 0 4px 16px 0;
 }
 
 /* One slim scrollbar for every scroller on this page: an 8px rounded thumb on a
