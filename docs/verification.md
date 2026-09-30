@@ -1,5 +1,13 @@
 # Verification
 
+## Node 22 bundled-npm clean installs (2026-09-30)
+
+The [Issue #24 main-branch workflow](https://github.com/Duskriver/dsh-opencode-go/actions/runs/36696633511) passed 11 of 13 jobs. Both Linux and Windows core jobs on Node 22.19.0 failed during `npm ci --strict-peer-deps`, before running tests, with `Missing: esbuild@0.28.2 from lock file`. Their bundled npm is 10.9.3. The previous local Node 22 checks used npm 11, so they did not cover that clean-install contract.
+
+A fresh fixture containing only the manifest and lockfile reproduced the same error with Node 22.19.0 / npm 10.9.3 in offline dry-run mode, while npm 11 accepted the same files. Vite under Vitest declares an optional esbuild peer whose range excludes the root build tool's esbuild 0.25.12. npm 10 resolves a nested 0.28.2 and checks its lock entries; npm 11 can omit them. The fix records that optional peer and all 26 platform packages. All existing lock entries, package versions, and platform metadata are preserved.
+
+The same isolated-fixture command rejects the original lockfile and accepts the corrected one. Clean strict installs and `npm run test:ci` passed on macOS with Node 22.19.0 / npm 10.9.3 and Node 24.14.1 / npm 11.11.0: **354 tests in 24 files** and all **31** shipped artifacts matching source in each environment. The existing Linux/Windows core jobs retain their clean-install check as the regression guard. Development guidance now requires each supported Node version's bundled npm when verifying a changed lockfile.
+
 ## Issue #24: DSH 0.2.0 and pi-ai transcript compatibility (2026-09-30)
 
 The plugin now uses pi-ai **0.87.1** through the `opencode-go-pi-ai` npm alias. All runtime imports, lazy protocol factories, and declaration imports use that alias, leaving the host's public pi-ai dependency to resolve independently. Before a direct provider call, the adapter applies the official `normalizeContext` to the existing text or image conversion result. This preserves system prompts and tool declarations under the new transcript contract while retaining DSH `0.1.5-rc.1` as the minimum supported host. Tool argument replay uses the SDK's JSON object type; the persisted replay envelope remains version 2.
