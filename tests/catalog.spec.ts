@@ -1,6 +1,6 @@
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
+import { getBuiltinModels } from 'opencode-go-pi-ai/providers/all'
 import {
   OpencodeGoCatalog,
   discoverCatalogModels,

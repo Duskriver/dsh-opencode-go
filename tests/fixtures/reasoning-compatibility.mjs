@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 
 const host = process.argv[2]
-const modern = host.startsWith('v017')
+const modern = host.startsWith('v017') || host.startsWith('v020')
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const llm = await import('@deepseek-ai/dsh-llm')

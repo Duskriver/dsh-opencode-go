@@ -12,7 +12,7 @@ The root package contains one coherent DSH 0.1.6-alpha.1 development environment
 | `npm run test:ci` | Verify shipped artifacts match source, then run the core suite |
 | `npm test` | Rebuild, then run the core Vitest suite |
 | `npm run test:compat` | Pack once and test the installed artifact across every supported host fixture |
-| `npm run test:compat -- v015-rc1 v017-rc2` | Test only the named fixtures; unknown names fail |
+| `npm run test:compat -- v015-rc1 v017-rc2 v020-rc2` | Test only the named fixtures; unknown names fail |
 | `npm run test:install` | Test npm and pnpm 11.7.0 Git installs of prebuilt artifacts without plugin build approval |
 | `npm run test:install -- npm` / `-- pnpm` | Run just one package manager; unknown names fail |
 | `npm run verify` | Run core, compatibility, and Git-installation checks |
@@ -29,7 +29,7 @@ The Git-installation regression creates a fresh repository containing the shippe
 
 ## Installed-package matrix
 
-`scripts/compatibility-hosts.mjs` lists the eight host generations. Each `tests/hosts/<id>` has a private manifest and its own lockfile. DSH packages and their required DSH peer/dependency closure are pinned to that host generation, together with compatible Cordis packages. This prevents a broad upstream peer range from silently selecting a later host generation.
+`scripts/compatibility-hosts.mjs` lists nine host generations, including DSH `0.2.0-rc.2`. Each `tests/hosts/<id>` has a private manifest and its own lockfile. DSH packages and their required DSH peer/dependency closure are pinned to that host generation, together with compatible Cordis packages. This prevents a broad upstream peer range from silently selecting a later host generation. The 0.2 fixture also installs its real `dsh-llm-pi-ai` adapter and public pi-ai dependency alongside this plugin.
 
 The runner performs these steps for each host:
 
@@ -41,7 +41,15 @@ The runner performs these steps for each host:
 
 Local compatibility runs are serial by default. Set `DSH_COMPAT_CONCURRENCY` to a positive integer to run that many isolated hosts at once; CI uses four workers and prefers its restored npm download cache, fetching missing packages as needed. Each host keeps its own dependency installation and fixture processes, and all workers consume the same tarball. A failed host does not skip queued hosts or delete files still used by running checks: the runner collects every result before cleanup. Logs are grouped by host, and the console and GitHub job summary report each result and elapsed time.
 
-All host JavaScript imports use ordinary Node resolution. The fixtures do not redirect DSH imports to alternate packages or load the plugin from the source checkout. The client fixture uses the consumer's React, store, and UI primitives, with a CSS loader for published host styles. It verifies the installed browser factory, settings registration, catalog injection, rendering, CSS, and cleanup. Host fixtures retain text streaming, real image processing, history/offload, limits, reasoning, live settings, and profile-bundle checks.
+All host JavaScript imports use ordinary Node resolution. The fixtures do not redirect DSH imports to alternate packages or load the plugin from the source checkout. The client fixture uses the consumer's React, store, and UI primitives, with a CSS loader for published host styles. It verifies the installed browser factory, settings registration, catalog injection, rendering, CSS, and cleanup. Host fixtures retain text streaming, real image processing, history/offload, limits, reasoning, live settings, and profile-bundle checks. Each host also runs all three wire protocols through prompt and tool declaration checks, a streamed tool call, JSON-restored assistant replay, tool-result continuation, and a one-shot request with no tools.
+
+## Isolated pi-ai dependency
+
+The runtime dependency `opencode-go-pi-ai` is an npm alias for `@earendil-works/pi-ai@0.87.1`. All plugin imports, including declaration types and lazy API factories, use the alias. It keeps this plugin's SDK requirement separate from the host's public `@earendil-works/pi-ai` name, so an older plugin that declares pi-ai only as a peer is not redirected by our dependency. The npm and pnpm Git-installation checks include a public pi-ai 0.85.1 and a peer-only probe, and verify that the probe retains 0.85.1 while this plugin resolves its own 0.87.1.
+
+DSH requests still convert through `toPiContext`, preserving the existing host input and durable replay contracts. Immediately before calling a provider directly, the adapter applies pi-ai's `normalizeContext`. In 0.87.1, direct providers require `TranscriptContext`; only `Models` streaming entry points normalize legacy Context automatically. Normalizing at this call site preserves the system prompt and tool declarations on both text and image paths without tying the SDK format to the DSH version.
+
+This upgrade does not enable developer messages, tool-change blocks, or deferred tool loading. Their existing `UNSUPPORTED_CONTENT` errors remain explicit. The minimum DSH version and peer ranges stay unchanged; new host fixtures verify runtime compatibility rather than expanding the supported content vocabulary.
 
 There is one explicit npm prerelease exception: DSH evaluates plugin ranges with prereleases included, whereas npm does not generally accept a future prerelease under `>=0.1.5-rc.1`. Only the tarball-install step uses `--legacy-peer-deps` after the host has passed strict installation. This is not a project `.npmrc` policy and does not affect root installs. The post-install version assertions ensure npm did not replace pinned host packages. Changing the plugin's published version policy is a separate decision.
 

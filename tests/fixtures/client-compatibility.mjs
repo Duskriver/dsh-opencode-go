@@ -10,7 +10,7 @@ import { JSDOM } from 'jsdom'
 import { transform } from 'lightningcss'
 
 const host = process.argv[2]
-const modern = host.startsWith('v017')
+const modern = host.startsWith('v017') || host.startsWith('v020')
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>')
 const { window } = dom
 Object.assign(globalThis, { window, document: window.document, getComputedStyle: window.getComputedStyle })

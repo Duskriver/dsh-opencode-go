@@ -1,5 +1,5 @@
 /** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
-import type { Api, Model, ModelCost, ModelThinkingLevel, ThinkingLevelMap } from '@earendil-works/pi-ai'
+import type { Api, Model, ModelCost, ModelThinkingLevel, ThinkingLevelMap } from 'opencode-go-pi-ai'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
 

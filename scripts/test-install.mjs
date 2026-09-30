@@ -61,7 +61,17 @@ try {
     console.log(`\nChecking ${manager} Git installation from prebuilt artifacts`)
     const consumer = join(scratch, manager)
     await mkdir(consumer)
-    await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: `install-test-${manager}`, private: true }))
+    // Reproduce a profile with an older SDK and a plugin that only declares a
+    // broad peer. Our private alias must never replace that peer's SDK.
+    await mkdir(join(consumer, 'pi-ai-peer-probe'))
+    await writeFile(join(consumer, 'pi-ai-peer-probe/package.json'), JSON.stringify({
+      name: 'pi-ai-peer-probe', version: '1.0.0', type: 'module', exports: './index.js',
+      peerDependencies: { '@earendil-works/pi-ai': '0.82.1 || 0.85.1 || 0.87.1' },
+    }))
+    await writeFile(join(consumer, 'pi-ai-peer-probe/index.js'), 'export * from "@earendil-works/pi-ai";\n')
+    await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: `install-test-${manager}`, private: true,
+      dependencies: { '@earendil-works/pi-ai': '0.85.1', 'pi-ai-peer-probe': 'file:./pi-ai-peer-probe' },
+    }))
     if (manager === 'npm') {
       await measure('npm Git installation', () => npm(['install', '--no-audit', '--no-fund', gitURL], consumer))
     } else {

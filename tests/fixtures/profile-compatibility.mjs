@@ -1,4 +1,4 @@
-/** Real 0.1.7 Loader/settings contracts, isolated from the legacy host packages. */
+/** Real profile Loader/settings contracts, isolated from the legacy host packages. */
 import assert from 'node:assert/strict'
 
 const { Context } = await import('@deepseek-ai/cordis')

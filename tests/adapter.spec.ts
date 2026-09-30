@@ -160,7 +160,8 @@ describe('OpencodeGoAdapter stream', () => {
     gateway.pushCompletions({ events: textEvents })
     const adapter = await adapterFor(gateway.url)
 
-    await drain(adapter.stream(requestOf({ reasoningEffort: ReasoningEffortId('off') })))
+    // pi-ai 0.87.1 no longer advertises off for V4.1; V4 still supports it.
+    await drain(adapter.stream(requestOf({ model: 'deepseek-v4-flash', reasoningEffort: ReasoningEffortId('off') })))
 
     expect(gateway.bodies[0]).toMatchObject({ thinking: { type: 'disabled' } })
     expect(gateway.bodies[0]).not.toHaveProperty('reasoning_effort')

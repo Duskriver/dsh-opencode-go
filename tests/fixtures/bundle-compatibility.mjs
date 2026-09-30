@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const host = process.argv[2] ?? 'v017-rc1'
 const { getDshRuntimeVersion, loadProfileDirectory } = await import('@deepseek-ai/dsh-app-boot')
-assert.equal(getDshRuntimeVersion(), { 'v017-rc1': '0.1.7-rc.1', 'v017-rc2': '0.1.7-rc.2' }[host])
+assert.equal(getDshRuntimeVersion(), process.argv[3] ?? { 'v017-rc1': '0.1.7-rc.1', 'v017-rc2': '0.1.7-rc.2' }[host])
 const root = fileURLToPath(new URL('../node_modules/dsh-opencode-go/', import.meta.url))
 const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
 const home = await mkdtemp(join(tmpdir(), 'opencode-go-bundle-compat-'))

@@ -23,8 +23,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
-import type { Api, Model, ModelThinkingLevel } from '@earendil-works/pi-ai'
+import { getSupportedThinkingLevels, normalizeContext } from 'opencode-go-pi-ai'
+import type { Api, Model, ModelThinkingLevel } from 'opencode-go-pi-ai'
 import {
   LlmAdapter,
   LlmError,
@@ -312,7 +312,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
       const context = imageRequest === undefined
         ? toPiContext(options, undefined, this.options.onReplayDegrade)
         : await toPiContext({ ...options, signal: watchdog.signal }, imageRequest, this.options.onReplayDegrade)
-      const events = snapshot.provider.streamSimple(model, context, {
+      // Direct providers accept a transcript, unlike Models which normalizes
+      // Context itself. Preserve prompts and tool declarations on every host.
+      const events = snapshot.provider.streamSimple(model, normalizeContext(context), {
         apiKey,
         ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },

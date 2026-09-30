@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const host = process.argv[2]
-const modern = host.startsWith('v017')
+const modern = host.startsWith('v017') || host.startsWith('v020')
 const legacy = host.startsWith('v015')
 const localPackage = '@deepseek-ai/dsh-attachment-local'
 const { Context } = await import('@deepseek-ai/cordis')

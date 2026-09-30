@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
+import { getBuiltinModels } from 'opencode-go-pi-ai/providers/all'
+import { getSupportedThinkingLevels } from 'opencode-go-pi-ai'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
@@ -316,13 +316,40 @@ describe('new models use the declared protocol', () => {
     const chunks = []
     for await (const chunk of adapter.stream({
       provider: 'opencode-go', model: 'future-unseen-model', sessionId: 'new-model-session' as never,
+      system: 'SYSTEM_PROMPT_SENTINEL',
+      tools: [{ name: 'probe_tool', description: 'Probe tool', parameters: {
+        type: 'object', properties: { query: { type: 'string' } }, required: ['query'],
+      } }],
       ...(cap === undefined ? {} : { maxTokens: 8192 }),
       messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'test' } })],
     })) chunks.push(chunk)
     expect(gateway.paths.map(value => new URL(value, gateway.url).pathname)).toEqual(['/v1/models', path])
     expect(gateway.bodies[0]).toMatchObject({ model: 'future-unseen-model' })
+    // A successful text stream alone cannot detect pi-ai silently dropping
+    // legacy Context fields. Inspect the actual wire prompt and declarations.
+    const body = gateway.bodies[0] as Record<string, unknown>
+    const serialized = JSON.stringify(body)
+    expect(serialized.match(/SYSTEM_PROMPT_SENTINEL/g)).toHaveLength(1)
+    if (npm === '@ai-sdk/anthropic') {
+      expect(body).toMatchObject({
+        system: expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'SYSTEM_PROMPT_SENTINEL' })]),
+        tools: [expect.objectContaining({ name: 'probe_tool', input_schema: {
+          type: 'object', properties: { query: { type: 'string' } }, required: ['query'],
+        } })],
+      })
+    } else if (npm === '@ai-sdk/openai') {
+      expect(body).toMatchObject({ tools: [expect.objectContaining({ type: 'function', name: 'probe_tool',
+        parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      })] })
+    } else {
+      expect(body).toMatchObject({
+        messages: expect.arrayContaining([expect.objectContaining({ role: 'system', content: 'SYSTEM_PROMPT_SENTINEL' })]),
+        tools: [expect.objectContaining({ type: 'function', function: expect.objectContaining({ name: 'probe_tool',
+          parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+        }) })],
+      })
+    }
     if (cap !== undefined) {
-      const body = gateway.bodies[0] as Record<string, unknown>
       expect(body.max_tokens ?? body.max_completion_tokens ?? body.max_output_tokens).toBe(cap)
     }
     expect(gateway.headers[1]?.['x-opencode-session']).toBe('new-model-session')

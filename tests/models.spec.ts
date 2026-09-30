@@ -18,7 +18,8 @@ it.each([
   { name: 'invalid JSON', reply: () => new Response('not-json'), detail: 'invalid JSON' },
   { name: 'invalid configuration document', reply: () => Response.json({}), detail: 'invalid model configuration' },
 ])('reports a cold-start metadata $name through the Host RPC and clears it after recovery', async ({ reply, detail }) => {
-  const id = 'deepseek-v4.1-flash'
+  // Keep the missing model outside SDK built-ins so fallback cannot mask the failure.
+  const id = 'future-metadata-only-model'
   const builtin = 'deepseek-v4-flash'
   const gateway = await mockGateway({ status: 200, body: listingBody([builtin, id]) })
   const config = configOf(gateway.url)
@@ -44,7 +45,9 @@ it.each([
     expect(failed.models.find(model => model.id === id)?.configurationMissing).toBe(true)
     expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual([builtin])
 
-    vi.stubGlobal('fetch', original)
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+      ? Promise.resolve(Response.json(metadataDocument({ [builtin]: modelMetadata(), [id]: modelMetadata() })))
+      : original(input, init))
     const recovered = await read()
     expect(recovered.stale).toBe(false)
     expect(recovered.error).toBeUndefined()

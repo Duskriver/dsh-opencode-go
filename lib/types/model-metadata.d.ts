@@ -1,5 +1,5 @@
 /** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
-import type { Api, Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from 'opencode-go-pi-ai';
 import { type GoModel } from './models-contract.ts';
 export declare const MODEL_METADATA_URL = "https://models.dev/api.json";
 /** Lifecycle and capability data the online catalog adds to a gateway listing. */

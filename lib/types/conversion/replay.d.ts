@@ -8,7 +8,7 @@
  * @module dsh-opencode-go/conversion/replay
  */
 import type { Message, ReplayEnvelope } from '@deepseek-ai/dsh-llm';
-import type { Api, AssistantMessage } from '@earendil-works/pi-ai';
+import type { Api, AssistantMessage } from 'opencode-go-pi-ai';
 /** Per-block half of the pi-ai replay envelope, one entry per content block. */
 export type PiAiReplayBlock = {
     type: 'text';

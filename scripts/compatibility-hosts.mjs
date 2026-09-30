@@ -8,4 +8,5 @@ export const hosts = [
   ['v017-alpha2', '0.1.7-alpha.2'],
   ['v017-rc1', '0.1.7-rc.1'],
   ['v017-rc2', '0.1.7-rc.2'],
+  ['v020-rc2', '0.2.0-rc.2'],
 ].map(([id, version]) => ({ id, version }))
