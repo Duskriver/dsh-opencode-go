@@ -86,7 +86,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.17.tgz
 ```
 
 源码开发时显式运行 `npm run compile`；普通用户直接安装预编译产物，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
@@ -154,7 +154,7 @@ DSH 0.1.5 的卸载只影响本次请求；DSH 0.1.6 及以上版本通过宿主
 
 ### 与宿主的 OpenCode Go 共存及升级迁移
 
-当前源码使用独立的 `dsh-opencode-go` provider，模型选择器中显示为 **DSH OpenCode Go**；宿主 pi-ai 的 `opencode-go` 可以同时使用。请在插件设置页配置 API Key，然后选择 **DSH OpenCode Go** 下的模型。已发布的 0.1.16 及以前版本仍使用 `opencode-go`，这些版本的 headless 配置也应使用旧标识。
+从 0.1.17 起使用独立的 `dsh-opencode-go` provider，模型选择器中显示为 **DSH OpenCode Go**；宿主 pi-ai 的 `opencode-go` 可以同时使用。请在插件设置页配置 API Key，然后选择 **DSH OpenCode Go** 下的模型。0.1.16 及以前版本使用 `opencode-go`，这些版本的 headless 配置也应使用旧标识。
 
 升级前保存为 `provider: opencode-go` 的会话、Agent 预设和 headless 默认模型，需要重新选择 **DSH OpenCode Go**，或将 provider 改为 `dsh-opencode-go`。API Key、模型设置和元数据缓存继续沿用。旧会话内容保留；跨 provider 切换时，DSH 会按其规则去除旧适配器的专用回放元数据。
 

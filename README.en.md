@@ -86,7 +86,7 @@ To build from source and install a local package:
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.15.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.17.tgz
 ```
 
 Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
@@ -154,7 +154,7 @@ DSH 0.1.5 offloads only for the current request. DSH 0.1.6 and later record offl
 
 ### Coexistence with the host's OpenCode Go and upgrade migration
 
-The current source uses the independent `dsh-opencode-go` provider, shown as **DSH OpenCode Go** in the model picker. The host pi-ai's `opencode-go` provider can run alongside it. Configure the API key in this plugin's settings, then choose a model under **DSH OpenCode Go**. Published versions 0.1.16 and earlier still use `opencode-go`; their headless configuration should also use that older identity.
+Version 0.1.17 and later use the independent `dsh-opencode-go` provider, shown as **DSH OpenCode Go** in the model picker. The host pi-ai's `opencode-go` provider can run alongside it. Configure the API key in this plugin's settings, then choose a model under **DSH OpenCode Go**. Versions 0.1.16 and earlier use `opencode-go`; their headless configuration should also use that older identity.
 
 Sessions, Agent presets and headless defaults previously saved with `provider: opencode-go` need to select **DSH OpenCode Go** again, or change the provider to `dsh-opencode-go`. API keys, model settings and metadata caches are retained. Existing session content remains available; when switching providers, DSH removes the previous adapter's private replay metadata according to its ownership rules.
 

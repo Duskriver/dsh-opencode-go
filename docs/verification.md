@@ -1,5 +1,9 @@
 # Verification
 
+## Release 0.1.17 validation (2026-09-30)
+
+After integrating the npm 10 lockfile correction, the 0.1.17 manifest passed Host/Client type checks, all **367 tests in 26 files**, and freshness checks for **32 shipped artifacts** on macOS / Node 24.14.1. Both npm and pnpm 11.7.0 Git installs passed without plugin build approval; the installed package uses private pi-ai 0.87.1 while the independent peer probe keeps public pi-ai 0.85.1. The nine-generation runtime compatibility results below remain applicable: the subsequent integration changes only lockfile metadata, documentation and the package version.
+
 ## Independent DSH provider route (2026-09-30)
 
 The public LLM route is now `dsh-opencode-go`, shown as **DSH OpenCode Go**, and does not register an `opencode-go` alias. This permits the generic host adapter and the plugin to register in either order. The SDK's native provider remains `opencode-go`, preserving its OpenCode-specific reasoning serialization and models.dev lookup. Host and Client share the route constant; settings discovery and the usage badge follow the new route. The profile entry `opencode-go`, settings namespace, credentials and metadata cache retain their existing identities.
