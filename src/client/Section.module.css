@@ -19,7 +19,9 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding-right: 4px;
+  /* Room under the last card: without it a scrolled-to-end page lands the card's
+     bottom edge exactly on the action bar's rule, which reads as a clipped card. */
+  padding: 0 4px 16px 0;
 }
 
 /* One slim scrollbar for every scroller on this page: an 8px rounded thumb on a
@@ -206,6 +208,7 @@
   flex: none;
 }
 
+
 .card + .card,
 .card + .cardModels,
 .cardModels + .card {
@@ -213,14 +216,22 @@
 }
 
 /* The model card grows into the leftover height instead of being fixed at a
-   height guessed from the window: flex-grow only, so a page whose cards need
-   more room than it has scrolls rather than crushing the list. The ceiling
-   keeps a very tall window from ballooning the list past what a list is for. */
+   height guessed from the window. It must never shrink: a page whose cards need
+   more room than it has scrolls, while a card allowed to compress spills its
+   footer row over the card below it. It carries no ceiling of its own either:
+   the listing's diagnostics are part of its height, so a clamp below the tallest
+   the card can get — measured with those diagnostics showing — spills the list
+   and the footer over the card below it the same way. */
 .cardModels {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  max-height: 720px;
+  flex: 1 0 auto;
+}
+/* Folded away, the model card is a header again: it stops growing, so the space
+   it was holding goes back to the page. Declared after .cardModels on purpose:
+   both are single-class rules, and source order is what settles them. */
+.cardFolded {
+  flex: none;
 }
 
 .cardHead {
@@ -262,8 +273,19 @@
 }
 
 .cardModels > .cardBody {
-  flex: 1 1 auto;
+  flex: 1 0 auto;
 }
+
+/* Folded, the card still speaks: what its body would have reported renders here
+   instead of behind the fold. An empty block takes no room at all. */
+.cardNotes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 14px 2px;
+}
+
+.cardNotes:empty { display: none; }
 
 .cardDivider {
   margin: 10px 14px;
@@ -310,13 +332,26 @@
 .limitsEditor {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   gap: 10px;
   padding-top: 4px;
 }
 
+/* The model card's footer. The negative side margins cancel the card's own
+   padding so the rule runs edge to edge and the tally reads as a section of the
+   card rather than a line squeezed under the list. */
+.limitsFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px -14px 0;
+  padding: 10px 14px 0;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
 .limitsSummary {
-  padding-bottom: 8px;
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--dsw-alias-label-tertiary);
@@ -435,7 +470,10 @@
   transform: rotate(-90deg);
 }
 
-.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* The control the row ends with — the listing refresh — rides the same line as
+   the filters when there is room, and wraps under them when there is not. */
+.filterAction { display: inline-flex; align-items: center; margin-left: auto; }
 .filter { padding: 6px 9px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .filter[aria-pressed="true"] { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-3); }
 .filter span { margin-left: 4px; color: var(--dsw-alias-label-tertiary); }
@@ -492,8 +530,7 @@
 @container (max-width: 440px) {
   .advancedGrid { grid-template-columns: minmax(0, 1fr); }
   /* One column cannot stretch: the list and the card stack, and each keeps its
-     own ceiling instead of sharing the model card's. */
-  .cardModels { max-height: none; }
+     own ceiling. */
   .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); }
   .modelList { max-height: 240px; border-right: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
   .modelDetails { max-height: 460px; }

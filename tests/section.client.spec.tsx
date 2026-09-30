@@ -90,7 +90,11 @@ function actions() {
   }
 }
 
-function renderSection(state: OpencodeGoSectionState, overrides: Partial<ReturnType<typeof actions>> = {}) {
+function renderSection(
+  state: OpencodeGoSectionState,
+  overrides: Partial<ReturnType<typeof actions>> = {},
+  options: { foldedModels?: boolean } = {},
+) {
   const store = createSnapshotStore(state)
   const props = {
     ...actions(),
@@ -99,6 +103,9 @@ function renderSection(state: OpencodeGoSectionState, overrides: Partial<ReturnT
     useOpencodeGo: bindSnapshotSelector(store),
   } as unknown as OpencodeGoSectionProps
   render(<OpencodeGoSection {...props} />)
+  // The page ships with the model card folded; most of these tests are about what
+  // is inside it, so they open it the way a reader would.
+  if (options.foldedModels !== true) openModelLimits()
   return store
 }
 
@@ -107,10 +114,11 @@ function openAdvanced(): void {
   fireEvent.click(screen.getByText(en.advancedLabel))
 }
 
-/** The model-capacity disclosure starts collapsed; open it before its table. */
-function openModelLimits() {
-  // Capacity editing is always visible in the combined model list.
-
+/** The model card ships folded; open it before its list and its capacities. */
+function openModelLimits(): void {
+  // Nothing is served in the unavailable posture, and then there is no card.
+  const trigger = document.querySelector('[aria-controls="opencode-go-models"]')
+  if (trigger !== null) fireEvent.click(trigger)
 }
 
 describe('OpencodeGoSection', () => {
@@ -176,8 +184,9 @@ describe('OpencodeGoSection', () => {
     }))
 
     expect(screen.getByText(en.keyConfigured)).toBeTruthy()
-    expect(screen.getByText(t('modelsCount', { count: 2 }))).toBeTruthy()
-    openModelLimits()
+    // The listing's size shows on the filter that selects all of it, not in the
+    // card header it used to be repeated in.
+    expect(screen.getByRole('button', { name: en.filterAll + ' 2' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /DeepSeek V4\.1 Flash/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Kimi K2/ })).toBeTruthy()
   })
@@ -287,7 +296,6 @@ describe('OpencodeGoSection', () => {
       modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
     }), edits)
 
-    openModelLimits()
     expect(screen.getByRole('region', { name: en.modelDetails })).toBeTruthy()
     const context = screen.getByLabelText(t('limitsContextLabel', { name: 'DeepSeek V4.1 Flash' })) as HTMLInputElement
     expect(context.type).toBe('number')
@@ -315,7 +323,6 @@ describe('OpencodeGoSection', () => {
       modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
     }), edits)
 
-    openModelLimits()
     fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
     expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"deepseek-v4.1-flash":null}')
   })
@@ -326,7 +333,6 @@ describe('OpencodeGoSection', () => {
       models: listing([{ id: 'm', name: 'Model' }]),
       modelLimitDraft: { m: { contextWindow: 123456, maxTokens: 1024 }, previous: null },
     }), edits)
-    openModelLimits()
     fireEvent.change(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })), { target: { value: '' } })
     expect(edits.edit).toHaveBeenCalledWith('modelLimits', '{"m":{"contextWindow":null,"maxTokens":1024},"previous":null}')
     fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
@@ -335,10 +341,77 @@ describe('OpencodeGoSection', () => {
 
   it('does not count explicit catalog resets as customized models', () => {
     renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]), modelLimitDraft: { m: null } }))
-    openModelLimits()
     expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
     expect(screen.queryByRole('button', { name: en.limitsResetModel })).toBeNull()
     expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
+  })
+
+  it('ships the model card folded and opens it on demand', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+    const trigger = screen.getByRole('button', { name: en.modelsLabel })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById('opencode-go-models')).toBeNull()
+    expect(screen.queryByRole('navigation', { name: en.modelsLabel })).toBeNull()
+
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById('opencode-go-models')).not.toBeNull()
+    expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById('opencode-go-models')).toBeNull()
+  })
+
+  it('keeps what the model card reports out of the fold', () => {
+    // The card ships folded, so a notice behind it is a notice nobody reads:
+    // the refused switch write and the listing's own diagnostics both show.
+    renderSection(stateOf({ pickerFailed: true, models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+    expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByText(en.pickerFailed)).toBeTruthy()
+
+    cleanup()
+    renderSection(stateOf({ models: { status: 'failed', message: 'offline' } }), {}, { foldedModels: true })
+    expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByText(en.modelsFailed)).toBeTruthy()
+    expect(screen.getByText('offline')).toBeTruthy()
+
+    // A healthy listing still leaves the folded card with nothing to say.
+    cleanup()
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+  })
+
+  it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {
+    renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+    expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+
+    const refresh = screen.getByRole('button', { name: en.modelsRefresh })
+    const filters = screen.getByRole('group', { name: en.filterLabel })
+    expect(filters.contains(refresh)).toBe(true)
+  })
+
+  it('closes the model card with the tally on its own row beside the clear action', () => {
+    renderSection(stateOf({
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 1024 } },
+    }))
+    const tally = screen.getByText(t('limitsSummary', { count: 1 }))
+    const action = screen.getByRole('button', { name: en.limitsResetAll })
+    // One row of its own, under the model area, tally left of the action.
+    expect(tally.parentElement).toBe(action.parentElement)
+    expect(tally.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The action is a control, not decoration: live while the document is.
+    expect(action.hasAttribute('disabled')).toBe(false)
+
+    cleanup()
+    renderSection(stateOf({
+      writable: false,
+      models: listing([{ id: 'm', name: 'Model' }]),
+      modelLimitDraft: { m: { contextWindow: 1024 } },
+    }))
+    expect(screen.getByRole('button', { name: en.limitsResetAll }).hasAttribute('disabled')).toBe(true)
   })
 
   it('never invents gateway membership from offline saved overrides, but permits clearing them', () => {

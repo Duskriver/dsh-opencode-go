@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { INPUT_MODALITIES, isModelEnabled, isNewModel, sortModels, type GoModel, type InputModality } from '../models-contract.ts'
 import type { OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels } from './section-controller.ts'
 import type { en } from './locales.ts'
@@ -18,7 +18,7 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
 }
 
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
-export function ModelEditor({ models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
+export function ModelEditor({ models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
   modelVisibility: Readonly<Record<string, boolean>>
@@ -26,6 +26,8 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
   locale?: string
   disabled: boolean
   visibilitySaving: boolean
+  /** Optional control pinned to the right of the filter row, such as a refresh. */
+  filterAction?: ReactNode
   onEdit: (next: OpencodeGoModelLimits) => void
   onModelEnabled: (id: string, enabled: boolean) => void
 }) {
@@ -71,6 +73,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
       <div className={css.filters} role="group" aria-label={t('filterLabel')}>
         {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
           aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
+        {filterAction ? <span className={css.filterAction}>{filterAction}</span> : null}
       </div>
       {model ? (
         <div className={css.modelLayout}>
@@ -126,10 +129,12 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
           </section>
         </div>
       ) : models.status === 'ready' && all.length > 0 ? <p className={css.hint}>{t('limitsNoMatches', { query })}</p> : null}
-      <div className={css.head}>
+      {/* The tally is not a footnote to the list: it closes the card on a line
+          of its own, with the one action that clears the overrides beside it. */}
+      <div className={css.limitsFoot}>
         <span className={css.limitsSummary}>{t('limitsSummary', { count: customized })}</span>
-        {Object.values(draft).some(hasCapacityOverride) ? <button type="button" className={css.reset} disabled={disabled}
-          onClick={() => { onEdit(Object.fromEntries(Object.keys(draft).map(id => [id, null]))) }}>{t('limitsResetAll')}</button> : null}
+        {Object.values(draft).some(hasCapacityOverride) ? <Button variant="outline" size="sm" disabled={disabled}
+          onClick={() => { onEdit(Object.fromEntries(Object.keys(draft).map(id => [id, null]))) }}>{t('limitsResetAll')}</Button> : null}
       </div>
     </div>
   )

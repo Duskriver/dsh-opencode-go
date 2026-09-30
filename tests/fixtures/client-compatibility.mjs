@@ -121,6 +121,18 @@ try {
   assert.doesNotMatch(pluginCss, /\.\w*modelChoice:hover\{[^}]*background/)
   assert.match(pluginCss, /\.\w*modelRowSelected\{[^}]*background:var\(--dsw-alias-bg-layer-3\)/)
   assert.match(pluginCss, /grid-template-columns:minmax\(0,45fr\) minmax\(0,55fr\)/)
+  // The model card grows into the page's leftover height, and it must never
+  // shrink: a page that needs more room than it has scrolls, while a card
+  // allowed to compress spills its footer over the card below it.
+  assert.match(pluginCss, /\.\w*cardModels\{[^}]*flex:1 0 auto/)
+  // It carries no ceiling of its own: the listing's diagnostics are part of its
+  // height, so a clamp below that spills the list and the footer over the card
+  // below. Its notices sit outside the fold, and an empty notice block — the
+  // healthy, folded card — takes no room at all.
+  assert.doesNotMatch(pluginCss, /\.\w*cardModels\{[^}]*max-height/)
+  assert.match(pluginCss, /\.\w*cardNotes:empty\{display:none\}/)
+  // The override tally closes the card on a ruled footer row of its own.
+  assert.match(pluginCss, /\.\w*limitsFoot\{[^}]*border-top/)
   for (const dispose of effects.splice(0).reverse()) (await dispose)()
   assert.equal(listeners.size, 0, 'client cleanup releases settings subscriptions')
   console.log(`PASS: client compatibility (${host}): module table, settings, catalog injection, rendering, CSS, cleanup`)
