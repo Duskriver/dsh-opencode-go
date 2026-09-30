@@ -32,7 +32,7 @@ export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
 export interface OpencodeGoConfig {
     /**
      * Whether this adapter serves its route at all. False withdraws the
-     * `opencode-go` route and its models from every picker without unloading the
+     * `dsh-opencode-go` route and its models from every picker without unloading the
      * plugin, so the settings page that owns this switch stays reachable to turn
      * it back on. Independent of the credential: a key present while this is
      * false registers nothing.

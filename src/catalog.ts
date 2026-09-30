@@ -12,9 +12,9 @@ import { sortModels, type GoModelCatalog } from './models-contract.ts'
 import type { ModelMetadata } from './model-metadata.ts'
 import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-response.ts'
 import { MODEL_METADATA_MAX_BYTES, metadataCachePath, metadataETag, readMetadataCache, writeMetadataCache } from './metadata-cache.ts'
+import { DISPLAY_NAME, SDK_PROVIDER_ID } from './provider-identity.ts'
 
-export const PROVIDER_ID = 'opencode-go'
-export const DISPLAY_NAME = 'OpenCode Go'
+export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts'
 export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
 const MODELS_FETCH_TIMEOUT_MS = 10_000
 const METADATA_FETCH_TIMEOUT_MS = 30_000
@@ -70,8 +70,8 @@ function waitForSnapshot(pending: Promise<CatalogSnapshot>, signal?: AbortSignal
 
 /** Built-ins are outage fallbacks and compatibility hints, never a membership whitelist. */
 function builtinModels(baseURL: string): Map<string, Model<Api>> {
-  return new Map((getBuiltinModels('opencode-go') as Model<Api>[]).map(model => [model.id, {
-    ...model, provider: PROVIDER_ID, baseUrl: modelBaseURL(model.api, baseURL),
+  return new Map((getBuiltinModels(SDK_PROVIDER_ID) as Model<Api>[]).map(model => [model.id, {
+    ...model, provider: SDK_PROVIDER_ID, baseUrl: modelBaseURL(model.api, baseURL),
   }]))
 }
 
@@ -124,7 +124,7 @@ function harnessApiKeyAuth(): Provider['auth'] {
 
 function buildProvider(baseURL: string, models: readonly Model<Api>[]): Provider {
   return createProvider({
-    id: PROVIDER_ID, name: DISPLAY_NAME, baseUrl: baseURL,
+    id: SDK_PROVIDER_ID, name: DISPLAY_NAME, baseUrl: baseURL,
     auth: harnessApiKeyAuth(), models: [...models],
     api: {
       'anthropic-messages': anthropicMessagesApi(),
@@ -232,7 +232,7 @@ export class OpencodeGoCatalog {
       headers: { ...attributionHeaders(), accept: 'application/json',
         ...(this.metadataETag === undefined ? {} : { 'if-none-match': this.metadataETag }) },
       cache: 'no-cache', signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS),
-    }, MODEL_METADATA_MAX_BYTES)
+    }, MODEL_METADATA_MAX_BYTES, 'gzip')
     if (response.status === 304 && this.metadata !== undefined) {
       this.metadataUpdatedAtMs = Date.now()
       this.metadataETag = metadataETag(response.headers.get('etag')) ?? this.metadataETag

@@ -40,28 +40,28 @@ it('uses independent model switches while keeping settings and existing requests
       expect.objectContaining({ id: 'current', releaseDate: '2026-09-22', contextWindow: 262144 }),
       expect.objectContaining({ id: 'old', deprecated: true }),
     ] })
-    expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['current'])
     config.modelVisibility = { old: true }
-    expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current', 'old'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['current', 'old'])
     config.modelVisibility = { current: false, old: true, absent: true }
-    expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['old'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['old'])
     // The complete settings list stays available for changing the selection.
     expect((await read()).models.map(m => m.id)).toEqual(['current', 'old'])
     config.modelVisibility = { current: false, old: false }
-    expect(await adapter.listModels('opencode-go')).toEqual([])
+    expect(await adapter.listModels('dsh-opencode-go')).toEqual([])
     // Hiding affects pickers; existing conversations can keep using the served model.
     gateway.pushCompletions({ events: textEvents })
     const chunks = []
-    for await (const chunk of adapter.stream({ provider: 'opencode-go', model: 'old',
+    for await (const chunk of adapter.stream({ provider: 'dsh-opencode-go', model: 'old',
       messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'test' } })] })) chunks.push(chunk)
     expect(chunks.length).toBeGreaterThan(0)
     config.modelVisibility = {}
     metadataDown = true
-    expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['current'])
     config.modelVisibility = { old: true }
     gateway.setModelListing(200, listingBody(['current']))
     expect((await read()).models.map(m => m.id)).toEqual(['current'])
-    expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['current'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['current'])
   } finally { await ctx.fiber.dispose() }
 })
 
@@ -75,12 +75,12 @@ it('applies lifecycle defaults to new models and retains overrides for returning
   const gateway = await mockGateway({ status: 200, body: listingBody(['first']) })
   const config = configOf(gateway.url, { modelVisibility: { first: false, returning: true } })
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-  expect(await adapter.listModels('opencode-go')).toEqual([])
+  expect(await adapter.listModels('dsh-opencode-go')).toEqual([])
   gateway.setModelListing(200, listingBody(['first', 'second', 'old', 'returning']))
   await discoverSettingsModels(adapter.catalogOf(config))
-  expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['second', 'returning'])
+  expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['second', 'returning'])
   config.modelVisibility = {}
-  expect((await adapter.listModels('opencode-go')).map(m => m.id)).toEqual(['first', 'second'])
+  expect((await adapter.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['first', 'second'])
 })
 
 it('uses only own boolean overrides and rejects non-boolean configuration', () => {

@@ -460,7 +460,7 @@ describe('OpencodeGoSectionController', () => {
     expect(state().models).toEqual({ status: 'idle' })
     controller.loadModels()
     expect(state().models).toEqual({ status: 'loading' })
-    expect(discoverModels).toHaveBeenCalledWith('llm-opencode-go', { provider: 'opencode-go' })
+    expect(discoverModels).toHaveBeenCalledWith('llm-opencode-go', { provider: 'dsh-opencode-go' })
 
     await vi.waitFor(() => { expect(state().models.status).toBe('ready') })
     // Every model is visible, including those beyond the former six-name preview.

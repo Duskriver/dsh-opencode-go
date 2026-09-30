@@ -44,7 +44,7 @@ If your DSH version does not have an **Add plugin** entry, use the command-line 
 ### Command-line installation (alternative)
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.15
+dsh plugin --profile web add dsh-opencode-go
 ```
 
 Start or restart `dsh web`, then:
@@ -58,7 +58,7 @@ Start or restart `dsh web`, then:
 Install the plugin into the Headless profile:
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.15
+dsh plugin --profile headless add dsh-opencode-go
 ```
 
 Save the following as `headless.patch.yml` to select a default model:
@@ -66,7 +66,7 @@ Save the following as `headless.patch.yml` to select a default model:
 ```yaml
 - id: agent-default-model
   config:
-    provider: opencode-go
+    provider: dsh-opencode-go
     model: deepseek-v4.1-flash
 ```
 
@@ -152,9 +152,11 @@ DSH 0.1.5 offloads only for the current request. DSH 0.1.6 and later record offl
 
 ## FAQ
 
-### The `opencode-go` route is already in use
+### Coexistence with the host's OpenCode Go and upgrade migration
 
-Only one adapter in a profile can provide the `opencode-go` route. If another plugin or a generic pi-ai configuration already connects OpenCode Go, disable that configuration first. Other providers can continue to run.
+The current source uses the independent `dsh-opencode-go` provider, shown as **DSH OpenCode Go** in the model picker. The host pi-ai's `opencode-go` provider can run alongside it. Configure the API key in this plugin's settings, then choose a model under **DSH OpenCode Go**. Published versions 0.1.16 and earlier still use `opencode-go`; their headless configuration should also use that older identity.
+
+Sessions, Agent presets and headless defaults previously saved with `provider: opencode-go` need to select **DSH OpenCode Go** again, or change the provider to `dsh-opencode-go`. API keys, model settings and metadata caches are retained. Existing session content remains available; when switching providers, DSH removes the previous adapter's private replay metadata according to its ownership rules.
 
 ### An expected model is missing
 
@@ -178,7 +180,7 @@ Model configuration is saved to `$DSH_HOME/cache/dsh-opencode-go/models.dev.api.
 
 `refreshMinutes` controls the cache lifetime after a successful refresh. Failed refreshes become eligible for retry on the next read after 5, 10, 20, 40, then at most 60 seconds; there is no background polling when nothing reads the catalog. Explicit Settings refreshes and previously unknown model requests bypass this delay. Cancelling model resolution or generation immediately ends that caller's catalog wait while other callers can continue sharing the same refresh.
 
-Verified model configurations can serve generation immediately for five minutes after their cache lifetime expires, while triggering one shared background refresh. This window is measured from each source's last successful check; failed retries do not extend it. Beyond that window, requests wait for the next due refresh, retaining the existing fallback behavior if it fails. Initial loads without a disk cache, unknown models, and manual refreshes wait for online results. Listing requests have a 10-second deadline; the larger model metadata download has its own 30-second deadline. JSON requests still use uncompressed transfer for compatibility with hosts affected by the HTTP/2 decompression issue.
+Verified model configurations can serve generation immediately for five minutes after their cache lifetime expires, while triggering one shared background refresh. This window is measured from each source's last successful check; failed retries do not extend it. Beyond that window, requests wait for the next due refresh, retaining the existing fallback behavior if it fails. Initial loads without a disk cache, unknown models, and manual refreshes wait for online results. Listing requests have a 10-second deadline; the larger model metadata download has its own 30-second deadline and negotiates gzip to reduce transfer size on slow connections. If an HTTP/2 host compatibility issue delivers raw gzip bytes, the plugin asynchronously decompresses them within the same deadline, limiting both the delivered bytes and decoded result to 16 MiB. Model listing and usage requests continue to use uncompressed transfer.
 
 Continuation, retries, and restored sessions reuse the Host's durable session ID. Forks and subagent sessions use their own IDs, separate from the parent. Standalone requests without a session ID receive a fresh random identifier each time.
 

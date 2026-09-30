@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage, UsageWindow } from '../usage-contract.ts'
+import { PROVIDER_ID } from '../provider-identity.ts'
 import css from './UsagePill.module.css'
 
 export interface UsagePillProps {
@@ -40,7 +41,7 @@ function usageLevel(window: UsageWindow): string | undefined {
 /** Only the selected Go provider mounts a poller, so other models send no usage traffic. */
 export function UsagePill({ directory, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
-  return state.current?.provider === 'opencode-go' ? <ActiveUsage {...props} /> : null
+  return state.current?.provider === PROVIDER_ID ? <ActiveUsage {...props} /> : null
 }
 
 function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'directory'>) {

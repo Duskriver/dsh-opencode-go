@@ -174,11 +174,10 @@ describe('OpencodeGoCatalog', () => {
     }
   })
 
-  it('avoids undecoded compression by requesting identity from both JSON endpoints', async () => {
+  it('keeps listing identity and recovers metadata gzip when the host loses encoding headers', async () => {
     // Reproduce bytes delivered after the host loses the encoding header.
-    // Respecting identity keeps the response plain, before decoding is involved.
     const responseBodyTransform = (body: Buffer, request: import('node:http').IncomingMessage) =>
-      request.headers['accept-encoding'] === 'identity' ? body : brotliCompressSync(body)
+      request.headers['accept-encoding'] === 'gzip' ? gzipSync(body) : body
     const gateway = await mockGateway({ status: 200, body: listingBody([metadataOnlyId]), responseBodyTransform })
     const metadataGateway = await mockGateway({ status: 200, body: metadataOnlyDocument(), responseBodyTransform })
     routeMetadataTo(metadataGateway.url)
@@ -186,7 +185,7 @@ describe('OpencodeGoCatalog', () => {
     expect(snapshot.live).toBe(true)
     expect(snapshot.models.has(metadataOnlyId)).toBe(true)
     expect(gateway.headers[0]['accept-encoding']).toBe('identity')
-    expect(metadataGateway.headers[0]['accept-encoding']).toBe('identity')
+    expect(metadataGateway.headers[0]['accept-encoding']).toBe('gzip')
   })
 
   it.each(responseFormats)('reads $name from both discovery endpoints over HTTP', async ({ name: _name, ...format }) => {

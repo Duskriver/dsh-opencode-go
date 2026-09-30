@@ -26,7 +26,10 @@ export interface PiAiReplayResponse {
     kind: 'pi-ai';
     version: 2;
     api: Api;
+    /** Requested DSH provider identity, matching the durable assistant source. */
     provider: string;
+    /** Native SDK provider when it differs from the DSH route. */
+    sdkProvider?: string;
     /** Requested model identity, matching the durable assistant source. */
     model: string;
     /** Provider-reported model; only Anthropic replays it as the native model (reported in `message.model`, not `message.responseModel`). */
@@ -43,9 +46,10 @@ export interface PiAiReplayResponse {
  * removes one.
  * @param message - completed native pi-ai assistant response.
  * @param requestedModel - request identity stored in the assistant source; defaults to the native model.
+ * @param requestedProvider - DSH route stored in the assistant source; defaults to the native provider.
  * @returns the versioned lossless-JSON replay projection.
  */
-export declare function toPiReplayState(message: AssistantMessage, requestedModel?: string): ReplayEnvelope;
+export declare function toPiReplayState(message: AssistantMessage, requestedModel?: string, requestedProvider?: string): ReplayEnvelope;
 /**
  * Convert one durable Harness assistant message into pi-ai history.
  *

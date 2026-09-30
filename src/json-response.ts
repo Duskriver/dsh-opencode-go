@@ -1,5 +1,8 @@
 /** Bounded JSON GET requests with one retry for transient transport failures. */
 import { setTimeout as delay } from 'node:timers/promises'
+import { Readable, Writable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { createGunzip } from 'node:zlib'
 
 const RETRYABLE_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET', 'EAI_AGAIN'])
 
@@ -47,12 +50,12 @@ export function diagnosticURL(raw: string): string {
 
 /** The caller's signal covers both attempts, the retry delay, and all response reads. */
 export async function fetchJsonResponse(
-  url: string, init: RequestInit, maxBytes: number,
+  url: string, init: RequestInit, maxBytes: number, encoding: 'identity' | 'gzip' = 'identity',
 ): Promise<{ response: Response; body: unknown }> {
   if ((init.method ?? 'GET').toUpperCase() !== 'GET') throw new TypeError('JSON requests must use GET')
   const headers = new Headers(init.headers)
-  // Avoid the host's Undici 8 / built-in fetch HTTP/2 decompression mismatch (#7).
-  headers.set('accept-encoding', 'identity')
+  // Small responses retain the #7 workaround; metadata opts into recoverable gzip.
+  headers.set('accept-encoding', encoding)
   const options = { ...init, method: 'GET', headers }
   for (let attempt = 0; ; attempt += 1) {
     init.signal?.throwIfAborted()
@@ -62,7 +65,7 @@ export async function fetchJsonResponse(
         await response.body?.cancel().catch(() => {})
         return { response, body: undefined }
       }
-      return { response, body: await readJsonResponse(response, maxBytes) }
+      return { response, body: await readJsonResponse(response, maxBytes, { gzip: encoding === 'gzip', signal: init.signal }) }
     } catch (error) {
       init.signal?.throwIfAborted()
       if (attempt > 0 || !retryableTransportFailure(error)) throw error
@@ -94,9 +97,38 @@ async function readBoundedBody(response: Response, maxBytes: number): Promise<Bu
   }
 }
 
-/** Fetch handles HTTP decoding; this reader bounds the bytes it delivers. */
-export async function readJsonResponse(response: Response, maxBytes: number): Promise<unknown> {
-  const bytes = await readBoundedBody(response, maxBytes)
+/** Bound recovered gzip output and let the request deadline cancel decompression too. */
+async function readGzipBody(bytes: Buffer, maxBytes: number, signal?: AbortSignal | null): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let size = 0
+  await pipeline(Readable.from([bytes]), createGunzip(), new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      if (chunk.length > maxBytes - size) {
+        done(new RangeError(`Response body exceeds ${maxBytes} byte limit`))
+        return
+      }
+      size += chunk.length
+      chunks.push(chunk)
+      done()
+    },
+  }), { signal: signal ?? undefined })
+  return Buffer.concat(chunks, size)
+}
+
+/** Fetch normally decodes HTTP; only negotiated gzip may recover a raw gzip body (#7). */
+export async function readJsonResponse(
+  response: Response, maxBytes: number, options: { gzip?: boolean; signal?: AbortSignal | null } = {},
+): Promise<unknown> {
+  let bytes = await readBoundedBody(response, maxBytes)
+  if (options.gzip && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    try {
+      bytes = await readGzipBody(bytes, maxBytes, options.signal)
+    } catch (error) {
+      options.signal?.throwIfAborted()
+      if (error instanceof RangeError) throw error
+      throw new SyntaxError('Response is not valid gzip', { cause: error })
+    }
+  }
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown
   } catch (error) {

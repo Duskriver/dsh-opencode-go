@@ -84,7 +84,7 @@ async function mountSurfaces(locale: HostLocaleRuntime) {
   const useOpencodeGo = bindSnapshotSelector(face.hooks.opencodeGo)
   const t = locale.bind(namespace)
   const directory = store.createSnapshotStore<ModelDirectoryState>({
-    current: { provider: 'opencode-go', model: 'alpha' }, routable: true,
+    current: { provider: 'dsh-opencode-go', model: 'alpha' }, routable: true,
     groups: [], failures: [], status: 'ready', error: null,
   })
   const readUsage = vi.fn(async () => usage)

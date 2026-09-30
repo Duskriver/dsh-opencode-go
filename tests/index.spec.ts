@@ -22,7 +22,7 @@ const MODEL_IMAGE_PATH = '/model/.dsh/attachments/objects/aa/object'
 
 /** Wait until the credential-backed route registration settles. */
 async function waitForRoute(ctx: Context): Promise<void> {
-  await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 }).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+  await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 }).toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
 }
 
 class MappedFileSystem extends Service {
@@ -64,11 +64,11 @@ describe('llm-opencode-go plugin mount', () => {
     const updated = vi.fn()
     ctx.on('llm/adapters-updated', updated)
     try {
-      expect((await ctx.llm.listModels('opencode-go')).map(model => model.id)).toEqual([id])
+      expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id])
       expect(updated).not.toHaveBeenCalled()
       metadata.resolve(Response.json(metadataDocument({ [id]: modelMetadata(), 'new-model': modelMetadata() })))
       await expect.poll(() => updated.mock.calls.length).toBe(1)
-      expect((await ctx.llm.listModels('opencode-go')).map(model => model.id)).toEqual([id, 'new-model'])
+      expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id, 'new-model'])
     } finally {
       metadata.resolve(Response.json(metadataDocument()))
       await ctx.fiber.dispose()
@@ -81,7 +81,7 @@ describe('llm-opencode-go plugin mount', () => {
     await ctx.plugin(LlmRuntime)
     apply(ctx, configOf(gateway.url))
 
-    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'opencode-go' })
+    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })
 
     expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
   })
@@ -113,13 +113,13 @@ describe('llm-opencode-go plugin mount', () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
-    ctx.llm.registerAdapter(['opencode-go'], new StubAdapter())
+    ctx.llm.registerAdapter(['dsh-opencode-go'], new StubAdapter())
 
     // The conflicting registration is logged, not thrown, and discovery — whose
     // value does not depend on owning the route — still registers.
     apply(ctx, configOf(gateway.url))
 
-    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'opencode-go' })
+    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })
     expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
   })
 
@@ -134,7 +134,7 @@ describe('llm-opencode-go plugin mount', () => {
 
     const chunks: StreamChunk[] = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi' }],
@@ -158,7 +158,7 @@ describe('llm-opencode-go plugin mount', () => {
 
     // No `reasoningEffort`: this is the "Default" entry of the model picker.
     for await (const _chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi' }],
@@ -182,7 +182,7 @@ describe('llm-opencode-go plugin mount', () => {
 
     const chunks: StreamChunk[] = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi' }],
@@ -208,7 +208,7 @@ describe('llm-opencode-go plugin mount', () => {
 
     const chunks: StreamChunk[] = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi' }],
@@ -231,7 +231,7 @@ describe('llm-opencode-go plugin mount', () => {
     await ctx.plugin(LlmRuntime)
     apply(ctx, configOf(gateway.url))
 
-    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'opencode-go' })
+    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })
     expect(models.find(model => model.id === 'mystery-model')?.name).toContain('metadata unavailable')
     expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
   })
@@ -250,7 +250,7 @@ describe('llm-opencode-go plugin mount', () => {
 
     const chunks: StreamChunk[] = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [
         createUserMessage({
@@ -263,7 +263,7 @@ describe('llm-opencode-go plugin mount', () => {
           content: [{ type: 'text', text: 'earlier answer' }],
           source: {
             kind: 'model',
-            provider: 'opencode-go',
+            provider: 'dsh-opencode-go',
             model: 'deepseek-v4.1-flash',
             replayState: { kind: 'foreign-adapter' },
           },
@@ -375,7 +375,7 @@ describe('llm-opencode-go plugin mount', () => {
 
     const chunks: StreamChunk[] = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [createUserMessage({
         content: [{ type: 'image', attachment: ref }],

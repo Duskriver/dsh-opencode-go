@@ -76,6 +76,65 @@ describe('readJsonResponse', () => {
 })
 
 describe('fetchJsonResponse', () => {
+  it('accepts gzip already decoded by Fetch without decompressing it twice', async () => {
+    const document = { data: [{ id: 'compressed-model' }] }
+    const endpoint = await localEndpoint((request, response) => {
+      expect(request.headers['accept-encoding']).toBe('gzip')
+      response.writeHead(200, { 'content-encoding': 'gzip', etag: '"compressed-version"' })
+      response.end(gzipSync(Buffer.from(JSON.stringify(document))))
+    })
+    const result = await fetchJsonResponse(endpoint, { signal: AbortSignal.timeout(2000) }, 1024, 'gzip')
+    expect(result.body).toEqual(document)
+    expect(result.response.headers.get('etag')).toBe('"compressed-version"')
+  })
+
+  it.each([undefined, { 'content-encoding': 'gzip' }])('bounds recovered gzip output with headers %j', async (headers) => {
+    const document = { data: 'x'.repeat(4096) }
+    const plain = Buffer.from(JSON.stringify(document))
+    const compressed = gzipSync(plain)
+    expect(compressed.length).toBeLessThan(plain.length - 1)
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(compressed, { headers })))
+    vi.stubGlobal('fetch', fetch)
+    expect((await fetchJsonResponse('https://fixture.invalid/metadata', {}, plain.length, 'gzip')).body).toEqual(document)
+    await expect(fetchJsonResponse('https://fixture.invalid/metadata', {}, plain.length - 1, 'gzip'))
+      .rejects.toBeInstanceOf(RangeError)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('bounds the raw gzip input before decompression', async () => {
+    const compressed = gzipSync(Buffer.from('{"ok":true}'))
+    const fetch = vi.fn().mockResolvedValue(new Response(compressed))
+    vi.stubGlobal('fetch', fetch)
+    await expect(fetchJsonResponse('https://fixture.invalid/metadata', {}, compressed.length - 1, 'gzip'))
+      .rejects.toBeInstanceOf(RangeError)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { description: 'truncated gzip', body: gzipSync(Buffer.from('{"private":"upstream text"}')).subarray(0, 12), message: 'Response is not valid gzip' },
+    { description: 'gzip containing invalid JSON', body: gzipSync(Buffer.from('{"private":invalid}')), message: 'Response is not valid JSON' },
+  ])('does not retry or expose $description', async ({ body, message }) => {
+    const fetch = vi.fn().mockResolvedValue(new Response(body))
+    vi.stubGlobal('fetch', fetch)
+    await expect(fetchJsonResponse('https://fixture.invalid/metadata', {}, 1024, 'gzip'))
+      .rejects.toMatchObject({ name: 'SyntaxError', message })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('cancels raw gzip recovery with the original request signal', async () => {
+    const compressed = gzipSync(Buffer.from(JSON.stringify({ data: 'x'.repeat(8 * 1024 * 1024) })))
+    const fetch = vi.fn().mockResolvedValue(new Response(compressed))
+    vi.stubGlobal('fetch', fetch)
+    const controller = new AbortController()
+    const reason = new DOMException('fixture cancellation', 'AbortError')
+    const pending = fetchJsonResponse('https://fixture.invalid/metadata', { signal: controller.signal }, 16 * 1024 * 1024, 'gzip')
+    const result = expect(pending).rejects.toBe(reason)
+    // gzip recovery is asynchronous, so a caller can cancel while it is decoding.
+    setImmediate(() => controller.abort(reason))
+    await result
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it('recovers a GET when the first connection closes before headers arrive', async () => {
     let requests = 0
     const endpoint = await localEndpoint((request, response) => {

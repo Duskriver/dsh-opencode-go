@@ -83,7 +83,7 @@ describe('llm-opencode-go through a real Loader composition', () => {
       '        contextWindow: 123456',
       // Schemastery preserves unknown profile fields without wrapping them
       // in volatile references. None of these values has a callable get().
-      '    provider: opencode-go',
+      '    provider: dsh-opencode-go',
       '    legacyEnabled: true',
       '    legacyLimit: 42',
       '    legacyOption: null',
@@ -92,8 +92,8 @@ describe('llm-opencode-go through a real Loader composition', () => {
     ])
 
     await expect.poll(() => ctx.llm.listProviders())
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
-    expect((await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
+    expect((await ctx.llm.resolveModelInfo('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
       .toBe(123456)
     expect(gateway.paths).toEqual(['/models'])
   })
@@ -110,15 +110,15 @@ describe('llm-opencode-go through a real Loader composition', () => {
     ])
 
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
     // The supplemented model reaches the picker through the loaded row.
-    await expect(ctx.llm.listModels('opencode-go')).resolves.toContainEqual(
+    await expect(ctx.llm.listModels('dsh-opencode-go')).resolves.toContainEqual(
       expect.objectContaining({ id: 'deepseek-v4.1-flash' }),
     )
 
     const chunks: StreamChunk[] = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi' }],
@@ -157,6 +157,6 @@ describe('llm-opencode-go through a real Loader composition', () => {
     ])
 
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
   })
 })

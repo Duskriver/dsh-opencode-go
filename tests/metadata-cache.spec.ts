@@ -150,7 +150,7 @@ it('notifies adapter consumers with the committed models and ignores late result
   network(() => pending.promise)
   const notified = vi.fn()
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => undefined, onCatalogRefresh: notified })
-  expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual([id])
+  expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id])
   const old = adapter.catalogOf(config).snapshot(true)
   config = { ...config, baseURL: 'https://changed.invalid/v1' }
   const current = adapter.catalogOf(config)
@@ -158,10 +158,10 @@ it('notifies adapter consumers with the committed models and ignores late result
   await old
   expect(notified).not.toHaveBeenCalled()
   network(() => Response.json(metadataDocument({ [id]: modelMetadata({ name: 'Updated' }) })))
-  await adapter.listModels('opencode-go')
+  await adapter.listModels('dsh-opencode-go')
   await current.snapshot(true)
   expect(notified).toHaveBeenCalledOnce()
-  expect((await adapter.listModels('opencode-go'))[0].name).toBe('Updated')
+  expect((await adapter.listModels('dsh-opencode-go'))[0].name).toBe('Updated')
 })
 
 it('persists 304 verification time and ETag, and remaps cached metadata to the current gateway', async () => {
@@ -173,7 +173,7 @@ it('persists 304 verification time and ETag, and remaps cached metadata to the c
   const result = await catalog(() => {}, 'https://other.invalid/api/v1').snapshot(true)
   const init = fetch.mock.calls.find(([url]) => String(url) === MODELS_METADATA_URL)![1]
   expect(new Headers(init?.headers).get('if-none-match')).toBe('"v1"')
-  expect(new Headers(init?.headers).get('accept-encoding')).toBe('identity')
+  expect(new Headers(init?.headers).get('accept-encoding')).toBe('gzip')
   expect(result.metadataLive).toBe(true)
   expect(result.metadataUpdatedAtMs).toBe(1_010_000)
   expect(result.models.get(id)?.baseUrl).toBe('https://other.invalid/api/v1')

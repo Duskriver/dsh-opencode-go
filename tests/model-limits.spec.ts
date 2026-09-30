@@ -17,7 +17,7 @@ it('keeps original catalog references when runtime capacities are overridden', a
   const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
   const config = configOf(gateway.url, { modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 123456, maxTokens: 5432 } } })
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-  expect((await adapter.resolveModel('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow).toBe(123456)
+  expect((await adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow).toBe(123456)
   expect(await discoverCatalogModels(adapter.catalogOf(config))).toContainEqual(expect.objectContaining({
     id: 'deepseek-v4.1-flash', contextWindow: 262144, maxTokens: 131072,
   }))
@@ -28,7 +28,7 @@ it.each([undefined, 8192, 512])('caps explicit and default request output (%s)',
   gateway.pushCompletions({ events: textEvents })
   const config = configOf(gateway.url, { modelLimits: { 'deepseek-v4.1-flash': { maxTokens: 1024 } } })
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-  for await (const chunk of adapter.stream({ provider: 'opencode-go', model: 'deepseek-v4.1-flash', messages: [],
+  for await (const chunk of adapter.stream({ provider: 'dsh-opencode-go', model: 'deepseek-v4.1-flash', messages: [],
     ...(requested === undefined ? {} : { maxTokens: requested }),
   })) void chunk
   const body = gateway.bodies[0] as Record<string, number>
@@ -39,19 +39,19 @@ it('retains last known online metadata when limits change during an outage', asy
   const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })
   let config = configOf(gateway.url)
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-  expect((await adapter.resolveModel('opencode-go', 'union-alpha')).context?.contextWindow).toBe(262144)
+  expect((await adapter.resolveModel('dsh-opencode-go', 'union-alpha')).context?.contextWindow).toBe(262144)
   const priorFetch = globalThis.fetch
   vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
     String(input) === MODELS_METADATA_URL ? Promise.resolve(new Response('', { status: 503 })) : priorFetch(input, init))
   config = { ...config, modelLimits: { 'union-alpha': { contextWindow: 123456 } } }
-  await expect(adapter.resolveModel('opencode-go', 'union-alpha')).resolves.toMatchObject({ context: { contextWindow: 123456 } })
+  await expect(adapter.resolveModel('dsh-opencode-go', 'union-alpha')).resolves.toMatchObject({ context: { contextWindow: 123456 } })
   // An explicit refresh must preserve the learned model too, not just the TTL hit.
   expect((await discoverSettingsModels(adapter.catalogOf(config))).models).toContainEqual(expect.objectContaining({
     id: 'union-alpha', contextWindow: 262144,
   }))
   expect(gateway.modelListings).toBe(2)
   config = { ...config, modelLimits: {} }
-  expect((await adapter.resolveModel('opencode-go', 'union-alpha')).context?.contextWindow).toBe(262144)
+  expect((await adapter.resolveModel('dsh-opencode-go', 'union-alpha')).context?.contextWindow).toBe(262144)
 })
 
 it('keeps capacities captured before an in-flight fetch across a settings change', async () => {
@@ -65,11 +65,11 @@ it('keeps capacities captured before an in-flight fetch across a settings change
     if (String(input) === MODELS_METADATA_URL) await gate
     return priorFetch(input, init)
   })
-  const pending = adapter.resolveModel('opencode-go', 'deepseek-v4.1-flash')
+  const pending = adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')
   config = { ...config, modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 42 } } }
   release()
   expect((await pending).context?.contextWindow).toBe(123456)
-  expect((await adapter.resolveModel('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow).toBe(42)
+  expect((await adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow).toBe(42)
 })
 
 it('can explicitly return inherited profile capacities to the catalog', async () => {

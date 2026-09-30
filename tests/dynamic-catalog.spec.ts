@@ -27,10 +27,10 @@ describe('runtime model metadata', () => {
     const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
-    ctx.llm.registerAdapter(['opencode-go'], adapter)
+    ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
     try {
-      const models = await ctx.llm.listModels('opencode-go')
-      const resolved = await Promise.all(models.map(model => ctx.llm.resolveModelInfo('opencode-go', model.id)))
+      const models = await ctx.llm.listModels('dsh-opencode-go')
+      const resolved = await Promise.all(models.map(model => ctx.llm.resolveModelInfo('dsh-opencode-go', model.id)))
       expect(resolved).toEqual([expect.objectContaining({ id })])
       expect(resolved[0]).not.toHaveProperty('reasoning')
       expect((await adapter.catalogOf(configOf(gateway.url)).snapshot()).models.get(id)?.reasoning).toBe(true)
@@ -48,17 +48,17 @@ describe('runtime model metadata', () => {
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
-    ctx.llm.registerAdapter(['opencode-go'], adapter)
+    ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
     try {
       // The browser eagerly resolves every listed model; a single rejection hides the provider.
-      const models = await ctx.llm.listModels('opencode-go')
-      const resolved = await Promise.all(models.map(model => ctx.llm.resolveModelInfo('opencode-go', model.id)))
+      const models = await ctx.llm.listModels('dsh-opencode-go')
+      const resolved = await Promise.all(models.map(model => ctx.llm.resolveModelInfo('dsh-opencode-go', model.id)))
       expect(resolved.map(model => model.id)).toEqual(['ready'])
       expect(resolved[0]?.reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'high'])
       expect(await discoverCatalogModels(adapter.catalogOf(config))).toContainEqual(expect.objectContaining({
         id: 'not-ready', name: expect.stringContaining('metadata unavailable'),
       }))
-      await expect(ctx.llm.resolveModelInfo('opencode-go', 'not-ready')).rejects.toMatchObject({ code: 'MODEL_METADATA_UNAVAILABLE' })
+      await expect(ctx.llm.resolveModelInfo('dsh-opencode-go', 'not-ready')).rejects.toMatchObject({ code: 'MODEL_METADATA_UNAVAILABLE' })
     } finally {
       await ctx.fiber.dispose()
     }
@@ -87,13 +87,13 @@ describe('runtime model metadata', () => {
     const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
-    ctx.llm.registerAdapter(['opencode-go'], adapter)
+    ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
     try {
-      const resolved = await ctx.llm.resolveModelInfo('opencode-go', 'fallback-model')
+      const resolved = await ctx.llm.resolveModelInfo('dsh-opencode-go', 'fallback-model')
       expect(resolved.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', ...values])
       expect.soft(resolved.reasoning?.defaultEffort).toBe(expected)
       for await (const _chunk of ctx.llm.stream({
-        provider: 'opencode-go', model: 'fallback-model',
+        provider: 'dsh-opencode-go', model: 'fallback-model',
         messages: [createUserMessage({
           content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' },
         })],
@@ -197,18 +197,18 @@ describe('runtime model metadata', () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['kimi-k3']) })
     const config = configOf(gateway.url)
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
     gateway.setModelListing(200, listingBody(['union-alpha']))
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
     expect(gateway.modelListings).toBe(1)
 
     expect((await discoverSettingsModels(adapter.catalogOf(config))).models.map(model => model.id)).toEqual(['union-alpha'])
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
     expect(gateway.modelListings).toBe(2)
     gateway.setModelListing(200, listingBody([]))
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
     expect(await discoverSettingsModels(adapter.catalogOf(config))).toMatchObject({ models: [], stale: false })
-    expect(await adapter.listModels('opencode-go')).toEqual([])
+    expect(await adapter.listModels('dsh-opencode-go')).toEqual([])
     expect(gateway.modelListings).toBe(3)
   })
 
@@ -216,16 +216,16 @@ describe('runtime model metadata', () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['kimi-k3']) })
     const config = configOf(gateway.url, { refreshMinutes: 1 })
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
     const first = await adapter.catalogOf(config).snapshot()
     gateway.setModelListing(200, listingBody(['union-alpha']))
     const now = vi.spyOn(Date, 'now')
     try {
       now.mockReturnValue(first.fetchedAtMs + 59_999)
-      expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+      expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
       expect(gateway.modelListings).toBe(1)
       now.mockReturnValue(first.fetchedAtMs + 60_000)
-      expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+      expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
       expect(gateway.modelListings).toBe(2)
     } finally {
       now.mockRestore()
@@ -236,12 +236,12 @@ describe('runtime model metadata', () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })
     const config = configOf(gateway.url)
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['union-alpha'])
     metadataReplies(() => Response.json(metadataDocument({ 'future-model': modelMetadata() })))
     gateway.setModelListing(200, listingBody(['future-model']))
 
-    await expect(adapter.resolveModel('opencode-go', 'future-model')).resolves.toMatchObject({ id: 'future-model' })
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['future-model'])
+    await expect(adapter.resolveModel('dsh-opencode-go', 'future-model')).resolves.toMatchObject({ id: 'future-model' })
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['future-model'])
     expect(gateway.modelListings).toBe(2)
   })
 
@@ -315,7 +315,7 @@ describe('new models use the declared protocol', () => {
     }), resolveApiKey: async () => 'test-key' })
     const chunks = []
     for await (const chunk of adapter.stream({
-      provider: 'opencode-go', model: 'future-unseen-model', sessionId: 'new-model-session' as never,
+      provider: 'dsh-opencode-go', model: 'future-unseen-model', sessionId: 'new-model-session' as never,
       system: 'SYSTEM_PROMPT_SENTINEL',
       tools: [{ name: 'probe_tool', description: 'Probe tool', parameters: {
         type: 'object', properties: { query: { type: 'string' } }, required: ['query'],

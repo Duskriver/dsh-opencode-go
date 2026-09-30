@@ -2,8 +2,7 @@ import type { Api, Model, Provider } from 'opencode-go-pi-ai';
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm';
 import { type GoModelCatalog } from './models-contract.ts';
 import type { ModelMetadata } from './model-metadata.ts';
-export declare const PROVIDER_ID = "opencode-go";
-export declare const DISPLAY_NAME = "OpenCode Go";
+export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts';
 export declare const DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
 export interface CatalogSnapshot {
     readonly details: ModelMetadata['details'];

@@ -81,9 +81,9 @@ try {
     config: { ...config, legacyOption: true } })
   await ctx.loader.await()
   assert.ok(ctx.loader.resolve(id).fiber, 'plugin mounts through the real Loader')
-  assert.ok(ctx.llm.listProviders().some(p => p.id === 'opencode-go'))
-  assert.equal((await ctx.llm.listModels('opencode-go'))[0].id, 'compat-model')
-  assert.equal((await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow, 50000)
+  assert.ok(ctx.llm.listProviders().some(p => p.id === 'dsh-opencode-go'))
+  assert.equal((await ctx.llm.listModels('dsh-opencode-go'))[0].id, 'compat-model')
+  assert.equal((await ctx.llm.resolveModelInfo('dsh-opencode-go', 'compat-model')).context.contextWindow, 50000)
   if (modern) {
     const catalog = await ctx.typertGateway.invoke({ namespace: 'opencodeGoModels', method: 'read', args: {} })
     assert.equal(catalog.stale, false, 'settings report a live catalog')
@@ -97,7 +97,7 @@ try {
     assert.match(source, /^[0-9a-f-]{36}$/, 'opaque account identity survives the actual RPC codec')
   }
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'compat-test' } })
-  const request = messages => ({ provider: 'opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })
+  const request = messages => ({ provider: 'dsh-opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })
   const drain = async stream => { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks }
   const text = await drain(ctx.llm.stream({ ...request([user([{ type: 'text', text: 'hello' }])]), maxTokens: 8192 }))
   assert.ok(text.some(c => c.type === 'text-delta' && c.text === 'compat-ok'))
@@ -108,18 +108,18 @@ try {
   const discovered = await plugin.discoverCatalogModels(limitsAdapter.catalogOf(limitsConfig))
   assert.equal(discovered[0].contextWindow, 100000)
   assert.equal(discovered[0].maxTokens, 4096)
-  assert.equal((await limitsAdapter.resolveModel('opencode-go', 'compat-model')).context.contextWindow, 50000)
+  assert.equal((await limitsAdapter.resolveModel('dsh-opencode-go', 'compat-model')).context.contextWindow, 50000)
   limitsConfig = { ...limitsConfig, modelLimits: { 'compat-model': { contextWindow: 60000, maxTokens: 512 } } }
-  assert.equal((await limitsAdapter.resolveModel('opencode-go', 'compat-model')).context.contextWindow, 60000)
+  assert.equal((await limitsAdapter.resolveModel('dsh-opencode-go', 'compat-model')).context.contextWindow, 60000)
   await drain(limitsAdapter.stream({ ...request([]), maxTokens: 8192 }))
   assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 512)
   limitsConfig = { ...limitsConfig, modelLimits: { 'compat-model': null } }
-  assert.equal((await limitsAdapter.resolveModel('opencode-go', 'compat-model')).context.contextWindow, 100000)
+  assert.equal((await limitsAdapter.resolveModel('dsh-opencode-go', 'compat-model')).context.contextWindow, 100000)
   await drain(limitsAdapter.stream(request([])))
   assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 4096)
   if (modern) {
     const messages = [
-      { id: 'assistant-tool-call', role: 'assistant', source: { kind: 'model', provider: 'opencode-go', model: 'compat-model' },
+      { id: 'assistant-tool-call', role: 'assistant', source: { kind: 'model', provider: 'dsh-opencode-go', model: 'compat-model' },
         content: [{ type: 'tool-call', id: 'call', name: 'lookup', arguments: '{}' }] },
       llm.createToolResultMessage({ callId: 'call', content: [{ type: 'text', text: 'tool-result-ok' }], isError: true }),
     ]
@@ -164,7 +164,7 @@ try {
     // text and image when the host hands it to this third-party adapter.
     if (modern && width === 800) {
       await drain(realAdapter.stream(request([
-        { id: 'image-tool-call', role: 'assistant', source: { kind: 'model', provider: 'opencode-go', model: 'compat-model' },
+        { id: 'image-tool-call', role: 'assistant', source: { kind: 'model', provider: 'dsh-opencode-go', model: 'compat-model' },
           content: [{ type: 'tool-call', id: 'image-call', name: 'lookup', arguments: '{}' }] },
         llm.createToolResultMessage({ callId: 'image-call', isError: false, content: [
           { type: 'text', text: 'retained-head' }, { type: 'image', attachment }, { type: 'text', text: 'retained-tail' },

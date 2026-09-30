@@ -113,17 +113,19 @@ try {
   await once(server, 'listening')
   const config = plugin.PlainConfig({ baseURL: `http://127.0.0.1:${server.address().port}/v1` })
   await ctx.plugin(llm.default)
-  ctx.llm.registerAdapter(['opencode-go'], new plugin.OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'fixture-key' }))
+  ctx.llm.registerAdapter(['dsh-opencode-go'], new plugin.OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'fixture-key' }))
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'transcript-compat' } })
   const drain = async options => { const chunks = []; for await (const chunk of ctx.llm.stream(options)) chunks.push(chunk); return chunks }
   for (const protocol of protocols) {
     const leading = { id: 'system-header', role: 'system', content: [{ type: 'text', text: prompt }],
       source: { kind: 'plugin', plugin: 'transcript-compat' } }
-    const initial = { provider: 'opencode-go', model: protocol.id, sessionId: 'transcript-session', tools: [tool],
+    const initial = { provider: 'dsh-opencode-go', model: protocol.id, sessionId: 'transcript-session', tools: [tool],
       messages: [leading, user([{ type: 'text', text: 'hello' }])] }
     const chunks = await drain(initial)
     const finish = chunks.find(chunk => chunk.type === 'finish')
     assert.equal(finish?.reason.kind, 'tool-calls')
+    assert.equal(finish.replayState.response.provider, 'dsh-opencode-go')
+    assert.equal(finish.replayState.response.sdkProvider, 'opencode-go')
     const blocks = chunks.filter(chunk => chunk.type === 'block-end').map(chunk => chunk.block)
     const call = blocks.find(block => block.type === 'tool-call')
     assert.equal(call?.name, tool.name)
@@ -132,7 +134,7 @@ try {
 
     // Round-trip the real streamed replay envelope as a restored session would.
     const assistant = JSON.parse(JSON.stringify({ id: 'assistant-tool-turn', role: 'assistant', content: blocks,
-      source: { kind: 'model', provider: 'opencode-go', model: protocol.id, replayState: finish.replayState } }))
+      source: { kind: 'model', provider: 'dsh-opencode-go', model: protocol.id, replayState: finish.replayState } }))
     const content = [{ type: 'text', text: resultText }]
     const result = modern ? llm.createToolResultMessage({ callId: call.id, content, isError: false })
       : user([{ type: 'tool-result', toolCallId: call.id, content, isError: false }])

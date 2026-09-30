@@ -44,7 +44,7 @@ https://github.com/Duskriver/dsh-opencode-go
 ### 命令行安装（备选）
 
 ```sh
-dsh plugin --profile web add dsh-opencode-go@0.1.15
+dsh plugin --profile web add dsh-opencode-go
 ```
 
 安装后启动或重启 `dsh web`，然后：
@@ -58,7 +58,7 @@ dsh plugin --profile web add dsh-opencode-go@0.1.15
 安装到 Headless profile：
 
 ```sh
-dsh plugin --profile headless add dsh-opencode-go@0.1.15
+dsh plugin --profile headless add dsh-opencode-go
 ```
 
 将以下内容保存为 `headless.patch.yml`，选择默认模型：
@@ -66,7 +66,7 @@ dsh plugin --profile headless add dsh-opencode-go@0.1.15
 ```yaml
 - id: agent-default-model
   config:
-    provider: opencode-go
+    provider: dsh-opencode-go
     model: deepseek-v4.1-flash
 ```
 
@@ -152,9 +152,11 @@ DSH 0.1.5 的卸载只影响本次请求；DSH 0.1.6 及以上版本通过宿主
 
 ## 常见问题
 
-### 提示 `opencode-go` 路由已被占用
+### 与宿主的 OpenCode Go 共存及升级迁移
 
-同一 profile 中只能有一个适配器提供 `opencode-go` 路由。如果已经通过其他插件或通用 pi-ai 配置接入 OpenCode Go，请先停用那一项配置。其他提供方可以继续使用。
+当前源码使用独立的 `dsh-opencode-go` provider，模型选择器中显示为 **DSH OpenCode Go**；宿主 pi-ai 的 `opencode-go` 可以同时使用。请在插件设置页配置 API Key，然后选择 **DSH OpenCode Go** 下的模型。已发布的 0.1.16 及以前版本仍使用 `opencode-go`，这些版本的 headless 配置也应使用旧标识。
+
+升级前保存为 `provider: opencode-go` 的会话、Agent 预设和 headless 默认模型，需要重新选择 **DSH OpenCode Go**，或将 provider 改为 `dsh-opencode-go`。API Key、模型设置和元数据缓存继续沿用。旧会话内容保留；跨 provider 切换时，DSH 会按其规则去除旧适配器的专用回放元数据。
 
 ### 没有出现预期的模型
 
@@ -178,7 +180,7 @@ DSH 0.1.5 的卸载只影响本次请求；DSH 0.1.6 及以上版本通过宿主
 
 `refreshMinutes` 控制成功刷新后的目录缓存时长。刷新失败后，下一次读取会按 5、10、20、40、60 秒的退避间隔尝试恢复，最长等待间隔为 60 秒；没有读取时不会后台轮询。设置页主动刷新和未知模型的即时发现不受这个间隔限制。取消模型解析或生成时，会立即结束当前调用的目录等待，其他调用仍可继续使用同一次共享刷新。
 
-已验证的模型配置在缓存到期后的 5 分钟内可直接用于生成，同时触发一次共享后台刷新。这个窗口按两种来源各自上次成功检查的时间计算，失败重试不会延长它；超过窗口后，请求等待下一次到期刷新，刷新仍失败时保留已有回退行为。没有磁盘缓存的首次加载、未知模型和手动刷新会等待在线结果。模型名单请求限时 10 秒，体积更大的模型配置下载单独限时 30 秒。JSON 请求仍使用非压缩传输，以兼容存在 HTTP/2 解压问题的宿主。
+已验证的模型配置在缓存到期后的 5 分钟内可直接用于生成，同时触发一次共享后台刷新。这个窗口按两种来源各自上次成功检查的时间计算，失败重试不会延长它；超过窗口后，请求等待下一次到期刷新，刷新仍失败时保留已有回退行为。没有磁盘缓存的首次加载、未知模型和手动刷新会等待在线结果。模型名单请求限时 10 秒，体积更大的模型配置下载单独限时 30 秒，并协商 gzip 压缩以减少慢速连接的传输量。若宿主因 HTTP/2 兼容问题返回未解压的 gzip 数据，插件会在同一超时预算内异步解压，原始数据和解压结果均受 16 MiB 限制。模型名单和用量接口继续使用非压缩传输。
 
 同一会话继续、重试以及恢复后的请求沿用宿主保存的会话 ID。分叉和子会话使用各自的 ID，不复用父会话标识；没有会话 ID 的独立请求每次生成随机标识。
 

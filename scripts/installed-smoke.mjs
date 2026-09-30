@@ -48,12 +48,12 @@ try {
   await ctx.loader.await()
   const adapterEntry = ctx.loader.resolve(adapterId)
   assert.ok(adapterEntry.fiber, 'the installed adapter must mount')
-  assert.ok((await ctx.llm.listProviders()).some(provider => provider.id === 'opencode-go'))
-  const models = await ctx.llm.listModels('opencode-go')
+  assert.ok((await ctx.llm.listProviders()).some(provider => provider.id === 'dsh-opencode-go'))
+  const models = await ctx.llm.listModels('dsh-opencode-go')
   assert.ok(models.some(model => model.id === 'deepseek-v4.1-flash'))
   for (const sessionId of ['standalone-session-a', 'standalone-session-a', 'standalone-session-b']) {
     const chunks = []
-    for await (const chunk of ctx.llm.stream({ provider: 'opencode-go', model: 'deepseek-v4.1-flash', messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'installed-smoke' } })], sessionId })) chunks.push(chunk)
+    for await (const chunk of ctx.llm.stream({ provider: 'dsh-opencode-go', model: 'deepseek-v4.1-flash', messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'installed-smoke' } })], sessionId })) chunks.push(chunk)
     assert.ok(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'standalone-ok'), JSON.stringify(chunks))
   }
   const completions = requests.filter(request => request.path === '/chat/completions')
@@ -61,7 +61,7 @@ try {
   assert.ok(completions.every(request => request.headers['user-agent'].startsWith('deepseek-harness/')))
   assert.ok(completions.every(request => request.headers.authorization === 'Bearer fixture-key'))
   await adapterEntry.fiber.dispose()
-  assert.ok(!(await ctx.llm.listProviders()).some(provider => provider.id === 'opencode-go'))
+  assert.ok(!(await ctx.llm.listProviders()).some(provider => provider.id === 'dsh-opencode-go'))
   console.log('PASS: installed package resolution, catalog, streamed text, session headers, attribution, authorization, unload')
 } finally {
   await ctx.fiber.dispose()

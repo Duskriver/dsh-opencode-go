@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../node_modules/dsh-opencode-go/', import.me
 const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
 const home = await mkdtemp(join(tmpdir(), 'opencode-go-bundle-compat-'))
 try {
-  for (const name of ['web', 'headless']) {
+  for (const name of ['desktop', 'web', 'headless']) {
     const dir = join(home, name)
     await mkdir(join(dir, 'node_modules'), { recursive: true })
     await writeFile(join(dir, 'package.json'), JSON.stringify({
@@ -26,7 +26,7 @@ try {
     assert.ok(profile.layers[0].patches.some(patch => patch.insert?.some(entry => entry.id === 'opencode-go')),
       `${name}: the provider entry must survive bundle admission`)
   }
-  console.log('PASS: Web and Headless bundle admission without exemptions')
+  console.log('PASS: Desktop, Web and Headless bundle admission without exemptions')
 } finally {
   await rm(home, { recursive: true, force: true })
 }

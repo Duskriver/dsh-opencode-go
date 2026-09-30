@@ -78,9 +78,9 @@ async function streamOnce(ctx: Context): Promise<void> {
   // Seam-backed registration settles asynchronously once the credential
   // provider answers; a request before that would race the route's arrival.
   await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-    .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
   for await (const _chunk of ctx.llm.stream({
-    provider: 'opencode-go',
+    provider: 'dsh-opencode-go',
     model: 'deepseek-v4.1-flash',
     messages: [],
   })) { /* drain */ }
@@ -155,21 +155,21 @@ describe('settings-backed configuration', () => {
       baseURL: gateway.url,
     })
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
 
-    const advertised = (await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow
+    const advertised = (await ctx.llm.resolveModelInfo('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow
     expect(advertised).toBeGreaterThan(0)
 
     await ctx.settings.update(NS, {
       modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 123_456, maxTokens: 5_432 } },
     })
-    expect((await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
+    expect((await ctx.llm.resolveModelInfo('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
       .toBe(123_456)
 
     // `update` is merge-only, so use the documented replace path to remove the
     // user-layer field and let the catalog value re-inherit.
     await ctx.settings.replace(NS, {})
-    expect((await ctx.llm.resolveModelInfo('opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
+    expect((await ctx.llm.resolveModelInfo('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow)
       .toBe(advertised)
   })
 
@@ -195,7 +195,7 @@ describe('settings-backed configuration', () => {
     // Storing it again brings the route back without a restart.
     await ctx.credentials.set(credentialRef('OPENCODE_API_KEY'), 'test-key')
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
     await streamOnce(ctx)
     expect(gateway.paths.filter(path => path === '/chat/completions')).toHaveLength(2)
   })
@@ -227,11 +227,11 @@ describe('settings-backed configuration', () => {
     } as never)
     apply(ctx, configOf(gateway.url))
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
 
     const chunks: Array<{ type: string; reason?: unknown }> = []
     for await (const chunk of ctx.llm.stream({
-      provider: 'opencode-go',
+      provider: 'dsh-opencode-go',
       model: 'deepseek-v4.1-flash',
       messages: [],
     })) chunks.push(chunk)
@@ -250,15 +250,15 @@ describe('settings-backed configuration', () => {
       : original(input, init))
     const gateway = await mockGateway({ status: 200, body: listingBody(['old']) })
     const ctx = await boot({ settingsYaml: '', credentials: { OPENCODE_API_KEY: 'test-key' }, baseURL: gateway.url })
-    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
-    expect(await ctx.llm.listModels('opencode-go')).toEqual([])
+    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
+    expect(await ctx.llm.listModels('dsh-opencode-go')).toEqual([])
     const notify = vi.fn()
     ctx.on('llm/adapters-updated', notify)
     await ctx.settings.update(NS, { modelVisibility: { old: true } })
     expect(notify).toHaveBeenCalled()
-    expect((await ctx.llm.listModels('opencode-go')).map(m => m.id)).toEqual(['old'])
+    expect((await ctx.llm.listModels('dsh-opencode-go')).map(m => m.id)).toEqual(['old'])
     await ctx.settings.update(NS, { modelVisibility: { old: false } })
-    expect(await ctx.llm.listModels('opencode-go')).toEqual([])
+    expect(await ctx.llm.listModels('dsh-opencode-go')).toEqual([])
     expect(gateway.modelListings).toBe(1)
   })
 
@@ -268,11 +268,11 @@ describe('settings-backed configuration', () => {
     cleanups.push(() => ctx.fiber.dispose())
     await ctx.plugin(Registry)
     await ctx.plugin(Gateway)
-    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
     const pickerReads: Array<Promise<readonly { id: string }[]>> = []
     const notify = vi.fn(() => {
-      if (ctx.llm.listProviders().some(provider => provider.id === 'opencode-go')) {
-        pickerReads.push(ctx.llm.listModels('opencode-go'))
+      if (ctx.llm.listProviders().some(provider => provider.id === 'dsh-opencode-go')) {
+        pickerReads.push(ctx.llm.listModels('dsh-opencode-go'))
       }
     })
     ctx.on('llm/adapters-updated', notify)
@@ -310,19 +310,19 @@ describe('settings-backed configuration', () => {
   it('persists individual model switches and notifies open legacy pickers without altering other models', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     const ctx = await boot({ settingsYaml: '', credentials: { OPENCODE_API_KEY: 'test-key' }, baseURL: gateway.url })
-    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+    await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
     const notify = vi.fn()
     ctx.on('llm/adapters-updated', notify)
     await ctx.settings.update(NS, { modelVisibility: { 'deepseek-v4.1-flash': false } })
     expect(notify).toHaveBeenCalled()
-    const otherModels = (await ctx.llm.listModels('opencode-go')).map(m => m.id)
+    const otherModels = (await ctx.llm.listModels('dsh-opencode-go')).map(m => m.id)
     expect(otherModels).not.toContain('deepseek-v4.1-flash')
     expect(otherModels.length).toBeGreaterThan(0)
     expect(ctx.settings.describe().find(row => row.ns === NS)?.value.modelVisibility).toEqual({ 'deepseek-v4.1-flash': false })
     notify.mockClear()
     await ctx.settings.update(NS, { modelVisibility: { 'deepseek-v4.1-flash': true } })
     expect(notify).toHaveBeenCalled()
-    const restoredModels = (await ctx.llm.listModels('opencode-go')).map(m => m.id)
+    const restoredModels = (await ctx.llm.listModels('dsh-opencode-go')).map(m => m.id)
     expect(restoredModels).toContain('deepseek-v4.1-flash')
     expect(restoredModels.filter(id => id !== 'deepseek-v4.1-flash')).toEqual(otherModels)
   })
@@ -337,7 +337,7 @@ describe('settings-backed configuration', () => {
       baseURL: gateway.url,
     })
     await streamOnce(ctx)
-    expect((await ctx.llm.listModels('opencode-go')).map(model => model.id)).toContain('deepseek-v4.1-flash')
+    expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toContain('deepseek-v4.1-flash')
 
     // The key stays configured throughout: only the switch decides.
     await ctx.settings.update(NS, { enabled: false })
@@ -346,7 +346,7 @@ describe('settings-backed configuration', () => {
     // nothing further reaches the gateway while it is off.
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 }).toEqual([])
     // The route itself is gone, so even a direct catalog read cannot find it.
-    await expect(ctx.llm.listModels('opencode-go')).rejects.toThrow()
+    await expect(ctx.llm.listModels('dsh-opencode-go')).rejects.toThrow()
     expect(gateway.paths.filter(path => path === '/chat/completions')).toHaveLength(1)
 
     // The page that owns the switch keeps working while the route is gone.
@@ -355,7 +355,7 @@ describe('settings-backed configuration', () => {
 
     await ctx.settings.update(NS, { enabled: true })
     await expect.poll(() => ctx.llm.listProviders(), { timeout: 10_000 })
-      .toContainEqual({ id: 'opencode-go', name: 'OpenCode Go' })
+      .toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
     await streamOnce(ctx)
     expect(gateway.paths.filter(path => path === '/chat/completions')).toHaveLength(2)
   })

@@ -136,6 +136,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  * @param callerSignal - caller cancellation state; an aborted caller makes any
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
+ * @param requestedProvider - DSH provider identity recorded for durable replay.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
@@ -144,6 +145,7 @@ export async function* toStreamChunks(
   contextWindow?: number,
   callerSignal?: AbortSignal,
   requestedModel?: string,
+  requestedProvider?: string,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
@@ -210,7 +212,7 @@ export async function* toStreamChunks(
         yield {
           type: 'finish',
           reason: mapStopReason(event.message, contextWindow),
-          replayState: toPiReplayState(event.message, requestedModel),
+          replayState: toPiReplayState(event.message, requestedModel, requestedProvider),
         }
         return
       case 'error':

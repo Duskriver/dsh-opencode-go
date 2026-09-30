@@ -16,7 +16,7 @@ function prompt(session: Session, text: string): void {
 
 async function generate(adapter: OpencodeGoAdapter, session: Session): Promise<StreamChunk[]> {
   const chunks = []
-  for await (const chunk of adapter.stream({ provider: 'opencode-go', model: 'deepseek-v4.1-flash',
+  for await (const chunk of adapter.stream({ provider: 'dsh-opencode-go', model: 'deepseek-v4.1-flash',
     sessionId: session.id, messages: session.deriveMessages(),
   })) chunks.push(chunk)
   return chunks

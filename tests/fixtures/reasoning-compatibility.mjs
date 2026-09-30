@@ -77,13 +77,13 @@ try {
     ['glm-5.3', 'low', { reasoning_effort: 'low' }],
   ]
   for (const [model, effort, wire] of cases) {
-    const request = { provider: 'opencode-go', model,
+    const request = { provider: 'dsh-opencode-go', model,
       messages: [llm.createUserMessage({ content: [{ type: 'text', text: 'hello' }],
         source: { kind: 'plugin', plugin: 'reasoning-compat-test' } })],
       ...effort === undefined ? {} : { reasoningEffort: llm.ReasoningEffortId(effort) },
     }
     const expectedDefault = model === 'glm-5.3' ? undefined : 'high'
-    const info = await ctx.llm.resolveModelInfo('opencode-go', model)
+    const info = await ctx.llm.resolveModelInfo('dsh-opencode-go', model)
     assert.equal(info.reasoning.defaultEffort, expectedDefault)
     const resolved = await ctx.llm.resolveCallConfig(request)
     assert.equal(resolved.reasoningEffort, effort ?? expectedDefault)

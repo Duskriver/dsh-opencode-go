@@ -14,6 +14,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { GoModel, GoModelCatalog } from '../models-contract.ts'
+import { PROVIDER_ID } from '../provider-identity.ts'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
@@ -36,13 +37,6 @@ const DEFAULT_API_KEY_REF = 'OPENCODE_API_KEY'
 
 /** Form field the credential control stages under. */
 const API_KEY_FIELD = 'apiKey'
-
-/**
- * Route the Host's model discovery answers for, spelled here for the same
- * reason as {@link OPENCODE_GO_NS}: a client package must not depend on a Host
- * package.
- */
-const OPENCODE_GO_PROVIDER = 'opencode-go'
 
 /** The adapter fields this page edits. */
 export interface OpencodeGoSettings {
@@ -189,7 +183,7 @@ export class OpencodeGoSectionController {
     private readonly scope: SettingsScope<OpencodeGoSettings>,
     private readonly ctx: ClientContext,
     private readonly readModels: () => Promise<RemoteResult<GoModelCatalog>> = async () => {
-      const result = await ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: OPENCODE_GO_PROVIDER })
+      const result = await ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: PROVIDER_ID })
       return result.ok ? { ok: true, value: { models: result.value, stale: false } } : result
     },
   ) {

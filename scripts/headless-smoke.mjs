@@ -30,7 +30,7 @@ let child
 try {
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
-  await writeFile(patch, `- id: opencode-go\n  config:\n    apiKeyEnv: OPENCODE_GO_INSTALL_TEST_KEY\n    baseURL: http://127.0.0.1:${server.address().port}\n- id: agent-default-model\n  config:\n    provider: opencode-go\n    model: deepseek-v4.1-flash\n- id: session-title-llm\n  disabled: true\n`)
+  await writeFile(patch, `- id: opencode-go\n  config:\n    apiKeyEnv: OPENCODE_GO_INSTALL_TEST_KEY\n    baseURL: http://127.0.0.1:${server.address().port}\n- id: agent-default-model\n  config:\n    provider: dsh-opencode-go\n    model: deepseek-v4.1-flash\n- id: session-title-llm\n  disabled: true\n`)
   child = spawn(resolve(root, 'node_modules/.bin/dsh'), ['--profile', 'headless', '--patch', patch, 'Say standalone-ok'], {
     cwd: root,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, DSH_HOME: resolve(root, 'home'), OPENCODE_GO_INSTALL_TEST_KEY: 'fixture-key' },

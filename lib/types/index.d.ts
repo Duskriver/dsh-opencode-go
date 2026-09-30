@@ -1,5 +1,5 @@
 /**
- * Dedicated OpenCode Go adapter plugin. Registers one `opencode-go` route
+ * Dedicated OpenCode Go adapter plugin. Registers one `dsh-opencode-go` route
  * whose catalog follows the gateway's live model listing and models.dev
  * metadata, and installs the `llm-opencode-go` settings section: the Web UI
  * renders it as its own settings page where the API key and every knob are
@@ -24,7 +24,7 @@
  * The credential resolves per request through the credentials seam, falling
  * back to the process environment — the same reference semantics the generic
  * pi-ai adapter uses. The route registers atomically: if another adapter
- * family already owns `opencode-go` (a profile in `llm-pi-ai`, for example),
+ * mount already owns `dsh-opencode-go`,
  * the refusal is logged with the reason and everything else this plugin does
  * still works.
  *

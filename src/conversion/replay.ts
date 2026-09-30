@@ -23,7 +23,10 @@ export interface PiAiReplayResponse {
   kind: 'pi-ai'
   version: 2
   api: Api
+  /** Requested DSH provider identity, matching the durable assistant source. */
   provider: string
+  /** Native SDK provider when it differs from the DSH route. */
+  sdkProvider?: string
   /** Requested model identity, matching the durable assistant source. */
   model: string
   /** Provider-reported model; only Anthropic replays it as the native model (reported in `message.model`, not `message.responseModel`). */
@@ -73,16 +76,18 @@ function emptyPiUsage(): PiUsage {
  * removes one.
  * @param message - completed native pi-ai assistant response.
  * @param requestedModel - request identity stored in the assistant source; defaults to the native model.
+ * @param requestedProvider - DSH route stored in the assistant source; defaults to the native provider.
  * @returns the versioned lossless-JSON replay projection.
  */
-export function toPiReplayState(message: AssistantMessage, requestedModel = message.model): ReplayEnvelope {
+export function toPiReplayState(message: AssistantMessage, requestedModel = message.model, requestedProvider = message.provider): ReplayEnvelope {
   const responseModel = message.api === 'anthropic-messages' && message.model !== requestedModel
     ? message.model : message.responseModel
   const response: PiAiReplayResponse = {
     kind: 'pi-ai',
     version: 2,
     api: message.api,
-    provider: message.provider,
+    provider: requestedProvider,
+    ...requestedProvider === message.provider ? {} : { sdkProvider: message.provider },
     model: requestedModel,
     ...responseModel === undefined ? {} : { responseModel },
     ...message.responseId === undefined ? {} : { responseId: message.responseId },
@@ -126,6 +131,9 @@ function readReplayState(value: unknown): PiAiReplayState {
   if (response['version'] !== 2) return invalidReplay(`unsupported version ${String(response['version'])}`)
   for (const key of ['api', 'provider', 'model'] as const) {
     if (typeof response[key] !== 'string' || response[key].length === 0) return invalidReplay(`${key} must be a non-empty string`)
+  }
+  if (response['sdkProvider'] !== undefined && (typeof response['sdkProvider'] !== 'string' || response['sdkProvider'].length === 0)) {
+    return invalidReplay('sdkProvider must be a non-empty string')
   }
   if (!['stop', 'length', 'toolUse', 'error', 'aborted'].includes(String(response['stopReason']))) {
     return invalidReplay('unknown stopReason')
@@ -221,7 +229,7 @@ function replayedAssistant(message: Message, source: ModelMessageSource, rawStat
     role: 'assistant',
     content,
     api: state.response.api,
-    provider: state.response.provider,
+    provider: state.response.sdkProvider ?? state.response.provider,
     // Anthropic reports aliases and fallbacks as model, unlike Completions' informational responseModel.
     model: state.response.api === 'anthropic-messages'
       ? state.response.responseModel ?? state.response.model : state.response.model,

@@ -43,7 +43,7 @@ it.each([
       listing: { updatedAt: expect.any(Number) }, metadata: { error: expect.stringContaining(detail) },
     })
     expect(failed.models.find(model => model.id === id)?.configurationMissing).toBe(true)
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual([builtin])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([builtin])
 
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
       ? Promise.resolve(Response.json(metadataDocument({ [builtin]: modelMetadata(), [id]: modelMetadata() })))
@@ -53,7 +53,7 @@ it.each([
     expect(recovered.error).toBeUndefined()
     expect(recovered.sources?.metadata).toEqual({ updatedAt: expect.any(Number) })
     expect(recovered.models.find(model => model.id === id)?.configurationMissing).not.toBe(true)
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual([builtin, id])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([builtin, id])
   } finally {
     await ctx.fiber.dispose()
   }
@@ -130,16 +130,16 @@ it('marks missing configuration in the Host RPC and only enables the model after
       sources: { listing: { updatedAt: expect.any(Number) }, metadata: { updatedAt: expect.any(Number) } },
     })
     expect(isModelEnabled(missing.models[0], config.modelVisibility)).toBe(false)
-    expect(await adapter.listModels('opencode-go')).toEqual([])
-    await expect(adapter.resolveModel('opencode-go', id)).rejects.toMatchObject({ code: 'MODEL_METADATA_UNAVAILABLE' })
+    expect(await adapter.listModels('dsh-opencode-go')).toEqual([])
+    await expect(adapter.resolveModel('dsh-opencode-go', id)).rejects.toMatchObject({ code: 'MODEL_METADATA_UNAVAILABLE' })
 
     configured = true
     const available = await read()
     expect(available.models).toEqual([expect.objectContaining({ id, name: 'Configured model' })])
     expect(available.models[0].configurationMissing).not.toBe(true)
     expect(isModelEnabled(available.models[0], config.modelVisibility)).toBe(true)
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual([id])
-    await expect(adapter.resolveModel('opencode-go', id)).resolves.toMatchObject({ id })
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id])
+    await expect(adapter.resolveModel('dsh-opencode-go', id)).resolves.toMatchObject({ id })
   } finally {
     await ctx.fiber.dispose()
   }
@@ -170,7 +170,7 @@ it('returns retained settings models and the timeout diagnostic through the Host
     expect(stale.models).toEqual(first.models)
     expect(stale.stale).toBe(true)
     expect(stale.error).toContain(`${gateway.url}/models: request timed out or was aborted`)
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(stale.models.map(model => model.id))
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(stale.models.map(model => model.id))
 
     vi.stubGlobal('fetch', original)
     gateway.setModelListing(200, listingBody(['kimi-k3']))
@@ -178,7 +178,7 @@ it('returns retained settings models and the timeout diagnostic through the Host
     expect(recovered.stale).toBe(false)
     expect(recovered.error).toBeUndefined()
     expect(recovered.models.map(model => model.id)).toEqual(['kimi-k3'])
-    expect((await adapter.listModels('opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
+    expect((await adapter.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['kimi-k3'])
   } finally {
     await ctx.fiber.dispose()
   }

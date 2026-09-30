@@ -1,4 +1,4 @@
 - id: agent-default-model
   config:
-    provider: opencode-go
+    provider: dsh-opencode-go
     model: deepseek-v4.1-flash

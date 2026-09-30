@@ -59,24 +59,24 @@ try {
   assert.equal(view().value.enabled, false)
   assert.deepEqual(ctx.llm.listProviders(), [])
   await ctx.settings.update('opencode-go', { enabled: true, refreshMinutes: 30 })
-  assert.ok(ctx.llm.listProviders().some(row => row.id === 'opencode-go'))
+  assert.ok(ctx.llm.listProviders().some(row => row.id === 'dsh-opencode-go'))
   assert.equal(view().value.refreshMinutes, 30)
-  assert.deepEqual(await ctx.llm.listModels('opencode-go'), [], 'legacy visibility fields do not override the deprecated default')
+  assert.deepEqual(await ctx.llm.listModels('dsh-opencode-go'), [], 'legacy visibility fields do not override the deprecated default')
   let pickerUpdates = 0
   ctx.on('llm/adapters-updated', () => { pickerUpdates++ })
   await ctx.settings.update('opencode-go', { modelVisibility: { 'compat-model': true, missing: true } })
   assert.ok(pickerUpdates > 0, 'enabling a model notifies already open session pickers')
-  assert.deepEqual((await ctx.llm.listModels('opencode-go')).map(model => model.id), ['compat-model'],
+  assert.deepEqual((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id), ['compat-model'],
     'explicitly enabling a deprecated model does not manufacture unknown gateway models')
   assert.equal(view().value.modelVisibility['compat-model'], true)
   assert.equal(entry.fiber, fiber, 'enabling a model preserves the running plugin')
   pickerUpdates = 0
   await ctx.settings.update('opencode-go', { modelVisibility: { 'compat-model': false, missing: true } })
   assert.ok(pickerUpdates > 0, 'disabling a model notifies already open session pickers')
-  assert.deepEqual(await ctx.llm.listModels('opencode-go'), [])
+  assert.deepEqual(await ctx.llm.listModels('dsh-opencode-go'), [])
   assert.equal(view().value.modelVisibility['compat-model'], false)
   assert.equal(entry.fiber, fiber, 'disabling a model preserves the running plugin')
-  const capacity = async () => (await ctx.llm.resolveModelInfo('opencode-go', 'compat-model')).context.contextWindow
+  const capacity = async () => (await ctx.llm.resolveModelInfo('dsh-opencode-go', 'compat-model')).context.contextWindow
   assert.equal(await capacity(), 100000)
   await ctx.settings.update('opencode-go', { modelLimits: { 'compat-model': { contextWindow: 50000, maxTokens: 1024 } } })
   assert.equal(entry.fiber, fiber, 'capacity changes must preserve the running plugin')
