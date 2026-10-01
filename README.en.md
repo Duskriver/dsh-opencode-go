@@ -86,7 +86,7 @@ To build from source and install a local package:
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.17.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.18.tgz
 ```
 
 Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
@@ -171,6 +171,10 @@ A gateway model ID with no usable protocol or capability configuration is marked
 If online configuration cannot be loaded, models without usable cached or built-in configuration are marked “Configuration unavailable”, with the configuration source error shown on the page. Check access to `https://models.dev/api.json` from the machine running DSH and review the error details, then refresh. When retrying a retained model list, its previous failure stays visible until a successful refresh clears it; configured models remain usable.
 
 A reasoning-capable model without adjustable reasoning levels (for example, `union-alpha`) remains selectable and usable; it simply has no reasoning-strength control.
+
+MiMo V2.6 Flash's gateway catalog does not yet list its controls. Based on direct OpenCode Go probes, the plugin offers **Off / Low / Medium / High**: Default omits `reasoning_effort` and preserves gateway-default reasoning; Off sends `none`, and the other levels send their matching values. This rule applies only to the verified model and protocol, not other MiMo models. Low / Medium / High were accepted and returned reasoning content, but are not guaranteed to produce increasing amounts of reasoning.
+
+Online effort declarations determine selectable strengths. Toggle or budget declarations produce controls only for established native switch or budget protocols; they do not imply `off` or `high` effort parameters on a generic OpenAI-compatible route. An explicit empty control list does not gain an Off choice just because the model can reason.
 
 A model that does offer adjustable levels also declares a default effort (`high` when the model offers it, otherwise the highest level it offers) whenever its transport would answer an unset effort with an explicit disable (`deepseek`, `zai`, `qwen`, `qwen-chat-template`). DSH uses that default when no level has been chosen, so leaving the control unset still sends a reasoning level instead of turning thinking off. Transports that leave the choice to the provider declare no default and are unchanged, and an explicitly chosen level always wins.
 

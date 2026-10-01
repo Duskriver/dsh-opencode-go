@@ -2,6 +2,7 @@
 import type { Api, Model, ModelCost, ModelThinkingLevel, ThinkingLevelMap } from 'opencode-go-pi-ai'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
+import { NATIVE_THINKING_FLAGS, THINKING_LEVELS, unsupportedThinkingLevels, withGatewayReasoning } from './reasoning.ts'
 
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
@@ -35,27 +36,34 @@ function rates(value: unknown): ModelCost {
   return { input: rate('input'), output: rate('output'), cacheRead: rate('cache_read'), cacheWrite: rate('cache_write') }
 }
 
-const LEVELS: readonly ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
-
 /** Missing controls must not turn into SDK-default effort levels the gateway never advertised. */
-function thinkingLevels(metadata: Record<string, unknown>, known?: Model<Api>): ThinkingLevelMap {
-  if (!Array.isArray(metadata.reasoning_options) && known?.thinkingLevelMap !== undefined) return known.thinkingLevelMap
-  const map: ThinkingLevelMap = Object.fromEntries(LEVELS.map(level => [level, null]))
-  for (const item of Array.isArray(metadata.reasoning_options) ? metadata.reasoning_options : []) {
-    const option = record(item)
-    if (option.type === 'toggle' || option.type === 'budget_tokens') {
-      map.off = 'off'
-      map.high = 'high'
-    }
-    if (option.type !== 'effort' || !Array.isArray(option.values)) continue
-    for (const value of option.values) {
+function thinkingLevels(id: string, api: Api, metadata: Record<string, unknown>, known?: Model<Api>): ThinkingLevelMap {
+  // A family can share wire quirks without sharing selectable effort levels.
+  if (!Array.isArray(metadata.reasoning_options) && known?.id === id && known.thinkingLevelMap !== undefined) return known.thinkingLevelMap
+  const map = unsupportedThinkingLevels()
+  const options = (Array.isArray(metadata.reasoning_options) ? metadata.reasoning_options : []).map(record)
+  const efforts = options.filter(option => option.type === 'effort' && Array.isArray(option.values))
+  for (const option of efforts) {
+    for (const value of option.values as unknown[]) {
       const level = value === 'none' ? 'off' : value
-      if (LEVELS.includes(level as ModelThinkingLevel)) map[level as ModelThinkingLevel] = String(value)
+      if (THINKING_LEVELS.includes(level as ModelThinkingLevel)) map[level as ModelThinkingLevel] = String(value)
     }
   }
-  // An established transport may support disabling thinking in addition to the
-  // model's advertised effort levels (e.g. DeepSeek's separate thinking flag).
-  if (known?.reasoning && known.thinkingLevelMap?.off !== null) map.off ??= known.thinkingLevelMap?.off ?? 'off'
+  const format = (known?.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat
+  const native = api === 'anthropic-messages' || NATIVE_THINKING_FLAGS.has(format ?? '')
+  const toggle = options.some(option => option.type === 'toggle')
+  const budget = options.some(option => option.type === 'budget_tokens')
+  // The SDK represents a native switch/budget's enabled state with high. That
+  // is not evidence that an OpenAI-compatible endpoint accepts effort "high".
+  if (native && efforts.length === 0 && (toggle || budget)) map.high = 'high'
+  const enabled = Object.entries(map).some(([level, wire]) => level !== 'off' && typeof wire === 'string')
+  if (native && (toggle || (enabled && known?.reasoning)) && known?.thinkingLevelMap?.off !== null && map.off === null) {
+    // An absent Off key advertises the native disable flag without inventing
+    // an effort spelling. Empty control lists never reach this branch.
+    delete map.off
+  } else if (enabled && known?.id === id && known.reasoning && typeof known.thinkingLevelMap?.off === 'string') {
+    map.off ??= known.thinkingLevelMap.off
+  }
   return map
 }
 
@@ -119,17 +127,17 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
             ? [{ ...rates(item), inputTokensAbove: tier.size }] : []
         }).sort((a, b) => a.inputTokensAbove - b.inputTokensAbove)
       }
-      models.set(id, {
+      models.set(id, withGatewayReasoning({
         id,
         name: typeof metadata.name === 'string' && metadata.name.length > 0 ? metadata.name : id,
         provider: 'opencode-go', api, baseUrl: modelBaseURL(api, baseURL),
         reasoning: metadata.reasoning,
-        thinkingLevelMap: thinkingLevels(metadata, known),
+        thinkingLevelMap: thinkingLevels(id, api, metadata, known),
         input: input.includes('image') ? ['text', 'image'] : ['text'],
         contextWindow: positiveInteger(limit.context, 'context limit'),
         maxTokens: positiveInteger(limit.output, 'output limit'),
         cost, compat,
-      })
+      }))
     } catch (error) {
       errors.set(id, error instanceof Error ? error.message : String(error))
     }

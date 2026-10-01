@@ -86,7 +86,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.17.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.18.tgz
 ```
 
 源码开发时显式运行 `npm run compile`；普通用户直接安装预编译产物，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
@@ -171,6 +171,10 @@ DSH 0.1.5 的卸载只影响本次请求；DSH 0.1.6 及以上版本通过宿主
 如果在线配置获取失败，没有可用缓存或内置配置的模型会标注“配置暂不可用”，页面会显示配置源错误。请检查运行 DSH 的设备能否访问 `https://models.dev/api.json`，并查看具体错误后刷新重试。已有模型列表在重试期间保留上次的失败提示，成功后自动清除；已配置的模型继续可用。
 
 模型具有推理能力但没有可调节的推理档位时（如 `union-alpha`），仍可正常选择和使用，只是不显示推理强度选项。
+
+MiMo V2.6 Flash 的网关目录尚未列出可调节档位，插件按 OpenCode Go 实测提供 **Off / Low / Medium / High**：默认不发送 `reasoning_effort`，保留网关默认思考；Off 发送 `none`，其余发送对应值。仅对这个已验证的型号和协议补充映射，不扩展到其他 MiMo 型号。Low / Medium / High 已验证可正常请求并返回思考内容，但不保证实际思考量随档位递增。
+
+在线目录中的 effort 列表决定可选强度。仅有 toggle 或 budget 声明时，插件只对已有原生开关或预算协议提供相应控件，不为普通 OpenAI 兼容协议猜测 `off` 或 `high` 参数。明确的空控制列表不会因为模型具有推理能力就自动增加 Off。
 
 提供可调节档位的模型，如果其传输协议在未选择档位时会显式关闭思考（`deepseek`、`zai`、`qwen`、`qwen-chat-template`），还会声明一个默认档位（模型支持 `high` 时用 `high`，否则用它提供的最高档位）。用户未选择档位时 DSH 使用该默认值，因此留空也会带上推理档位，而不是关闭思考。由服务商自行决定的协议不声明默认值，行为不变；显式选择的档位始终优先。
 

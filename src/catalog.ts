@@ -13,6 +13,7 @@ import type { ModelMetadata } from './model-metadata.ts'
 import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-response.ts'
 import { MODEL_METADATA_MAX_BYTES, metadataCachePath, metadataETag, readMetadataCache, writeMetadataCache } from './metadata-cache.ts'
 import { DISPLAY_NAME, SDK_PROVIDER_ID } from './provider-identity.ts'
+import { withGatewayReasoning } from './reasoning.ts'
 
 export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts'
 export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
@@ -70,9 +71,9 @@ function waitForSnapshot(pending: Promise<CatalogSnapshot>, signal?: AbortSignal
 
 /** Built-ins are outage fallbacks and compatibility hints, never a membership whitelist. */
 function builtinModels(baseURL: string): Map<string, Model<Api>> {
-  return new Map((getBuiltinModels(SDK_PROVIDER_ID) as Model<Api>[]).map(model => [model.id, {
+  return new Map((getBuiltinModels(SDK_PROVIDER_ID) as Model<Api>[]).map(model => [model.id, withGatewayReasoning({
     ...model, provider: SDK_PROVIDER_ID, baseUrl: modelBaseURL(model.api, baseURL),
-  }]))
+  })]))
 }
 
 /** A valid empty listing means the gateway serves nothing; malformed replies are failures. */
