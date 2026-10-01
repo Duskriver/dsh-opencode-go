@@ -5,8 +5,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { UsagePill } from './UsagePill.tsx'
 import type { OpencodeGoKey } from './locales.ts'
+import type { SettingsScope } from './settings.ts'
+import type { OpencodeGoSettings } from './section-controller.ts'
 
-export function registerUsagePill(ctx: Context): void {
+export function registerUsagePill(ctx: Context, settings: SettingsScope<OpencodeGoSettings>): void {
   ctx.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
     scope.inject(['remote.opencodeGoUsage'], ready => {
       const readUsage = async () => {
@@ -19,6 +21,7 @@ export function registerUsagePill(ctx: Context): void {
         name: 'conversation.input.right', id: 'opencode-go-usage', order: 1000,
         inject: sessionId => ({
           directory: ready.modelDirectories.directoryFor(sessionId as SessionId).store,
+          settings,
           readUsage,
           getLocale: () => ready.locale.getLocale().active,
           t: (key: string) => translate(key as OpencodeGoKey),

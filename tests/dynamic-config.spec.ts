@@ -87,6 +87,18 @@ async function streamOnce(ctx: Context): Promise<void> {
 }
 
 describe('settings-backed configuration', () => {
+  it('defaults usage display to auto and persists valid display modes while refusing invalid ones', async () => {
+    const ctx = await boot({ settingsYaml: '', credentials: {}, baseURL: 'https://gateway.test/v1' })
+    const value = () => ctx.settings.describe().find(row => row.ns === NS)?.value.usageDisplay
+    expect(value()).toBe('auto')
+    for (const usageDisplay of ['always', 'off', 'auto']) {
+      await ctx.settings.update(NS, { usageDisplay })
+      expect(value()).toBe(usageDisplay)
+    }
+    await expect(ctx.settings.update(NS, { usageDisplay: 'invalid' })).rejects.toThrow()
+    expect(value()).toBe('auto')
+  })
+
   it('serves the cordis entry until the settings section supplies overrides', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'env-key')
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })

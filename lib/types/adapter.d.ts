@@ -45,8 +45,8 @@ export interface OpencodeGoAdapterOptions {
      * two configuration generations.
      */
     config: () => OpencodeGoConfig;
-    /** Resolve the route's credential per call; missing must fail loud. */
-    resolveApiKey: () => Promise<string | undefined>;
+    /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
+    resolveApiKey: (config: OpencodeGoConfig) => Promise<string | undefined>;
     /**
      * Image input machinery; absent refuses image content, which is the posture
      * for direct construction without a durable attachment service behind it.
@@ -94,9 +94,17 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     };
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(_provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
+    /** Copy nested limits before discovery can yield to a settings update. */
+    private callSnapshot;
+    /** Keep capability resolution and eventual dispatch on the same configuration. */
+    prepareCall(_provider: string, model: string, signal?: AbortSignal): Promise<{
+        model: LlmResolvedModelInfo;
+        stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>;
+    }>;
     /** Describe one model: capacities plus the reasoning levels it actually offers. */
     private modelInfo;
     /** Validate an explicit effort against the model's own levels, without clamping. */
     private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
+    private streamWithSnapshot;
 }

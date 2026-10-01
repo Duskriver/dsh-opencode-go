@@ -11,6 +11,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import type { GoModel, GoModelCatalog } from '../models-contract.ts';
+import { type UsageDisplayMode } from '../usage-display.ts';
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { SettingsScope } from './settings.ts';
 import { type FieldState, type FormActions, type FormShell } from './staged-form.ts';
@@ -20,6 +21,8 @@ export declare const OPENCODE_GO_NS = "llm-opencode-go";
 export interface OpencodeGoSettings {
     /** Whether the adapter serves its route; false withdraws it from every picker. */
     enabled?: boolean;
+    /** Usage pill visibility, independent of the selected model in always mode. */
+    usageDisplay?: UsageDisplayMode;
     /** Per-model switches; normal models default on, deprecated models default off. */
     modelVisibility?: Record<string, boolean>;
     /** Credential reference naming the environment key. */
@@ -85,6 +88,7 @@ export interface OpencodeGoSectionState extends FormShell {
      * a withdrawn route is what the user is trying to observe.
      */
     enabled: boolean;
+    usageDisplay: FieldState;
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;
     pickerFailed: boolean;

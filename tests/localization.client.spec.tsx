@@ -94,7 +94,7 @@ async function mountSurfaces(locale: HostLocaleRuntime) {
   const usageTranslate = (key: string) => t(key as OpencodeGoKey)
   // Host slot injection caches these faces; getters must remain live without rebuilding them.
   const sectionProps = { ...face, t, getLocale, useOpencodeGo }
-  const usageProps = { directory, readUsage, t: usageTranslate, getLocale }
+  const usageProps = { directory, settings: settings.scope, readUsage, t: usageTranslate, getLocale }
   function Surfaces() {
     // The real Host SlotOutlet subscribes to this same locale revision source.
     React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)

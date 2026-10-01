@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createMessage, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createMessage, createUserMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.ts'
 import { configOf } from './config-of.ts'
@@ -92,6 +92,50 @@ it('preserves OpenCode reasoning replay across the DSH route and SDK provider id
     await drain(ctx, { ...request, messages: [...request.messages, restored, user()] })
     const migrated = gateway.bodies[2] as { messages: { role: string; content?: string }[] }
     expect(migrated.messages.find(message => message.role === 'assistant')?.content).toContain('answer')
+  } finally {
+    await ctx.fiber.dispose()
+  }
+})
+
+it('preserves signed Anthropic thinking across a returned model alias and JSON-restored continuation', async () => {
+  vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+  const gateway = await mockGateway({ status: 200, body: listingBody(['minimax-m3', 'union-alpha']) })
+  const events = [
+    { type: 'message_start', message: { id: 'msg_alias', type: 'message', role: 'assistant', model: 'minimax-m3-reported-alias',
+      content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'signed thought' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'fixture-signature' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'answer' } },
+    { type: 'content_block_stop', index: 1 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } },
+    { type: 'message_stop' },
+  ].map(event => JSON.stringify(event))
+  for (let i = 0; i < 3; i++) gateway.pushCompletions({ events, namedEvents: true })
+  const ctx = new Context()
+  await ctx.plugin(LlmRuntime)
+  try {
+    apply(ctx, configOf(`${gateway.url}/v1`))
+    const request = { provider: route, model: 'minimax-m3', messages: [user()], reasoningEffort: ReasoningEffortId('high') }
+    const chunks = await drain(ctx, request)
+    const finish = chunks.find(chunk => chunk.type === 'finish')
+    expect(finish).toMatchObject({ reason: { kind: 'stop' }, replayState: { response: {
+      model: request.model, responseModel: 'minimax-m3-reported-alias', provider: route, sdkProvider: 'opencode-go',
+    } } })
+    const restored = JSON.parse(JSON.stringify(createMessage({ role: 'assistant',
+      content: chunks.filter(chunk => chunk.type === 'block-end').map(chunk => chunk.block),
+      source: { kind: 'model', provider: route, model: request.model, replayState: finish?.replayState },
+    })))
+    const messages = [...request.messages, restored, user()]
+    await drain(ctx, { ...request, messages })
+    const assistant = (gateway.bodies[1] as { messages: { role: string; content: unknown[] }[] }).messages.find(m => m.role === 'assistant')
+    expect(assistant?.content).toContainEqual({ type: 'thinking', thinking: 'signed thought', signature: 'fixture-signature' })
+
+    // A real model switch must still strip signatures that belong to the previous model.
+    await drain(ctx, { provider: route, model: 'union-alpha', messages })
+    expect(JSON.stringify(gateway.bodies[2])).not.toContain('fixture-signature')
   } finally {
     await ctx.fiber.dispose()
   }

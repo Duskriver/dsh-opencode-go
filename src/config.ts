@@ -17,6 +17,7 @@ import {
 } from './conversion/index.ts'
 import z from '@deepseek-ai/schemastery'
 import { DEFAULT_BASE_URL } from './catalog.ts'
+import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } from './usage-display.ts'
 
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
@@ -52,6 +53,8 @@ export interface OpencodeGoConfig {
    * false registers nothing.
    */
   enabled: boolean
+  /** Usage pill visibility; auto follows this plugin's selected provider. */
+  usageDisplay: UsageDisplayMode
   /** Per-model picker switches; absent entries default to enabled unless deprecated. */
   modelVisibility?: Record<string, boolean>
   /** Credential reference: the environment variable the key resolves from. */
@@ -77,6 +80,7 @@ export interface OpencodeGoConfig {
 /** Runtime schema for {@link OpencodeGoConfig}. */
 const fields = {
   enabled: z.boolean().default(true),
+  usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string().default(DEFAULT_BASE_URL),

@@ -6,8 +6,17 @@ import type { GoUsage } from '../src/usage-contract.ts'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { UsagePill } from '../src/client/UsagePill.tsx'
 import { en } from '../src/client/locales.ts'
+import { stubSettingsScope } from './support/settings-scope.ts'
+import type { OpencodeGoSettings } from '../src/client/section-controller.ts'
+import type { SettingsScope } from '../src/client/settings.ts'
 
-beforeEach(() => { vi.useFakeTimers() })
+const usageSettings = (value: OpencodeGoSettings = {}) => {
+  const host = stubSettingsScope<OpencodeGoSettings>()
+  host.publish({ status: 'ready', value })
+  return host
+}
+let settings: SettingsScope<OpencodeGoSettings>
+beforeEach(() => { vi.useFakeTimers(); settings = usageSettings().scope })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 const t = (key: string) => en[key as keyof typeof en]
 const usageWindow = { status: 'ok' as const, percent: 10, resetsAt: '2026-09-21T00:00:00Z' }
@@ -32,10 +41,85 @@ const percentageLabel = (value: GoUsage) => `Go Â· ${en.usageRollingShort} ${val
 const tick = async (milliseconds = 60_000) => { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) }) }
 const showDetails = () => { fireEvent.click(trigger()) }
 
+it.each(['deepseek', 'opencode-go', 'dsh-opencode-go'])('keeps usage visible in always mode while using %s', async provider => {
+  const host = usageSettings({ usageDisplay: 'always' })
+  const store = directory(provider)
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={store} readUsage={read} t={t} />) })
+  expect(trigger().textContent).toContain(percentageLabel(usage))
+  expect(trigger().getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await act(async () => { store.set({ ...store.getSnapshot(), current: null }) })
+  expect(trigger().textContent).toContain(percentageLabel(usage))
+  await tick()
+  expect(read).toHaveBeenCalledTimes(2)
+  showDetails()
+  expect(screen.getAllByRole('progressbar')).toHaveLength(3)
+})
+
+it('applies live display changes and tears down polling and visibility refreshes while off', async () => {
+  const host = usageSettings()
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory()} readUsage={read} t={t} />) })
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(read).not.toHaveBeenCalled()
+  await act(async () => { host.publish({ value: { usageDisplay: 'always' } }) })
+  expect(trigger().textContent).toContain(percentageLabel(usage))
+  await act(async () => { host.publish({ value: { usageDisplay: 'off' } }) })
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(vi.getTimerCount()).toBe(0)
+  await tick()
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+  expect(read).toHaveBeenCalledTimes(1)
+  await act(async () => { host.publish({ value: { usageDisplay: 'always' } }) })
+  expect(read).toHaveBeenCalledTimes(2)
+  await act(async () => { host.publish({ value: {} }) })
+  expect(screen.queryByRole('button')).toBeNull()
+  await tick()
+  expect(read).toHaveBeenCalledTimes(2)
+})
+
+it('sends no usage requests in off mode even when this plugin model is selected', async () => {
+  const host = usageSettings({ usageDisplay: 'off' })
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  await tick()
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(read).not.toHaveBeenCalled()
+})
+
+it.each(['auto', 'always'] as const)('hides usage and stops polling when the plugin is disabled in %s mode', async usageDisplay => {
+  const host = usageSettings({ usageDisplay, enabled: true })
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  showDetails()
+  await act(async () => { host.publish({ value: { usageDisplay, enabled: false } }) })
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await tick()
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+  expect(read).toHaveBeenCalledTimes(1)
+  await act(async () => { host.publish({ value: { usageDisplay, enabled: true } }) })
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(trigger().getAttribute('aria-expanded')).toBe('false')
+})
+
+it.each(['loading', 'unavailable'] as const)('waits for available settings before polling (%s)', async status => {
+  const host = usageSettings({ usageDisplay: 'always' })
+  host.publish({ status })
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  await tick()
+  expect(read).not.toHaveBeenCalled()
+  expect(screen.queryByRole('button')).toBeNull()
+  await act(async () => { host.publish({ status: 'ready' }) })
+  expect(read).toHaveBeenCalledTimes(1)
+})
+
 it.each(['deepseek', 'opencode-go'])('shows plugin usage only on its route and stops polling when switching to %s', async otherProvider => {
   const store = directory(otherProvider)
   const read = vi.fn().mockResolvedValue(usage)
-  render(<UsagePill directory={store} readUsage={read} t={t} />)
+  render(<UsagePill settings={settings} directory={store} readUsage={read} t={t} />)
   expect(read).not.toHaveBeenCalled()
   await act(async () => { store.set({ ...store.getSnapshot(), current: { provider: 'dsh-opencode-go', model: 'deepseek-v4-flash' } }) })
   expect(trigger().textContent).toContain(percentageLabel(usage))
@@ -55,7 +139,7 @@ it('retains same-account percentages after a temporary failure and recovers thro
   const read = vi.fn().mockResolvedValueOnce(usage).mockRejectedValueOnce(usageError())
     .mockImplementationOnce(() => new Promise<GoUsage>(resolve => { finishRetry = resolve }))
     .mockResolvedValue(updated)
-  await act(async () => { render(<UsagePill directory={store} readUsage={read} t={t} />) })
+  await act(async () => { render(<UsagePill settings={settings} directory={store} readUsage={read} t={t} />) })
   showDetails()
   const lastUpdated = () => screen.getByText(new RegExp(`^${en.usageLastUpdated}`)).textContent
   const firstUpdated = lastUpdated()
@@ -96,7 +180,7 @@ it.each([
   { reason: 'a cached result without source identity', cached: { rolling: usage.rolling, weekly: usage.weekly, monthly: usage.monthly }, error: usageError() },
 ])('clears previous percentages after $reason', async ({ cached, error }) => {
   const read = vi.fn().mockResolvedValueOnce(cached).mockRejectedValue(error)
-  await act(async () => { render(<UsagePill directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   expect(trigger().textContent).toContain(percentageLabel(cached))
   await tick()
   expect(trigger().textContent).toContain(en.usageUnavailable)
@@ -110,7 +194,7 @@ it.each([
 
 it('shows the reason for the first failure without inventing cached usage and allows retry', async () => {
   const read = vi.fn().mockRejectedValueOnce(usageError()).mockResolvedValue(usage)
-  await act(async () => { render(<UsagePill directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   expect(trigger().textContent).toContain(en.usageUnavailable)
   expect(trigger().textContent).not.toContain(en.usageStaleShort)
   showDetails()
@@ -125,7 +209,7 @@ it('shows the reason for the first failure without inventing cached usage and al
 it('clears cached usage for an unclassified error and does not display its raw message', async () => {
   const privateMessage = 'upstream rejected private-token=secret'
   const read = vi.fn().mockResolvedValueOnce(usage).mockRejectedValue(new Error(privateMessage))
-  await act(async () => { render(<UsagePill directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   await tick()
   expect(trigger().textContent).toContain(en.usageUnavailable)
   expect(trigger().textContent).not.toContain('%')
@@ -140,7 +224,7 @@ it('resumes polling when visible and avoids concurrent timer and visibility read
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   let finish!: (value: GoUsage) => void
   const read = vi.fn().mockImplementationOnce(() => new Promise<GoUsage>(resolve => { finish = resolve })).mockResolvedValue(usage)
-  await act(async () => { render(<UsagePill directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   await tick()
   expect(read).not.toHaveBeenCalled()
   visibility.mockReturnValue('visible')
@@ -160,12 +244,12 @@ it('clears usage when its source reader changes and ignores the previous readerâ
   const readOld = vi.fn().mockResolvedValueOnce(usage)
     .mockImplementationOnce(() => new Promise<GoUsage>(resolve => { finishOld = resolve }))
   const readNew = vi.fn().mockImplementationOnce(() => new Promise<GoUsage>(resolve => { finishNew = resolve }))
-  const view = render(<UsagePill directory={store} readUsage={readOld} t={t} />)
+  const view = render(<UsagePill settings={settings} directory={store} readUsage={readOld} t={t} />)
   await act(async () => { await Promise.resolve() })
   await tick()
   expect(readOld).toHaveBeenCalledTimes(2)
 
-  await act(async () => { view.rerender(<UsagePill directory={store} readUsage={readNew} t={t} />) })
+  await act(async () => { view.rerender(<UsagePill settings={settings} directory={store} readUsage={readNew} t={t} />) })
   expect(trigger().textContent).not.toContain('%')
   expect(readNew).toHaveBeenCalledTimes(1)
   const otherAccount = { ...updated, source: 'account-b' }
@@ -177,7 +261,7 @@ it('clears usage when its source reader changes and ignores the previous readerâ
 
 it('marks windows near or at their limit so the bars are not all shown as healthy', async () => {
   const levels = { ...usage, rolling: { ...usageWindow, percent: 20 }, weekly: { ...usageWindow, percent: 85 }, monthly: { ...usageWindow, status: 'rate-limited' as const, percent: 60 } }
-  await act(async () => { render(<UsagePill directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(levels)} t={t} />) })
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(levels)} t={t} />) })
   showDetails()
   const bar = (name: string) => screen.getByRole('progressbar', { name }).className
   expect(bar(en.usage_rolling)).toBe('')

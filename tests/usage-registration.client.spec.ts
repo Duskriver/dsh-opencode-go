@@ -1,6 +1,8 @@
 import { expect, it, vi } from 'vitest'
 import { registerUsagePill } from '../src/client/usage.ts'
 import type { UsagePillProps } from '../src/client/UsagePill.tsx'
+import { stubSettingsScope } from './support/settings-scope.ts'
+import type { OpencodeGoSettings } from '../src/client/section-controller.ts'
 
 it('preserves the usage account source and structured failures through the client slot binding', async () => {
   let props: UsagePillProps | undefined
@@ -21,8 +23,10 @@ it('preserves the usage account source and structured failures through the clien
       register: (definition: { inject: (id: string) => UsagePillProps }) => { props = definition.inject('fixture-session') },
     },
   }
-  registerUsagePill(ctx as never)
+  const settings = stubSettingsScope<OpencodeGoSettings>().scope
+  registerUsagePill(ctx as never, settings)
   expect(props).toBeDefined()
+  expect(props!.settings).toBe(settings)
   await expect(props!.readUsage()).resolves.toEqual(usage)
   await expect(props!.readUsage()).rejects.toBe(error)
 })

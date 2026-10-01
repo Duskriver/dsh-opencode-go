@@ -89,8 +89,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   assertBaseURL(entry.baseURL)
   let current: () => OpencodeGoConfig = () => readConfig(config)
 
-  const resolveApiKey = async (): Promise<string | undefined> => {
-    const ref = current().apiKeyEnv
+  const resolveApiKey = async (config: OpencodeGoConfig = current()): Promise<string | undefined> => {
+    const ref = config.apiKeyEnv
     const credentials = ctx.get('credentials')
     const hit = credentials !== undefined
       ? (await credentials.resolve(credentialRef(ref)))?.value

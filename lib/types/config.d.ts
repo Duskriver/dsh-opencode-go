@@ -9,6 +9,7 @@
  * @module dsh-llm-opencode-go/config
  */
 import z from '@deepseek-ai/schemastery';
+import { type UsageDisplayMode } from './usage-display.ts';
 /** Environment variable resolving the OpenCode API key. */
 export declare const DEFAULT_API_KEY_ENV = "OPENCODE_API_KEY";
 /** Successful refresh lifetime; failed refreshes retry sooner and explicit discovery revalidates immediately. */
@@ -38,6 +39,8 @@ export interface OpencodeGoConfig {
      * false registers nothing.
      */
     enabled: boolean;
+    /** Usage pill visibility; auto follows this plugin's selected provider. */
+    usageDisplay: UsageDisplayMode;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
     /** Credential reference: the environment variable the key resolves from. */

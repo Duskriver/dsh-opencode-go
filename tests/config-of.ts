@@ -8,6 +8,7 @@ import type { OpencodeGoConfig } from '../src/config.ts'
 export function configOf(baseURL: string, overrides: Partial<OpencodeGoConfig> = {}): OpencodeGoConfig {
   return {
     enabled: true,
+    usageDisplay: 'auto',
     modelVisibility: {},
     apiKeyEnv: 'OPENCODE_API_KEY',
     baseURL,

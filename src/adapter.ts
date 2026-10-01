@@ -80,8 +80,8 @@ export interface OpencodeGoAdapterOptions {
    * two configuration generations.
    */
   config: () => OpencodeGoConfig
-  /** Resolve the route's credential per call; missing must fail loud. */
-  resolveApiKey: () => Promise<string | undefined>
+  /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
+  resolveApiKey: (config: OpencodeGoConfig) => Promise<string | undefined>
   /**
    * Image input machinery; absent refuses image content, which is the posture
    * for direct construction without a durable attachment service behind it.
@@ -95,6 +95,13 @@ export interface OpencodeGoAdapterOptions {
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
+}
+
+/** Configuration, model and provider captured together before dispatch. */
+interface OpencodeGoCallSnapshot {
+  config: OpencodeGoConfig
+  catalog: CatalogSnapshot
+  model: Model<Api>
 }
 
 /**
@@ -178,13 +185,30 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: string,
     signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    const config = this.options.config()
-    const snapshot = await this.catalogOf(config).forModel(model, signal)
-    const resolved = snapshot.models.get(model)
+    return this.modelInfo((await this.callSnapshot(model, signal)).model)
+  }
+
+  /** Copy nested limits before discovery can yield to a settings update. */
+  private async callSnapshot(model: string, signal?: AbortSignal): Promise<OpencodeGoCallSnapshot> {
+    const config = structuredClone(this.options.config())
+    const catalog = await this.catalogOf(config).forModel(model, signal)
+    const resolved = catalog.models.get(model)
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
     }
-    return this.modelInfo(withModelLimit(resolved, config.modelLimits))
+    return { config, catalog, model: withModelLimit(resolved, config.modelLimits) }
+  }
+
+  /** Keep capability resolution and eventual dispatch on the same configuration. */
+  override async prepareCall(_provider: string, model: string, signal?: AbortSignal): Promise<{
+    model: LlmResolvedModelInfo
+    stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>
+  }> {
+    const snapshot = await this.callSnapshot(model, signal)
+    return {
+      model: this.modelInfo(snapshot.model),
+      stream: options => this.streamWithSnapshot(options, snapshot),
+    }
   }
 
   /** Describe one model: capacities plus the reasoning levels it actually offers. */
@@ -241,10 +265,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
-    const config = this.options.config()
-    let snapshot: CatalogSnapshot
+    let snapshot: OpencodeGoCallSnapshot
     try {
-      snapshot = await this.catalogOf(config).forModel(options.model, options.signal)
+      snapshot = await this.callSnapshot(options.model, options.signal)
     } catch (error) {
       if (!options.signal?.aborted) throw error
       yield { type: 'finish', reason: {
@@ -252,14 +275,17 @@ export class OpencodeGoAdapter extends LlmAdapter {
       } }
       return
     }
-    const advertised = snapshot.models.get(options.model)
-    if (advertised === undefined) {
-      throw new LlmError(`opencode-go has no model "${options.model}"`, 'UNKNOWN_MODEL')
+    yield* this.streamWithSnapshot(options, snapshot)
+  }
+
+  private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
+    if (options.stop !== undefined) {
+      throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
-    const model = withModelLimit(advertised, config.modelLimits)
+    const { config, catalog, model } = snapshot
     const outputLimit = config.modelLimits[model.id]?.maxTokens
     const maxTokens = outputLimit == null ? options.maxTokens : Math.min(options.maxTokens ?? outputLimit, outputLimit)
-    const apiKey = await this.options.resolveApiKey()
+    const apiKey = await this.options.resolveApiKey(config)
     if (apiKey === undefined || apiKey.length === 0) {
       throw new LlmError('llm-opencode-go: no credential resolved for the route', 'MISSING_CREDENTIAL')
     }
@@ -307,7 +333,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         : await toPiContext({ ...options, signal: watchdog.signal }, imageRequest, this.options.onReplayDegrade)
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
-      const events = snapshot.provider.streamSimple(withRequestReasoning(model, reasoning), normalizeContext(context), {
+      const events = catalog.provider.streamSimple(withRequestReasoning(model, reasoning), normalizeContext(context), {
         apiKey,
         ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },

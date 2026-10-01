@@ -3,10 +3,14 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage, UsageWindow } from '../usage-contract.ts'
 import { PROVIDER_ID } from '../provider-identity.ts'
+import { DEFAULT_USAGE_DISPLAY } from '../usage-display.ts'
+import type { SettingsScope } from './settings.ts'
+import type { OpencodeGoSettings } from './section-controller.ts'
 import css from './UsagePill.module.css'
 
 export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
+  settings: SettingsScope<OpencodeGoSettings>
   readUsage: () => Promise<GoUsage>
   t: (key: string) => string
   getLocale?: () => string
@@ -38,13 +42,17 @@ function usageLevel(window: UsageWindow): string | undefined {
   return window.percent >= 80 ? css.high : undefined
 }
 
-/** Only the selected Go provider mounts a poller, so other models send no usage traffic. */
-export function UsagePill({ directory, ...props }: UsagePillProps) {
+/** Only a visible, enabled pill mounts the usage poller. */
+export function UsagePill({ directory, settings, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
-  return state.current?.provider === PROVIDER_ID ? <ActiveUsage {...props} /> : null
+  const config = useSyncExternalStore(settings.subscribe, settings.getSnapshot, settings.getSnapshot)
+  const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
+  const visible = config.status === 'ready' && config.value?.enabled !== false
+    && (mode === 'always' || mode === 'auto' && state.current?.provider === PROVIDER_ID)
+  return visible ? <ActiveUsage {...props} /> : null
 }
 
-function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'directory'>) {
+function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'directory' | 'settings'>) {
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
   const [refreshing, setRefreshing] = useState(false)

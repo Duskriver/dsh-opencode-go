@@ -24,7 +24,8 @@ globalThis.fetch = (input, init) => {
   const url = input instanceof Request ? input.url : String(input)
   if (url === 'https://models.dev/api.json') return Promise.resolve(Response.json({
     'opencode-go': { npm: '@ai-sdk/openai-compatible', models: Object.fromEntries(protocols.map(protocol => [protocol.id, {
-      name: protocol.id, provider: { npm: protocol.npm }, reasoning: false,
+      name: protocol.id, provider: { npm: protocol.npm }, reasoning: protocol.npm === '@ai-sdk/anthropic',
+      ...protocol.npm === '@ai-sdk/anthropic' ? { reasoning_options: [{ type: 'toggle' }] } : {},
       modalities: { input: ['text'] }, limit: { context: 100000, output: 4096 },
     }])) },
   }))
@@ -56,13 +57,17 @@ function events(protocol, callingTool) {
     ]
   }
   return [
-    { type: 'message_start', message: { id: 'msg_probe', type: 'message', role: 'assistant', model: protocol.id,
+    { type: 'message_start', message: { id: 'msg_probe', type: 'message', role: 'assistant', model: `${protocol.id}-reported-alias`,
       content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
-    { type: 'content_block_start', index: 0, content_block: callingTool
-      ? { type: 'tool_use', id: 'call_probe', name: tool.name, input: {} } : { type: 'text', text: '' } },
-    { type: 'content_block_delta', index: 0, delta: callingTool
-      ? { type: 'input_json_delta', partial_json: argumentsText } : { type: 'text_delta', text: 'compat-ok' } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'signed thought' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'fixture-signature' } },
     { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: callingTool
+      ? { type: 'tool_use', id: 'call_probe', name: tool.name, input: {} } : { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 1, delta: callingTool
+      ? { type: 'input_json_delta', partial_json: argumentsText } : { type: 'text_delta', text: 'compat-ok' } },
+    { type: 'content_block_stop', index: 1 },
     { type: 'message_delta', delta: { stop_reason: callingTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
     { type: 'message_stop' },
   ]
@@ -120,6 +125,7 @@ try {
     const leading = { id: 'system-header', role: 'system', content: [{ type: 'text', text: prompt }],
       source: { kind: 'plugin', plugin: 'transcript-compat' } }
     const initial = { provider: 'dsh-opencode-go', model: protocol.id, sessionId: 'transcript-session', tools: [tool],
+      ...protocol.npm === '@ai-sdk/anthropic' ? { reasoningEffort: 'high' } : {},
       messages: [leading, user([{ type: 'text', text: 'hello' }])] }
     const chunks = await drain(initial)
     const finish = chunks.find(chunk => chunk.type === 'finish')
@@ -145,6 +151,13 @@ try {
     assertPromptAndTools(protocol, replayed)
     assert.ok(JSON.stringify(replayed).includes(resultText), 'the tool result must reach the resumed request')
     assert.ok(JSON.stringify(replayed).includes('call_probe'), 'the resumed tool result must retain its call identity')
+    if (protocol.npm === '@ai-sdk/anthropic') {
+      assert.equal(finish.replayState.response.model, protocol.id)
+      assert.equal(finish.replayState.response.responseModel, `${protocol.id}-reported-alias`)
+      assert.ok(replayed.messages.find(message => message.role === 'assistant').content.some(block =>
+        block.type === 'thinking' && block.thinking === 'signed thought' && block.signature === 'fixture-signature'),
+      'a reported model alias must preserve signed thinking during tool-result continuation')
+    }
 
     await drain({ ...initial, system: prompt, tools: [], messages: [user([{ type: 'text', text: 'one-shot' }])] })
     const oneShot = requests.get(protocol.path)[2]

@@ -117,6 +117,18 @@ try {
   assert.equal((await limitsAdapter.resolveModel('dsh-opencode-go', 'compat-model')).context.contextWindow, 100000)
   await drain(limitsAdapter.stream(request([])))
   assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 4096)
+  // Prepared dispatch must keep the old endpoint, credential reference and nested limits.
+  let preparedConfig = plugin.PlainConfig(structuredClone(config))
+  const preparedAdapter = new plugin.OpencodeGoAdapter({ config: () => preparedConfig,
+    resolveApiKey: async captured => captured.apiKeyEnv === 'OPENCODE_GO_COMPAT_KEY' ? 'fixture-key' : 'wrong-fixture-key' })
+  const preparedCall = await preparedAdapter.prepareCall('dsh-opencode-go', 'compat-model')
+  assert.equal(preparedCall.model.context.contextWindow, 50000)
+  preparedConfig.modelLimits['compat-model'].maxTokens = 2048
+  preparedConfig.modelLimits['compat-model'].contextWindow = 60000
+  preparedConfig = { ...preparedConfig, baseURL: 'http://127.0.0.1:1', apiKeyEnv: 'CHANGED_COMPAT_KEY' }
+  const preparedChunks = await drain(preparedCall.stream(request([])))
+  assert.equal(preparedChunks.find(c => c.type === 'finish').reason.kind, 'stop')
+  assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 1024)
   if (modern) {
     const messages = [
       { id: 'assistant-tool-call', role: 'assistant', source: { kind: 'model', provider: 'dsh-opencode-go', model: 'compat-model' },
