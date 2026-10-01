@@ -29,6 +29,7 @@ function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = 
 }
 
 type SectionField = 'baseURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+  | 'usageDisplay'
   | 'maxImages'
   | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'apiKey' | 'models'
   | 'modelLimits' | 'modelLimitDraft'
@@ -62,6 +63,7 @@ function listing(entries: readonly ModelEntry[]) {
 function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSectionState {
   return {
     ...settled,
+    usageDisplay: field('auto'),
     apiKeyEnv: field('OPENCODE_API_KEY'),
     baseURL: field('https://opencode.ai/zen/go/v1'),
     refreshMinutes: field('60'),
@@ -122,6 +124,28 @@ function openModelLimits(): void {
 }
 
 describe('OpencodeGoSection', () => {
+  it('stages the three usage display modes in advanced settings and offers reset', () => {
+    const reading = actions()
+    renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)
+    expect(screen.queryByRole('combobox', { name: en.usageDisplayLabel })).toBeNull()
+    openAdvanced()
+    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: en.usageDisplayLabel })
+    expect(select.value).toBe('always')
+    expect(within(select).getAllByRole('option').map(option => option.textContent))
+      .toEqual([en.usageDisplay_auto, en.usageDisplay_always, en.usageDisplay_off])
+    fireEvent.change(select, { target: { value: 'off' } })
+    expect(reading.edit).toHaveBeenCalledWith('usageDisplay', 'off')
+    expect(reading.save).not.toHaveBeenCalled()
+    fireEvent.click(within(select.parentElement!).getByRole('button', { name: en.reset }))
+    expect(reading.resetField).toHaveBeenCalledWith('usageDisplay')
+  })
+
+  it('disables usage display editing in a read-only deployment', () => {
+    renderSection(stateOf({ writable: false }))
+    openAdvanced()
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: en.usageDisplayLabel }).disabled).toBe(true)
+  })
+
   it('renders nothing until every injected seat is present', () => {
     const { container } = render(<OpencodeGoSection t={t} />)
     expect(container.innerHTML).toBe('')

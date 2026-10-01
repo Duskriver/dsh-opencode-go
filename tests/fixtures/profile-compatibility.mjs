@@ -45,6 +45,16 @@ try {
   const view = () => ctx.settings.describe().find(row => row.ns === 'opencode-go')
   assert.ok(view(), 'OpenCode Go must be exposed in the new profile settings')
   assert.equal(view().autoGenerate, false, 'the custom page owns these settings')
+  assert.equal(view().value.usageDisplay, 'auto', 'usage display keeps the previous default')
+  for (const usageDisplay of ['always', 'off']) {
+    await ctx.settings.update('opencode-go', { usageDisplay })
+    assert.equal(view().value.usageDisplay, usageDisplay)
+    assert.equal(entry.fiber, fiber, 'usage display changes preserve the running plugin')
+  }
+  await assert.rejects(ctx.settings.update('opencode-go', { usageDisplay: 'invalid' }))
+  assert.equal(view().value.usageDisplay, 'off', 'invalid modes leave the saved setting intact')
+  await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['usageDisplay'] }])
+  assert.equal(view().value.usageDisplay, 'auto', 'reset restores automatic usage display')
   assert.equal(view().value.maxImages, undefined, 'image count has no default')
   await ctx.settings.update('opencode-go', { maxImages: 30 })
   assert.equal(view().value.maxImages, 30)

@@ -92,6 +92,11 @@ export declare const en: {
     advancedSummary: string;
     advancedLabel: string;
     advancedHint: string;
+    usageDisplayLabel: string;
+    usageDisplayHint: string;
+    usageDisplay_auto: string;
+    usageDisplay_always: string;
+    usageDisplay_off: string;
     apiKeyEnvLabel: string;
     apiKeyEnvHint: string;
     baseURLLabel: string;

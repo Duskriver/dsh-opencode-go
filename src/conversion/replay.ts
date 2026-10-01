@@ -29,7 +29,7 @@ export interface PiAiReplayResponse {
   sdkProvider?: string
   /** Requested model identity, matching the durable assistant source. */
   model: string
-  /** Provider-reported model; only Anthropic replays it as the native model (reported in `message.model`, not `message.responseModel`). */
+  /** Provider-reported model; informational only, so requested identity still matches replay signatures. */
   responseModel?: string
   responseId?: string
   /** Provider-native effort for historical replay; absence is preserved. */
@@ -230,9 +230,8 @@ function replayedAssistant(message: Message, source: ModelMessageSource, rawStat
     content,
     api: state.response.api,
     provider: state.response.sdkProvider ?? state.response.provider,
-    // Anthropic reports aliases and fallbacks as model, unlike Completions' informational responseModel.
-    model: state.response.api === 'anthropic-messages'
-      ? state.response.responseModel ?? state.response.model : state.response.model,
+    // SDK signature matching uses the requested identity even when Anthropic reports an alias.
+    model: state.response.model,
     ...state.response.responseModel === undefined ? {} : { responseModel: state.response.responseModel },
     ...state.response.responseId === undefined ? {} : { responseId: state.response.responseId },
     ...state.response.providerThinkingLevel === undefined ? {} : { providerThinkingLevel: state.response.providerThinkingLevel },

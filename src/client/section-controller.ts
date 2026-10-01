@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { GoModel, GoModelCatalog } from '../models-contract.ts'
 import { PROVIDER_ID } from '../provider-identity.ts'
+import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } from '../usage-display.ts'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
@@ -42,6 +43,8 @@ const API_KEY_FIELD = 'apiKey'
 export interface OpencodeGoSettings {
   /** Whether the adapter serves its route; false withdraws it from every picker. */
   enabled?: boolean
+  /** Usage pill visibility, independent of the selected model in always mode. */
+  usageDisplay?: UsageDisplayMode
   /** Per-model switches; normal models default on, deprecated models default off. */
   modelVisibility?: Record<string, boolean>
   /** Credential reference naming the environment key. */
@@ -113,6 +116,7 @@ export interface OpencodeGoSectionState extends FormShell {
    * a withdrawn route is what the user is trying to observe.
    */
   enabled: boolean
+  usageDisplay: FieldState
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
@@ -193,6 +197,11 @@ export class OpencodeGoSectionController {
         // Present so the shared override/reset machinery tracks the field; the
         // page's switch writes it directly instead of staging it.
         booleanField('enabled'),
+        {
+          field: 'usageDisplay',
+          format: value => typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY,
+          parse: text => USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text } : undefined,
+        },
         textField('apiKeyEnv'),
         textField('baseURL'),
         numberField('refreshMinutes'),
@@ -231,6 +240,7 @@ export class OpencodeGoSectionController {
     return {
       ...this.form.shell(),
       enabled: this.enabled(),
+      usageDisplay: this.form.field('usageDisplay'),
       modelVisibility: this.scope.getSnapshot().value?.modelVisibility ?? {},
       pickerSaving: this.pickerSaving,
       pickerFailed: this.pickerFailed,

@@ -1,5 +1,11 @@
 # Verification
 
+## Release 0.1.19: consolidate pending features (2026-10-02)
+
+The prepared-call configuration, Anthropic alias replay and usage-display changes are now integrated with 0.1.18's MiMo controls. Prepared calls retain the captured endpoint, credential reference and nested capacities; later calls use updated settings. Anthropic replay preserves signed thinking against the requested model ID. Settings now offer Auto / Always / Off usage visibility, with Off and a disabled plugin stopping the poller. The existing default remains Auto.
+
+Host/Client type checks, production compilation, **398 tests in 28 files**, and freshness checks for **34 shipped artifacts** passed on macOS / Node 24.14.1. All **nine installed-host generations** passed, including DSH 0.2.0-rc.2, prepared-call dispatch, signed alias replay, MiMo Default/Off controls and usage-display settings. The complete compatibility run took 73.8 seconds including cleanup. Both npm and pnpm 11.7.0 Git installations passed without plugin build approval, retaining the plugin's private pi-ai 0.87.1 and the independent peer's 0.85.1. This integration uses isolated local gateway fixtures; the earlier live MiMo observations are recorded in the 0.1.18 entry.
+
 ## Release 0.1.18 validation (2026-10-02)
 
 The 0.1.18 manifest passed Host/Client type checks, production compilation, all **381 tests in 27 files**, and freshness checks for **33 shipped artifacts** on macOS / Node 24.14.1. Both npm and pnpm 11.7.0 Git installations passed with the new version, without plugin build approval; the plugin retains private pi-ai 0.87.1 and the independent peer retains public pi-ai 0.85.1. The nine-host compatibility checks and live OpenCode Go observations for this reasoning fix are recorded below.
@@ -22,6 +28,18 @@ Direct streaming requests to **OpenCode Go**, using the same TypeScript interval
 Two further live calls went through the rebuilt plugin, DSH LLM runtime and actual SDK, using an isolated temporary metadata cache. Default omitted the wire field and returned **14 reasoning tokens**, 74 reasoning characters and 1,605 answer characters. Explicit Off sent `none` and returned **0 reasoning tokens**, no reasoning characters and 902 answer characters. Both returned HTTP 200 and finished with `stop`. This confirms Default remains distinct from Off through the implemented request path; the installed user profile was not changed.
 
 Host/Client type checks and production compilation passed. `npm run test:ci` passed **381 tests in 27 files** and freshness checks for all **33 shipped artifacts**. New regressions cover online and outage paths, all four supported choices, rejection of unsupported choices before inference, Default/Off alternation without shared-map mutation, exact-model/protocol boundaries, future advertised `none`, and native controls. `DSH_COMPAT_CONCURRENCY=3 npm run test:compat` passed all **nine isolated installed-host generations**, from 0.1.5-rc.1 through **0.2.0-rc.2**, with 13 reasoning streams per generation plus the existing Host/Client/transcript/profile/bundle checks; total time including cleanup was 88.2 seconds. Other operating systems and a Desktop GUI session were not exercised for this change.
+
+## Prepared-call configuration and Anthropic alias replay (2026-09-30)
+
+The adapter now copies its configuration, including nested model limits, before catalog discovery. Its `prepareCall` binds the resolved model, catalog provider and that configuration to the eventual stream. Credential resolution receives the captured configuration instead of re-reading the current key reference. This keeps an already prepared request on its original endpoint and credential reference while later requests use changed settings. Direct streams use the same capture path. Existing credential values still resolve through the Host service at dispatch; the reference is the frozen fact.
+
+Anthropic replay now reconstructs the assistant with the requested model ID. The provider-reported alias remains in `responseModel` as informational metadata, preserving envelope version 2 and previously saved history. pi-ai therefore retains signed thinking when continuing the same requested model, while an actual switch to another model still strips those signatures.
+
+Before the fix, `npx vitest run tests/call-snapshot.spec.ts tests/provider-identity.spec.ts` failed all four new regressions: nested limits changed during discovery, a prepared request went to the new endpoint, a direct stream combined the old endpoint with the new key reference, and JSON-restored Anthropic alias history lost its thinking signature. The same tests pass after the fix, also checking that subsequent requests use the new endpoint/key/capacities and that actual model changes still remove incompatible signatures.
+
+`npm test` passed Host/Client type checks, rebuilt the distributed artifacts and passed **371 tests in 27 files**. `npm run check:dist` confirmed all **32** shipped files match source. The installed-package matrix passed all **nine** host generations from `0.1.5-rc.1` through `0.2.0-rc.2`; each now checks prepared endpoint/key/limit retention and signed Anthropic alias replay through a streamed tool call, JSON restoration and tool-result continuation.
+
+The original differential probe was rerun with the rebuilt tarball and real `0.2.0-rc.2` dependencies. Both native and plugin prepared requests stayed on endpoint A, the plugin paired endpoint A with fixture key A during a held catalog refresh, and both retained Anthropic thinking signatures. Existing reasoning defaults and forced output-cap behavior remained unchanged. All requests used isolated temporary caches, loopback gateways and dummy credentials; no paid inference or installed user profile was changed during this fix.
 
 ## Release 0.1.17 validation (2026-09-30)
 

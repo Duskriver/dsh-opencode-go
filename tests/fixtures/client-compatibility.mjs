@@ -58,12 +58,18 @@ try {
   const slots = mock.fn(() => () => {})
   const getForm = mock.fn(() => scope)
   const bindScope = mock.fn(() => scope)
+  const directory = store.createSnapshotStore({
+    current: { provider: 'deepseek', model: 'deepseek-chat' },
+    routable: true, groups: [], failures: [], status: 'ready', error: null,
+  })
   const ctx = {
     inject: (services, callback) => {
-      if (services.includes(modern ? 'configForms' : 'settingsScope')) callback({
+      if (services.includes(modern ? 'configForms' : 'settingsScope')
+        || services.includes('modelDirectories') || services.includes('remote.opencodeGoUsage')) callback({
         ...ctx,
         remote: new Proxy(ctx.remote, { get(target, key) {
           if (key === 'opencodeGoModels') assert.ok(services.includes('remote.opencodeGoModels'), 'catalog service must be injected')
+          if (key === 'opencodeGoUsage') assert.ok(services.includes('remote.opencodeGoUsage'), 'usage service must be injected')
           return target[key]
         } }),
       })
@@ -72,9 +78,11 @@ try {
     effect: install => { effects.push(install()) },
     locale: { getLocale: () => ({ active: 'en' }), register: () => () => {}, bind: () => key => key },
     settingsScope: { bind: bindScope },
+    modelDirectories: { directoryFor: () => ({ store: directory }) },
     remote: {
       $mount: async () => () => {}, $on: () => () => {},
       opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
+      opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
       credentials: { describe: async () => ({ ok: true, value: {} }) },
     },
     slots: { inject: (_name, install) => install(), register: slots },
@@ -90,7 +98,24 @@ try {
     assert.equal(bindScope.mock.calls[0]?.arguments[0].namespace, 'llm-opencode-go')
     assert.equal(getForm.mock.callCount(), 0)
   }
-  const [options, Component] = slots.mock.calls[0].arguments
+  const [usageOptions, UsageComponent] = slots.mock.calls.find(call => call.arguments[0].id === 'opencode-go-usage').arguments
+  const usageProps = usageOptions.inject('fixture-session')
+  assert.equal(usageProps.settings, scope, 'usage pill follows the same settings scope as the advanced form')
+  const usageMarkup = () => renderToStaticMarkup(React.createElement(UsageComponent, usageProps))
+  assert.equal(usageMarkup(), '', 'auto hides usage on other providers')
+  snapshot.value = { usageDisplay: 'always' }
+  assert.match(usageMarkup(), /aria-haspopup="dialog"/, 'always shows the pill on other providers')
+  assert.doesNotMatch(usageMarkup(), /role="dialog"/, 'the usage panel starts collapsed')
+  snapshot.value = { usageDisplay: 'always', enabled: false }
+  assert.equal(usageMarkup(), '', 'disabled plugins hide even an always-visible pill')
+  snapshot.value = { usageDisplay: 'off' }
+  directory.set({ ...directory.getSnapshot(), current: { provider: 'dsh-opencode-go', model: 'compat-model' } })
+  assert.equal(usageMarkup(), '', 'off hides usage even on this plugin provider')
+  snapshot.value = {}
+  assert.match(usageMarkup(), /aria-haspopup="dialog"/, 'auto retains usage on this plugin provider')
+  directory.set({ ...directory.getSnapshot(), current: { provider: 'opencode-go', model: 'compat-model' } })
+  assert.equal(usageMarkup(), '', 'auto keeps the built-in provider separate')
+  const [options, Component] = slots.mock.calls.find(call => call.arguments[0].id === 'opencode-go').arguments
   assert.equal(options.id, 'opencode-go')
   assert.equal(options.name, 'settings.section')
   assert.equal(typeof Component, 'function')

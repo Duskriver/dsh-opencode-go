@@ -86,7 +86,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.18.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.19.tgz
 ```
 
 源码开发时显式运行 `npm run compile`；普通用户直接安装预编译产物，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
@@ -115,6 +115,8 @@ dsh plugin --profile web update dsh-opencode-go --latest
 完成后重启 `dsh web` 并刷新浏览器。Headless 用户将 `web` 换成 `headless`；如果两个 profile 都安装了插件，需要分别升级。
 
 ## 订阅用量显示
+
+在「设置 → OpenCode Go → 高级设置 → 额度显示」中选择并保存：**自动（默认）**仅在选中本插件的 DSH OpenCode Go 模型时显示；**常驻**在使用其他模型（包括宿主自带的 `opencode-go`）时也显示；**关闭**隐藏胶囊并停止轮询。停用 OpenCode Go 后所有模式均隐藏。显示时点击胶囊展开用量面板。
 
 用量每分钟刷新。临时网络或服务错误会保留同一账号的上次数据，并标明刷新失败、更新时间和错误原因；可在用量弹层中立即重试。首次获取失败或鉴权失败时不显示旧额度。模型目录、模型配置和用量的 JSON 请求遇到短暂连接重置时会在原有超时范围内额外重试一次；这不能保证故障中的网络恢复可用。
 

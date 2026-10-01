@@ -86,7 +86,7 @@ To build from source and install a local package:
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.18.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.19.tgz
 ```
 
 Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
@@ -115,6 +115,8 @@ dsh plugin --profile web update dsh-opencode-go --latest
 Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web` with `headless`; if both profiles have the plugin installed, update each one separately.
 
 ## Subscription usage display
+
+Under **Settings → OpenCode Go → Advanced settings → Usage display**, choose a mode and save: **Auto (default)** shows the pill only for this plugin's DSH OpenCode Go models; **Always** keeps it visible with other models, including the built-in `opencode-go` provider; **Off** hides it and stops polling. Disabling OpenCode Go hides the pill in every mode. Click the pill to open the usage panel.
 
 Usage refreshes every minute. Temporary network or service errors retain the last reading for the same account, with a failure notice, timestamp, and reason; the usage panel offers an immediate retry. Initial and authentication failures do not show old usage. Catalog, metadata, and usage JSON requests retry a transient connection reset once within the original timeout budget; this cannot guarantee recovery while the network is failing.
 

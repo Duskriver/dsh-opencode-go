@@ -18,6 +18,7 @@ import type {
 } from './section-controller.ts'
 import { ModelEditor } from './ModelEditor.tsx'
 import type { en } from './locales.ts'
+import { USAGE_DISPLAY_MODES } from '../usage-display.ts'
 import css from './Section.module.css'
 
 // 0.1.7 names icons by stroke weight; older hosts name them by pixel size.
@@ -51,6 +52,7 @@ interface ValueFieldProps {
   resetLabel: string
   disabled: boolean
   numeric?: boolean
+  options?: readonly { value: string; label: string }[]
   onEdit: (text: string) => void
   onReset: () => void
 }
@@ -78,7 +80,18 @@ function ValueField(props: ValueFieldProps) {
           )
           : null}
       </div>
-      <input
+      {props.options ? <select
+        id={props.id}
+        name={props.id}
+        aria-describedby={hintId}
+        className={props.field.invalid ? css.inputInvalid : css.input}
+        aria-invalid={props.field.invalid || undefined}
+        value={props.field.text}
+        disabled={props.disabled}
+        onChange={event => { props.onEdit(event.target.value) }}
+      >
+        {props.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select> : <input
         id={props.id}
         name={props.id}
         autoComplete="off"
@@ -90,7 +103,7 @@ function ValueField(props: ValueFieldProps) {
         value={props.field.text}
         disabled={props.disabled}
         onChange={(event) => { props.onEdit(event.target.value) }}
-      />
+      />}
       <p id={hintId} className={props.field.invalid ? css.invalid : css.hint}>
         {props.field.invalid ? props.invalidLabel : props.hint}
       </p>
@@ -213,7 +226,7 @@ function Loaded(props: {
     resetLabel: t('reset'),
     disabled,
   }
-  const advancedOverridden = state.apiKeyEnv.overridden || state.baseURL.overridden
+  const advancedOverridden = state.usageDisplay.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden
     || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
     || state.maxImages.overridden
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
@@ -337,6 +350,16 @@ function Loaded(props: {
             <div id="opencode-go-advanced" className={css.cardBody}>
               <p className={css.hint}>{t('advancedHint')}</p>
               <div className={css.advancedGrid}>
+                <ValueField
+                  id="opencode-go-usage-display"
+                  label={t('usageDisplayLabel')}
+                  hint={t('usageDisplayHint')}
+                  field={state.usageDisplay}
+                  options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
+                  {...fieldProps}
+                  onEdit={text => { props.edit('usageDisplay', text) }}
+                  onReset={() => { props.resetField('usageDisplay') }}
+                />
                 <ValueField
                   id="opencode-go-api-key-env"
                   label={t('apiKeyEnvLabel')}

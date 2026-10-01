@@ -1,2 +1,4 @@
 import type { Context } from '@deepseek-ai/cordis';
-export declare function registerUsagePill(ctx: Context): void;
+import type { SettingsScope } from './settings.ts';
+import type { OpencodeGoSettings } from './section-controller.ts';
+export declare function registerUsagePill(ctx: Context, settings: SettingsScope<OpencodeGoSettings>): void;

@@ -55,7 +55,6 @@ export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remot
  */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'llm-opencode-go: copy dictionaries')
-  registerUsagePill(ctx)
   const modelsReady = ctx.remote.$mount(goRemote)
   ctx.effect(async () => await modelsReady)
   ctx.inject(['configForms', 'remote.opencodeGoModels'], child => {
@@ -73,6 +72,7 @@ export function apply(ctx: ClientContext): void {
 }
 
 function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
+  registerUsagePill(ctx, scope)
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
