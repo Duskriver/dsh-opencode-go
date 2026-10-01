@@ -47,14 +47,7 @@ import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } fr
 import { assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
-
-/**
- * pi-ai thinking formats that answer an unset effort with an explicit disable
- * (`thinking: { type: 'disabled' }`, `enable_thinking: false`). Every other
- * format omits the parameter and lets the provider decide, so a default effort
- * is only needed here.
- */
-const DISABLES_THINKING_WHEN_UNSET: ReadonlySet<string> = new Set(['deepseek', 'zai', 'qwen', 'qwen-chat-template'])
+import { NATIVE_THINKING_FLAGS, withRequestReasoning } from './reasoning.ts'
 
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
@@ -209,7 +202,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       // fallback @deepseek-ai/dsh-llm-deepseek uses. Formats that leave the
       // choice to the provider keep no default: there is nothing to correct.
       const format = (model.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat
-      const fallback = format !== undefined && DISABLES_THINKING_WHEN_UNSET.has(format)
+      const fallback = format !== undefined && NATIVE_THINKING_FLAGS.has(format)
         ? levels.includes('high') ? 'high' : levels.findLast(level => level !== 'off')
         : undefined
       reasoning.reasoning = {
@@ -314,7 +307,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         : await toPiContext({ ...options, signal: watchdog.signal }, imageRequest, this.options.onReplayDegrade)
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
-      const events = snapshot.provider.streamSimple(model, normalizeContext(context), {
+      const events = snapshot.provider.streamSimple(withRequestReasoning(model, reasoning), normalizeContext(context), {
         apiKey,
         ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },

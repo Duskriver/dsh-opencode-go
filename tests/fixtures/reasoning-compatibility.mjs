@@ -14,6 +14,7 @@ const models = {
   'deepseek-v4-flash': { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] },
   'qwen3.6-plus': { reasoning_options: [{ type: 'toggle' }] },
   'glm-5.3': { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] },
+  'mimo-v2.6-flash': { reasoning_options: [] },
 }
 const bodies = []
 const networkFetch = globalThis.fetch
@@ -40,7 +41,7 @@ const server = createServer((request, response) => {
     assert.equal(request.headers.authorization, 'Bearer fixture-key')
     const parsed = JSON.parse(body)
     bodies.push(parsed)
-    const thinkingEnabled = parsed.thinking?.type !== 'disabled' && parsed.enable_thinking !== false
+    const thinkingEnabled = parsed.thinking?.type !== 'disabled' && parsed.enable_thinking !== false && parsed.reasoning_effort !== 'none'
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     for (const event of [
       ...thinkingEnabled ? [{ choices: [{ delta: { role: 'assistant', reasoning_content: 'think' }, index: 0, finish_reason: null }] }] : [],
@@ -75,6 +76,12 @@ try {
     ['qwen3.6-plus', 'off', { enable_thinking: false }],
     ['glm-5.3', undefined, {}],
     ['glm-5.3', 'low', { reasoning_effort: 'low' }],
+    ['mimo-v2.6-flash', undefined, {}],
+    ['mimo-v2.6-flash', 'off', { reasoning_effort: 'none' }],
+    ['mimo-v2.6-flash', 'low', { reasoning_effort: 'low' }],
+    ['mimo-v2.6-flash', 'medium', { reasoning_effort: 'medium' }],
+    ['mimo-v2.6-flash', 'high', { reasoning_effort: 'high' }],
+    ['mimo-v2.6-flash', undefined, {}],
   ]
   for (const [model, effort, wire] of cases) {
     const request = { provider: 'dsh-opencode-go', model,
@@ -82,9 +89,10 @@ try {
         source: { kind: 'plugin', plugin: 'reasoning-compat-test' } })],
       ...effort === undefined ? {} : { reasoningEffort: llm.ReasoningEffortId(effort) },
     }
-    const expectedDefault = model === 'glm-5.3' ? undefined : 'high'
+    const expectedDefault = model === 'glm-5.3' || model === 'mimo-v2.6-flash' ? undefined : 'high'
     const info = await ctx.llm.resolveModelInfo('dsh-opencode-go', model)
     assert.equal(info.reasoning.defaultEffort, expectedDefault)
+    if (model === 'mimo-v2.6-flash') assert.deepEqual(info.reasoning.efforts.map(effort => effort.id), ['off', 'low', 'medium', 'high'])
     const resolved = await ctx.llm.resolveCallConfig(request)
     assert.equal(resolved.reasoningEffort, effort ?? expectedDefault)
 
@@ -97,7 +105,7 @@ try {
     assert.equal(chunks.some(c => c.type === 'reasoning-delta' && c.text === 'think'), effort !== 'off')
     assert.ok(chunks.some(c => c.type === 'text-delta' && c.text === 'ok'))
   }
-  console.log(`PASS: reasoning compatibility (${host}): defaults, explicit low/off, qwen toggle, provider defaults; ${cases.length} streams`)
+  console.log(`PASS: reasoning compatibility (${host}): defaults, explicit low/off, qwen toggle, MiMo wire mappings; ${cases.length} streams`)
 } finally {
   await ctx.fiber.dispose()
   server.closeAllConnections()

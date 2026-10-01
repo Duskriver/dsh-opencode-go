@@ -1,5 +1,28 @@
 # Verification
 
+## Release 0.1.18 validation (2026-10-02)
+
+The 0.1.18 manifest passed Host/Client type checks, production compilation, all **381 tests in 27 files**, and freshness checks for **33 shipped artifacts** on macOS / Node 24.14.1. Both npm and pnpm 11.7.0 Git installations passed with the new version, without plugin build approval; the plugin retains private pi-ai 0.87.1 and the independent peer retains public pi-ai 0.85.1. The nine-host compatibility checks and live OpenCode Go observations for this reasoning fix are recorded below.
+
+## Issue #28: MiMo reasoning controls (2026-10-02)
+
+The metadata reader no longer derives an `off` effort spelling from intrinsic reasoning or creates generic OpenAI effort levels from toggle/budget declarations. Established DeepSeek/Qwen native switches remain supported. An exact `mimo-v2.6-flash` / OpenAI Completions rule supplies **Off, Low, Medium, High** in both online metadata and built-in outage fallbacks. Off maps to `none`; an unset effort suppresses the SDK's implicit Off mapping on a request-local model copy, preserving gateway-default reasoning and the shared picker map. Other MiMo models do not inherit this rule.
+
+Direct streaming requests to **OpenCode Go**, using the same TypeScript interval-merging prompt and a 4,096-token output cap, produced the following observations. Counts measure individual responses, not comparative reasoning quality or guaranteed effort ordering.
+
+| Wire `reasoning_effort` | HTTP | Reasoning tokens | Finish |
+| --- | ---: | ---: | --- |
+| Omitted | 200 | 122 | stop |
+| `none` | 200 | 0 | stop |
+| `low` | 200 | 626 | stop |
+| `medium` | 200 | 383 | stop |
+| `high` | 200 | 71 | stop |
+| `off` | 400 | — | Invalid request parameters |
+
+Two further live calls went through the rebuilt plugin, DSH LLM runtime and actual SDK, using an isolated temporary metadata cache. Default omitted the wire field and returned **14 reasoning tokens**, 74 reasoning characters and 1,605 answer characters. Explicit Off sent `none` and returned **0 reasoning tokens**, no reasoning characters and 902 answer characters. Both returned HTTP 200 and finished with `stop`. This confirms Default remains distinct from Off through the implemented request path; the installed user profile was not changed.
+
+Host/Client type checks and production compilation passed. `npm run test:ci` passed **381 tests in 27 files** and freshness checks for all **33 shipped artifacts**. New regressions cover online and outage paths, all four supported choices, rejection of unsupported choices before inference, Default/Off alternation without shared-map mutation, exact-model/protocol boundaries, future advertised `none`, and native controls. `DSH_COMPAT_CONCURRENCY=3 npm run test:compat` passed all **nine isolated installed-host generations**, from 0.1.5-rc.1 through **0.2.0-rc.2**, with 13 reasoning streams per generation plus the existing Host/Client/transcript/profile/bundle checks; total time including cleanup was 88.2 seconds. Other operating systems and a Desktop GUI session were not exercised for this change.
+
 ## Release 0.1.17 validation (2026-09-30)
 
 After integrating the npm 10 lockfile correction, the 0.1.17 manifest passed Host/Client type checks, all **367 tests in 26 files**, and freshness checks for **32 shipped artifacts** on macOS / Node 24.14.1. Both npm and pnpm 11.7.0 Git installs passed without plugin build approval; the installed package uses private pi-ai 0.87.1 while the independent peer probe keeps public pi-ai 0.85.1. The nine-generation runtime compatibility results below remain applicable: the subsequent integration changes only lockfile metadata, documentation and the package version.
