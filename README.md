@@ -86,7 +86,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.18.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.19.tgz
 ```
 
 源码开发时显式运行 `npm run compile`；普通用户直接安装预编译产物，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
