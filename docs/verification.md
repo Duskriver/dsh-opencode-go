@@ -1,5 +1,11 @@
 # Verification
 
+## Release 0.1.20: usage pill and settings draft fixes (2026-10-02)
+
+The release includes the Host scope receiver fix and shared no-op draft predicate from PR #34. The installed-client compatibility fixture now reads instance state and exercises both SSR snapshot reads and client subscription cleanup. Desktop follow-up confirmed that saving Always works after restarting a Host process that predated the installed plugin update; the upgrade instructions now explicitly require quitting and reopening desktop Harness.
+
+On macOS / Node 24.14.1, `DSH_COMPAT_CONCURRENCY=4 npm run verify` passed **401 tests in 28 files**, freshness checks for **34 shipped build files**, **all nine installed-host generations**, and both **npm and pnpm Git installation checks**. The compatibility run took **87.9 seconds** including cleanup; installation checks took **11.8 seconds**. Both installation paths loaded the shipped artifacts without source builds or plugin build approval and retained the private pi-ai 0.87.1 alongside the independent peer's 0.85.1. The test suite used local gateways and isolated consumers.
+
 ## Usage pill rendering on a real Host and the staged override badge (2026-10-02)
 
 The browser half no longer hands the Host settings scope's methods over as plain values. `UsagePill` subscribed with `useSyncExternalStore(settings.subscribe, settings.getSnapshot, ...)`, and a Host scope is a class instance whose methods read their own state (`ConfigFormController` behind `ctx.configForms.get(entryId)`, `SettingsScopeController` behind `ctx.settingsScope.bind(spec)`); both providers return that instance as-is. The detached reference lost its receiver, so the pill threw `TypeError: Cannot read properties of undefined (reading 'store')` on its first render, the slot's per-entry error boundary removed it, and no usage mode could ever show a pill — including Always, which is why a saved `usageDisplay: always` had no visible effect. React now reaches the scope through `useCallback` wrappers, the same shape the Host's own slot outlet uses.

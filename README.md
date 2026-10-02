@@ -86,7 +86,7 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.19.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.20.tgz
 ```
 
 源码开发时显式运行 `npm run compile`；普通用户直接安装预编译产物，无需 `--legacy-peer-deps`。多版本 DSH 兼容性测试使用独立环境，不参与普通安装或构建。Headless 用户将 `web` 换成 `headless`。
@@ -97,7 +97,7 @@ dsh plugin --profile web add ./dsh-opencode-go-0.1.19.tgz
 npm run compile       # 更新 lib/，与源码一起提交
 npm test              # 基础功能测试（自动重新构建）
 npm run check:dist    # 检查已提交产物是否与源码一致
-npm run test:compat   # 同一安装包在 8 套独立 DSH 环境中测试
+npm run test:compat   # 同一安装包在 9 套独立 DSH 环境中测试
 npm run test:install  # npm / pnpm 无额外构建授权的 Git 安装检查
 npm run verify        # 执行以上全部检查
 ```
@@ -113,6 +113,8 @@ dsh plugin --profile web update dsh-opencode-go --latest
 ```
 
 完成后重启 `dsh web` 并刷新浏览器。Headless 用户将 `web` 换成 `headless`；如果两个 profile 都安装了插件，需要分别升级。
+
+桌面版升级后，请完全退出并重新打开 DeepSeek Harness，以加载更新后的插件代码。
 
 ## 订阅用量显示
 

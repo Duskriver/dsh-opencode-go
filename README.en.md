@@ -86,7 +86,7 @@ To build from source and install a local package:
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.19.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.20.tgz
 ```
 
 Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
@@ -97,7 +97,7 @@ Source development builds the plugin explicitly with `npm run compile`; `--legac
 npm run compile       # Regenerate lib/ and commit it with source changes
 npm test              # Core tests, rebuilding the plugin first
 npm run check:dist    # Verify shipped artifacts match the source
-npm run test:compat   # One tarball tested in 8 independent DSH environments
+npm run test:compat   # One tarball tested in 9 independent DSH environments
 npm run test:install  # npm / pnpm Git installs without plugin build approval
 npm run verify        # All of the above
 ```
@@ -113,6 +113,8 @@ dsh plugin --profile web update dsh-opencode-go --latest
 ```
 
 Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web` with `headless`; if both profiles have the plugin installed, update each one separately.
+
+After updating the desktop plugin, fully quit and reopen DeepSeek Harness to load the updated plugin code.
 
 ## Subscription usage display
 
