@@ -276,7 +276,9 @@ export class StagedForm {
     const write = staged.clear ? { kind: 'clear' as const } : spec.parse(staged.text)
     return {
       text: staged.text,
-      overridden: write?.kind === 'set',
+      // A draft a save would skip leaves the user layer exactly as it stands, so
+      // the badge answers for that standing override instead of the edit.
+      overridden: this.unchangedDraft(field, staged) ? this.stored(field) : write?.kind === 'set',
       invalid: write === undefined,
     }
   }
@@ -346,7 +348,7 @@ export class StagedForm {
         if (this.stored(field)) plan.push({ field, run: () => this.clear(field) })
         continue
       }
-      if (staged.text === spec.format(this.sectionValue(field))) continue
+      if (this.unchangedDraft(field, staged)) continue
       const write = spec.parse(staged.text)
       if (write === undefined) plan.push({ field, run: undefined })
       else if (write.kind === 'clear') plan.push({ field, run: () => this.clear(field) })
@@ -398,6 +400,17 @@ export class StagedForm {
   private stored(field: string): boolean {
     const user = this.userLayer()
     return user !== undefined && Object.hasOwn(user, field)
+  }
+
+  /**
+   * Whether a draft already equals the field's effective value, so a save would
+   * write nothing. The save plan and the override badge both answer for it.
+   * @param field - field name inside the namespace section.
+   * @param staged - the staged edit to test.
+   * @returns true when the draft is a no-op; a clear is never one.
+   */
+  private unchangedDraft(field: string, staged: StagedEdit): boolean {
+    return !staged.clear && staged.text === this.spec(field).format(this.sectionValue(field))
   }
 
   private publish(): void {
