@@ -29,7 +29,7 @@
 
 ![在 DSH 插件页添加、安装并启用 dsh-opencode-go](docs/assets/install-via-dsh.gif)
 
-然后打开 **设置 → OpenCode Go**，填入 API Key 并保存，即可在会话中选择 OpenCode Go 模型。
+然后打开 **设置 → OpenCode Go**，填入 API Key 并保存，或在「账号」中添加账号，即可在会话中选择 OpenCode Go 模型。
 
 也支持在添加插件时直接输入 Git 仓库地址：
 
@@ -115,6 +115,24 @@ dsh plugin --profile web update dsh-opencode-go --latest
 完成后重启 `dsh web` 并刷新浏览器。Headless 用户将 `web` 换成 `headless`；如果两个 profile 都安装了插件，需要分别升级。
 
 桌面版升级后，请完全退出并重新打开 DeepSeek Harness，以加载更新后的插件代码。
+
+
+
+Headless 或手动配置可在插件的 `config` 中填写：
+
+```yaml
+apiKeyEnv: OPENCODE_API_KEY
+accounts:
+  - id: primary
+    name: 主账号
+    apiKeyEnv: OPENCODE_API_KEY
+  - id: backup
+    name: 备用账号
+    apiKeyEnv: OPENCODE_GO_BACKUP_KEY
+autoSwitch: false
+```
+
+分别通过凭据服务或环境变量提供两个引用的 Key。`apiKeyEnv` 指向首选账号；省略 `accounts` 保留旧版单 Key 行为，`accounts: []` 表示已移除全部账号。
 
 ## 订阅用量显示
 

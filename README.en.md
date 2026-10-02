@@ -116,6 +116,34 @@ Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web
 
 After updating the desktop plugin, fully quit and reopen DeepSeek Harness to load the updated plugin code.
 
+## Multiple accounts and switching
+
+Open **Settings → OpenCode Go → Accounts** to add up to 20 named API keys. Adding, renaming, replacing a key, removing, and selecting a preferred account take effect immediately. Model capacities and advanced fields still use Save. Existing `apiKeyEnv` configuration appears as the default account without re-entering its key.
+
+Each account shows its rolling, weekly, and monthly usage, reset times, and last successful update. Usage refreshes every minute while the settings page is visible. The conversation usage panel also lets you switch accounts; it immediately clears the old account's data and rejects late responses. Temporary failures retain data only for the same account and key.
+
+The preferred account is shared by conversations in the current profile and affects subsequent new requests. Requests already generating retain their resolved key. Account metadata and preference survive restart. Web and Headless profiles keep their own configuration. Save or discard a key draft before changing accounts; if another surface switches accounts, the draft remains addressed to the original account.
+
+Keys are stored through the host credential service and never returned to the page. Configuration contains account names, IDs, and credential references. Read-only environment keys can be selected but cannot be replaced in the UI. Removing accounts created here also removes their dedicated credential; existing external references are retained. Removing every account withdraws the provider until another account is added.
+
+**Automatic fallback** is off by default. When enabled, missing/rejected keys or exhausted quota can trigger attempts with the other accounts in list order, before any content or tool call is emitted and only when no token usage was reported. Each account is tried at most once per request. The preferred account stays selected; a successful fallback is reported in the usage panel with its reason and time. Partial responses, permission errors, ordinary rate limits, network errors, and server errors stay with host recovery. Cancellation stops further attempts. Quotas remain controlled by the upstream subscriptions.
+
+For Headless or manual configuration, put the following under the plugin's `config`:
+
+```yaml
+apiKeyEnv: OPENCODE_API_KEY
+accounts:
+  - id: primary
+    name: Primary
+    apiKeyEnv: OPENCODE_API_KEY
+  - id: backup
+    name: Backup
+    apiKeyEnv: OPENCODE_GO_BACKUP_KEY
+autoSwitch: false
+```
+
+Supply both keys through the credential service or environment variables. `apiKeyEnv` selects the preferred account. Omitting `accounts` preserves legacy single-key behavior; `accounts: []` explicitly removes every account.
+
 ## Subscription usage display
 
 Under **Settings → OpenCode Go → Advanced settings → Usage display**, choose a mode and save: **Auto (default)** shows the pill only for this plugin's DSH OpenCode Go models; **Always** keeps it visible with other models, including the built-in `opencode-go` provider; **Off** hides it and stops polling. Disabling OpenCode Go hides the pill in every mode. Click the pill to open the usage panel.

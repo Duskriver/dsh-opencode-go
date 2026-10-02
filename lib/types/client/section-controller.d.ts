@@ -14,6 +14,8 @@ import type { GoModel, GoModelCatalog } from '../models-contract.ts';
 import { type UsageDisplayMode } from '../usage-display.ts';
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { SettingsScope } from './settings.ts';
+import type { GoAccount } from '../accounts.ts';
+import { type GoAccountsState, type GoAccountsActions } from './accounts-controller.ts';
 import { type FieldState, type FormActions, type FormShell } from './staged-form.ts';
 /** Namespace of the OpenCode Go adapter. Spelled here rather than imported: a client package must not depend on a Host package. */
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
@@ -27,6 +29,8 @@ export interface OpencodeGoSettings {
     modelVisibility?: Record<string, boolean>;
     /** Credential reference naming the environment key. */
     apiKeyEnv?: string;
+    accounts?: GoAccount[] | null;
+    autoSwitch?: boolean;
     /** The gateway endpoint; also the live listing base. */
     baseURL?: string;
     /** Live catalog re-resolution interval, in minutes. */
@@ -82,6 +86,7 @@ export type OpencodeGoModels =
 };
 /** What the settings page renders. */
 export interface OpencodeGoSectionState extends FormShell {
+    accounts?: GoAccountsState;
     /**
      * Whether the adapter currently serves its route. Resolved from the section
      * rather than staged: the switch writes on the click that flips it, because
@@ -122,7 +127,7 @@ export interface OpencodeGoSectionState extends FormShell {
     modelLimitDraft: OpencodeGoModelLimits;
 }
 /** The registration-side face the page's slot entry injects. */
-export interface OpencodeGoSectionFace extends FormActions {
+export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
     hooks: {
         /** Page snapshot bound by the UI renderer as useOpencodeGo. */
         opencodeGo: SnapshotStore<OpencodeGoSectionState>;
@@ -150,12 +155,15 @@ export declare class OpencodeGoSectionController {
     private pickerFailed;
     private face;
     private readonly unsubscribe;
+    private accounts;
+    private credentialRequest;
+    private keyDraftRef;
     /**
      * @param scope - the bound settings scope for the `llm-opencode-go` namespace.
      * @param ctx - the page plugin's context, whose `remote.credentials` namespace
      *   answers for the credential the section references.
      */
-    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>);
+    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<import('../usage-contract.ts').GoUsage>);
     /** Release subscriptions without disposing the host's shared form. */
     dispose(): void;
     private projection;

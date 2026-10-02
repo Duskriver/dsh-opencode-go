@@ -58,6 +58,50 @@ it('keeps unavailable or malformed usage distinct from zero', () => {
   }
 })
 
+it('reads named accounts through the real RPC contract without switching the active account or exposing keys', async () => {
+  const calls: string[] = []
+  let status = 200
+  const server = createServer((req, res) => {
+    calls.push(req.headers.authorization ?? '')
+    res.writeHead(status, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ usage }))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('missing address')
+  const ctx = new Context()
+  cleanups.push(() => ctx.fiber.dispose())
+  await ctx.plugin(Registry)
+  await ctx.plugin(Gateway)
+  registerGoRemotes(ctx)
+  const active = 'ACCOUNT_A'
+  let backupKey = 'backup-private-key'
+  await ctx.plugin(GoUsageService, {
+    baseURL: () => `http://127.0.0.1:${address.port}/v1`, activeRef: () => active,
+    accountRefs: () => ['ACCOUNT_A', 'ACCOUNT_B'],
+    resolveApiKey: async ref => ref === 'ACCOUNT_B' ? backupKey : 'primary-private-key',
+    lastSwitch: () => ({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'credential', at: 1 }),
+  })
+  const readAccount = (ref: string) => ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'readAccount', args: { ref } })
+  const first = await readAccount('ACCOUNT_A')
+  const backup = await readAccount('ACCOUNT_B')
+  expect(first.source).not.toBe(backup.source)
+  expect((await readAccount('ACCOUNT_A')).source).toBe(first.source)
+  backupKey = 'rotated-private-key'
+  const rotated = await readAccount('ACCOUNT_B')
+  expect(rotated.source).not.toBe(backup.source)
+  expect(active).toBe('ACCOUNT_A')
+  expect(calls).toEqual(['Bearer primary-private-key', 'Bearer backup-private-key', 'Bearer primary-private-key', 'Bearer rotated-private-key'])
+  await expect(readAccount('NOT_A_SAVED_ACCOUNT')).rejects.toMatchObject({ code: 'gateway/bad-request' })
+  expect(calls).toHaveLength(4)
+  expect(JSON.stringify([first, backup, rotated])).not.toContain('private-key')
+  status = 401
+  await expect(ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }))
+    .rejects.toMatchObject({ details: { retainPrevious: false,
+      lastSwitch: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'credential', at: 1 } } })
+})
+
 async function usageReader(body: Buffer, headers: Record<string, string> = {}) {
   const server = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'application/json', ...headers })

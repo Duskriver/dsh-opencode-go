@@ -10,6 +10,7 @@
  */
 import z from '@deepseek-ai/schemastery';
 import { type UsageDisplayMode } from './usage-display.ts';
+import { type GoAccount } from './accounts.ts';
 /** Environment variable resolving the OpenCode API key. */
 export declare const DEFAULT_API_KEY_ENV = "OPENCODE_API_KEY";
 /** Successful refresh lifetime; failed refreshes retry sooner and explicit discovery revalidates immediately. */
@@ -45,6 +46,9 @@ export interface OpencodeGoConfig {
     modelVisibility?: Record<string, boolean>;
     /** Credential reference: the environment variable the key resolves from. */
     apiKeyEnv: string;
+    accounts?: GoAccount[] | null;
+    /** Try other saved accounts on quota/credential rejection before any content is emitted. */
+    autoSwitch?: boolean;
     /** The gateway endpoint; also the base of the live model listing. */
     baseURL: string;
     /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */

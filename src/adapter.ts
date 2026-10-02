@@ -48,6 +48,16 @@ import { assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, withRequestReasoning } from './reasoning.ts'
+import { accountsOf, type GoAccountSwitch } from './accounts.ts'
+
+/** A generic 403/rate limit is not proof that another subscription can help. */
+function accountFailureReason(failure: { code: string; message: string }): GoAccountSwitch['reason'] | undefined {
+  if (failure.code === 'QUOTA') return 'quota'
+  if (failure.code === 'MISSING_CREDENTIAL' || failure.code === 'INVALID_CREDENTIAL'
+    || failure.code === 'AUTH' && (/\b401\b/.test(failure.message)
+      || /invalid[ _-]?(?:api[ _-]?)?key|incorrect[ _-]?(?:api[ _-]?)?key|expired[ _-]?(?:api[ _-]?)?key/i.test(failure.message))) return 'credential'
+  return undefined
+}
 
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
@@ -95,6 +105,7 @@ export interface OpencodeGoAdapterOptions {
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
+  onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig) => void
 }
 
 /** Configuration, model and provider captured together before dispatch. */
@@ -279,6 +290,56 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
+    const accounts = accountsOf(snapshot.config)
+    if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
+    const refs = snapshot.config.autoSwitch
+      ? [...new Set([snapshot.config.apiKeyEnv, ...accounts.map(account => account.apiKeyEnv)])]
+      : [snapshot.config.apiKeyEnv]
+    let switchReason: GoAccountSwitch['reason'] | undefined
+    for (let attempt = 0; attempt < refs.length; attempt++) {
+      let emitted = false
+      let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
+      let retry = false
+      const announce = (): void => {
+        if (emitted) return
+        if (attempt === 0) this.options.onAccountSwitch?.(undefined, snapshot.config)
+        else if (switchReason) this.options.onAccountSwitch?.({
+          fromRef: refs[0]!, toRef: refs[attempt]!, reason: switchReason, at: Date.now(),
+        }, snapshot.config)
+      }
+      try {
+        for await (const chunk of this.streamAttempt(options, {
+          ...snapshot, config: { ...snapshot.config, apiKeyEnv: refs[attempt]! },
+        })) {
+          if (chunk.type === 'usage') { usage = chunk; continue }
+          if (chunk.type === 'finish') {
+            const reason = chunk.reason.kind === 'error' ? accountFailureReason(chunk.reason.failure) : undefined
+            if (reason && !emitted && !options.signal?.aborted && !((usage?.usage.totalTokens ?? 0) > 0)
+              && attempt + 1 < refs.length) {
+              switchReason ??= reason
+              retry = true
+              break
+            }
+            if (chunk.reason.kind === 'stop' || chunk.reason.kind === 'tool-calls' || chunk.reason.kind === 'max-tokens') announce()
+            if (usage) yield usage
+            yield chunk
+            return
+          }
+          announce()
+          emitted = true
+          yield chunk
+        }
+        if (!retry) return
+      } catch (error) {
+        const reason = error instanceof LlmError ? accountFailureReason(error) : undefined
+        if (!reason || emitted || options.signal?.aborted || attempt + 1 >= refs.length) throw error
+        switchReason ??= reason
+      }
+    }
+  }
+
+  /** One account, one SDK attempt; host recovery still owns failures after output. */
+  private async *streamAttempt(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }

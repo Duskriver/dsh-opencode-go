@@ -19,6 +19,9 @@ import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } fro
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
+import type { GoAccount } from '../accounts.ts'
+import { accountsOf } from '../accounts.ts'
+import { GoAccountsController, type GoAccountsState, type GoAccountsActions } from './accounts-controller.ts'
 import {
   StagedForm,
   booleanField,
@@ -49,6 +52,8 @@ export interface OpencodeGoSettings {
   modelVisibility?: Record<string, boolean>
   /** Credential reference naming the environment key. */
   apiKeyEnv?: string
+  accounts?: GoAccount[] | null
+  autoSwitch?: boolean
   /** The gateway endpoint; also the live listing base. */
   baseURL?: string
   /** Live catalog re-resolution interval, in minutes. */
@@ -110,6 +115,7 @@ export type OpencodeGoModels =
 
 /** What the settings page renders. */
 export interface OpencodeGoSectionState extends FormShell {
+  accounts?: GoAccountsState
   /**
    * Whether the adapter currently serves its route. Resolved from the section
    * rather than staged: the switch writes on the click that flips it, because
@@ -151,7 +157,7 @@ export interface OpencodeGoSectionState extends FormShell {
 }
 
 /** The registration-side face the page's slot entry injects. */
-export interface OpencodeGoSectionFace extends FormActions {
+export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   hooks: {
     /** Page snapshot bound by the UI renderer as useOpencodeGo. */
     opencodeGo: SnapshotStore<OpencodeGoSectionState>
@@ -177,6 +183,9 @@ export class OpencodeGoSectionController {
   private pickerFailed = false
   private face: OpencodeGoSectionFace | undefined
   private readonly unsubscribe: () => void
+  private accounts: GoAccountsController | undefined
+  private credentialRequest = 0
+  private keyDraftRef: string | undefined
 
   /**
    * @param scope - the bound settings scope for the `llm-opencode-go` namespace.
@@ -189,6 +198,11 @@ export class OpencodeGoSectionController {
     private readonly readModels: () => Promise<RemoteResult<GoModelCatalog>> = async () => {
       const result = await ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: PROVIDER_ID })
       return result.ok ? { ok: true, value: { models: result.value, stale: false } } : result
+    },
+    readUsage: (ref: string) => Promise<import('../usage-contract.ts').GoUsage> = async ref => {
+      const result = await ctx.remote.opencodeGoUsage.readAccount(ref)
+      if (!result.ok) throw result.error
+      return result.value
     },
   ) {
     this.form = new StagedForm(
@@ -215,8 +229,14 @@ export class OpencodeGoSectionController {
       [{ field: API_KEY_FIELD, write: text => this.writeKey(text) }],
     )
     this.store = this.form.bind(() => this.projection())
+    this.accounts = new GoAccountsController(scope, ctx, readUsage,
+      () => { this.store.set(this.projection()) },
+      () => this.form.shell().saving || this.pickerSaving || Boolean(this.form.field(API_KEY_FIELD).text.trim()))
+    this.store.set(this.projection())
     let modelsEndpoint = scope.getSnapshot().value?.baseURL
     this.unsubscribe = scope.subscribe(() => {
+      this.accounts?.sync()
+      this.store.set(this.projection())
       const endpoint = scope.getSnapshot().value?.baseURL
       if (endpoint !== modelsEndpoint) {
         modelsEndpoint = endpoint
@@ -231,6 +251,8 @@ export class OpencodeGoSectionController {
 
   /** Release subscriptions without disposing the host's shared form. */
   dispose(): void {
+    this.credentialRequest++
+    this.accounts?.dispose()
     this.modelsRequest++
     this.unsubscribe()
     this.form.dispose()
@@ -239,6 +261,8 @@ export class OpencodeGoSectionController {
   private projection(): OpencodeGoSectionState {
     return {
       ...this.form.shell(),
+      saving: this.form.shell().saving || this.accounts?.snapshot().busy === true,
+      accounts: this.accounts?.snapshot(),
       enabled: this.enabled(),
       usageDisplay: this.form.field('usageDisplay'),
       modelVisibility: this.scope.getSnapshot().value?.modelVisibility ?? {},
@@ -253,7 +277,8 @@ export class OpencodeGoSectionController {
       requestImagePixelBudget: this.form.field('requestImagePixelBudget'),
       requestImageMaxBytes: this.form.field('requestImageMaxBytes'),
       apiKey: this.form.field(API_KEY_FIELD),
-      apiKeyConfigured: this.credential.configured,
+      apiKeyConfigured: this.credential.ref === refOf(this.scope.getSnapshot()) && this.credential.configured
+        && accountsOf(this.scope.getSnapshot().value ?? {}).length > 0,
       apiKeyWritable: this.credential.writable,
       models: this.models,
       modelLimits: this.form.field('modelLimits'),
@@ -313,7 +338,7 @@ export class OpencodeGoSectionController {
 
   /** Serialize immediate switches with form saves; refused writes retain committed values. */
   private async writePickerSetting(field: string, value: unknown, accepted: () => boolean): Promise<void> {
-    if (this.pickerSaving || this.form.shell().saving || !this.scope.getSnapshot().writable) return
+    if (this.pickerSaving || this.form.shell().saving || this.accounts?.snapshot().busy || !this.scope.getSnapshot().writable) return
     this.pickerSaving = true
     this.pickerFailed = false
     this.store.set(this.projection())
@@ -382,15 +407,21 @@ export class OpencodeGoSectionController {
    * reference in force.
    */
   private async readCredential(): Promise<void> {
+    const request = ++this.credentialRequest
     const ref = refOf(this.scope.getSnapshot())
+    if (accountsOf(this.scope.getSnapshot().value ?? {}).length === 0) {
+      this.credential = { ref, configured: false, writable: false }
+      this.store.set(this.projection())
+      return
+    }
     if (ref !== this.credential.ref) {
       // A new reference knows nothing yet; keeping the old answer would claim
       // the key is configured under a name nobody has checked.
       this.credential = { ref, configured: false, writable: true }
       this.store.set(this.projection())
     }
-    const response = await this.ctx.remote.credentials.describe([ref])
-    if (!response.ok || ref !== refOf(this.scope.getSnapshot())) return
+    const response = await this.ctx.remote.credentials.describe([ref]).catch(() => undefined)
+    if (!response?.ok || request !== this.credentialRequest || ref !== refOf(this.scope.getSnapshot())) return
     const view = response.value[ref]
     const next: CredentialState = {
       ref,
@@ -413,6 +444,7 @@ export class OpencodeGoSectionController {
    * @param ref - the reference the Host reports as changed.
    */
   refreshCredential(ref: string): void {
+    this.accounts?.invalidate(ref)
     if (ref !== this.credential.ref) return
     void this.readCredential()
   }
@@ -429,6 +461,20 @@ export class OpencodeGoSectionController {
       setEnabled: (next) => { void this.setEnabled(next) },
       setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
       ...this.form.actions(),
+      ...this.accounts!.actions(),
+      edit: (field, text) => {
+        if (field === API_KEY_FIELD) {
+          if (text.trim()) this.keyDraftRef ??= refOf(this.scope.getSnapshot())
+          else this.keyDraftRef = undefined
+        }
+        this.form.actions().edit(field, text)
+      },
+      discard: () => { this.keyDraftRef = undefined; this.form.actions().discard() },
+      save: () => {
+        if (!this.accounts?.snapshot().busy) void this.form.save().then(() => {
+          if (!this.form.field(API_KEY_FIELD).text.trim()) this.keyDraftRef = undefined
+        })
+      },
     }
     return this.face
   }
@@ -441,9 +487,12 @@ export class OpencodeGoSectionController {
   private async writeKey(value: string): Promise<boolean> {
     // Refusals surface through the re-read below: the Host is the only
     // authority on whether the key now exists.
-    await this.ctx.remote.credentials.set(refOf(this.scope.getSnapshot()), value)
+    const ref = this.keyDraftRef ?? refOf(this.scope.getSnapshot())
+    const response = await this.ctx.remote.credentials.set(ref, value)
+    if (!response.ok) return false
+    this.accounts?.invalidate(ref)
     await this.readCredential()
-    return this.credential.configured
+    return ref === this.credential.ref ? this.credential.configured : true
   }
 }
 

@@ -1,4 +1,6 @@
 .root { position: relative; display: inline-flex; min-width: 0; }
+.accountSelector { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.accountSelector select { flex: 1; min-width: 0; font: inherit; color: inherit; background: var(--dsw-alias-bg-layer-2, Canvas); border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; padding: 5px; }
 .trigger { border: 0; background: transparent; color: inherit; opacity: .75; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
 .trigger:hover, .trigger:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
 .panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 280px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); box-shadow: 0 8px 30px #0003; font-size: 12px; isolation: isolate;

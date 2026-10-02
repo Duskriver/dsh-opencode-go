@@ -472,8 +472,10 @@ describe('OpencodeGoSectionController', () => {
     }))
     calls = credentials.describe.mock.calls.length
     host.publish(ready({}))
-    await vi.waitFor(() => { expect(credentials.describe.mock.calls.length).toBeGreaterThan(calls) })
-    expect(state().apiKeyConfigured).toBe(false)
+    await vi.waitFor(() => {
+      expect(credentials.describe.mock.calls.length).toBeGreaterThan(calls)
+      expect(state().apiKeyConfigured).toBe(false)
+    })
   })
 
   it('refreshes the credential badge only for the reference it watches', async () => {

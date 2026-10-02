@@ -1,0 +1,63 @@
+import type { Context } from '@deepseek-ai/cordis';
+import { type AccountSettings, type GoAccount } from '../accounts.ts';
+import type { GoUsage } from '../usage-contract.ts';
+import type { SettingsScope } from './settings.ts';
+export interface GoAccountView extends GoAccount {
+    configured?: boolean;
+    writable?: boolean;
+    usage?: GoUsage;
+    updatedAt?: number;
+    stale?: boolean;
+    loading?: boolean;
+    failed?: boolean;
+}
+export interface GoAccountsState {
+    entries: readonly GoAccountView[];
+    activeRef: string;
+    autoSwitch: boolean;
+    busy: boolean;
+    blocked: boolean;
+    refreshing: boolean;
+    failure?: 'write' | 'cleanup' | 'read';
+}
+export interface GoAccountsActions {
+    loadAccounts: () => void;
+    addAccount: (name: string, key: string) => Promise<boolean>;
+    renameAccount: (ref: string, name: string) => Promise<boolean>;
+    removeAccount: (ref: string) => Promise<boolean>;
+    selectAccount: (ref: string) => Promise<boolean>;
+    setAutoSwitch: (next: boolean) => Promise<boolean>;
+    replaceAccountKey: (ref: string, key: string) => Promise<boolean>;
+}
+/** Immediate account operations, separate from the page's staged tuning form. */
+export declare class GoAccountsController {
+    private readonly scope;
+    private readonly ctx;
+    private readonly readUsage;
+    private readonly publish;
+    private readonly blocked;
+    private rows;
+    private busy;
+    private refreshing;
+    private failure;
+    private epoch;
+    private identity;
+    private loaded;
+    private disposed;
+    constructor(scope: SettingsScope<AccountSettings & {
+        baseURL?: string;
+    }>, ctx: Context, readUsage: (ref: string) => Promise<GoUsage>, publish: () => void, blocked: () => boolean);
+    snapshot(): GoAccountsState;
+    sync(): void;
+    dispose(): void;
+    invalidate(ref: string): void;
+    refresh(): Promise<void>;
+    actions(): GoAccountsActions;
+    private account;
+    private mutate;
+    private add;
+    private rename;
+    private select;
+    private remove;
+    private run;
+}

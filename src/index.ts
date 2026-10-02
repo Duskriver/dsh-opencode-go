@@ -49,6 +49,7 @@ import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
 import { registerGoRemotes } from './remotes.ts'
+import { accountsOf, accountRefOf, assertAccounts, type GoAccountSwitch } from './accounts.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -87,10 +88,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // Self-contained misconfiguration fails at load; a bad stored value instead
   // refuses the write through the section's validate hook.
   assertBaseURL(entry.baseURL)
+  assertAccounts(entry.accounts, entry.apiKeyEnv)
   let current: () => OpencodeGoConfig = () => readConfig(config)
 
   const resolveApiKey = async (config: OpencodeGoConfig = current()): Promise<string | undefined> => {
     const ref = config.apiKeyEnv
+    if (!accountsOf(config).some(account => account.apiKeyEnv === ref)) {
+      throw new LlmError('OpenCode Go has no selected account', 'MISSING_CREDENTIAL')
+    }
     const credentials = ctx.get('credentials')
     const hit = credentials !== undefined
       ? (await credentials.resolve(credentialRef(ref)))?.value
@@ -104,7 +109,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     )
   }
   registerGoRemotes(ctx)
-  ctx.plugin(GoUsageService, { baseURL: () => current().baseURL, resolveApiKey })
+  let lastSwitch: GoAccountSwitch | undefined
+  ctx.plugin(GoUsageService, {
+    baseURL: () => current().baseURL,
+    resolveApiKey: (ref?: string) => resolveApiKey({ ...current(), apiKeyEnv: ref ?? current().apiKeyEnv }),
+    activeRef: () => accountRefOf(current()),
+    accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
+    lastSwitch: () => lastSwitch,
+  })
   const logger = {
     fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {
       ctx.logger.warn(`llm-opencode-go: could not refresh ${url}; using last-known model data (${String(error)})`)
@@ -117,6 +129,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const adapter = new OpencodeGoAdapter({
     config: () => current(),
     resolveApiKey,
+    onAccountSwitch: (notice, captured) => {
+      const config = current()
+      if (config.baseURL === captured.baseURL && config.apiKeyEnv === captured.apiKeyEnv
+        && JSON.stringify(config.accounts) === JSON.stringify(captured.accounts)) lastSwitch = notice
+    },
     imageAccess: {
       resolveAttachments: () => ctx.get('attachments'),
       resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(
@@ -169,7 +186,13 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       }
     }
   }
+  let routeCheck = 0
+  let accountIdentity = ''
   const syncRoute = (): void => {
+    const check = ++routeCheck
+    const config = current()
+    const identity = JSON.stringify([config.apiKeyEnv, config.accounts, config.baseURL, config.autoSwitch])
+    if (identity !== accountIdentity) { accountIdentity = identity; lastSwitch = undefined }
     const visibility = pickerVisibilityOf()
     if (pickerVisibility !== visibility) {
       pickerVisibility = visibility
@@ -177,12 +200,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       registration?.replace([PROVIDER_ID])
     }
     const credentials = ctx.get('credentials')
+    const refs = accountsOf(config).filter(account => config.autoSwitch || account.apiKeyEnv === config.apiKeyEnv)
+      .map(account => account.apiKeyEnv)
     if (credentials === undefined) {
-      applyRoute(launchEnvironmentOf(ctx).get(current().apiKeyEnv)?.value !== undefined)
+      applyRoute(refs.some(ref => Boolean(launchEnvironmentOf(ctx).get(ref)?.value)))
       return
     }
-    void credentials.describe(credentialRef(current().apiKeyEnv))
-      .then((info) => { applyRoute(info.configured) })
+    void Promise.all(refs.map(ref => credentials.describe(credentialRef(ref))))
+      .then((infos) => { if (check === routeCheck) applyRoute(infos.some(info => info.configured)) })
       .catch((error: unknown) => {
         ctx.logger.error(`llm-opencode-go: credential describe failed; keeping the previous route state (${String(error)})`)
       })
@@ -219,6 +244,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     settingsCtx.settings.installSection(ctx, NS, PlainConfig, entry, {
       validate: (value) => {
         assertBaseURL(value.baseURL)
+        assertAccounts(value.accounts, value.apiKeyEnv)
       },
       setSource: (source) => {
         current = source
@@ -233,7 +259,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // Validate before 0.1.7 persists a profile edit, then follow committed refs.
   ctx.on('internal/config', function (_raw, next) {
     const value = next()
-    if (this === ctx.fiber) assertBaseURL(PlainConfig(value).baseURL)
+    if (this === ctx.fiber) {
+      const config = PlainConfig(value)
+      assertBaseURL(config.baseURL)
+      assertAccounts(config.accounts, config.apiKeyEnv)
+    }
     return value
   })
   // The event is absent on older Loaders; registering it is harmless there.
@@ -242,7 +272,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // included — flips the route's presence; the event names the reference.
   ctx.inject(['credentials'], (credentialsCtx) => {
     credentialsCtx.on('credentials/reference-updated', (ref) => {
-      if (ref === current().apiKeyEnv) syncRoute()
+      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { lastSwitch = undefined; syncRoute() }
     })
     // The seam becomes visible only once its provider is active, which can be
     // after this plugin applied: the boot-time call above then found no seam

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { GoUsage, UsageWindow } from '../usage-contract.ts'
+import { parseAccountSwitch, type GoUsage, type UsageWindow } from '../usage-contract.ts'
 import { PROVIDER_ID } from '../provider-identity.ts'
 import { DEFAULT_USAGE_DISPLAY } from '../usage-display.ts'
 import type { SettingsScope } from './settings.ts'
 import type { OpencodeGoSettings } from './section-controller.ts'
+import { accountsOf, accountRefOf, type GoAccount, type GoAccountSwitch } from '../accounts.ts'
 import css from './UsagePill.module.css'
 
 export interface UsagePillProps {
@@ -14,12 +15,18 @@ export interface UsagePillProps {
   readUsage: () => Promise<GoUsage>
   t: (key: string) => string
   getLocale?: () => string
+  credentialChanges?: SnapshotStore<number>
+  selectAccount?: (ref: string) => Promise<boolean>
 }
+
+const unchanged = () => 0
+const noSubscription = () => () => {}
 
 interface UsageFailure {
   message?: string
   retainPrevious: boolean
   source?: string
+  lastSwitch?: GoAccountSwitch
 }
 
 /** Only the Host's domain failure message is approved for display. */
@@ -27,10 +34,13 @@ function usageFailure(error: unknown): UsageFailure {
   if (error && typeof error === 'object' && 'code' in error && error.code === 'opencode-go/usage-unavailable'
     && 'details' in error && error.details && typeof error.details === 'object') {
     const details = error.details as Record<string, unknown>
+    let lastSwitch: GoAccountSwitch | undefined
+    try { if (details.lastSwitch) lastSwitch = parseAccountSwitch(details.lastSwitch) } catch { /* Ignore malformed notices. */ }
     return {
       ...('message' in error && typeof error.message === 'string' ? { message: error.message } : {}),
       retainPrevious: details.retryable === true && details.retainPrevious === true,
       ...(typeof details.source === 'string' ? { source: details.source } : {}),
+      ...(lastSwitch ? { lastSwitch } : {}),
     }
   }
   return { retainPrevious: false }
@@ -43,7 +53,7 @@ function usageLevel(window: UsageWindow): string | undefined {
 }
 
 /** Only a visible, enabled pill mounts the usage poller. */
-export function UsagePill({ directory, settings, ...props }: UsagePillProps) {
+export function UsagePill({ directory, settings, credentialChanges, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
   // The Host scope is a class instance whose methods read their own state, so
   // React has to reach them through this receiver: a reference handed over as a
@@ -51,17 +61,27 @@ export function UsagePill({ directory, settings, ...props }: UsagePillProps) {
   const readSettings = useCallback(() => settings.getSnapshot(), [settings])
   const subscribeSettings = useCallback((listener: () => void) => settings.subscribe(listener), [settings])
   const config = useSyncExternalStore(subscribeSettings, readSettings, readSettings)
+  const readChanges = useCallback(() => credentialChanges?.getSnapshot() ?? unchanged(), [credentialChanges])
+  const subscribeChanges = useCallback((listener: () => void) => credentialChanges?.subscribe(listener) ?? noSubscription(), [credentialChanges])
+  const credentialRevision = useSyncExternalStore(subscribeChanges, readChanges, readChanges)
   const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
   const visible = config.status === 'ready' && config.value?.enabled !== false
     && (mode === 'always' || mode === 'auto' && state.current?.provider === PROVIDER_ID)
-  return visible ? <ActiveUsage {...props} /> : null
+  const accounts = accountsOf(config.value ?? {})
+  const activeRef = accountRefOf(config.value ?? {})
+  return visible ? <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, credentialRevision, accounts])}
+    {...props} accounts={accounts} activeRef={activeRef} writable={config.writable} /> : null
 }
 
-function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'directory' | 'settings'>) {
+function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, selectAccount }: Omit<UsagePillProps, 'directory' | 'settings'> & {
+  accounts: readonly GoAccount[]; activeRef: string; writable: boolean
+}) {
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [open, setOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [switchFailed, setSwitchFailed] = useState(false)
   const root = useRef<HTMLSpanElement>(null)
   const retry = useRef<() => void>(() => {})
   useEffect(() => {
@@ -116,15 +136,31 @@ function ActiveUsage({ readUsage, t, getLocale }: Omit<UsagePillProps, 'director
   const current = snapshot?.reader === readUsage ? snapshot : null
   const usage = current?.usage
   const failure = failed?.reader === readUsage ? failed.failure : null
+  const notice = usage?.lastSwitch ?? failure?.lastSwitch
   const label = usage
-    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}`
-    : `Go · ${failure ? t('usageUnavailable') : '…'}`
+    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${accounts.length > 1 ? ` · ${accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')}` : ''}`
+    : `Go · ${failure ? t('usageUnavailable') : '…'}${accounts.length > 1 ? ` · ${accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')}` : ''}`
   return <span className={css.root} ref={root}>
     <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog"
       aria-label={`${t('usageTitle')}: ${label}`} onClick={() => { setOpen(!open) }}>{label}</button>
     {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
       <strong>{t('usageTitle')}</strong>
       <p className={css.hint}>{t('usageHint')}</p>
+      {accounts.length ? <label className={css.accountSelector}>{t('accountSwitchLabel')}
+        <select value={activeRef} disabled={!writable || switching || !selectAccount} onChange={event => {
+          const ref = event.target.value
+          setSwitching(true)
+          setSwitchFailed(false)
+          void selectAccount?.(ref).then(accepted => { setSwitchFailed(!accepted) })
+            .catch(() => { setSwitchFailed(true) }).finally(() => { setSwitching(false) })
+        }}>{accounts.map(account => <option key={account.id} value={account.apiKeyEnv}>{account.name || t('accountDefault')}</option>)}</select>
+      </label> : null}
+      {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
+      {notice ? <p className={css.warning} role="status">
+        {t(notice.reason === 'quota' ? 'accountFallbackQuota' : 'accountFallbackCredential')}{' '}
+        {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
+        {' · '}{new Date(notice.at).toLocaleString(getLocale?.())}
+      </p> : null}
       {failure ? <div className={css.warning} role="alert">
         <strong>{t('usageRefreshFailed')}</strong>
         <p>{failure.message ?? t('usageUnavailable')}</p>

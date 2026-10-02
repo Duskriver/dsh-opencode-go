@@ -5,29 +5,61 @@ import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { assertBaseURL } from './config.ts'
 import { parseGoUsage, type GoUsage } from './usage-contract.ts'
 import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-response.ts'
+import type { GoAccountSwitch } from './accounts.ts'
 
 const USAGE_MAX_BYTES = 1024 * 1024
 
 interface UsageOptions {
   baseURL: () => string
-  resolveApiKey: () => Promise<string | undefined>
+  resolveApiKey: (ref?: string) => Promise<string | undefined>
+  activeRef?: () => string
+  accountRefs?: () => readonly string[]
+  lastSwitch?: () => GoAccountSwitch | undefined
 }
 
 /** Account statistics are fetched on the Host; credentials never enter the browser. */
 export class GoUsageService extends TypertRemoteService {
-  private identity?: { baseURL: string; key: string; source: string }
+  private readonly identities = new Map<string, { baseURL: string; key: string; source: string }>()
+  private readonly pending = new Map<string, Promise<GoUsage>>()
 
   constructor(ctx: Context, private readonly options: UsageOptions) {
     super(ctx, 'opencodeGoUsage')
   }
 
   async read(): Promise<GoUsage> {
+    try {
+      const usage = await this.readRef(this.options.activeRef?.())
+      const lastSwitch = this.options.lastSwitch?.()
+      return lastSwitch ? { ...usage, lastSwitch } : usage
+    } catch (error) {
+      const lastSwitch = this.options.lastSwitch?.()
+      if (lastSwitch && error instanceof RemoteError && error.code === 'opencode-go/usage-unavailable') {
+        throw new RemoteError('opencode-go/usage-unavailable', error.message,
+          { ...error.details as { retryable: boolean; retainPrevious: boolean; source?: string }, lastSwitch }, { cause: error })
+      }
+      throw error
+    }
+  }
+
+  async readAccount(ref: string): Promise<GoUsage> {
+    if (!this.options.accountRefs?.().includes(ref)) {
+      throw new RemoteError('gateway/bad-request', 'Unknown OpenCode Go account', {})
+    }
+    return this.readRef(ref)
+  }
+
+  private async readRef(ref?: string): Promise<GoUsage> {
+    const identityKey = ref ?? ''
+    // Retire removed accounts, including their secret-bearing identity records.
+    if (this.options.accountRefs) for (const saved of this.identities.keys()) {
+      if (saved && !this.options.accountRefs().includes(saved)) this.identities.delete(saved)
+    }
     const baseURL = assertBaseURL(this.options.baseURL()).replace(/\/$/, '')
     let key: string | undefined
     try {
-      key = await this.options.resolveApiKey()
+      key = await this.options.resolveApiKey(ref)
     } catch (error: unknown) {
-      this.identity = undefined
+      this.identities.delete(identityKey)
       const missing = error instanceof Error && 'code' in error && error.code === 'MISSING_CREDENTIAL'
       throw new RemoteError('opencode-go/usage-unavailable', missing
         ? 'OpenCode Go API key is not configured' : 'Could not resolve the OpenCode Go API key', {
@@ -35,15 +67,25 @@ export class GoUsageService extends TypertRemoteService {
       }, { cause: error })
     }
     if (!key) {
-      this.identity = undefined
+      this.identities.delete(identityKey)
       throw new RemoteError('opencode-go/usage-unavailable', 'OpenCode Go API key is not configured', {
         retryable: false, retainPrevious: false,
       })
     }
-    if (this.identity?.baseURL !== baseURL || this.identity.key !== key) {
-      this.identity = { baseURL, key, source: randomUUID() }
+    let identity = this.identities.get(identityKey)
+    if (identity?.baseURL !== baseURL || identity.key !== key) {
+      identity = { baseURL, key, source: randomUUID() }
+      this.identities.set(identityKey, identity)
     }
-    const { source } = this.identity
+    const { source } = identity
+    const shared = this.pending.get(source)
+    if (shared) return shared
+    const pending = this.fetchUsage(baseURL, key, source)
+    this.pending.set(source, pending)
+    try { return await pending } finally { this.pending.delete(source) }
+  }
+
+  private async fetchUsage(baseURL: string, key: string, source: string): Promise<GoUsage> {
     const endpoint = diagnosticURL(`${baseURL}/usage`)
     let result: Awaited<ReturnType<typeof fetchJsonResponse>>
     try {

@@ -18,6 +18,7 @@ import {
 import z from '@deepseek-ai/schemastery'
 import { DEFAULT_BASE_URL } from './catalog.ts'
 import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } from './usage-display.ts'
+import { MAX_ACCOUNTS, type GoAccount } from './accounts.ts'
 
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
@@ -59,6 +60,9 @@ export interface OpencodeGoConfig {
   modelVisibility?: Record<string, boolean>
   /** Credential reference: the environment variable the key resolves from. */
   apiKeyEnv: string
+  accounts?: GoAccount[] | null
+  /** Try other saved accounts on quota/credential rejection before any content is emitted. */
+  autoSwitch?: boolean
   /** The gateway endpoint; also the base of the live model listing. */
   baseURL: string
   /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */
@@ -83,6 +87,11 @@ const fields = {
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
+  accounts: z.union([z.const(null), z.array(z.object({
+    id: z.string().required(), name: z.string().required(),
+    apiKeyEnv: z.string().role('credential-ref').required(),
+  })).max(MAX_ACCOUNTS)]).default(null),
+  autoSwitch: z.boolean().default(false),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),

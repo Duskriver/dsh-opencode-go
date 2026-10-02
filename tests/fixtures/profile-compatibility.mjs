@@ -55,6 +55,30 @@ try {
   assert.equal(view().value.usageDisplay, 'off', 'invalid modes leave the saved setting intact')
   await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['usageDisplay'] }])
   assert.equal(view().value.usageDisplay, 'auto', 'reset restores automatic usage display')
+  process.env.OPENCODE_GO_BACKUP_COMPAT_KEY = 'backup-fixture-key'
+  const accounts = [
+    { id: 'primary', name: 'Primary', apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY' },
+    { id: 'backup', name: 'Backup', apiKeyEnv: 'OPENCODE_GO_BACKUP_COMPAT_KEY' },
+  ]
+  await ctx.settings.mutate('opencode-go', [
+    { op: 'set', path: ['accounts'], value: accounts },
+    { op: 'set', path: ['apiKeyEnv'], value: 'OPENCODE_GO_BACKUP_COMPAT_KEY' },
+  ])
+  assert.deepEqual(view().value.accounts, accounts, 'account metadata persists through real profile forms')
+  assert.equal(view().value.apiKeyEnv, 'OPENCODE_GO_BACKUP_COMPAT_KEY')
+  assert.equal(entry.fiber, fiber, 'account switching preserves the running plugin')
+  await ctx.settings.update('opencode-go', { autoSwitch: true })
+  assert.equal(view().value.autoSwitch, true)
+  await assert.rejects(ctx.settings.update('opencode-go', { accounts: [accounts[0], accounts[0]] }))
+  assert.deepEqual(view().value.accounts, accounts, 'duplicate account writes are refused')
+  await ctx.settings.mutate('opencode-go', [
+    { op: 'set', path: ['accounts'], value: [] },
+    { op: 'set', path: ['apiKeyEnv'], value: 'OPENCODE_GO_COMPAT_KEY' },
+    { op: 'set', path: ['autoSwitch'], value: false },
+  ])
+  assert.deepEqual(ctx.llm.listProviders(), [], 'removing every account withdraws the route')
+  await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['accounts'] }])
+  assert.ok(ctx.llm.listProviders().some(row => row.id === 'dsh-opencode-go'), 'legacy credentials resume after resetting accounts')
   assert.equal(view().value.maxImages, undefined, 'image count has no default')
   await ctx.settings.update('opencode-go', { maxImages: 30 })
   assert.equal(view().value.maxImages, 30)

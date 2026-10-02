@@ -1,5 +1,31 @@
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
 export declare const en: {
+    accountsTitle: string;
+    accountsRefresh: string;
+    accountsHint: string;
+    accountsBlocked: string;
+    accountsEmpty: string;
+    accountsWriteFailed: string;
+    accountsReadFailed: string;
+    accountsCleanupFailed: string;
+    accountDefault: string;
+    accountCurrent: string;
+    accountUse: string;
+    accountAdd: string;
+    accountRename: string;
+    accountReplaceKey: string;
+    accountRemove: string;
+    accountRemoveHint: string;
+    accountName: string;
+    accountKeyHint: string;
+    accountConfirm: string;
+    accountCancel: string;
+    accountAutoSwitch: string;
+    accountAutoSwitchHint: string;
+    accountSwitchLabel: string;
+    accountSwitchFailed: string;
+    accountFallbackQuota: string;
+    accountFallbackCredential: string;
     usageTitle: string;
     usageRollingShort: string;
     usageHint: string;

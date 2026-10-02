@@ -1,6 +1,17 @@
 /* OpenCode Go settings page: page header, section cards, field rows, badges,
    hints, and actions. */
 
+.accounts { display: grid; gap: 10px; margin: 12px 0; }
+.account { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; }
+.accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
+.accountUsage progress { display: block; width: 100%; height: 6px; accent-color: #39a878; margin: 6px 0; }
+.accountUsage .hint { display: block; overflow-wrap: anywhere; }
+.accountActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.accountEditor { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; margin-top: 12px; }
+.accountSubmit { border: 1px solid var(--dsw-alias-border-l3); border-radius: 6px; padding: 5px 12px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font: inherit; cursor: pointer; }
+.accountSubmit:disabled { opacity: .5; cursor: default; }
+@media (max-width: 480px) { .accountUsage { grid-template-columns: 1fr; } }
+
 .page {
   display: flex;
   flex-direction: column;

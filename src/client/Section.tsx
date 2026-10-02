@@ -17,6 +17,8 @@ import type {
   OpencodeGoSectionState,
 } from './section-controller.ts'
 import { ModelEditor } from './ModelEditor.tsx'
+import { AccountsCard } from './AccountsCard.tsx'
+import type { GoAccountsActions } from './accounts-controller.ts'
 import type { en } from './locales.ts'
 import { USAGE_DISPLAY_MODES } from '../usage-display.ts'
 import css from './Section.module.css'
@@ -179,6 +181,12 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       loadModels={loadModels}
       setEnabled={setEnabled}
       setModelEnabled={setModelEnabled}
+      accountActions={props.loadAccounts && props.addAccount && props.renameAccount && props.removeAccount
+        && props.selectAccount && props.setAutoSwitch && props.replaceAccountKey ? {
+          loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
+          removeAccount: props.removeAccount, selectAccount: props.selectAccount,
+          setAutoSwitch: props.setAutoSwitch, replaceAccountKey: props.replaceAccountKey,
+        } : undefined}
     />
   )
 }
@@ -195,6 +203,7 @@ function Loaded(props: {
   loadModels: () => void
   setEnabled: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
+  accountActions?: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
   const [advanced, setAdvanced] = useState(false)
@@ -291,6 +300,8 @@ function Loaded(props: {
           <p id="opencode-go-key-hint" className={css.hint}>{state.apiKeyWritable ? t('keyHint') : t('keyNotWritable')}</p>
         </div>
       </section>
+      {state.accounts && props.accountActions ? <AccountsCard state={state.accounts} actions={props.accountActions}
+        writable={state.writable} t={t} locale={props.locale} /> : null}
       {/* The model card takes whatever height the page has left: its list and its
           parameter card are the reason the page is open. It folds away exactly
           like the tuning card does, and the listing's own refresh sits with the

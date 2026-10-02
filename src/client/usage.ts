@@ -7,10 +7,18 @@ import { UsagePill } from './UsagePill.tsx'
 import type { OpencodeGoKey } from './locales.ts'
 import type { SettingsScope } from './settings.ts'
 import type { OpencodeGoSettings } from './section-controller.ts'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { accountsOf, accountRefOf } from '../accounts.ts'
 
 export function registerUsagePill(ctx: Context, settings: SettingsScope<OpencodeGoSettings>): void {
   ctx.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
     scope.inject(['remote.opencodeGoUsage'], ready => {
+      const credentialChanges = createSnapshotStore(0)
+      ready.effect(() => ready.remote.$on('credentials/reference-updated', ref => {
+        if (accountsOf(settings.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) {
+          credentialChanges.set(credentialChanges.getSnapshot() + 1)
+        }
+      }))
       const readUsage = async () => {
         const result = await ready.remote.opencodeGoUsage.read()
         if (!result.ok) throw result.error
@@ -22,6 +30,15 @@ export function registerUsagePill(ctx: Context, settings: SettingsScope<Opencode
         inject: sessionId => ({
           directory: ready.modelDirectories.directoryFor(sessionId as SessionId).store,
           settings,
+          credentialChanges,
+          selectAccount: async ref => {
+            const snapshot = settings.getSnapshot()
+            if (!snapshot.writable || !accountsOf(snapshot.value ?? {}).some(account => account.apiKeyEnv === ref)) return false
+            try {
+              await settings.mutate([{ op: 'set', path: ['apiKeyEnv'], value: ref }], snapshot.revision)
+              return accountRefOf(settings.getSnapshot().value ?? {}) === ref
+            } catch { return false }
+          },
           readUsage,
           getLocale: () => ready.locale.getLocale().active,
           t: (key: string) => translate(key as OpencodeGoKey),

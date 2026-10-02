@@ -320,7 +320,8 @@ export class StagedForm {
     this.publish()
     let landed = true
     for (const write of writes) {
-      landed = await write() && landed
+      try { landed = await write() && landed }
+      catch { landed = false }
     }
     if (landed) this.staged.clear()
     this.saving = false

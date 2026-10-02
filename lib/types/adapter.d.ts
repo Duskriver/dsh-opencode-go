@@ -26,6 +26,7 @@ import type { GenerateOptions, ImageAttachmentAccess, LlmModelInfo, LlmResolvedM
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
 import { OpencodeGoCatalog } from './catalog.ts';
 import type { OpencodeGoConfig } from './config.ts';
+import { type GoAccountSwitch } from './accounts.ts';
 /**
  * The attachment-service bridges one image request reads. Construction-time
  * (context-dependent); the config-dependent policy numbers are merged per
@@ -64,6 +65,7 @@ export interface OpencodeGoAdapterOptions {
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
+    onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig) => void;
 }
 /**
  * The single route's adapter. The catalog snapshot freezes at each operation,
@@ -107,4 +109,6 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
     private streamWithSnapshot;
+    /** One account, one SDK attempt; host recovery still owns failures after output. */
+    private streamAttempt;
 }

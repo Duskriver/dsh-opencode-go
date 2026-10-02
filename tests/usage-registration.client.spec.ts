@@ -15,7 +15,8 @@ it('preserves the usage account source and structured failures through the clien
   const read = vi.fn().mockResolvedValueOnce({ ok: true, value: usage }).mockResolvedValue({ ok: false, error })
   const ctx = {
     inject: (_services: unknown, callback: (scope: unknown) => void) => { callback(ctx) },
-    remote: { opencodeGoUsage: { read } },
+    effect: (install: () => unknown) => install(),
+    remote: { opencodeGoUsage: { read }, $on: () => () => {} },
     modelDirectories: { directoryFor: () => ({ store: {} }) },
     locale: { bind: () => (key: string) => key, getLocale: () => ({ active: 'en' }) },
     slots: {

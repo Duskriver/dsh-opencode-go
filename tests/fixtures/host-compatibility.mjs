@@ -62,10 +62,15 @@ const server = createServer((request, response) => {
 const ctx = new Context()
 const attachmentHome = await mkdtemp(join(tmpdir(), 'opencode-go-image-compat-'))
 process.env.OPENCODE_GO_COMPAT_KEY = 'fixture-key'
+process.env.OPENCODE_GO_BACKUP_COMPAT_KEY = 'fixture-key'
 try {
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const config = plugin.PlainConfig({ apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY',
+    accounts: [
+      { id: 'primary', name: 'Primary', apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY' },
+      { id: 'backup', name: 'Backup', apiKeyEnv: 'OPENCODE_GO_BACKUP_COMPAT_KEY' },
+    ],
     baseURL: `http://127.0.0.1:${server.address().port}`, maxRequestImageBytes: 8,
     modelLimits: { 'compat-model': { contextWindow: 50000, maxTokens: 1024 } } })
   ctx.baseUrl = new URL('../package.json', import.meta.url).href
@@ -95,6 +100,10 @@ try {
     const { source, ...reading } = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
     assert.deepEqual(reading, usage)
     assert.match(source, /^[0-9a-f-]{36}$/, 'opaque account identity survives the actual RPC codec')
+    const backup = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'readAccount', args: { ref: 'OPENCODE_GO_BACKUP_COMPAT_KEY' } })
+    assert.deepEqual({ ...backup, source: undefined }, { ...usage, source: undefined })
+    assert.notEqual(backup.source, source, 'account-scoped usage identities stay separate')
+    await assert.rejects(ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'readAccount', args: { ref: 'UNLISTED_COMPAT_KEY' } }))
   }
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'compat-test' } })
   const request = messages => ({ provider: 'dsh-opencode-go', model: 'compat-model', messages, sessionId: 'compat-session' })
