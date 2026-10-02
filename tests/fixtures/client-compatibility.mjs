@@ -13,7 +13,8 @@ const host = process.argv[2]
 const modern = host.startsWith('v017') || host.startsWith('v020')
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>')
 const { window } = dom
-Object.assign(globalThis, { window, document: window.document, getComputedStyle: window.getComputedStyle })
+Object.assign(globalThis, { window, document: window.document, getComputedStyle: window.getComputedStyle,
+  IS_REACT_ACT_ENVIRONMENT: true })
 // Node has no CSS loader. Transform host styles as the browser toolchain does;
 // all JavaScript packages still resolve normally within this isolated consumer.
 registerHooks({ load(url, context, next) {
@@ -32,6 +33,7 @@ const jsx = await import('react/jsx-runtime')
 const store = await import('@deepseek-ai/dsh-client-store')
 const primitives = await import('@deepseek-ai/dsh-client-ui-primitives')
 const { renderToStaticMarkup } = await import('react-dom/server')
+const { createRoot } = await import('react-dom/client')
 const table = new Map([
   ['react', React], ['react/jsx-runtime', jsx],
   ['@deepseek-ai/dsh-client-store', store],
@@ -51,15 +53,19 @@ try {
   })
   const snapshot = { status: 'ready', value: {}, base: {}, user: {}, writable: true, mode: 'host' }
   // The real Host scope is a class instance whose methods read their own state;
-  // a literal of arrow functions would hide a method passed as a detached value.
+  // prototype methods must use this too, or they still hide detached calls.
   class CompatibilityScope {
-    getSnapshot() { return snapshot }
-    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } }
+    constructor(snapshot, listeners) {
+      this.snapshot = snapshot
+      this.listeners = listeners
+    }
+    getSnapshot() { return this.snapshot }
+    subscribe(listener) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
     async set() {}
     async unset() {}
     async mutate() {}
   }
-  const scope = new CompatibilityScope()
+  const scope = new CompatibilityScope(snapshot, listeners)
   const slots = mock.fn(() => () => {})
   const getForm = mock.fn(() => scope)
   const bindScope = mock.fn(() => scope)
@@ -120,6 +126,21 @@ try {
   assert.match(usageMarkup(), /aria-haspopup="dialog"/, 'auto retains usage on this plugin provider')
   directory.set({ ...directory.getSnapshot(), current: { provider: 'opencode-go', model: 'compat-model' } })
   assert.equal(usageMarkup(), '', 'auto keeps the built-in provider separate')
+  // SSR checks the snapshot reader; a client mount also exercises subscribe.
+  // Auto stays hidden on this provider, so this check starts no usage poller.
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const beforeMount = listeners.size
+  try {
+    await React.act(async () => { root.render(React.createElement(UsageComponent, usageProps)) })
+    assert.equal(container.innerHTML, '', 'the mounted pill stays hidden on the built-in provider')
+    assert.equal(listeners.size, beforeMount + 1, 'the mounted pill subscribes through the scope receiver')
+  } finally {
+    await React.act(async () => { root.unmount() })
+    container.remove()
+  }
+  assert.equal(listeners.size, beforeMount, 'unmount releases the pill settings subscription')
   const [options, Component] = slots.mock.calls.find(call => call.arguments[0].id === 'opencode-go').arguments
   assert.equal(options.id, 'opencode-go')
   assert.equal(options.name, 'settings.section')
@@ -165,7 +186,7 @@ try {
   assert.match(pluginCss, /\.\w*limitsFoot\{[^}]*border-top/)
   for (const dispose of effects.splice(0).reverse()) (await dispose)()
   assert.equal(listeners.size, 0, 'client cleanup releases settings subscriptions')
-  console.log(`PASS: client compatibility (${host}): module table, settings, catalog injection, rendering, CSS, cleanup`)
+  console.log(`PASS: client compatibility (${host}): module table, settings, catalog injection, SSR/client rendering, CSS, cleanup`)
 } finally {
   for (const dispose of effects.reverse()) (await dispose)()
   dom.window.close()
