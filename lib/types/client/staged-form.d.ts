@@ -191,5 +191,13 @@ export declare class StagedForm {
     private baseValue;
     private userLayer;
     private stored;
+    /**
+     * Whether a draft already equals the field's effective value, so a save would
+     * write nothing. The save plan and the override badge both answer for it.
+     * @param field - field name inside the namespace section.
+     * @param staged - the staged edit to test.
+     * @returns true when the draft is a no-op; a clear is never one.
+     */
+    private unchangedDraft;
     private publish;
 }

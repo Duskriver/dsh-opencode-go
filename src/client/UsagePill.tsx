@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage, UsageWindow } from '../usage-contract.ts'
@@ -45,7 +45,12 @@ function usageLevel(window: UsageWindow): string | undefined {
 /** Only a visible, enabled pill mounts the usage poller. */
 export function UsagePill({ directory, settings, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
-  const config = useSyncExternalStore(settings.subscribe, settings.getSnapshot, settings.getSnapshot)
+  // The Host scope is a class instance whose methods read their own state, so
+  // React has to reach them through this receiver: a reference handed over as a
+  // plain value loses it and throws on the pill's first render.
+  const readSettings = useCallback(() => settings.getSnapshot(), [settings])
+  const subscribeSettings = useCallback((listener: () => void) => settings.subscribe(listener), [settings])
+  const config = useSyncExternalStore(subscribeSettings, readSettings, readSettings)
   const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
   const visible = config.status === 'ready' && config.value?.enabled !== false
     && (mode === 'always' || mode === 'auto' && state.current?.provider === PROVIDER_ID)

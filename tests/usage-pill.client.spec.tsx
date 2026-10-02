@@ -57,6 +57,18 @@ it.each(['deepseek', 'opencode-go', 'dsh-opencode-go'])('keeps usage visible in 
   expect(screen.getAllByRole('progressbar')).toHaveLength(3)
 })
 
+it('reads a class-shaped host scope through its own receiver', async () => {
+  const host = usageSettings({ usageDisplay: 'always' })
+  // The real Host scope keeps getSnapshot/subscribe on the prototype, so a
+  // reference handed over as a value loses \`this\`; the pill must call them on
+  // the instance instead.
+  expect(Object.hasOwn(host.scope, 'getSnapshot')).toBe(false)
+  expect(Object.hasOwn(host.scope, 'subscribe')).toBe(false)
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('deepseek')} readUsage={read} t={t} />) })
+  expect(trigger().textContent).toContain(percentageLabel(usage))
+})
+
 it('applies live display changes and tears down polling and visibility refreshes while off', async () => {
   const host = usageSettings()
   const read = vi.fn().mockResolvedValue(usage)

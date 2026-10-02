@@ -1,5 +1,6 @@
 /** Test double for the client settings-scope seam. */
 import { vi } from 'vitest'
+import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import type {
   SettingsScope, SettingsScopeSnapshot,
 } from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -24,38 +25,93 @@ export interface StubSettingsScope<T> {
   publish(next: Partial<SettingsScopeSnapshot<T>>): void
 }
 
+/** The write spies the scope delegates to, shared with the handle the test holds. */
+interface StubWrites<T> {
+  set: SettingsScope<T>['set']
+  mutate: SettingsScope<T>['mutate']
+  unset: SettingsScope<T>['unset']
+}
+
+/**
+ * The Host's scope is a class instance whose methods read their own state, so a
+ * method handed over as a value loses its receiver. Keeping this double's
+ * methods on the prototype is what makes such a detached call fail here exactly
+ * as it does in a browser.
+ */
+class StubScope<T> implements SettingsScope<T> {
+  private snapshot: SettingsScopeSnapshot<T> = {
+    status: 'loading', value: undefined, base: undefined, user: undefined,
+    revision: undefined, writable: false, mode: 'host',
+  }
+  private readonly listeners = new Set<() => void>()
+  /** @param writes - the spies the handle exposes, so both sides count the same calls. */
+  constructor(private readonly writes: StubWrites<T>) {}
+  /** @returns the current sync snapshot (stable reference until the next change). */
+  getSnapshot(): SettingsScopeSnapshot<T> {
+    return this.snapshot
+  }
+  /**
+   * @param listener - invoked after each snapshot change.
+   * @returns the disposer removing this listener.
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+  /**
+   * @param ops - ordered field operations copied when queued.
+   * @param expectedRevision - optional fixed revision read by the domain editor.
+   * @returns settlement after this scope records the write.
+   */
+  mutate(ops: readonly SettingsPathOpView[], expectedRevision?: number): Promise<void> {
+    return this.writes.mutate(ops, expectedRevision)
+  }
+  /**
+   * @param field - scalar field inside the namespace section.
+   * @param value - JSON-shaped value selected by the user.
+   * @returns settlement after this scope records the write.
+   */
+  set(field: string, value: unknown): Promise<void> {
+    return this.writes.set(field, value)
+  }
+  /**
+   * @param field - scalar field inside the namespace section.
+   * @returns settlement after this scope records the clear.
+   */
+  unset(field: string): Promise<void> {
+    return this.writes.unset(field)
+  }
+  /**
+   * Replace part of the snapshot and notify subscribers, as a Host
+   * acceptance would.
+   * @param next - snapshot fields to replace.
+   */
+  publish(next: Partial<SettingsScopeSnapshot<T>>): void {
+    this.snapshot = { ...this.snapshot, ...next }
+    for (const listener of [...this.listeners]) listener()
+  }
+  /** @returns how many listeners are currently subscribed. */
+  subscribers(): number {
+    return this.listeners.size
+  }
+}
+
 /**
  * Build an in-memory settings scope for service specs: starts in the host
  * loading state, records writes, and lets the test publish Host acceptances.
  * @returns the stub handle.
  */
 export function stubSettingsScope<T>(): StubSettingsScope<T> {
-  let snapshot: SettingsScopeSnapshot<T> = {
-    status: 'loading', value: undefined, base: undefined, user: undefined,
-    revision: undefined, writable: false, mode: 'host',
-  }
-  const listeners = new Set<() => void>()
   const set = vi.fn(() => Promise.resolve())
   const mutate = vi.fn(() => Promise.resolve())
   const unset = vi.fn(() => Promise.resolve())
+  const scope = new StubScope<T>({ set, mutate, unset })
   return {
-    scope: {
-      getSnapshot: () => snapshot,
-      subscribe: (listener) => {
-        listeners.add(listener)
-        return () => { listeners.delete(listener) }
-      },
-      mutate,
-      set,
-      unset,
-    },
+    scope,
     set,
     mutate,
     unset,
-    listenerCount: () => listeners.size,
-    publish: (next) => {
-      snapshot = { ...snapshot, ...next }
-      for (const listener of [...listeners]) listener()
-    },
+    listenerCount: () => scope.subscribers(),
+    publish: (next) => { scope.publish(next) },
   }
 }

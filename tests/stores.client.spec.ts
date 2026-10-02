@@ -154,6 +154,42 @@ describe('StagedForm', () => {
     expect(form.shell().dirty).toBe(true)
   })
 
+  it('drops the override badge once a draft returns to the effective value', () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptWrites(host)
+    const form = new StagedForm(host.scope as never, specs)
+    host.publish({ status: 'ready', writable: true, value: { refreshMinutes: 60 }, base: { refreshMinutes: 60 }, user: {} })
+    const actions = form.actions()
+
+    actions.edit('refreshMinutes', '59')
+    expect(form.field('refreshMinutes')).toEqual(field('59', { overridden: true }))
+    expect(form.shell().dirty).toBe(true)
+
+    // The save plan skips a draft equal to the effective value, so the badge and
+    // the Save button must agree: nothing is overridden and nothing is pending.
+    actions.edit('refreshMinutes', '60')
+    expect(form.field('refreshMinutes')).toEqual(field('60'))
+    expect(form.shell().dirty).toBe(false)
+  })
+
+  it('keeps the override badge for a user-layer entry the draft leaves in place', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptWrites(host)
+    const form = new StagedForm(host.scope as never, specs)
+    host.publish({
+      status: 'ready', writable: true,
+      value: { refreshMinutes: 60 }, base: { refreshMinutes: 60 }, user: { refreshMinutes: 60 },
+    })
+
+    form.actions().edit('refreshMinutes', '60')
+    // The draft writes nothing, but the user layer keeps the entry the page can clear.
+    expect(form.field('refreshMinutes')).toEqual(field('60', { overridden: true }))
+    expect(form.shell().dirty).toBe(false)
+    form.actions().resetField('refreshMinutes')
+    await form.save()
+    expect(host.unset).toHaveBeenCalledWith('refreshMinutes')
+  })
+
   it('writes staged edits on save, clears accepted drafts, and re-reads from the Host', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     acceptWrites(host)

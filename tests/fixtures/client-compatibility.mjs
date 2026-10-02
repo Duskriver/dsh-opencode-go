@@ -50,11 +50,16 @@ try {
     return table.get(id)
   })
   const snapshot = { status: 'ready', value: {}, base: {}, user: {}, writable: true, mode: 'host' }
-  const scope = {
-    getSnapshot: () => snapshot,
-    subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
-    set: async () => {}, mutate: async () => {}, unset: async () => {},
+  // The real Host scope is a class instance whose methods read their own state;
+  // a literal of arrow functions would hide a method passed as a detached value.
+  class CompatibilityScope {
+    getSnapshot() { return snapshot }
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } }
+    async set() {}
+    async unset() {}
+    async mutate() {}
   }
+  const scope = new CompatibilityScope()
   const slots = mock.fn(() => () => {})
   const getForm = mock.fn(() => scope)
   const bindScope = mock.fn(() => scope)
