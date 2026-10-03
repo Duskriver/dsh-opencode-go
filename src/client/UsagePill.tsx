@@ -137,12 +137,33 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
   const usage = current?.usage
   const failure = failed?.reader === readUsage ? failed.failure : null
   const notice = usage?.lastSwitch ?? failure?.lastSwitch
+  const accountName = accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')
   const label = usage
-    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${accounts.length > 1 ? ` · ${accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')}` : ''}`
-    : `Go · ${failure ? t('usageUnavailable') : '…'}${accounts.length > 1 ? ` · ${accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')}` : ''}`
+    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    : `Go · ${failure ? t('usageUnavailable') : '…'}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+  /** The segments concatenate to exactly `label`, so `textContent` — and every assertion built on it —
+   * stays unchanged, while the @container tiers in UsagePill.module.css can hide the brand, the unit
+   * words, the stale wording and the account name independently. jsdom does not evaluate container
+   * queries, so the tests below exercise the full label in every tier. */
+  const segments = usage
+    ? <>
+      <span className={css.brand}>Go · </span>
+      <span className={css.reading} data-stale={failure ? '' : undefined}>
+        <span className={css.unit}>{t('usageRollingShort')} </span>{usage.rolling.percent}%
+        {' · '}
+        <span className={css.unit}>{t('usageWeekShort')} </span>{usage.weekly.percent}%
+      </span>
+      {failure ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
+      {accounts.length > 1 ? <span className={css.account}> · {accountName}</span> : null}
+    </>
+    : <>
+      <span className={css.brand}>Go · </span>
+      {failure ? t('usageUnavailable') : '…'}
+      {accounts.length > 1 ? <span className={css.account}> · {accountName}</span> : null}
+    </>
   return <span className={css.root} ref={root}>
     <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog"
-      aria-label={`${t('usageTitle')}: ${label}`} onClick={() => { setOpen(!open) }}>{label}</button>
+      aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open) }}>{segments}</button>
     {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
       <strong>{t('usageTitle')}</strong>
       <p className={css.hint}>{t('usageHint')}</p>

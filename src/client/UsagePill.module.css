@@ -3,6 +3,26 @@
 .accountSelector select { flex: 1; min-width: 0; font: inherit; color: inherit; background: var(--dsw-alias-bg-layer-2, Canvas); border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; padding: 5px; }
 .trigger { border: 0; background: transparent; color: inherit; opacity: .75; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
 .trigger:hover, .trigger:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
+.account { display: inline-block; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+
+/* Narrow composer, tier 1: the host's own composer-row breakpoint. The pill lives in the composer's
+   non-shrinking trailing group, which already wraps onto its own line at this row width (the same
+   460px cut PermissionSelect.module.css uses against the same row), so the pill's own untruncated
+   width then forces a *second* wrap inside that line. Drop the "Go · " brand, the stale
+   " · Last data" wording and the account name. The container is the composer row (InputBar .row) — an anonymous query
+   because CSS modules hash container names per module. */
+@container (max-width: 460px) {
+  .brand, .stale, .account { display: none; }
+  /* The stale wording is gone at this tier; keep the signal as a bare marker that stays out of
+     textContent (::after), appended to the reading instead of the removed suffix. */
+  .reading[data-stale]::after { content: '*'; }
+}
+
+/* Narrow composer, tier 2: drop the unit words ("5h ", "week ") below this row width.
+   The popup and button title retain the full reading and account name. */
+@container (max-width: 360px) {
+  .unit { display: none; }
+}
 .panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 280px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); box-shadow: 0 8px 30px #0003; font-size: 12px; isolation: isolate;
   /* The host menu token is translucent: tint an opaque surface with it so chat text never shows through. */
   background-color: Canvas;
