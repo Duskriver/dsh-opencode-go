@@ -115,7 +115,12 @@ function expectCopy(active: 'zh' | 'en'): void {
   expect(screen.getAllByText(copy.newBadge).length).toBeGreaterThan(0)
   expect(screen.getByText(copy.configurationMissing)).toBeTruthy()
   expect(screen.getByRole('button', { name: copy.modelsRefresh })).toBeTruthy()
-  expect(screen.getByText(`Go · ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%`)).toBeTruthy()
+  // UsagePill renders this label as segmented spans (brand/reading/unit/stale/account) so the narrow-composer
+  // container queries can hide them independently; the label text is therefore no longer a single text node
+  // and getByText's own-text match no longer applies. Match the trigger's textContent instead, which still
+  // concatenates to exactly this string.
+  expect(screen.getByRole('button', { name: `${copy.usageTitle}: Go · ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }).textContent)
+    .toBe(`Go · ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%`)
 }
 
 it.each([
