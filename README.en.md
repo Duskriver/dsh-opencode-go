@@ -144,6 +144,8 @@ autoSwitch: false
 
 Supply both keys through the credential service or environment variables. `apiKeyEnv` selects the preferred account. Omitting `accounts` preserves legacy single-key behavior; `accounts: []` explicitly removes every account.
 
+The Accounts card folds: collapsed, it reports the account count, the preferred account, and how many accounts are ready. Expanded, each account takes one row showing its key state, the rolling reading, and its reset countdown; the row's chevron opens the weekly and monthly windows, the last successful update, and the rename, replace-key, and remove actions. Drag a row's handle — or focus it and press ↑ / ↓ — to reorder. The list reads top to bottom: the first row is the preferred account and becomes preferred on drop, and automatic fallback follows the same order.
+
 ## Subscription usage display
 
 Under **Settings → OpenCode Go → Advanced settings → Usage display**, choose a mode and save: **Auto (default)** shows the pill only for this plugin's DSH OpenCode Go models; **Always** keeps it visible with other models, including the built-in `opencode-go` provider; **Off** hides it and stops polling. Disabling OpenCode Go hides the pill in every mode. Click the pill to open the usage panel.

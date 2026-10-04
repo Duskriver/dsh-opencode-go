@@ -183,6 +183,8 @@ it('keeps rejected account form input and clears it only after a successful subm
   fixture.actions.addAccount = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
   const props = { state: fixture.controller.snapshot(), actions: fixture.actions, writable: true, t }
   render(<AccountsCard {...props} />)
+  // The card ships folded; its controls are one disclosure away.
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
   fireEvent.click(screen.getByRole('button', { name: en.accountAdd }))
   fireEvent.change(screen.getByLabelText(en.accountName), { target: { value: 'Work' } })
   fireEvent.change(screen.getByLabelText(en.keyLabel), { target: { value: 'private-new-key' } })
@@ -236,3 +238,76 @@ it('shows a successful fallback notice even when the preferred account cannot re
   expect(screen.getByRole('status').textContent).toContain(en.accountFallbackCredential)
   fixture.controller.dispose()
 })
+
+it('ships folded, and keeps every account row detail closed until its disclosure opens', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable t={t} />)
+  const trigger = screen.getByRole('button', { name: new RegExp(en.accountsTitle) })
+  expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  expect(screen.queryByRole('button', { name: en.accountAdd })).toBeNull()
+  expect(screen.getByText(/^2 accounts/)).toBeTruthy()
+  expect(screen.queryByRole('switch')).toBeNull()
+  fireEvent.click(trigger)
+  expect(trigger.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByRole('button', { name: en.accountAdd })).toBeTruthy()
+  // The automatic-fallback switch lives inside the fold, unlike the model switches.
+  expect(screen.getByRole('switch')).toBeTruthy()
+  // Rows carry the key state and the rolling reading; the rest is behind each row's disclosure.
+  expect(screen.getAllByText(en.keyConfigured)).toHaveLength(2)
+  expect(screen.queryByText(new RegExp(en.usage_weekly))).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+  expect(screen.getByText(new RegExp(en.usage_weekly))).toBeTruthy()
+  expect(screen.getByRole('button', { name: t('accountsDetailsHide', { name: 'Primary' }) })).toBeTruthy()
+  fixture.controller.dispose()
+})
+
+it('writes the dragged order and the new preferred account in one mutation', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  expect(await fixture.actions.moveAccount('ACCOUNT_B', 0)).toBe(true)
+  expect(fixture.host.mutate.mock.calls.at(-1)![0]).toEqual([
+    { op: 'set', path: ['accounts'], value: [accounts[1], accounts[0]] },
+    { op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' },
+  ])
+  expect(fixture.controller.snapshot().entries.map(entry => entry.apiKeyEnv)).toEqual(['ACCOUNT_B', 'ACCOUNT_A'])
+  fixture.controller.dispose()
+})
+
+it('keeps the loaded rows when only the order changes', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const reads = fixture.read.mock.calls.length
+  expect(await fixture.actions.moveAccount('ACCOUNT_B', 0)).toBe(true)
+  expect(fixture.read.mock.calls.length).toBe(reads)
+  expect(fixture.controller.snapshot().entries[0]).toMatchObject({ apiKeyEnv: 'ACCOUNT_B', usage: { source: 'ACCOUNT_B' } })
+  fixture.controller.dispose()
+})
+
+it('reorders when a row handle is dragged onto another row', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const moveAccount = vi.fn(async () => true)
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={{ ...fixture.actions, moveAccount }} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const source = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
+  const target = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Backup' }) })
+  const dataTransfer = { effectAllowed: 'none', dropEffect: 'none', setData: vi.fn() }
+  fireEvent.dragStart(source, { dataTransfer })
+  fireEvent.dragOver(target, { dataTransfer })
+  fireEvent.drop(target, { dataTransfer })
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_A', 1)
+  fixture.controller.dispose()
+})
+
+it('reorders with the arrow keys on a row handle', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const moveAccount = vi.fn(async () => true)
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={{ ...fixture.actions, moveAccount }} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  fireEvent.keyDown(screen.getByRole('button', { name: t('accountDragHandle', { name: 'Backup' }) }), { key: 'ArrowUp' })
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_B', 0)
+  fixture.controller.dispose()
+})
+

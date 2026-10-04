@@ -28,6 +28,8 @@ export interface GoAccountsActions {
     selectAccount: (ref: string) => Promise<boolean>;
     setAutoSwitch: (next: boolean) => Promise<boolean>;
     replaceAccountKey: (ref: string, key: string) => Promise<boolean>;
+    /** Move one account to a new position; the first row becomes the preferred account. */
+    moveAccount: (ref: string, toIndex: number) => Promise<boolean>;
 }
 /** Immediate account operations, separate from the page's staged tuning form. */
 export declare class GoAccountsController {
@@ -53,6 +55,13 @@ export declare class GoAccountsController {
     invalidate(ref: string): void;
     refresh(): Promise<void>;
     actions(): GoAccountsActions;
+    /**
+     * Reorder the visible accounts and keep the preferred reference on the first row.
+     * The adapter tries the preferred reference first and the rest in array order, so
+     * one write is what makes top-to-bottom the real call order. A placeholder row the
+     * settings never stored is materialized here, which its `legacy:` id admits.
+     */
+    private move;
     private account;
     private mutate;
     private add;

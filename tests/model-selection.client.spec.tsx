@@ -146,7 +146,8 @@ describe('per-model switches through the settings controller and component', () 
     expect(checked('Beta')).toBe(true)
     expect(checked('Old')).toBe(false)
     expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.getAllByRole('switch')).toHaveLength(5) // provider, account fallback, and one per model
+    // The accounts card ships folded, so its fallback switch is not on the page yet.
+    expect(screen.getAllByRole('switch')).toHaveLength(4) // provider and one per model
 
     await flip('Beta')
     expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { beta: false })

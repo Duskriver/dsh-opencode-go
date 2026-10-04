@@ -182,10 +182,11 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       setEnabled={setEnabled}
       setModelEnabled={setModelEnabled}
       accountActions={props.loadAccounts && props.addAccount && props.renameAccount && props.removeAccount
-        && props.selectAccount && props.setAutoSwitch && props.replaceAccountKey ? {
+        && props.selectAccount && props.setAutoSwitch && props.replaceAccountKey && props.moveAccount ? {
           loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
           removeAccount: props.removeAccount, selectAccount: props.selectAccount,
           setAutoSwitch: props.setAutoSwitch, replaceAccountKey: props.replaceAccountKey,
+          moveAccount: props.moveAccount,
         } : undefined}
     />
   )

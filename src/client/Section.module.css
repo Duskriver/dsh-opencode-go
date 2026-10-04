@@ -2,7 +2,27 @@
    hints, and actions. */
 
 .accounts { display: grid; gap: 10px; margin: 12px 0; }
-.account { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; }
+/* One row per account: the summary line stays readable, and the detail opens under
+   it. The row is the drag unit, so nothing inside it may swallow the pointer. */
+.accountRow { border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
+.accountRow[data-dragging='true'] { opacity: .55; }
+.accountMain { display: flex; align-items: center; gap: 9px; padding: 9px 11px; }
+.accountHandle { flex: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; }
+.accountHandle:disabled { cursor: default; opacity: .5; }
+.accountHandle:focus-visible, .accountToggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.accountName { flex: none; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.accountState { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+.accountDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #39a878; }
+.accountDot[data-off='true'] { background: #d9a441; }
+.accountSpacer { flex: 1; min-width: 8px; }
+.accountPercent { flex: none; width: 40px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary); }
+.accountProgress { flex: none; width: 132px; height: 6px; accent-color: #39a878; }
+.accountReset { flex: none; width: 106px; text-align: right; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+.accountToggle { flex: none; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.accountProblems { padding: 0 11px 8px 36px; }
+.accountDetail { display: flex; flex-direction: column; gap: 8px; padding: 9px 11px 10px 36px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+/* The drop slot: a line where the dragged row would land. */
+.accountDropLine { height: 2px; border-radius: 2px; background: var(--dsw-alias-brand-primary); }
 .accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
 .accountUsage progress { display: block; width: 100%; height: 6px; accent-color: #39a878; margin: 6px 0; }
 .accountUsage .hint { display: block; overflow-wrap: anywhere; }
@@ -323,6 +343,10 @@
 .cardTrigger:hover .cardTitle {
   color: var(--dsw-alias-brand-primary);
 }
+
+/* A header that carries its own trailing control keeps the trigger flush: the row
+   owns the padding, so the button inside it is not inset twice. */
+.cardHead > .cardTrigger { padding: 0; }
 
 /* Tuning fields pair up inside the advanced card, and every divider they carry
    as a stacked field is dropped: the grid gap does that job here. */

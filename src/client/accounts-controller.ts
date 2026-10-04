@@ -34,6 +34,8 @@ export interface GoAccountsActions {
   selectAccount: (ref: string) => Promise<boolean>
   setAutoSwitch: (next: boolean) => Promise<boolean>
   replaceAccountKey: (ref: string, key: string) => Promise<boolean>
+  /** Move one account to a new position; the first row becomes the preferred account. */
+  moveAccount: (ref: string, toIndex: number) => Promise<boolean>
 }
 
 /** Immediate account operations, separate from the page's staged tuning form. */
@@ -66,7 +68,13 @@ export class GoAccountsController {
 
   sync(): void {
     const config = this.scope.getSnapshot().value ?? {}
-    const identity = JSON.stringify([accountsOf(config), config.baseURL])
+    // Order is presentation, not identity: a reorder keeps every row's quota and
+    // status, so the comparison sorts the accounts and a reorder refetches nothing.
+    const identity = JSON.stringify([
+      accountsOf(config).map(account => [account.id, account.name, account.apiKeyEnv])
+        .sort((left, right) => left[2]! < right[2]! ? -1 : left[2]! > right[2]! ? 1 : 0),
+      config.baseURL,
+    ])
     if (identity === this.identity) return
     this.identity = identity
     this.epoch++
@@ -140,7 +148,31 @@ export class GoAccountsController {
         this.invalidate(ref)
         return true
       }, false),
+      moveAccount: (ref, toIndex) => this.move(ref, toIndex),
     }
+  }
+
+  /**
+   * Reorder the visible accounts and keep the preferred reference on the first row.
+   * The adapter tries the preferred reference first and the rest in array order, so
+   * one write is what makes top-to-bottom the real call order. A placeholder row the
+   * settings never stored is materialized here, which its `legacy:` id admits.
+   */
+  private move(ref: string, toIndex: number): Promise<boolean> {
+    return this.run(async () => {
+      const snapshot = this.scope.getSnapshot()
+      const entries = [...accountsOf(snapshot.value ?? {})]
+      const from = entries.findIndex(account => account.apiKeyEnv === ref)
+      if (from < 0 || !Number.isInteger(toIndex) || toIndex < 0 || toIndex >= entries.length || toIndex === from) return false
+      const [moved] = entries.splice(from, 1)
+      entries.splice(toIndex, 0, moved!)
+      await this.mutate([
+        { op: 'set', path: ['accounts'], value: entries },
+        { op: 'set', path: ['apiKeyEnv'], value: entries[0]!.apiKeyEnv },
+      ], snapshot.revision)
+      const after = this.scope.getSnapshot().value
+      return after?.apiKeyEnv === entries[0]!.apiKeyEnv && after.accounts?.[toIndex]?.apiKeyEnv === ref
+    })
   }
 
   private account(ref: string): GoAccount | undefined {
