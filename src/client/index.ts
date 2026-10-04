@@ -57,12 +57,15 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'llm-opencode-go: copy dictionaries')
   const modelsReady = ctx.remote.$mount(goRemote)
   ctx.effect(async () => await modelsReady)
-  ctx.inject(['configForms', 'remote.opencodeGoModels'], child => {
+  // The account rows read the plugin's own usage namespace, so the page waits
+  // for that mount too: the pill has always injected it, and a read issued
+  // before it is available fails where the pill's succeeds.
+  ctx.inject(['configForms', 'remote.opencodeGoModels', 'remote.opencodeGoUsage'], child => {
     const forms = child.get('configForms') as { get<T>(id: string): SettingsScope<T> }
     // Profile forms use the bundle entry id, not the legacy settings namespace.
     mountSettings(child, forms.get<OpencodeGoSettings>('opencode-go'), modelsReady)
   })
-  ctx.inject(['settingsScope', 'remote.opencodeGoModels'], child => {
+  ctx.inject(['settingsScope', 'remote.opencodeGoModels', 'remote.opencodeGoUsage'], child => {
     mountSettings(child, child.settingsScope.bind({
       namespace: 'llm-opencode-go',
       decode: (section): OpencodeGoSettings | undefined =>
@@ -76,6 +79,12 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
+  }, async ref => {
+    // One account's quota, through the namespace this plugin mounts for itself.
+    await modelsReady
+    const result = await ctx.remote.opencodeGoUsage.readAccount(ref)
+    if (!result.ok) throw result.error
+    return result.value
   })
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']

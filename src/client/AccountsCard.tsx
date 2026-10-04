@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { GoAccountsActions, GoAccountsState } from './accounts-controller.ts'
+import type { GoAccountsActions, GoAccountsState, GoAccountView } from './accounts-controller.ts'
 import { MAX_ACCOUNTS } from '../accounts.ts'
 import type { en } from './locales.ts'
 import css from './Section.module.css'
@@ -34,7 +34,7 @@ function resetText(resetsAt: string, t: Translate): string {
   return t('usageResetDays', { days: Math.round(hours / 24) })
 }
 
-/** The drag handle: six dots, the page's reorder affordance. */
+/** The drag handle: six dots, the page's reorder affordance and the drag source. */
 function GripIcon() {
   return <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true">
     <circle cx="2.5" cy="2.5" r="1.3" /><circle cx="7.5" cy="2.5" r="1.3" />
@@ -46,8 +46,9 @@ function GripIcon() {
 /**
  * The account card: a folded header that summarizes the set, and one row per
  * account inside. Rows keep the identity, key state, rolling quota and its reset
- * countdown; everything else opens under the row. Dragging a row's handle — or the
- * arrow keys on it — reorders the list, and the first row is the preferred account.
+ * countdown; everything else opens under the row. The handle is the drag source —
+ * dragging it, or the arrow keys on it, reorders the list, and the first row is
+ * the preferred account.
  */
 export function AccountsCard({ state, actions, writable, t, locale }: {
   state: GoAccountsState
@@ -66,6 +67,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
   const disabled = state.busy || state.blocked || !writable
   const total = state.entries.length
   const ready = state.entries.filter(entry => entry.configured === true).length
+  const unreadable = state.entries.filter(entry => entry.failed === true).length
   const preferred = state.entries.find(entry => entry.apiKeyEnv === state.activeRef)
   const reorderable = !disabled && total > 1
   useEffect(() => {
@@ -87,13 +89,59 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
   const summary = total
     ? t('accountsSummary', { count: total, name: preferred ? (preferred.name || t('accountDefault')) : '' })
     : t('accountsSummaryEmpty')
+  const editorTitle = (kind: Editor['kind']): string => t(kind === 'add' ? 'accountAdd' : kind === 'rename' ? 'accountRename'
+    : kind === 'key' ? 'accountReplaceKey' : 'accountRemove')
+  /** The editor renders inside the row it edits; adding one renders under the list. */
+  const editorForm = (label = '') => editor ? <form className={css.accountEditor}
+    onSubmit={event => { event.preventDefault(); void submit() }}
+    onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
+    <div className={css.accountEditorHead}>
+      <span className={css.accountEditorTitle}>{editorTitle(editor.kind)}</span>
+      {label ? <span className={css.accountEditorFor}>{label}</span> : null}
+    </div>
+    {editor.kind === 'remove' ? <p className={css.hint}>{t('accountRemoveHint', { name })}</p> : null}
+    {editor.kind === 'add' || editor.kind === 'rename' ? <label className={css.accountField}>{t('accountName')}
+      <input className={css.input} value={name} maxLength={80} required disabled={state.busy} autoFocus
+        onChange={event => { setName(event.target.value) }} />
+    </label> : null}
+    {editor.kind === 'add' || editor.kind === 'key' ? <><label className={css.accountField}>{t('keyLabel')}
+      <input className={css.input} type="password" autoComplete="off" value={key} required disabled={state.busy} autoFocus
+        onChange={event => { setKey(event.target.value) }} />
+    </label><p className={css.hint}>{t('accountKeyHint')}</p></> : null}
+    <div className={css.accountEditorActions}>
+      <Button variant="primary" size="sm" type="submit"
+        disabled={editor.kind === 'key' ? state.busy || state.blocked : disabled}>{t(state.busy ? 'saving' : 'accountConfirm')}</Button>
+      <Button variant="outline" size="sm" type="button" disabled={state.busy} onClick={cancel}>{t('accountCancel')}</Button>
+    </div>
+  </form> : null
+  const detail = (account: GoAccountView, label: string, index: number) => <div className={css.accountDetail}>
+    {account.usage ? <div className={css.accountUsage}>
+      {WINDOWS.map(window => <div key={window}>
+        <span>{t(`usage_${window}`)} · {account.usage![window].percent}%</span>
+        <progress aria-label={`${label} ${t(`usage_${window}`)}`} max={100} value={Math.min(100, account.usage![window].percent)} />
+        <span className={css.hint}>{t('usageResets')} {new Date(account.usage![window].resetsAt).toLocaleString(locale)}</span>
+      </div>)}
+    </div> : <p className={css.hint}>{t(account.loading ? 'usageLoading' : 'usageUnavailable')}</p>}
+    {account.updatedAt ? <p className={css.hint}>{t('usageLastUpdated')} {new Date(account.updatedAt).toLocaleString(locale)}</p> : null}
+    <div className={css.accountActions}>
+      <Button variant="outline" size="sm" disabled={!reorderable || index === 0}
+        onClick={() => { move(account.apiKeyEnv, index - 1) }}>{t('accountMoveUp')}</Button>
+      <Button variant="outline" size="sm" disabled={!reorderable || index === total - 1}
+        onClick={() => { move(account.apiKeyEnv, index + 1) }}>{t('accountMoveDown')}</Button>
+      <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
+      <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false} onClick={() => { start({ kind: 'key', ref: account.apiKeyEnv }, label) }}>{t('accountReplaceKey')}</Button>
+      <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
+    </div>
+  </div>
   return <section className={open ? css.card : css.card + ' ' + css.cardFolded}>
     <div className={css.cardHead}>
       <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
         onClick={() => { setOpen(!open) }}>
         <span className={css.cardTitle}>{t('accountsTitle')}</span>
         <span className={css.cardSub}>{summary}</span>
-        {total > 0 ? <Tag tone={ready === total ? 'success' : 'warning'}>{t('accountsAvailability', { ready, total })}</Tag> : null}
+        {total > 0 ? <Tag tone={unreadable > 0 || ready < total ? 'warning' : 'success'}>
+          {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
+        </Tag> : null}
         <ChevronDown className={open ? css.chevronOpen : css.chevron} />
       </button>
       <span className={css.trailing}><Button variant="outline" size="sm" disabled={state.refreshing}
@@ -114,14 +162,22 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
           const panelId = `opencode-go-account-${index}`
           return <Fragment key={account.id}>
             {reorderable && dropAt === index ? <div className={css.accountDropLine} /> : null}
-            <div className={css.accountRow} data-dragging={dragging === account.apiKeyEnv ? 'true' : undefined}
+            <div className={css.accountRow} data-account-row={account.apiKeyEnv}
+              data-dragging={dragging === account.apiKeyEnv ? 'true' : undefined}
               onDragStart={event => {
-                // Only the handle starts a drag: the row itself keeps its text and buttons usable.
+                // Only the handle is a drag source; a stray text drag stays a text drag.
                 if (!reorderable || (event.target as HTMLElement | null)?.closest?.('[data-account-handle]') == null) {
                   event.preventDefault()
                   return
                 }
-                if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', account.apiKeyEnv) }
+                if (event.dataTransfer) {
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', account.apiKeyEnv)
+                  // The row, not the small handle, is what the reader sees following the pointer.
+                  if (typeof event.dataTransfer.setDragImage === 'function') {
+                    event.dataTransfer.setDragImage(event.currentTarget, 16, 16)
+                  }
+                }
                 setDragging(account.apiKeyEnv)
               }}
               onDragOver={event => {
@@ -143,7 +199,8 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
               }}
               onDragEnd={() => { setDragging(null); setDropAt(null) }}>
               <div className={css.accountMain}>
-                <button type="button" className={css.accountHandle} data-account-handle="" disabled={!reorderable}
+                <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
+                  disabled={!reorderable}
                   aria-label={t('accountDragHandle', { name: label })}
                   onKeyDown={event => {
                     if (event.key === 'ArrowUp' && index > 0) { event.preventDefault(); move(account.apiKeyEnv, index - 1) }
@@ -170,51 +227,21 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                   <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
                 </button>
               </div>
-              {account.failed ? <div className={css.accountProblems}>
-                <p className={css.failedNote}>{t(account.stale ? 'usageStaleHint' : 'usageRefreshFailed')}</p>
+              {account.failed ? <div className={css.accountProblems} role="alert">
+                <p className={css.failedNote}>{account.problem ?? t(account.stale ? 'usageStaleHint' : 'usageRefreshFailed')}</p>
+                <button type="button" className={css.accountRetry} disabled={state.refreshing}
+                  onClick={actions.loadAccounts}>{t('usageRetry')}</button>
               </div> : null}
-              {expanded ? <div id={panelId} className={css.accountDetail}>
-                {account.usage ? <div className={css.accountUsage}>
-                  {WINDOWS.map(window => <div key={window}>
-                    <span>{t(`usage_${window}`)} · {account.usage![window].percent}%</span>
-                    <progress aria-label={`${label} ${t(`usage_${window}`)}`} max={100} value={Math.min(100, account.usage![window].percent)} />
-                    <span className={css.hint}>{t('usageResets')} {new Date(account.usage![window].resetsAt).toLocaleString(locale)}</span>
-                  </div>)}
-                </div> : <p className={css.hint}>{t(account.loading ? 'usageLoading' : 'usageUnavailable')}</p>}
-                {account.updatedAt ? <p className={css.hint}>{t('usageLastUpdated')} {new Date(account.updatedAt).toLocaleString(locale)}</p> : null}
-                <div className={css.accountActions}>
-                  <Button variant="outline" size="sm" disabled={!reorderable || index === 0}
-                    onClick={() => { move(account.apiKeyEnv, index - 1) }}>{t('accountMoveUp')}</Button>
-                  <Button variant="outline" size="sm" disabled={!reorderable || index === total - 1}
-                    onClick={() => { move(account.apiKeyEnv, index + 1) }}>{t('accountMoveDown')}</Button>
-                  <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
-                  <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false} onClick={() => { start({ kind: 'key', ref: account.apiKeyEnv }, label) }}>{t('accountReplaceKey')}</Button>
-                  <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
-                </div>
-              </div> : null}
+              {expanded ? detail(account, label, index) : null}
+              {editor?.ref === account.apiKeyEnv ? editorForm(label) : null}
             </div>
           </Fragment>
         })}
         {reorderable && dropAt === total ? <div className={css.accountDropLine} /> : null}
       </div>
-      {editor ? <form className={css.accountEditor} onSubmit={event => { event.preventDefault(); void submit() }}>
-        <strong>{t(editor.kind === 'add' ? 'accountAdd' : editor.kind === 'rename' ? 'accountRename'
-          : editor.kind === 'key' ? 'accountReplaceKey' : 'accountRemove')}</strong>
-        {editor.kind === 'remove' ? <p className={css.hint}>{t('accountRemoveHint', { name })}</p> : null}
-        {editor.kind === 'add' || editor.kind === 'rename' ? <label className={css.field}>{t('accountName')}
-          <input className={css.input} value={name} maxLength={80} required disabled={state.busy}
-            onChange={event => { setName(event.target.value) }} />
-        </label> : null}
-        {editor.kind === 'add' || editor.kind === 'key' ? <><label className={css.field}>{t('keyLabel')}
-          <input className={css.input} type="password" autoComplete="off" value={key} required disabled={state.busy}
-            onChange={event => { setKey(event.target.value) }} />
-        </label><p className={css.hint}>{t('accountKeyHint')}</p></> : null}
-        <div className={css.accountActions}>
-          <button className={css.accountSubmit} type="submit" disabled={editor.kind === 'key' ? state.busy || state.blocked : disabled}>{t(state.busy ? 'saving' : 'accountConfirm')}</button>
-          <Button variant="outline" size="sm" disabled={state.busy} onClick={cancel}>{t('accountCancel')}</Button>
-        </div>
-      </form> : <Button variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
-        onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
+      {editor ? (editor.kind === 'add' ? editorForm() : null)
+        : <Button variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
+          onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
       <div className={css.field}>
         <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}</span>
           <Switch checked={state.autoSwitch} disabled={disabled} label={t('accountAutoSwitch')}

@@ -14,6 +14,8 @@ export interface GoAccountView extends GoAccount {
   stale?: boolean
   loading?: boolean
   failed?: boolean
+  /** Why the last quota read failed, safe to show: it carries no credential value. */
+  problem?: string
 }
 
 export interface GoAccountsState {
@@ -121,7 +123,11 @@ export class GoAccountsController {
             && 'details' in error && error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : undefined
           const retain = details?.retryable === true && details.retainPrevious === true && previous?.usage?.source
             && previous.usage.source === details.source
+          // The row reports the failure it saw: the message names the URL and the
+          // HTTP status, and never the key.
+          const message = error instanceof Error ? error.message : String(error)
           this.rows.set(ref, { ...account, configured: true, writable: info.writable, failed: true,
+            problem: message.length > 200 ? message.slice(0, 200) + '…' : message,
             ...(retain ? { usage: previous.usage, updatedAt: previous.updatedAt, stale: true } : {}) })
         }
         this.publish()

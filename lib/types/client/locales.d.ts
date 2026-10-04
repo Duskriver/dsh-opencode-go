@@ -27,6 +27,7 @@ export declare const en: {
     accountsSummary: string;
     accountsSummaryEmpty: string;
     accountsAvailability: string;
+    accountsAvailabilityFailed: string;
     accountsOrderHint: string;
     accountsDetails: string;
     accountsDetailsHide: string;

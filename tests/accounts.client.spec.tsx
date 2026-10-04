@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { GoAccountsController } from '../src/client/accounts-controller.ts'
 import { OpencodeGoSectionController, type OpencodeGoSettings } from '../src/client/section-controller.ts'
@@ -310,4 +310,49 @@ it('reorders with the arrow keys on a row handle', async () => {
   expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_B', 0)
   fixture.controller.dispose()
 })
+
+it('reports the reason a row could not read its quota, without any credential value', async () => {
+  const fixture = setup()
+  fixture.read.mockRejectedValue(Object.assign(new Error('OpenCode Go usage unavailable (HTTP 401)'), { code: 'opencode-go/usage-unavailable' }))
+  await fixture.controller.refresh()
+  expect(fixture.controller.snapshot().entries[0]).toMatchObject({
+    failed: true, problem: 'OpenCode Go usage unavailable (HTTP 401)',
+  })
+  expect(JSON.stringify(fixture.controller.snapshot())).not.toContain('secret-a')
+  fixture.controller.dispose()
+})
+
+it('marks the handle as the drag source, so a real browser can start the reorder', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const handle = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
+  // Dragging is inert without this attribute: the browser never dispatches dragstart.
+  expect(handle.getAttribute('draggable')).toBe('true')
+  expect(handle.closest('[data-account-row]')?.getAttribute('data-account-row')).toBe('ACCOUNT_A')
+  fixture.controller.dispose()
+})
+
+it('edits a row in place and reports why a quota read failed', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const state = fixture.controller.snapshot()
+  render(<AccountsCard state={{ ...state, entries: state.entries.map((entry, index) => index === 0
+    ? { ...entry, failed: true, usage: undefined, problem: 'OpenCode Go usage unavailable (HTTP 401)' }
+    : entry) }} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  // The reason is visible without opening the row's detail, and retrying is one click away.
+  expect(screen.getByText('OpenCode Go usage unavailable (HTTP 401)')).toBeTruthy()
+  expect(screen.getByRole('button', { name: en.usageRetry })).toBeTruthy()
+  expect(screen.getByText(t('accountsAvailabilityFailed', { ready: 2, total: 2, failed: 1 }))).toBeTruthy()
+  // Editing opens inside the row it edits, not at the foot of the list.
+  const row = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) }).closest('[data-account-row]') as HTMLElement
+  fireEvent.click(within(row).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+  fireEvent.click(within(row).getByRole('button', { name: en.accountRename }))
+  expect(within(row).getByLabelText(en.accountName)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: en.accountAdd })).toBeNull()
+  fixture.controller.dispose()
+})
+
 

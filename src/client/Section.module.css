@@ -7,7 +7,7 @@
 .accountRow { border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
 .accountRow[data-dragging='true'] { opacity: .55; }
 .accountMain { display: flex; align-items: center; gap: 9px; padding: 9px 11px; }
-.accountHandle { flex: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; }
+.accountHandle { flex: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; -webkit-user-drag: element; }
 .accountHandle:disabled { cursor: default; opacity: .5; }
 .accountHandle:focus-visible, .accountToggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
 .accountName { flex: none; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
@@ -19,7 +19,10 @@
 .accountProgress { flex: none; width: 132px; height: 6px; accent-color: #39a878; }
 .accountReset { flex: none; width: 106px; text-align: right; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
 .accountToggle { flex: none; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
-.accountProblems { padding: 0 11px 8px 36px; }
+.accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 11px 9px 36px; }
+.accountRetry { flex: none; border: none; background: none; padding: 0; font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-brand-primary); cursor: pointer; }
+.accountRetry:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+.accountHandle:active { cursor: grabbing; }
 .accountDetail { display: flex; flex-direction: column; gap: 8px; padding: 9px 11px 10px 36px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
 /* The drop slot: a line where the dragged row would land. */
 .accountDropLine { height: 2px; border-radius: 2px; background: var(--dsw-alias-brand-primary); }
@@ -27,9 +30,16 @@
 .accountUsage progress { display: block; width: 100%; height: 6px; accent-color: #39a878; margin: 6px 0; }
 .accountUsage .hint { display: block; overflow-wrap: anywhere; }
 .accountActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.accountEditor { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; margin-top: 12px; }
-.accountSubmit { border: 1px solid var(--dsw-alias-border-l3); border-radius: 6px; padding: 5px 12px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font: inherit; cursor: pointer; }
-.accountSubmit:disabled { opacity: .5; cursor: default; }
+/* The row's editor sits inside the row it edits: same inset as the detail, one
+   step quieter than the card, and every control on the page's own type scale. */
+.accountEditor { display: flex; flex-direction: column; gap: 8px; margin: 0 11px 10px 36px; padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 25%, transparent); }
+.accountEditorHead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.accountEditorTitle { flex: none; font-size: 12.5px; font-weight: 600; line-height: 1.5; color: var(--dsw-alias-label-primary); }
+.accountEditorFor { min-width: 0; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+.accountField { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.accountEditorActions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 @media (max-width: 480px) { .accountUsage { grid-template-columns: 1fr; } }
 
 .page {

@@ -10,6 +10,8 @@ export interface GoAccountView extends GoAccount {
     stale?: boolean;
     loading?: boolean;
     failed?: boolean;
+    /** Why the last quota read failed, safe to show: it carries no credential value. */
+    problem?: string;
 }
 export interface GoAccountsState {
     entries: readonly GoAccountView[];
