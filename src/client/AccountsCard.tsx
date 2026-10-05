@@ -225,7 +225,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                 if (from >= 0) move(source, slot > from ? slot - 1 : slot)
               }}
               onDragEnd={() => { setDragging(null); setDropAt(null) }}>
-              <div className={css.accountMain}>
+              <div className={css.accountMain} data-account-main="">
                 <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
                   disabled={!reorderable} title={t('accountDragHandle', { name: label })}
                   aria-label={t('accountDragHandle', { name: label })}
@@ -235,12 +235,11 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                   }}>
                   <GripIcon />
                 </button>
-                <strong className={css.accountName}>{label}</strong>
+                <strong className={css.accountName} title={label}>{label}</strong>
                 <span className={css.accountState}>
                   <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
                   {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
                 </span>
-                <span className={css.accountSpacer} />
                 {rolling ? <>
                   <span className={css.accountBar} role="progressbar" data-level={barLevel(rolling)}
                     aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
@@ -250,7 +249,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                   </span>
                   <span className={css.accountPercent}>{rolling.percent}%</span>
                   <span className={css.accountReset}>{resetText(rolling.resetsAt, t)}</span>
-                </> : <span className={css.accountReset}>{account.configured === false
+                </> : <span className={css.accountIdle}>{account.configured === false
                   ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>}
                 <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
                   aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}

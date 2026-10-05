@@ -3,29 +3,36 @@
 
 .accounts { display: grid; gap: 10px; margin: 12px 0; }
 /* One row per account: the summary line stays readable, and the detail opens under
-   it. The row is the drag unit, so nothing inside it may swallow the pointer. */
+   it. The row is the drag unit, so nothing inside it may swallow the pointer. The
+   summary line is a grid of fixed columns — handle, name, key state, bar, reading,
+   reset, disclosure — so two accounts whose names differ in length still line up
+   their key state, their bar and their countdown. Only the bar's track takes
+   slack, which is why the name and state columns may clip a long value instead of
+   pushing their neighbours. */
 .accountRow { border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
 .accountRow[data-dragging='true'] { opacity: .55; }
-.accountMain { display: flex; align-items: center; gap: 9px; padding: 9px 11px; }
-.accountHandle { flex: none; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; -webkit-user-drag: element; }
+.accountMain { display: grid; grid-template-columns: 16px 112px 92px minmax(0, 1fr) 38px 106px 14px; align-items: center; gap: 9px; padding: 9px 11px; }
+.accountHandle { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; -webkit-user-drag: element; }
 .accountHandle:disabled { cursor: default; opacity: .5; }
 .accountHandle:focus-visible, .accountToggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
-.accountName { flex: none; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
-.accountState { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+.accountName { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.accountState { min-width: 0; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
 .accountDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #39a878; }
 .accountDot[data-off='true'] { background: #d9a441; }
-.accountSpacer { flex: 1; min-width: 8px; }
 /* The reading follows the bar: a bar wide enough to answer "how close to the
    limit" at a glance, with the number right after it. */
-.accountPercent { flex: none; min-width: 34px; text-align: right; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
-.accountBar { position: relative; flex: 1 1 auto; min-width: 140px; height: 12px; border-radius: 99px; background: rgba(255, 255, 255, .10); overflow: hidden; }
+.accountPercent { text-align: right; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.accountBar { position: relative; height: 12px; border-radius: 99px; background: rgba(255, 255, 255, .10); overflow: hidden; }
 .accountBarFill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: #39a878; }
 .accountBar[data-level='high'] .accountBarFill { background: #e0a100; }
 .accountBar[data-level='limited'] .accountBarFill { background: #e5484d; }
 /* Quarter marks: "three quarters spent" reads without measuring pixels. */
 .accountBarTick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .20); }
-.accountReset { flex: none; width: 106px; text-align: right; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
-.accountToggle { flex: none; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.accountReset { text-align: right; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+/* A row with nothing to read yet speaks across the bar, the reading and the
+   countdown instead of squeezing into one column. */
+.accountIdle { grid-column: 4 / 7; text-align: right; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.accountToggle { display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
 .accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 11px 9px 36px; }
 .accountRetry { flex: none; border: none; background: none; padding: 0; font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-brand-primary); cursor: pointer; }
 .accountRetry:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }

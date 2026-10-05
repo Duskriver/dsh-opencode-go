@@ -450,6 +450,32 @@ it('draws the row quota as one wide bar with quarter marks and a trailing readin
   fixture.controller.dispose()
 })
 
+it('lays a row out as fixed columns, so a longer name cannot move the bar', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const state = fixture.controller.snapshot()
+  const main = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
+    .closest('[data-account-row]')!.querySelector('[data-account-main]') as HTMLElement
+  const { unmount } = render(<AccountsCard state={state} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  // Handle, name, key state, bar, reading, reset, disclosure: the flexible
+  // spacer that let a long name push every later column is gone.
+  expect(Array.from(main().children).map(child => child.tagName)).toEqual(
+    ['BUTTON', 'STRONG', 'SPAN', 'SPAN', 'SPAN', 'SPAN', 'BUTTON'])
+  expect(main().children[3]!.getAttribute('role')).toBe('progressbar')
+  // The name column is fixed and may ellipsise, so the full value stays reachable.
+  expect(main().children[1]!.getAttribute('title')).toBe('Primary')
+  unmount()
+  // A row with nothing to read yet keeps that grid: its message spans the bar,
+  // the reading and the countdown instead of adding a column.
+  render(<AccountsCard state={{ ...state, entries: state.entries.map(entry => ({ ...entry, usage: undefined, loading: true })) }}
+    actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'STRONG', 'SPAN', 'SPAN', 'BUTTON'])
+  expect(screen.getAllByText(en.usageLoading)).toHaveLength(2)
+  fixture.controller.dispose()
+})
+
 it('turns the row bar amber at 80% and red once the window is spent', async () => {
   const fixture = setup()
   await fixture.controller.refresh()
