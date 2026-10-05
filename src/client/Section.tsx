@@ -1,10 +1,7 @@
 /**
- * The OpenCode Go settings page. Three cards carry the page's whole order — the
- * connection (the switch that routes the provider plus the API key it
- * authenticates with), the models the gateway currently serves and their
- * capacities, and the adapter tuning fields behind a collapsed disclosure at the
- * foot. The credential reference, the endpoint, and the tuning knobs all live in
- * the `llm-opencode-go` namespace, so every card writes the same document.
+ * The OpenCode Go settings page: provider activation, accounts and credentials,
+ * available models and capacities, then advanced tuning. Account operations
+ * apply immediately; tuning fields use the page's save/discard actions.
  */
 
 import { useEffect, useState } from 'react'
@@ -230,6 +227,9 @@ function Loaded(props: {
     return <p className={css.intro}>{t('unavailable')}</p>
   }
   const disabled = !state.writable
+  const accountCard = state.accounts && props.accountActions ? <AccountsCard
+    state={state.accounts} actions={props.accountActions} writable={state.writable}
+    t={t} locale={props.locale} /> : null
   const fieldProps = {
     invalidLabel: t('invalidValue'),
     overriddenLabel: t('overridden'),
@@ -248,10 +248,8 @@ function Loaded(props: {
         <h2 className={css.title}>{t('titleLabel')}</h2>
         <p className={css.intro}>{t('intro')}</p>
       </div>
-      {/* One card carries both halves of the connection: the switch that decides
-          whether the provider is served at all, and the key it authenticates
-          with. They are the two values a user has to get right, so they sit
-          together at the top instead of being split across the page. */}
+      {/* Account management owns credential entry and replacement. Keep the
+          standalone key control only for callers without the account actions. */}
       <section className={css.card}>
         <div className={css.cardHead}>
           <h3 className={css.cardTitle}>{t('enabledLabel')}</h3>
@@ -267,6 +265,7 @@ function Loaded(props: {
         <div className={css.cardBody}>
           <p className={css.hint}>{state.enabled ? t('enabledHint') : t('enabledOff')}</p>
         </div>
+        {accountCard ? null : <>
         <div className={css.cardDivider} />
         <div className={css.cardHead}>
           {/* Inline so every supported Host shows the same glyph. */}
@@ -300,9 +299,9 @@ function Loaded(props: {
           />
           <p id="opencode-go-key-hint" className={css.hint}>{state.apiKeyWritable ? t('keyHint') : t('keyNotWritable')}</p>
         </div>
+        </>}
       </section>
-      {state.accounts && props.accountActions ? <AccountsCard state={state.accounts} actions={props.accountActions}
-        writable={state.writable} t={t} locale={props.locale} /> : null}
+      {accountCard}
       {/* The model card takes whatever height the page has left: its list and its
           parameter card are the reason the page is open. It folds away exactly
           like the tuning card does, and the listing's own refresh sits with the

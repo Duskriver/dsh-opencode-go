@@ -127,6 +127,50 @@ it('skips a gateway-rejected key on later requests until the credential changes'
   expect(gateway.bodies).toHaveLength(5)
 })
 
+it('isolates rejected credentials by gateway while retaining each gateway rejection', async () => {
+  const first = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  const second = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  first.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+  first.pushCompletions({ events: textEvents })
+  let config = configOf(first.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => config.apiKeyEnv })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+
+  config = { ...config, baseURL: second.url }
+  second.pushCompletions({ events: textEvents })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(second.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual(['Bearer ACCOUNT_A'])
+
+  // An equivalent URL must still remember this gateway's rejection.
+  config = { ...config, baseURL: first.url + '/' }
+  first.pushCompletions({ events: textEvents })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(first.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual([
+    'Bearer ACCOUNT_A', 'Bearer ACCOUNT_B', 'Bearer ACCOUNT_B',
+  ])
+})
+
+it('invalidates a changed credential on every gateway where it was rejected', async () => {
+  const gateways = await Promise.all([0, 1].map(() => mockGateway({ status: 200, body: listingBody([request().model]) })))
+  let config = configOf(gateways[0]!.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => config.apiKeyEnv })
+  for (const gateway of gateways) {
+    config = { ...config, baseURL: gateway.url }
+    gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+    gateway.pushCompletions({ events: textEvents })
+    expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  }
+  adapter.forgetRejectedKey('ACCOUNT_A')
+  for (const gateway of gateways) {
+    config = { ...config, baseURL: gateway.url }
+    gateway.pushCompletions({ events: textEvents })
+    expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+    expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual([
+      'Bearer ACCOUNT_A', 'Bearer ACCOUNT_B', 'Bearer ACCOUNT_A',
+    ])
+  }
+})
+
 it('can use a backup when the preferred credential is missing and stops fallback on cancellation', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ events: textEvents })

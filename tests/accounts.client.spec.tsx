@@ -90,15 +90,38 @@ it('describes the legacy reference directly while the first refresh is still pen
   fixture.controller.dispose()
 })
 
-it('never stores the legacy placeholder and keeps the selection when the credential service cannot answer', async () => {
+it.each([
+  { value: {}, ref: 'OPENCODE_API_KEY', loaded: false },
+  { value: { accounts: null, apiKeyEnv: 'ACCOUNT_A' }, ref: 'ACCOUNT_A', loaded: true },
+])('preserves the configured legacy account $ref after adding and selecting another account', async ({ value, ref, loaded }) => {
+  const fixture = setup(value)
+  fixture.secrets.set(ref, 'legacy-secret')
+  if (loaded) await fixture.controller.refresh()
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  const added = fixture.controller.snapshot().entries.find(entry => entry.name === 'Work')!
+  expect(await fixture.actions.selectAccount(added.apiKeyEnv)).toBe(true)
+  expect(fixture.controller.snapshot().entries.map(entry => entry.apiKeyEnv)).toEqual([ref, added.apiKeyEnv])
+  expect(await fixture.actions.selectAccount(ref)).toBe(true)
+  expect(fixture.secrets.get(ref)).toBe('legacy-secret')
+  fixture.controller.dispose()
+})
+
+it('preserves an unknown legacy account once when the credential service cannot answer', async () => {
   const fixture = setup({})
   fixture.credentials.describe.mockRejectedValue(new Error('no credential provider mounted'))
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
   const config = fixture.host.scope.getSnapshot().value!
-  // Only the new account is stored: the placeholder stays a read-side view, and
-  // the legacy selection is kept because its key state is unknown, not false.
-  expect(config.accounts).toEqual([expect.objectContaining({ name: 'Work' })])
+  // Unknown does not mean absent: keep the legacy reference when the user
+  // later selects another account, without duplicating it on repeated adds.
+  expect(config.accounts).toEqual([
+    { id: 'legacy:OPENCODE_API_KEY', name: '', apiKeyEnv: 'OPENCODE_API_KEY' },
+    expect.objectContaining({ name: 'Work' }),
+  ])
   expect(config.apiKeyEnv).toBeUndefined()
+  expect(await fixture.actions.addAccount('Personal', 'other-secret')).toBe(true)
+  expect(await fixture.actions.selectAccount(config.accounts![1]!.apiKeyEnv)).toBe(true)
+  expect(fixture.controller.snapshot().entries).toHaveLength(3)
+  expect(fixture.controller.snapshot().entries.filter(entry => entry.apiKeyEnv === 'OPENCODE_API_KEY')).toHaveLength(1)
   fixture.controller.dispose()
 })
 
@@ -180,6 +203,26 @@ it('keeps the account when its stored key cannot be deleted', async () => {
   expect(fixture.controller.snapshot().entries.some(entry => entry.apiKeyEnv === ref)).toBe(true)
   expect(await fixture.actions.removeAccount(ref)).toBe(true)
   expect(fixture.secrets.has(ref)).toBe(false)
+  fixture.controller.dispose()
+})
+
+it.each(['rejected', 'thrown', 'missing'])('keeps the account and key retryable after a %s credential description', async failure => {
+  const fixture = setup({ accounts: [] })
+  await fixture.actions.addAccount('Work', 'private-key')
+  const ref = fixture.host.scope.getSnapshot().value!.apiKeyEnv!
+  fixture.host.mutate.mockClear()
+  if (failure === 'thrown') fixture.credentials.describe.mockRejectedValueOnce(new Error('describe unavailable'))
+  else if (failure === 'rejected') fixture.credentials.describe.mockResolvedValueOnce({ ok: false as const, error: new Error('describe unavailable') })
+  else fixture.credentials.describe.mockResolvedValueOnce({ ok: true, value: {} })
+  expect(await fixture.actions.removeAccount(ref)).toBe(false)
+  expect(fixture.host.mutate).not.toHaveBeenCalled()
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  expect(fixture.secrets.has(ref)).toBe(true)
+  expect(fixture.controller.snapshot().failure).toBe('remove')
+  expect(fixture.controller.snapshot().entries.some(entry => entry.apiKeyEnv === ref)).toBe(true)
+  expect(await fixture.actions.removeAccount(ref)).toBe(true)
+  expect(fixture.secrets.has(ref)).toBe(false)
+  expect(fixture.controller.snapshot().entries).toEqual([])
   fixture.controller.dispose()
 })
 
@@ -569,5 +612,4 @@ it('marks the collapsed pill when a fallback notice is active', async () => {
   expect(trigger.textContent).toContain('Primary')
   fixture.controller.dispose()
 })
-
 

@@ -230,14 +230,12 @@ export class GoAccountsController {
         const existing = accountsOf(snapshot.value ?? {})
         // An earlier ambiguous attempt may already have committed this account.
         if (existing.some(entry => entry.id === id)) return true
-        // The legacy placeholder is a read-side view; a write never stores it,
-        // because the reader resynthesizes it while the selection still names
-        // the legacy reference. Whether that reference holds a key decides only
-        // the new account's preference, and that answer must not race the
-        // page's first describe: anything the loaded rows do not know is
-        // described on the spot.
+        // Persist an existing legacy account before selection can move away
+        // from it. Only a confirmed empty placeholder can be dropped; an
+        // unanswered describe must not lose an account that may hold a key.
         const configured = await this.configuredOf(existing.map(entry => entry.apiKeyEnv))
-        const accounts = existing.filter(entry => !(snapshot.value?.accounts == null && !entry.name))
+        const accounts = existing.filter(entry => !(snapshot.value?.accounts == null && !entry.name
+          && configured.get(entry.apiKeyEnv) === false))
         if (accounts.length >= MAX_ACCOUNTS) break
         // The new account becomes preferred only when every account the page
         // already shows — placeholder included — is known to hold no key.
@@ -309,7 +307,11 @@ export class GoAccountsController {
       // fixable instead of becoming a dangling secret.
       if (ref.startsWith(ACCOUNT_REF_PREFIX)) {
         const described = await this.ctx.remote.credentials.describe([ref]).catch(() => undefined)
-        if (described?.ok && described.value[ref]?.configured === true) {
+        if (!described?.ok || described.value[ref] === undefined) {
+          this.failure = 'remove'
+          return false
+        }
+        if (described.value[ref].configured === true) {
           let removed = false
           try { removed = (await this.ctx.remote.credentials.unset(ref)).ok }
           catch { /* A refused unset keeps the row; the remove stays retryable. */ }

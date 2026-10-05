@@ -148,8 +148,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
    */
   private catalogCache: { key: string; catalog: OpencodeGoCatalog } | undefined
 
-  /** References whose key the gateway lately rejected, and when to re-check. */
-  private readonly rejectedKeys = new Map<string, number>()
+  /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
+  private readonly rejectedKeys = new Map<string, Map<string, number>>()
 
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
@@ -312,10 +312,16 @@ export class OpencodeGoAdapter extends LlmAdapter {
     // candidate is in that window the original order stands, so the gateway's
     // own error — not a synthetic local one — reaches the caller.
     const now = Date.now()
+    const gateway = assertBaseURL(snapshot.config.baseURL)
     const usable = ordered.filter(ref => {
-      const until = this.rejectedKeys.get(ref)
+      const rejected = this.rejectedKeys.get(ref)
+      const until = rejected?.get(gateway)
       if (until === undefined) return true
-      if (now >= until) { this.rejectedKeys.delete(ref); return true }
+      if (now >= until) {
+        rejected!.delete(gateway)
+        if (rejected!.size === 0) this.rejectedKeys.delete(ref)
+        return true
+      }
       return false
     })
     const refs = usable.length > 0 ? usable : ordered
@@ -350,7 +356,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
             const reason = failure === undefined ? undefined : accountFailureReason(failure)
             if (reason && failure !== undefined && !emitted && !options.signal?.aborted && !((usage?.usage.totalTokens ?? 0) > 0)
               && attempt + 1 < refs.length) {
-              if (isGatewayKeyRejection(failure)) this.rememberRejectedKey(refs[attempt]!)
+              if (isGatewayKeyRejection(failure)) this.rememberRejectedKey(refs[attempt]!, gateway)
               switchReason ??= reason
               failedRef ??= refs[attempt]!
               retry = true
@@ -369,15 +375,17 @@ export class OpencodeGoAdapter extends LlmAdapter {
       } catch (error) {
         const reason = error instanceof LlmError ? accountFailureReason(error) : undefined
         if (!reason || emitted || options.signal?.aborted || attempt + 1 >= refs.length) throw error
-        if (error instanceof LlmError && isGatewayKeyRejection(error)) this.rememberRejectedKey(refs[attempt]!)
+        if (error instanceof LlmError && isGatewayKeyRejection(error)) this.rememberRejectedKey(refs[attempt]!, gateway)
         switchReason ??= reason
         failedRef ??= refs[attempt]!
       }
     }
   }
 
-  private rememberRejectedKey(ref: string): void {
-    this.rejectedKeys.set(ref, Date.now() + REJECTED_KEY_TTL_MS)
+  private rememberRejectedKey(ref: string, gateway: string): void {
+    const rejected = this.rejectedKeys.get(ref) ?? new Map<string, number>()
+    rejected.set(gateway, Date.now() + REJECTED_KEY_TTL_MS)
+    this.rejectedKeys.set(ref, rejected)
   }
 
   /** A stored change to a reference outranks the gateway's last rejection of it. */

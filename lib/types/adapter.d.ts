@@ -81,7 +81,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
      * for the whole refresh interval.
      */
     private catalogCache;
-    /** References whose key the gateway lately rejected, and when to re-check. */
+    /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
     constructor(options: OpencodeGoAdapterOptions);
     /**

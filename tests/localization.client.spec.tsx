@@ -153,8 +153,9 @@ it('updates mounted plugin surfaces when the Host locale changes while preservin
   const { locale, host } = createLocale(['zh-CN'])
   const { snapshot, readModels, readUsage } = await mountSurfaces(locale)
   const t = locale.bind(namespace)
-  const keyInput = screen.getByLabelText(zh.keyLabel)
-  fireEvent.change(keyInput, { target: { value: 'unsaved-fixture-key' } })
+  fireEvent.click(screen.getByText(zh.advancedLabel))
+  const refreshInput = screen.getByLabelText(zh.refreshMinutesLabel)
+  fireEvent.change(refreshInput, { target: { value: '30' } })
   fireEvent.click(screen.getByRole('button', { name: `${zh.usageTitle}: Go · ${zh.usageRollingShort} 0% · ${zh.usageWeekShort} 10%` }))
   expect(snapshot().dirty).toBe(true)
 
@@ -162,8 +163,8 @@ it('updates mounted plugin surfaces when the Host locale changes while preservin
 
   expect(locale.bind(namespace)).toBe(t)
   expectCopy('en')
-  expect(screen.getByLabelText(en.keyLabel)).toBe(keyInput)
-  expect(keyInput).toHaveProperty('value', 'unsaved-fixture-key')
+  expect(screen.getByLabelText(en.refreshMinutesLabel)).toBe(refreshInput)
+  expect(refreshInput).toHaveProperty('value', '30')
   expect(snapshot().dirty).toBe(true)
   expect(screen.getByRole('dialog', { name: en.usageTitle })).toBeTruthy()
   expect(screen.getAllByText(`${en.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString('en')}`)).toHaveLength(3)
