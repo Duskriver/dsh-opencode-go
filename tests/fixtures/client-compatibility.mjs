@@ -44,7 +44,8 @@ const effects = []
 const listeners = new Set()
 try {
   runInNewContext(await readFile(new URL('../node_modules/dsh-opencode-go/lib/client.js', import.meta.url), 'utf8'), {
-    document, window: { __ModuleLoader__: { load: entry => { registration = entry } } },
+    document, setInterval, clearInterval,
+    window: { __ModuleLoader__: { load: entry => { registration = entry } } },
   })
   assert.equal(registration?.id, 'dsh-opencode-go')
   const client = registration.factory(id => {
@@ -155,7 +156,8 @@ try {
   const markup = renderToStaticMarkup(React.createElement(Component, {
     ...face, useOpencodeGo: () => face.hooks.opencodeGo.getSnapshot(),
   }))
-  assert.match(markup, /type="password"/)
+  assert.doesNotMatch(markup, /type="password"/, 'credentials are edited through the account card')
+  assert.match(markup, /aria-controls="opencode-go-accounts"/)
   document.body.innerHTML = markup
   const advanced = document.querySelector('[aria-controls="opencode-go-advanced"]')
   assert.ok(advanced)
@@ -184,6 +186,27 @@ try {
   assert.match(pluginCss, /\.\w*cardNotes:empty\{display:none\}/)
   // The override tally closes the card on a ruled footer row of its own.
   assert.match(pluginCss, /\.\w*limitsFoot\{[^}]*border-top/)
+  const sectionContainer = document.createElement('div')
+  document.body.replaceChildren(sectionContainer)
+  const sectionRoot = createRoot(sectionContainer)
+  try {
+    await React.act(async () => { sectionRoot.render(React.createElement(Component, {
+      ...face, useOpencodeGo: () => face.hooks.opencodeGo.getSnapshot(),
+    })) })
+    assert.equal(sectionContainer.querySelector('input[type="password"]'), null)
+    const accountsTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-accounts"]')
+    assert.ok(accountsTrigger)
+    await React.act(async () => { accountsTrigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+    const accountsBody = sectionContainer.querySelector('#opencode-go-accounts')
+    const addAccount = [...accountsBody.querySelectorAll('button')].find(button => button.textContent === 'accountAdd')
+    assert.ok(addAccount)
+    await React.act(async () => { addAccount.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+    assert.equal(sectionContainer.querySelectorAll('input[type="password"]').length, 1)
+    assert.ok(accountsBody.querySelector('input[type="password"]'), 'the account editor masks the new key')
+  } finally {
+    await React.act(async () => { sectionRoot.unmount() })
+    sectionContainer.remove()
+  }
   for (const dispose of effects.splice(0).reverse()) (await dispose)()
   assert.equal(listeners.size, 0, 'client cleanup releases settings subscriptions')
   console.log(`PASS: client compatibility (${host}): module table, settings, catalog injection, SSR/client rendering, CSS, cleanup`)
