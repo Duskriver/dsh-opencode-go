@@ -20,6 +20,7 @@ import { OpencodeGoSection } from './Section.tsx'
 import type { OpencodeGoSectionInjected } from './Section.tsx'
 import { OpencodeGoSectionController, type OpencodeGoSettings } from './section-controller.ts'
 import { en, zh } from './locales.ts'
+import type { GoUsage } from '../usage-contract.ts'
 import { goRemote } from '../remote-contract.ts'
 import { registerUsagePill } from './usage.ts'
 
@@ -73,17 +74,28 @@ export function apply(ctx: ClientContext): void {
 
 function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
   registerUsagePill(ctx, scope)
+  // The rows read the plugin's own usage namespace, and a context may only reach
+  // a remote namespace it injected. It gets an injection of its own — the way the
+  // pill declares it — because the two settings injections above must name
+  // exactly the services their host generation provides: a host carrying both
+  // service sets would otherwise mount this page twice.
+  let readAccount: ((ref: string) => Promise<GoUsage>) | undefined
+  ctx.inject(['remote.opencodeGoUsage'], ready => {
+    readAccount = async ref => {
+      const result = await (ready as ClientContext).remote.opencodeGoUsage.readAccount(ref)
+      if (!result.ok) throw result.error
+      return result.value
+    }
+  })
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
   }, async ref => {
-    // One account's quota, through the namespace this plugin mounts for itself:
-    // the mount is what publishes it, so the read waits for the same promise the
-    // catalog does instead of racing the page's first refresh.
     await modelsReady
-    const result = await ctx.remote.opencodeGoUsage.readAccount(ref)
-    if (!result.ok) throw result.error
-    return result.value
+    // A session without the usage namespace cannot read a quota; say so instead
+    // of reaching for a context that never injected it.
+    if (readAccount === undefined) throw new Error('OpenCode Go account usage is unavailable in this session')
+    return readAccount(ref)
   })
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
