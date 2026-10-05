@@ -563,3 +563,13 @@ The shape that satisfies both is one injection of its own, the way the pill decl
 
 Final-shape validation: `npm run test:ci` passes **455 tests in 30 files** with a byte-identical `check:dist`, and `DSH_COMPAT_CONCURRENCY=4 npm run test:compat` reports `PASS: installed-package compatibility across 9 host(s)` in 292.5s — the same command failed all nine hosts on the double-mounting revision and all nine again on the mount-waiting one.
 
+## Usage pill panel: model-selector card, explicit account choice (2026-10-05)
+
+The panel behind the composer's usage pill was rebuilt in the shape of the host's own model selector — a 320px card of 42px rows on a raised tile — after a rendered four-way comparison (`mockups/usage-pill/option-a…d.png`) picked the drill-down. The account now sits on a card row (state dot, name, `Preferred`, `Switch ›`), and `Switch ›` swaps the card's body for the account list, whose rows tick the current account and answer ↑ / ↓ or a click; Escape steps back to the reading instead of closing the panel, and a refused switch keeps the list open with the failure notice.
+
+The switch view says what it does: "Later requests in this profile use this account. The consumption order stays on the Settings page." This list is the user's own choice of which account spends now; the ordered fallback belongs to the Settings card, which is why the panel offers no order affordance.
+
+The modal hint line ("Account usage · used percentage · refreshes every minute") and its two copy keys are gone, and the native `<select>` went with them: an OS-rendered option list cannot be styled to match the host menu, which is what made the old picker look foreign. The three windows became one row each — label, 10px bar, reading — with the reset stamp under it and the refresh stamp in the card's foot. The bar stays the native `<progress>` element with its `high` / `limited` classes, so the colour tiers, their roles, and every existing bar assertion survive the redesign.
+
+Validation: `npm run test:ci` passes **459 tests in 30 files** — four new cases cover the card row and the departed picker, a successful drill-down switch, a refused one, and the arrow / Escape keys — with a byte-identical `check:dist` and both TypeScript projects clean. The installed-host fixture was A/B'd against the pre-change bundle in the same warm consumer: 1.47s before, 1.52s after. Local `test:compat` runs before that measurement tripped the script's 30s per-fixture ceiling on cold Windows file scans (the same fixture runs in 1.5s warm), so the ubuntu CI job is the gate that settles that matrix.
+

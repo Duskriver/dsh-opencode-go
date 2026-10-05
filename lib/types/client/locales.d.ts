@@ -21,7 +21,11 @@ export declare const en: {
     accountCancel: string;
     accountAutoSwitch: string;
     accountAutoSwitchHint: string;
-    accountSwitchLabel: string;
+    accountPreferredTag: string;
+    accountSwitchAction: string;
+    accountSwitchTitle: string;
+    accountSwitchBack: string;
+    accountSwitchHint: string;
     accountSwitchFailed: string;
     accountFallbackQuota: string;
     accountFallbackCredential: string;
@@ -40,7 +44,6 @@ export declare const en: {
     usageResetUnknown: string;
     usageTitle: string;
     usageRollingShort: string;
-    usageHint: string;
     usageWeekShort: string;
     usage_rolling: string;
     usage_weekly: string;
