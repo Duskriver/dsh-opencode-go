@@ -25,6 +25,7 @@ import { LlmAdapter } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, ImageAttachmentAccess, LlmModelInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
 import { OpencodeGoCatalog } from './catalog.ts';
+import { ProxyTransport } from './proxy.ts';
 import type { OpencodeGoConfig } from './config.ts';
 import { type GoAccountSwitch } from './accounts.ts';
 /**
@@ -40,6 +41,8 @@ export interface OpencodeGoImageAccess {
 }
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions {
+    /** Shared with Host usage reads for this plugin mount. */
+    transport?: ProxyTransport;
     /**
      * The current configuration, re-read at every operation: a settings write
      * reaches the next request without a restart, and one operation never mixes
@@ -81,9 +84,11 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
      * for the whole refresh interval.
      */
     private catalogCache;
+    private readonly transport;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
     constructor(options: OpencodeGoAdapterOptions);
+    dispose(): Promise<void>;
     /**
      * The catalog resolver for one configuration, rebuilding on the facts it
      * owns. Public for the plugin's discovery registration, which resolves the

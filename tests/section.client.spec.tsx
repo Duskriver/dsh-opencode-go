@@ -28,7 +28,7 @@ function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = 
   return { text, overridden: false, invalid: false, ...rest }
 }
 
-type SectionField = 'baseURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+type SectionField = 'baseURL' | 'proxyURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
   | 'usageDisplay'
   | 'maxImages'
   | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'apiKey' | 'models'
@@ -66,6 +66,7 @@ function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSec
     usageDisplay: field('auto'),
     apiKeyEnv: field('OPENCODE_API_KEY'),
     baseURL: field('https://opencode.ai/zen/go/v1'),
+    proxyURL: field(''),
     refreshMinutes: field('60'),
     streamIdleTimeoutMs: field('300000'),
     maxImages: field(''),
@@ -637,6 +638,51 @@ describe('OpencodeGoSection', () => {
 })
 
 describe('OpencodeGoSectionController through the component', () => {
+  it('validates, saves, clears and resets the proxy address in advanced settings', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    const base = { proxyURL: 'http://localhost:7890' }
+    host.set.mockImplementation((field: string, value: unknown) => {
+      host.publish({ value: { ...host.scope.getSnapshot().value, [field]: value },
+        user: { ...host.scope.getSnapshot().user as object, [field]: value } })
+    })
+    host.unset.mockImplementation((field: string) => {
+      const user = { ...host.scope.getSnapshot().user as Record<string, unknown> }
+      delete user[field]
+      host.publish({ value: { ...base, ...user }, user })
+    })
+    host.publish({ status: 'ready', writable: true, value: base, base, user: {} })
+    const controller = new OpencodeGoSectionController(host.scope, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+    } } as never)
+    render(<OpencodeGoSection {...controller.inject()} t={t}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    try {
+      await act(async () => { await Promise.resolve() })
+      openAdvanced()
+      const input = () => screen.getByLabelText<HTMLInputElement>(en.proxyURLLabel)
+      expect(input().value).toBe(base.proxyURL)
+      for (const value of ['127.0.0.1:7890', 'socks4://localhost:1080', 'http://localhost:7890/path']) {
+        fireEvent.change(input(), { target: { value } })
+        expect(input().getAttribute('aria-invalid')).toBe('true')
+        expect(screen.getByText(en.proxyURLInvalid)).toBeTruthy()
+        expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
+      }
+      fireEvent.change(input(), { target: { value: 'socks5://localhost:1080' } })
+      expect(host.set).not.toHaveBeenCalled()
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.set).toHaveBeenCalledWith('proxyURL', 'socks5://localhost:1080')
+      fireEvent.change(input(), { target: { value: '' } })
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.set).toHaveBeenCalledWith('proxyURL', '')
+      expect(input().value).toBe('')
+      fireEvent.click(within(input().parentElement!).getByRole('button', { name: en.reset }))
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.unset).toHaveBeenCalledWith('proxyURL')
+      expect(input().value).toBe(base.proxyURL)
+    } finally { controller.dispose() }
+  })
+
   it('saves an optional image count, rejects invalid counts, and clears or resets the override', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     host.set.mockImplementation((field: string, value: unknown) => {

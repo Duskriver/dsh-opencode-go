@@ -19,7 +19,7 @@ The plugin automatically adds the session headers required by OpenCode Go, reads
 
 Supports DSH `0.1.5-rc.1` and later, including alpha, rc, and stable releases. Compatibility will be maintained as new host versions are released.
 
-Verified versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, and `0.2.0-rc.2`.
+Verified versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.2`, and `0.2.1-alpha.1`.
 
 ### Install from DSH (recommended)
 
@@ -86,7 +86,7 @@ To build from source and install a local package:
 npm ci
 npm run compile
 npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.20.tgz
+dsh plugin --profile web add ./dsh-opencode-go-0.1.21.tgz
 ```
 
 Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
@@ -145,6 +145,21 @@ autoSwitch: false
 Supply both keys through the credential service or environment variables. `apiKeyEnv` selects the preferred account. Omitting `accounts` preserves legacy single-key behavior; `accounts: []` explicitly removes every account.
 
 The Accounts card folds: collapsed, it reports the account count, the preferred account, how many accounts are ready, and the one refresh stamp every row shares (the clock time on the day it happened, the full date and time on hover). Expanded, each account takes one row showing its key state, a wide rolling-quota bar (12px, full row width, quarter marks at 25/50/75%, amber from 80% and red once spent), and its reset countdown; the columns are fixed (handle, name, key state, bar, reading, reset, disclosure), and a name too long for its column ellipsises with the full value in its title, so names of different lengths never move the columns after them; the row's chevron opens the weekly and monthly windows and the rename, replace-key, and remove actions. Drag a row's handle — or focus it and press ↑ / ↓ — to reorder. The list reads top to bottom: the first row is the preferred account and becomes preferred on drop, and automatic fallback follows the same order.
+
+## Network proxy
+
+Open **Settings → OpenCode Go → Advanced settings → Proxy address**, enter a proxy URL and click **Save**. For example:
+
+```text
+http://127.0.0.1:7890
+socks5://127.0.0.1:1080
+```
+
+HTTPS proxies and authenticated URLs such as `http://username:password@host:port` or `socks5://username:password@host:port` are also supported. URL-encode special characters in the username and password.
+
+The next conversation, model listing, metadata download and usage query use the saved proxy without a restart. Save a blank address to use the default network settings; **Reset** restores the inherited configuration value. A failed proxy connection reports an error rather than falling back to a direct connection.
+
+Connections originate from the machine running DSH. On a remote deployment, `127.0.0.1` refers to that server. Headless profiles can set `proxyURL` in the plugin configuration as well.
 
 ## Subscription usage display
 

@@ -12,7 +12,7 @@ The root package contains one coherent DSH 0.1.6-alpha.1 development environment
 | `npm run test:ci` | Verify shipped artifacts match source, then run the core suite |
 | `npm test` | Rebuild, then run the core Vitest suite |
 | `npm run test:compat` | Pack once and test the installed artifact across every supported host fixture |
-| `npm run test:compat -- v015-rc1 v017-rc2 v020-rc2` | Test only the named fixtures; unknown names fail |
+| `npm run test:compat -- v015-rc1 v017-rc2 v021-alpha1` | Test only the named fixtures; unknown names fail |
 | `npm run test:install` | Test npm and pnpm 11.7.0 Git installs of prebuilt artifacts without plugin build approval |
 | `npm run test:install -- npm` / `-- pnpm` | Run just one package manager; unknown names fail |
 | `npm run verify` | Run core, compatibility, and Git-installation checks |
@@ -29,7 +29,7 @@ The Git-installation regression creates a fresh repository containing the shippe
 
 ## Installed-package matrix
 
-`scripts/compatibility-hosts.mjs` lists nine host generations, including DSH `0.2.0-rc.2`. Each `tests/hosts/<id>` has a private manifest and its own lockfile. DSH packages and their required DSH peer/dependency closure are pinned to that host generation, together with compatible Cordis packages. This prevents a broad upstream peer range from silently selecting a later host generation. The 0.2 fixture also installs its real `dsh-llm-pi-ai` adapter and public pi-ai dependency alongside this plugin.
+`scripts/compatibility-hosts.mjs` lists ten host generations, including DSH `0.2.0-rc.2` and `0.2.1-alpha.1`. Each `tests/hosts/<id>` has a private manifest and its own lockfile. DSH packages and their required DSH peer/dependency closure are pinned to that host generation, together with compatible Cordis packages. This prevents a broad upstream peer range from silently selecting a later host generation. The 0.2 fixtures also install their real `dsh-llm-pi-ai` adapter and public pi-ai dependency alongside this plugin.
 
 The runner performs these steps for each host:
 
@@ -52,6 +52,8 @@ DSH requests still convert through `toPiContext`, preserving the existing host i
 This upgrade does not enable developer messages, tool-change blocks, or deferred tool loading. Their existing `UNSUPPORTED_CONTENT` errors remain explicit. The minimum DSH version and peer ranges stay unchanged; new host fixtures verify runtime compatibility rather than expanding the supported content vocabulary.
 
 There is one explicit npm prerelease exception: DSH evaluates plugin ranges with prereleases included, whereas npm does not generally accept a future prerelease under `>=0.1.5-rc.1`. Only the tarball-install step uses `--legacy-peer-deps` after the host has passed strict installation. This is not a project `.npmrc` policy and does not affect root installs. The post-install version assertions ensure npm did not replace pinned host packages. Changing the plugin's published version policy is a separate decision.
+
+DSH 0.2.1-alpha.1 uses Cordis 4.0.5-alpha.1 and Schemastery 3.18.5-alpha.1 and no longer publishes runtime invariant plugins. Its fixture pins that dependency generation without the removed package. The plugin does not import invariant entrypoints or replace the former composer statistics row; its quota pill uses the retained `conversation.input.right` list slot. The installed client check verifies that the published composer still declares that slot, and profile checks validate proxy writes, rejection, clearing and reset through each modern host's real settings service.
 
 ## Updating a fixture
 

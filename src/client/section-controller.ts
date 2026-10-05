@@ -21,6 +21,7 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
 import type { GoAccount } from '../accounts.ts'
 import { accountsOf } from '../accounts.ts'
+import { assertProxyURL } from '../proxy-url.ts'
 import { GoAccountsController, type GoAccountsState, type GoAccountsActions } from './accounts-controller.ts'
 import {
   StagedForm,
@@ -56,6 +57,8 @@ export interface OpencodeGoSettings {
   autoSwitch?: boolean
   /** The gateway endpoint; also the live listing base. */
   baseURL?: string
+  /** Optional network proxy used by the Host. */
+  proxyURL?: string
   /** Live catalog re-resolution interval, in minutes. */
   refreshMinutes?: number
   /** Largest idle gap between stream events, in milliseconds. */
@@ -130,6 +133,7 @@ export interface OpencodeGoSectionState extends FormShell {
   apiKeyEnv: FieldState
   /** The gateway endpoint. */
   baseURL: FieldState
+  proxyURL: FieldState
   /** Live catalog re-resolution interval, in minutes. */
   refreshMinutes: FieldState
   /** Largest idle gap between stream events, in milliseconds. */
@@ -218,6 +222,14 @@ export class OpencodeGoSectionController {
         },
         textField('apiKeyEnv'),
         textField('baseURL'),
+        {
+          ...textField('proxyURL'),
+          // Blank explicitly disables an inherited proxy; Reset removes the override.
+          parse: text => {
+            try { assertProxyURL(text); return { kind: 'set', value: text.trim() } }
+            catch { return undefined }
+          },
+        },
         numberField('refreshMinutes'),
         numberField('streamIdleTimeoutMs'),
         numberField('maxImages', value => Number.isSafeInteger(value) && value > 0),
@@ -233,11 +245,14 @@ export class OpencodeGoSectionController {
       () => { this.store.set(this.projection()) },
       () => this.form.shell().saving || this.pickerSaving || Boolean(this.form.field(API_KEY_FIELD).text.trim()))
     this.store.set(this.projection())
-    let modelsEndpoint = scope.getSnapshot().value?.baseURL
+    const networkIdentity = () => JSON.stringify([
+      scope.getSnapshot().value?.baseURL, scope.getSnapshot().value?.proxyURL,
+    ])
+    let modelsEndpoint = networkIdentity()
     this.unsubscribe = scope.subscribe(() => {
       this.accounts?.sync()
       this.store.set(this.projection())
-      const endpoint = scope.getSnapshot().value?.baseURL
+      const endpoint = networkIdentity()
       if (endpoint !== modelsEndpoint) {
         modelsEndpoint = endpoint
         this.modelsRequest++
@@ -270,6 +285,7 @@ export class OpencodeGoSectionController {
       pickerFailed: this.pickerFailed,
       apiKeyEnv: this.form.field('apiKeyEnv'),
       baseURL: this.form.field('baseURL'),
+      proxyURL: this.form.field('proxyURL'),
       refreshMinutes: this.form.field('refreshMinutes'),
       streamIdleTimeoutMs: this.form.field('streamIdleTimeoutMs'),
       maxImages: this.form.field('maxImages'),

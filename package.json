@@ -90,7 +90,8 @@
   "dependencies": {
     "@deepseek-ai/dsh-brand": "0.1.6-alpha.1",
     "@deepseek-ai/schemastery": "3.18.3",
-    "opencode-go-pi-ai": "npm:@earendil-works/pi-ai@0.87.1"
+    "opencode-go-pi-ai": "npm:@earendil-works/pi-ai@0.87.1",
+    "undici": "7.30.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",

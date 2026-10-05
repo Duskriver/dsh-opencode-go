@@ -3,7 +3,7 @@ export declare function transportFailure(error: unknown): string;
 /** Keep the endpoint useful in diagnostics without user information or query secrets. */
 export declare function diagnosticURL(raw: string): string;
 /** The caller's signal covers both attempts, the retry delay, and all response reads. */
-export declare function fetchJsonResponse(url: string, init: RequestInit, maxBytes: number, encoding?: 'identity' | 'gzip'): Promise<{
+export declare function fetchJsonResponse(url: string, init: RequestInit, maxBytes: number, encoding?: 'identity' | 'gzip', fetcher?: typeof globalThis.fetch): Promise<{
     response: Response;
     body: unknown;
 }>;

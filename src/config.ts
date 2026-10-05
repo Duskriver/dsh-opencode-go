@@ -65,6 +65,8 @@ export interface OpencodeGoConfig {
   autoSwitch?: boolean
   /** The gateway endpoint; also the base of the live model listing. */
   baseURL: string
+  /** Optional HTTP(S) or SOCKS5 proxy; blank uses the default network transport. */
+  proxyURL: string
   /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */
   refreshMinutes: number
   /** Largest idle gap between stream events before the request fails. */
@@ -93,6 +95,7 @@ const fields = {
   })).max(MAX_ACCOUNTS)]).default(null),
   autoSwitch: z.boolean().default(false),
   baseURL: z.string().default(DEFAULT_BASE_URL),
+  proxyURL: z.string().default(''),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   maxImages: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),

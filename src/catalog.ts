@@ -88,7 +88,7 @@ export function readLiveModelIds(body: unknown): readonly string[] {
   return [...new Set(ids)]
 }
 
-async function fetchLiveModelIds(baseURL: string): Promise<readonly string[]> {
+async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fetch): Promise<readonly string[]> {
   const url = `${baseURL.replace(/\/+$/, '')}/models`
   const endpoint = diagnosticURL(url)
   let result: Awaited<ReturnType<typeof fetchJsonResponse>>
@@ -97,7 +97,7 @@ async function fetchLiveModelIds(baseURL: string): Promise<readonly string[]> {
       method: 'GET', cache: 'no-cache',
       headers: { ...attributionHeaders(), accept: 'application/json' },
       signal: AbortSignal.timeout(MODELS_FETCH_TIMEOUT_MS),
-    }, MODEL_LISTING_MAX_BYTES)
+    }, MODEL_LISTING_MAX_BYTES, 'identity', fetcher)
   } catch (error: unknown) {
     const detail = error instanceof SyntaxError
       ? 'invalid JSON response'
@@ -158,6 +158,7 @@ export class OpencodeGoCatalog {
     private readonly onOmitted: (ids: readonly string[]) => void,
     // Notify consumers after a background refresh commits its complete snapshot.
     private readonly onRefresh: () => void = () => {},
+    private readonly fetcher?: typeof globalThis.fetch,
   ) {}
 
   snapshot(force = false, signal?: AbortSignal): Promise<CatalogSnapshot> {
@@ -194,7 +195,7 @@ export class OpencodeGoCatalog {
 
   private startRefresh(force: boolean): void {
     const builtin = builtinModels(this.baseURL)
-    const listing = settled(fetchLiveModelIds(this.baseURL).then(ids => ({ ids, updatedAtMs: Date.now() })))
+    const listing = settled(fetchLiveModelIds(this.baseURL, this.fetcher).then(ids => ({ ids, updatedAtMs: Date.now() })))
     const restored = this.metadata
     if (!force && this.served === undefined && restored !== undefined) {
       const status: MetadataStatus = { metadataLive: false, metadataUpdatedAtMs: this.metadataUpdatedAtMs }
@@ -233,7 +234,7 @@ export class OpencodeGoCatalog {
       headers: { ...attributionHeaders(), accept: 'application/json',
         ...(this.metadataETag === undefined ? {} : { 'if-none-match': this.metadataETag }) },
       cache: 'no-cache', signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS),
-    }, MODEL_METADATA_MAX_BYTES, 'gzip')
+    }, MODEL_METADATA_MAX_BYTES, 'gzip', this.fetcher)
     if (response.status === 304 && this.metadata !== undefined) {
       this.metadataUpdatedAtMs = Date.now()
       this.metadataETag = metadataETag(response.headers.get('etag')) ?? this.metadataETag

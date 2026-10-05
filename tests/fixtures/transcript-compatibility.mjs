@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 
 const host = process.argv[2]
-const modern = host.startsWith('v017') || host.startsWith('v020')
+const modern = host.startsWith('v017') || host.startsWith('v02')
 const { Context } = await import('@deepseek-ai/cordis')
 const llm = await import('@deepseek-ai/dsh-llm')
 const plugin = await import('dsh-opencode-go')

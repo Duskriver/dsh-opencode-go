@@ -50,6 +50,8 @@ import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
 import { registerGoRemotes } from './remotes.ts'
 import { accountsOf, accountRefOf, assertAccounts, type GoAccountSwitch } from './accounts.ts'
+import { assertProxyURL } from './proxy-url.ts'
+import { ProxyTransport } from './proxy.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -68,6 +70,7 @@ export {
   readLiveModelIds,
 } from './catalog.ts'
 export { Config, PlainConfig, assertBaseURL } from './config.ts'
+export { assertProxyURL } from './proxy-url.ts'
 export type { OpencodeGoConfig } from './config.ts'
 
 export const name = 'llm-opencode-go'
@@ -88,6 +91,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // Self-contained misconfiguration fails at load; a bad stored value instead
   // refuses the write through the section's validate hook.
   assertBaseURL(entry.baseURL)
+  assertProxyURL(entry.proxyURL)
   assertAccounts(entry.accounts, entry.apiKeyEnv)
   let current: () => OpencodeGoConfig = () => readConfig(config)
 
@@ -110,8 +114,12 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   }
   registerGoRemotes(ctx)
   let lastSwitch: GoAccountSwitch | undefined
+  const transport = new ProxyTransport()
+  ctx.effect(() => () => transport.dispose())
   ctx.plugin(GoUsageService, {
     baseURL: () => current().baseURL,
+    proxyURL: () => current().proxyURL,
+    transport,
     resolveApiKey: (ref?: string) => resolveApiKey({ ...current(), apiKeyEnv: ref ?? current().apiKeyEnv }),
     activeRef: () => accountRefOf(current()),
     accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
@@ -127,11 +135,12 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   }
   let registration: AdapterRegistrationHandle | undefined
   const adapter = new OpencodeGoAdapter({
+    transport,
     config: () => current(),
     resolveApiKey,
     onAccountSwitch: (notice, captured) => {
       const config = current()
-      if (config.baseURL === captured.baseURL && config.apiKeyEnv === captured.apiKeyEnv
+      if (config.baseURL === captured.baseURL && config.proxyURL === captured.proxyURL && config.apiKeyEnv === captured.apiKeyEnv
         && JSON.stringify(config.accounts) === JSON.stringify(captured.accounts)) lastSwitch = notice
     },
     imageAccess: {
@@ -191,7 +200,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const syncRoute = (): void => {
     const check = ++routeCheck
     const config = current()
-    const identity = JSON.stringify([config.apiKeyEnv, config.accounts, config.baseURL, config.autoSwitch])
+    const identity = JSON.stringify([config.apiKeyEnv, config.accounts, config.baseURL, config.proxyURL, config.autoSwitch])
     if (identity !== accountIdentity) { accountIdentity = identity; lastSwitch = undefined }
     const visibility = pickerVisibilityOf()
     if (pickerVisibility !== visibility) {
@@ -244,6 +253,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     settingsCtx.settings.installSection(ctx, NS, PlainConfig, entry, {
       validate: (value) => {
         assertBaseURL(value.baseURL)
+        assertProxyURL(value.proxyURL)
         assertAccounts(value.accounts, value.apiKeyEnv)
       },
       setSource: (source) => {
@@ -262,6 +272,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     if (this === ctx.fiber) {
       const config = PlainConfig(value)
       assertBaseURL(config.baseURL)
+      assertProxyURL(config.proxyURL)
       assertAccounts(config.accounts, config.apiKeyEnv)
     }
     return value

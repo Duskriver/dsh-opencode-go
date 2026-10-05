@@ -60,7 +60,7 @@ export class GoAccountsController {
   private disposed = false
 
   constructor(
-    private readonly scope: SettingsScope<AccountSettings & { baseURL?: string }>,
+    private readonly scope: SettingsScope<AccountSettings & { baseURL?: string; proxyURL?: string }>,
     private readonly ctx: Context,
     private readonly readUsage: (ref: string) => Promise<GoUsage>,
     private readonly publish: () => void,
@@ -86,6 +86,7 @@ export class GoAccountsController {
       accountsOf(config).map(account => [account.id, account.apiKeyEnv])
         .sort((left, right) => left[1]! < right[1]! ? -1 : left[1]! > right[1]! ? 1 : 0),
       config.baseURL,
+      config.proxyURL,
     ])
     if (identity === this.identity) return
     this.identity = identity

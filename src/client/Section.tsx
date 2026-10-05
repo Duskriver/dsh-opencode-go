@@ -51,6 +51,7 @@ interface ValueFieldProps {
   resetLabel: string
   disabled: boolean
   numeric?: boolean
+  placeholder?: string
   options?: readonly { value: string; label: string }[]
   onEdit: (text: string) => void
   onReset: () => void
@@ -94,6 +95,7 @@ function ValueField(props: ValueFieldProps) {
         id={props.id}
         name={props.id}
         autoComplete="off"
+        placeholder={props.placeholder}
         aria-describedby={hintId}
         className={props.field.invalid ? css.inputInvalid : css.input}
         type={props.numeric === true ? 'number' : 'text'}
@@ -236,7 +238,7 @@ function Loaded(props: {
     resetLabel: t('reset'),
     disabled,
   }
-  const advancedOverridden = state.usageDisplay.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden
+  const advancedOverridden = state.usageDisplay.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden || state.proxyURL.overridden
     || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
     || state.maxImages.overridden
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
@@ -388,6 +390,17 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={(text) => { props.edit('baseURL', text) }}
                   onReset={() => { props.resetField('baseURL') }}
+                />
+                <ValueField
+                  id="opencode-go-proxy-url"
+                  label={t('proxyURLLabel')}
+                  hint={t('proxyURLHint')}
+                  placeholder="http://127.0.0.1:7890"
+                  field={state.proxyURL}
+                  {...fieldProps}
+                  invalidLabel={t('proxyURLInvalid')}
+                  onEdit={(text) => { props.edit('proxyURL', text) }}
+                  onReset={() => { props.resetField('proxyURL') }}
                 />
                 <ValueField
                   id="opencode-go-refresh-minutes"

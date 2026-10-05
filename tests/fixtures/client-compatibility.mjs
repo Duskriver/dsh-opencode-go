@@ -10,7 +10,7 @@ import { JSDOM } from 'jsdom'
 import { transform } from 'lightningcss'
 
 const host = process.argv[2]
-const modern = host.startsWith('v017') || host.startsWith('v020')
+const modern = host.startsWith('v017') || host.startsWith('v02')
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>')
 const { window } = dom
 Object.assign(globalThis, { window, document: window.document, getComputedStyle: window.getComputedStyle,
@@ -111,6 +111,10 @@ try {
     assert.equal(getForm.mock.callCount(), 0)
   }
   const [usageOptions, UsageComponent] = slots.mock.calls.find(call => call.arguments[0].id === 'opencode-go-usage').arguments
+  assert.equal(usageOptions.name, 'conversation.input.right')
+  const conversationClient = await readFile(new URL('../node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js', import.meta.url), 'utf8')
+  assert.match(conversationClient, /['"]conversation\.input\.right['"]\s*:\s*\{\s*kind:\s*['"]list['"]/,
+    'the published composer must still declare the usage pill slot')
   const usageProps = usageOptions.inject('fixture-session')
   assert.equal(usageProps.settings, scope, 'usage pill follows the same settings scope as the advanced form')
   const usageMarkup = () => renderToStaticMarkup(React.createElement(UsageComponent, usageProps))
@@ -194,6 +198,10 @@ try {
       ...face, useOpencodeGo: () => face.hooks.opencodeGo.getSnapshot(),
     })) })
     assert.equal(sectionContainer.querySelector('input[type="password"]'), null)
+    const advancedTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-advanced"]')
+    await React.act(async () => { advancedTrigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+    assert.ok(sectionContainer.querySelector('input[placeholder="http://127.0.0.1:7890"]'),
+      'expanding advanced settings exposes the installed proxy input')
     const accountsTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-accounts"]')
     assert.ok(accountsTrigger)
     await React.act(async () => { accountsTrigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })

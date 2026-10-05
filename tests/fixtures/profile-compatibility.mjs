@@ -46,6 +46,18 @@ try {
   assert.ok(view(), 'OpenCode Go must be exposed in the new profile settings')
   assert.equal(view().autoGenerate, false, 'the custom page owns these settings')
   assert.equal(view().value.usageDisplay, 'auto', 'usage display keeps the previous default')
+  assert.equal(view().value.proxyURL, '', 'proxy defaults to the host network path')
+  for (const proxyURL of ['http://127.0.0.1:7890', 'https://127.0.0.1:7890', 'socks5://user:pass@127.0.0.1:1080']) {
+    await ctx.settings.update('opencode-go', { proxyURL })
+    assert.equal(view().value.proxyURL, proxyURL)
+    assert.equal(entry.fiber, fiber, 'changing the proxy preserves the running plugin')
+  }
+  await assert.rejects(ctx.settings.update('opencode-go', { proxyURL: 'ftp://127.0.0.1:7890' }))
+  assert.equal(view().value.proxyURL, 'socks5://user:pass@127.0.0.1:1080', 'invalid proxy writes leave the setting intact')
+  await ctx.settings.update('opencode-go', { proxyURL: '' })
+  assert.equal(view().value.proxyURL, '', 'blank disables the explicit proxy')
+  await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['proxyURL'] }])
+  assert.equal(view().value.proxyURL, '', 'reset restores the default network path')
   for (const usageDisplay of ['always', 'off']) {
     await ctx.settings.update('opencode-go', { usageDisplay })
     assert.equal(view().value.usageDisplay, usageDisplay)

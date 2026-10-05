@@ -45,6 +45,8 @@ import type { PiImageRequestContext } from './conversion/index.ts'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } from './catalog.ts'
 import { assertBaseURL } from './config.ts'
+import { assertProxyURL } from './proxy-url.ts'
+import { ProxyTransport } from './proxy.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, withRequestReasoning } from './reasoning.ts'
@@ -93,6 +95,8 @@ export interface OpencodeGoImageAccess {
 
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions {
+  /** Shared with Host usage reads for this plugin mount. */
+  transport?: ProxyTransport
   /**
    * The current configuration, re-read at every operation: a settings write
    * reaches the next request without a restart, and one operation never mixes
@@ -147,13 +151,17 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * for the whole refresh interval.
    */
   private catalogCache: { key: string; catalog: OpencodeGoCatalog } | undefined
+  private readonly transport: ProxyTransport
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
   private readonly rejectedKeys = new Map<string, Map<string, number>>()
 
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
+    this.transport = options.transport ?? new ProxyTransport()
   }
+
+  dispose(): Promise<void> { return this.transport.dispose() }
 
   /**
    * The catalog resolver for one configuration, rebuilding on the facts it
@@ -163,7 +171,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * @returns the resolver caching catalog values, independent of deployment limits.
    */
   catalogOf(config: OpencodeGoConfig): OpencodeGoCatalog {
-    const key = `${config.baseURL}|${String(config.refreshMinutes)}`
+    const key = JSON.stringify([config.baseURL, config.refreshMinutes, assertProxyURL(config.proxyURL)])
     if (this.catalogCache?.key !== key) {
       const catalog = new OpencodeGoCatalog(
         assertBaseURL(config.baseURL),
@@ -176,6 +184,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
           // Late results from a replaced configuration cannot invalidate the current picker.
           if (this.catalogCache?.catalog === catalog) this.options.onCatalogRefresh?.()
         },
+        this.transport.forProxy(config.proxyURL),
       )
       this.catalogCache = { key, catalog }
     }
@@ -451,6 +460,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       // Context itself. Preserve prompts and tool declarations on every host.
       const events = catalog.provider.streamSimple(withRequestReasoning(model, reasoning), normalizeContext(context), {
         apiKey,
+        fetch: this.transport.forProxy(config.proxyURL),
         ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },

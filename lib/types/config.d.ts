@@ -51,6 +51,8 @@ export interface OpencodeGoConfig {
     autoSwitch?: boolean;
     /** The gateway endpoint; also the base of the live model listing. */
     baseURL: string;
+    /** Optional HTTP(S) or SOCKS5 proxy; blank uses the default network transport. */
+    proxyURL: string;
     /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */
     refreshMinutes: number;
     /** Largest idle gap between stream events before the request fails. */

@@ -50,6 +50,7 @@ export declare class GoAccountsController {
     private disposed;
     constructor(scope: SettingsScope<AccountSettings & {
         baseURL?: string;
+        proxyURL?: string;
     }>, ctx: Context, readUsage: (ref: string) => Promise<GoUsage>, publish: () => void, blocked: () => boolean);
     snapshot(): GoAccountsState;
     sync(): void;

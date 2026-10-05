@@ -12,6 +12,7 @@ export function configOf(baseURL: string, overrides: Partial<OpencodeGoConfig> =
     modelVisibility: {},
     apiKeyEnv: 'OPENCODE_API_KEY',
     baseURL,
+    proxyURL: '',
     refreshMinutes: 60,
     streamIdleTimeoutMs: 5_000,
     maxRequestImageBytes: 20 * 1024 * 1024,

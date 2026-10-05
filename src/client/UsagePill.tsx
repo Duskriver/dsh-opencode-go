@@ -82,7 +82,7 @@ export function UsagePill({ directory, settings, credentialChanges, ...props }: 
     && (mode === 'always' || mode === 'auto' && state.current?.provider === PROVIDER_ID)
   const accounts = accountsOf(config.value ?? {})
   const activeRef = accountRefOf(config.value ?? {})
-  return visible ? <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, credentialRevision, accounts])}
+  return visible ? <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts])}
     {...props} accounts={accounts} activeRef={activeRef} writable={config.writable} /> : null
 }
 

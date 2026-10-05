@@ -33,6 +33,8 @@ export interface OpencodeGoSettings {
     autoSwitch?: boolean;
     /** The gateway endpoint; also the live listing base. */
     baseURL?: string;
+    /** Optional network proxy used by the Host. */
+    proxyURL?: string;
     /** Live catalog re-resolution interval, in minutes. */
     refreshMinutes?: number;
     /** Largest idle gap between stream events, in milliseconds. */
@@ -101,6 +103,7 @@ export interface OpencodeGoSectionState extends FormShell {
     apiKeyEnv: FieldState;
     /** The gateway endpoint. */
     baseURL: FieldState;
+    proxyURL: FieldState;
     /** Live catalog re-resolution interval, in minutes. */
     refreshMinutes: FieldState;
     /** Largest idle gap between stream events, in milliseconds. */

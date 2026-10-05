@@ -51,6 +51,7 @@ export function diagnosticURL(raw: string): string {
 /** The caller's signal covers both attempts, the retry delay, and all response reads. */
 export async function fetchJsonResponse(
   url: string, init: RequestInit, maxBytes: number, encoding: 'identity' | 'gzip' = 'identity',
+  fetcher: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<{ response: Response; body: unknown }> {
   if ((init.method ?? 'GET').toUpperCase() !== 'GET') throw new TypeError('JSON requests must use GET')
   const headers = new Headers(init.headers)
@@ -60,7 +61,7 @@ export async function fetchJsonResponse(
   for (let attempt = 0; ; attempt += 1) {
     init.signal?.throwIfAborted()
     try {
-      const response = await fetch(url, options)
+      const response = await fetcher(url, options)
       if (!response.ok) {
         await response.body?.cancel().catch(() => {})
         return { response, body: undefined }

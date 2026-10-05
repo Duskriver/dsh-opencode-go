@@ -6,11 +6,15 @@ import { assertBaseURL } from './config.ts'
 import { parseGoUsage, type GoUsage } from './usage-contract.ts'
 import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-response.ts'
 import type { GoAccountSwitch } from './accounts.ts'
+import { assertProxyURL } from './proxy-url.ts'
+import { ProxyTransport } from './proxy.ts'
 
 const USAGE_MAX_BYTES = 1024 * 1024
 
 interface UsageOptions {
   baseURL: () => string
+  proxyURL?: () => string
+  transport?: ProxyTransport
   resolveApiKey: (ref?: string) => Promise<string | undefined>
   activeRef?: () => string
   accountRefs?: () => readonly string[]
@@ -19,11 +23,14 @@ interface UsageOptions {
 
 /** Account statistics are fetched on the Host; credentials never enter the browser. */
 export class GoUsageService extends TypertRemoteService {
-  private readonly identities = new Map<string, { baseURL: string; key: string; source: string }>()
+  private readonly identities = new Map<string, { baseURL: string; proxyURL: string; key: string; source: string }>()
   private readonly pending = new Map<string, Promise<GoUsage>>()
+  private readonly transport: ProxyTransport
 
   constructor(ctx: Context, private readonly options: UsageOptions) {
     super(ctx, 'opencodeGoUsage')
+    this.transport = options.transport ?? new ProxyTransport()
+    if (!options.transport) ctx.effect(() => () => this.transport.dispose())
   }
 
   async read(): Promise<GoUsage> {
@@ -55,6 +62,7 @@ export class GoUsageService extends TypertRemoteService {
       if (saved && !this.options.accountRefs().includes(saved)) this.identities.delete(saved)
     }
     const baseURL = assertBaseURL(this.options.baseURL()).replace(/\/$/, '')
+    const proxyURL = assertProxyURL(this.options.proxyURL?.())
     let key: string | undefined
     try {
       key = await this.options.resolveApiKey(ref)
@@ -73,19 +81,19 @@ export class GoUsageService extends TypertRemoteService {
       })
     }
     let identity = this.identities.get(identityKey)
-    if (identity?.baseURL !== baseURL || identity.key !== key) {
-      identity = { baseURL, key, source: randomUUID() }
+    if (identity?.baseURL !== baseURL || identity.proxyURL !== proxyURL || identity.key !== key) {
+      identity = { baseURL, proxyURL, key, source: randomUUID() }
       this.identities.set(identityKey, identity)
     }
     const { source } = identity
     const shared = this.pending.get(source)
     if (shared) return shared
-    const pending = this.fetchUsage(baseURL, key, source)
+    const pending = this.fetchUsage(baseURL, key, source, this.transport.forProxy(proxyURL))
     this.pending.set(source, pending)
     try { return await pending } finally { this.pending.delete(source) }
   }
 
-  private async fetchUsage(baseURL: string, key: string, source: string): Promise<GoUsage> {
+  private async fetchUsage(baseURL: string, key: string, source: string, fetcher?: typeof globalThis.fetch): Promise<GoUsage> {
     const endpoint = diagnosticURL(`${baseURL}/usage`)
     let result: Awaited<ReturnType<typeof fetchJsonResponse>>
     try {
@@ -93,7 +101,7 @@ export class GoUsageService extends TypertRemoteService {
         headers: { ...attributionHeaders(), Authorization: `Bearer ${key}`, Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000),
         redirect: 'error',
-      }, USAGE_MAX_BYTES)
+      }, USAGE_MAX_BYTES, 'identity', fetcher)
     } catch (error: unknown) {
       const invalid = error instanceof SyntaxError || error instanceof RangeError
       const detail = error instanceof SyntaxError ? 'invalid JSON response'

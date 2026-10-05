@@ -30,6 +30,7 @@ export declare class OpencodeGoCatalog {
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
     private readonly onOmitted;
     private readonly onRefresh;
+    private readonly fetcher?;
     private served;
     private pending;
     /** A cold runtime read can use disk metadata while the shared online refresh runs. */
@@ -48,7 +49,7 @@ export declare class OpencodeGoCatalog {
         kept: number;
     }) => void, 
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
-    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void);
+    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void, fetcher?: typeof globalThis.fetch | undefined);
     snapshot(force?: boolean, signal?: AbortSignal): Promise<CatalogSnapshot>;
     private restoreMetadata;
     private readSnapshot;

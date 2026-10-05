@@ -87,6 +87,17 @@ async function streamOnce(ctx: Context): Promise<void> {
 }
 
 describe('settings-backed configuration', () => {
+  it('persists valid proxies, rejects invalid addresses and supports explicit clearing', async () => {
+    const ctx = await boot({ settingsYaml: '', credentials: {}, baseURL: 'https://opencode.ai/zen/go/v1' })
+    const value = () => ctx.settings.describe().find(row => row.ns === NS)?.value.proxyURL
+    expect(value()).toBe('')
+    for (const proxyURL of ['http://localhost:7890', 'socks5://localhost:1080', '']) {
+      await ctx.settings.update(NS, { proxyURL })
+      expect(value()).toBe(proxyURL)
+    }
+    await expect(ctx.settings.update(NS, { proxyURL: 'socks4://localhost:1080' })).rejects.toThrow()
+    expect(value()).toBe('')
+  })
   it('defaults usage display to auto and persists valid display modes while refusing invalid ones', async () => {
     const ctx = await boot({ settingsYaml: '', credentials: {}, baseURL: 'https://gateway.test/v1' })
     const value = () => ctx.settings.describe().find(row => row.ns === NS)?.value.usageDisplay

@@ -143,6 +143,9 @@ export declare const en: {
     apiKeyEnvHint: string;
     baseURLLabel: string;
     baseURLHint: string;
+    proxyURLLabel: string;
+    proxyURLHint: string;
+    proxyURLInvalid: string;
     refreshMinutesLabel: string;
     refreshMinutesHint: string;
     streamIdleTimeoutMsLabel: string;
