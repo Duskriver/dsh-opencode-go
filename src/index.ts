@@ -272,6 +272,9 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // included — flips the route's presence; the event names the reference.
   ctx.inject(['credentials'], (credentialsCtx) => {
     credentialsCtx.on('credentials/reference-updated', (ref) => {
+      // A stored change to a reference outranks the gateway's last rejection
+      // of it, so the very next request re-checks the new key.
+      adapter.forgetRejectedKey(ref)
       if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { lastSwitch = undefined; syncRoute() }
     })
     // The seam becomes visible only once its provider is active, which can be

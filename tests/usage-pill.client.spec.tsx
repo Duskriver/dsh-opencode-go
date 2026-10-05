@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage } from '../src/usage-contract.ts'
@@ -348,4 +348,83 @@ it('omits the account segment when at most one account is configured', async () 
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   expect(trigger().textContent).toBe(percentageLabel(usage))
   expect(trigger().querySelector(`.${css.account}`)).toBeNull()
+})
+
+const openPanel = () => screen.getByRole('dialog', { name: en.usageTitle })
+/** The account switch writes through the settings scope, so those cases need a writable host. */
+const writableSettings = (apiKeyEnv = 'ACCOUNT_A') => {
+  const host = stubSettingsScope<OpencodeGoSettings>()
+  host.publish({ status: 'ready', writable: true, value: { usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv } })
+  return host
+}
+const switchButton = () => screen.getByRole('button', { name: new RegExp(en.accountSwitchAction) })
+
+it('shows the account on a card row instead of a native picker, and drops the hint line', async () => {
+  const host = writableSettings()
+  const read = vi.fn().mockResolvedValue(usage)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} selectAccount={vi.fn()} />) })
+  showDetails()
+  expect(within(openPanel()).getByText('Primary')).toBeTruthy()
+  expect(within(openPanel()).getByText(en.accountPreferredTag)).toBeTruthy()
+  expect(within(openPanel()).getByRole('button', { name: new RegExp(en.accountSwitchAction) })).toBeTruthy()
+  // The removed explainer must not come back, and the native <select> is gone with it.
+  expect(within(openPanel()).queryByText(/refreshes every minute/)).toBeNull()
+  expect(within(openPanel()).queryByRole('combobox')).toBeNull()
+  // One account leaves nothing to choose, so no drill-down is offered.
+  cleanup()
+  const single = usageSettings({ usageDisplay: 'always', accounts: [twoAccounts[0]!], apiKeyEnv: 'ACCOUNT_A' })
+  await act(async () => { render(<UsagePill settings={single.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} selectAccount={vi.fn()} />) })
+  showDetails()
+  expect(within(openPanel()).queryByRole('button', { name: new RegExp(en.accountSwitchAction) })).toBeNull()
+})
+
+it('switches the spending account through the drill-down list and returns to the reading', async () => {
+  const host = writableSettings()
+  const read = vi.fn().mockResolvedValue(usage)
+  const selectAccount = vi.fn().mockResolvedValue(true)
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} selectAccount={selectAccount} />) })
+  showDetails()
+  fireEvent.click(switchButton())
+  const list = screen.getByRole('listbox', { name: en.accountSwitchTitle })
+  const options = within(list).getAllByRole('option')
+  expect(options.map(option => option.textContent)).toEqual(['Primary', 'Backup'])
+  expect(options[0]!.getAttribute('aria-selected')).toBe('true')
+  expect(options[1]!.getAttribute('aria-selected')).toBe('false')
+  // The choice is the user's own; the copy says the order still lives in Settings.
+  expect(screen.getByText(en.accountSwitchHint)).toBeTruthy()
+  await act(async () => { fireEvent.click(options[1]!) })
+  expect(selectAccount).toHaveBeenCalledWith('ACCOUNT_B')
+  expect(screen.queryByRole('listbox')).toBeNull()
+  expect(within(openPanel()).getAllByRole('progressbar')).toHaveLength(3)
+})
+
+it('keeps the list open with the failure notice when the host refuses the switch', async () => {
+  const host = writableSettings()
+  const selectAccount = vi.fn().mockRejectedValue(new Error('settings are read-only'))
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)} t={t} selectAccount={selectAccount} />) })
+  showDetails()
+  fireEvent.click(switchButton())
+  const options = within(screen.getByRole('listbox', { name: en.accountSwitchTitle })).getAllByRole('option')
+  await act(async () => { fireEvent.click(options[1]!) })
+  expect(screen.getByRole('alert').textContent).toBe(en.accountSwitchFailed)
+  expect(screen.getByRole('listbox', { name: en.accountSwitchTitle })).toBeTruthy()
+})
+
+it('walks the account list with the arrow keys and leaves it with Escape before the panel', async () => {
+  const host = writableSettings()
+  await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)} t={t} selectAccount={vi.fn()} />) })
+  showDetails()
+  fireEvent.click(switchButton())
+  const list = screen.getByRole('listbox', { name: en.accountSwitchTitle })
+  const options = within(list).getAllByRole('option')
+  options[0]!.focus()
+  fireEvent.keyDown(list, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(options[1])
+  fireEvent.keyDown(list, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(options[0])
+  fireEvent.keyDown(list, { key: 'Escape' })
+  // Escape steps back to the reading; the panel itself stays open.
+  expect(screen.queryByRole('listbox')).toBeNull()
+  expect(openPanel()).toBeTruthy()
+  expect(within(openPanel()).getAllByRole('progressbar')).toHaveLength(3)
 })

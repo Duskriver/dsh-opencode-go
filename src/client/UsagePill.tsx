@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { parseAccountSwitch, type GoUsage, type UsageWindow } from '../usage-contract.ts'
@@ -52,6 +52,19 @@ function usageLevel(window: UsageWindow): string | undefined {
   return window.percent >= 80 ? css.high : undefined
 }
 
+/** The panel's own glyphs: no host icon set is required, and each one carries its meaning in text. */
+function ChevronRight() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
+}
+
+function ChevronLeft() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>
+}
+
+function Tick() {
+  return <svg className={css.tick} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" /></svg>
+}
+
 /** Only a visible, enabled pill mounts the usage poller. */
 export function UsagePill({ directory, settings, credentialChanges, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
@@ -82,6 +95,7 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [switchFailed, setSwitchFailed] = useState(false)
+  const [view, setView] = useState<'usage' | 'accounts'>('usage')
   const root = useRef<HTMLSpanElement>(null)
   const retry = useRef<() => void>(() => {})
   useEffect(() => {
@@ -138,13 +152,26 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
   const failure = failed?.reader === readUsage ? failed.failure : null
   const notice = usage?.lastSwitch ?? failure?.lastSwitch
   const accountName = accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')
+  // The account list is the user's own choice of which account to spend, not the
+  // fallback order the Settings page owns: it stays a drill-down inside the panel.
+  const accountsView = view === 'accounts' && accounts.length > 1
+  const switchable = accounts.length > 1 && writable && selectAccount !== undefined
+  const switchTo = (ref: string): void => {
+    if (ref === activeRef) { setView('usage'); return }
+    setSwitching(true)
+    setSwitchFailed(false)
+    void selectAccount?.(ref).then(accepted => {
+      setSwitchFailed(!accepted)
+      if (accepted) setView('usage')
+    }).catch(() => { setSwitchFailed(true) }).finally(() => { setSwitching(false) })
+  }
   const label = usage
-    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
-    : `Go · ${failure ? t('usageUnavailable') : '…'}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    : `Go · ${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
   /** The segments concatenate to exactly `label`, so `textContent` — and every assertion built on it —
    * stays unchanged, while the @container tiers in UsagePill.module.css can hide the brand, the unit
-   * words, the stale wording and the account name independently. jsdom does not evaluate container
-   * queries, so the tests below exercise the full label in every tier. */
+   * words, the stale wording, the fallback mark and the account name independently. jsdom does not
+   * evaluate container queries, so the tests below exercise the full label in every tier. */
   const segments = usage
     ? <>
       <span className={css.brand}>Go · </span>
@@ -154,48 +181,93 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
         <span className={css.unit}>{t('usageWeekShort')} </span>{usage.weekly.percent}%
       </span>
       {failure ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
+      {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
       {accounts.length > 1 ? <span className={css.account}> · {accountName}</span> : null}
     </>
     : <>
       <span className={css.brand}>Go · </span>
       {failure ? t('usageUnavailable') : '…'}
+      {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
       {accounts.length > 1 ? <span className={css.account}> · {accountName}</span> : null}
     </>
   return <span className={css.root} ref={root}>
-    <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog"
-      aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open) }}>{segments}</button>
+    <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}
+      aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open); setView('usage') }}>{segments}</button>
     {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
-      <strong>{t('usageTitle')}</strong>
-      <p className={css.hint}>{t('usageHint')}</p>
-      {accounts.length ? <label className={css.accountSelector}>{t('accountSwitchLabel')}
-        <select value={activeRef} disabled={!writable || switching || !selectAccount} onChange={event => {
-          const ref = event.target.value
-          setSwitching(true)
-          setSwitchFailed(false)
-          void selectAccount?.(ref).then(accepted => { setSwitchFailed(!accepted) })
-            .catch(() => { setSwitchFailed(true) }).finally(() => { setSwitching(false) })
-        }}>{accounts.map(account => <option key={account.id} value={account.apiKeyEnv}>{account.name || t('accountDefault')}</option>)}</select>
-      </label> : null}
-      {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
-      {notice ? <p className={css.warning} role="status">
-        {t(notice.reason === 'quota' ? 'accountFallbackQuota' : 'accountFallbackCredential')}{' '}
-        {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
-        {' · '}{new Date(notice.at).toLocaleString(getLocale?.())}
-      </p> : null}
-      {failure ? <div className={css.warning} role="alert">
-        <strong>{t('usageRefreshFailed')}</strong>
-        <p>{failure.message ?? t('usageUnavailable')}</p>
-        {usage ? <p>{t('usageStaleHint')}</p> : null}
-      </div> : null}
-      {failure ? <button type="button" className={css.retry} disabled={refreshing}
-        onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRetry')}</button> : null}
-      {current ? <p className={css.hint}>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</p> : null}
-      {usage ? (['rolling', 'weekly', 'monthly'] as const).map(key => <div className={css.window} key={key}>
-        <div className={css.row}><span>{t(`usage_${key}`)}</span><strong>{usage[key].percent}%</strong></div>
-        <progress className={usageLevel(usage[key])} aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
-        <div className={css.hint}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
-        {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
-      </div>) : failure ? null : <p>{t('usageLoading')}</p>}
+      {accountsView ? <>
+        <div className={css.panelHead}>
+          <button type="button" className={css.back} aria-label={t('accountSwitchBack')} onClick={() => { setView('usage') }}>
+            <ChevronLeft />
+          </button>
+          <strong>{t('accountSwitchTitle')}</strong>
+        </div>
+        <div className={css.tile} role="listbox" aria-label={t('accountSwitchTitle')}
+          onKeyDown={event => {
+            if (event.key === 'Escape') { event.stopPropagation(); setView('usage'); return }
+            const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+            if (step === 0) return
+            event.preventDefault()
+            const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'))
+            const at = options.indexOf(document.activeElement as HTMLButtonElement)
+            options[(at + step + options.length) % options.length]?.focus()
+          }}>
+          {accounts.map((account, index) => <Fragment key={account.id}>
+            {index ? <div className={css.divider} /> : null}
+            <button type="button" role="option" aria-selected={account.apiKeyEnv === activeRef}
+              data-selected={account.apiKeyEnv === activeRef ? '' : undefined}
+              className={css.option} disabled={switching}
+              onClick={() => { switchTo(account.apiKeyEnv) }}>
+              <span className={css.optionName}>{account.name || t('accountDefault')}</span>
+              {account.apiKeyEnv === activeRef ? <Tick /> : null}
+            </button>
+          </Fragment>)}
+        </div>
+        {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
+        <p className={css.hint}>{t('accountSwitchHint')}</p>
+      </> : <>
+        <div className={css.panelTitle}>{t('usageTitle')}</div>
+        {accounts.length ? <div className={css.tile}>
+          <div className={css.accHead}>
+            <span className={css.dot} />
+            <span className={css.accName}>{accountName}</span>
+            {accounts.length > 1 ? <span className={css.tag}>{t('accountPreferredTag')}</span> : null}
+            {accounts.length > 1 ? <button type="button" className={css.switch} disabled={!switchable || switching}
+              aria-haspopup="listbox" onClick={() => { setView('accounts') }}>
+              {t('accountSwitchAction')}<ChevronRight />
+            </button> : null}
+          </div>
+        </div> : null}
+        {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
+        {notice ? <p className={css.warning} role="status">
+          {t(notice.reason === 'quota' ? 'accountFallbackQuota' : 'accountFallbackCredential')}{' '}
+          {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
+          {' · '}{new Date(notice.at).toLocaleString(getLocale?.())}
+        </p> : null}
+        {failure ? <div className={css.warning} role="alert">
+          <strong>{t('usageRefreshFailed')}</strong>
+          <p>{failure.message ?? t('usageUnavailable')}</p>
+          {usage ? <p>{t('usageStaleHint')}</p> : null}
+        </div> : null}
+        {failure ? <button type="button" className={css.retry} disabled={refreshing}
+          onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRetry')}</button> : null}
+        {usage ? <div className={css.tile}>
+          {(['rolling', 'weekly', 'monthly'] as const).map((key, index) => <Fragment key={key}>
+            {index ? <div className={css.divider} /> : null}
+            <div className={css.window}>
+              <div className={css.windowRow}>
+                <span className={css.windowLabel}>{t(`usage_${key}`)}</span>
+                <progress className={usageLevel(usage[key])} aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
+                <strong className={css.windowPercent}>{usage[key].percent}%</strong>
+              </div>
+              <div className={css.windowReset}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
+              {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
+            </div>
+          </Fragment>)}
+        </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
+        {current ? <div className={css.foot}>
+          <span>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</span>
+        </div> : null}
+      </>}
     </div>}
   </span>
 }

@@ -1,6 +1,4 @@
 .root { position: relative; display: inline-flex; min-width: 0; }
-.accountSelector { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
-.accountSelector select { flex: 1; min-width: 0; font: inherit; color: inherit; background: var(--dsw-alias-bg-layer-2, Canvas); border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; padding: 5px; }
 .trigger { border: 0; background: transparent; color: inherit; opacity: .75; font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
 .trigger:hover, .trigger:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
 .account { display: inline-block; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
@@ -12,10 +10,12 @@
    " · Last data" wording and the account name. The container is the composer row (InputBar .row) — an anonymous query
    because CSS modules hash container names per module. */
 @container (max-width: 460px) {
-  .brand, .stale, .account { display: none; }
-  /* The stale wording is gone at this tier; keep the signal as a bare marker that stays out of
-     textContent (::after), appended to the reading instead of the removed suffix. */
+  .brand, .stale, .account, .fallback { display: none; }
+  /* The stale and fallback wordings are gone at this tier; keep each signal as a bare
+     marker that stays out of textContent (::after): the stale one appended to the
+     reading, the fallback one to the trigger, which exists in every state. */
   .reading[data-stale]::after { content: '*'; }
+  .trigger[data-fallback]::after { content: ' ↳'; }
 }
 
 /* Narrow composer, tier 2: drop the unit words ("5h ", "week ") below this row width.
@@ -23,22 +23,55 @@
 @container (max-width: 360px) {
   .unit { display: none; }
 }
-.panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 280px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); box-shadow: 0 8px 30px #0003; font-size: 12px; isolation: isolate;
+.panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 320px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 10px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); box-shadow: 0 8px 30px #0003; font-size: 12px; isolation: isolate; display: flex; flex-direction: column; gap: 6px;
   /* The host menu token is translucent: tint an opaque surface with it so chat text never shows through. */
   background-color: Canvas;
   background-image: linear-gradient(var(--dsw-specific-menu, transparent), var(--dsw-specific-menu, transparent)), linear-gradient(var(--dsw-alias-bg-layer-2, Canvas), var(--dsw-alias-bg-layer-2, Canvas)); }
+
+/* The panel speaks the model selector's card language: 42px rows on a raised tile,
+   and the account choice here is the user's own — a drill-down inside the popup —
+   while the fallback order stays on the Settings page. The picker is a plain list
+   of buttons marked as options, so arrow keys and Enter work without a menu host. */
+.panelTitle, .panelHead { flex: none; padding: 2px 6px 0; font-size: 11.5px; line-height: 1.6; color: var(--dsw-alias-label-tertiary, currentColor); }
+.panelHead { display: flex; align-items: center; gap: 6px; }
+.panelHead strong { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, CanvasText); }
+.back { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: none; color: inherit; cursor: pointer; }
+.back:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.icon { flex: none; width: 14px; height: 14px; }
+.tick { flex: none; width: 14px; height: 14px; color: #39a878; }
+.tile { flex: none; border-radius: 10px; background: color-mix(in srgb, currentColor 6%, transparent); overflow: hidden; }
+.divider { height: .5px; margin: 0 12px; background: color-mix(in srgb, currentColor 10%, transparent); }
+.accHead { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #39a878; }
+.accName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; }
+.tag { flex: none; padding: 0 7px; border-radius: 999px; border: .5px solid color-mix(in srgb, #39a878 45%, transparent); background: color-mix(in srgb, #39a878 12%, transparent); color: #39a878; font-size: 10.5px; line-height: 1.7; }
+.switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 11.5px; color: var(--dsw-alias-label-tertiary, currentColor); cursor: pointer; }
+.switch:hover:not(:disabled) { background: color-mix(in srgb, currentColor 8%, transparent); }
+.switch:disabled { opacity: .55; cursor: default; }
+.option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 0 12px; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.option:hover:not(:disabled) { background: color-mix(in srgb, currentColor 6%, transparent); }
+.option:disabled { opacity: .6; cursor: default; }
+.optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--dsw-alias-label-secondary, currentColor); }
+.option[data-selected] .optionName { font-weight: 600; color: var(--dsw-alias-label-primary, CanvasText); }
 .hint { opacity: .65; font-size: 11px; line-height: 1.6; }
 .warning { margin: 10px 0; padding: 10px; border-radius: 6px; background: color-mix(in srgb, currentColor 6%, transparent); line-height: 1.5; overflow-wrap: anywhere; }
 .warning p { margin: 5px 0 0; }
 .retry { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); border-radius: 6px; padding: 5px 9px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .retry:disabled { opacity: .6; cursor: default; }
-.retry:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.window { margin-top: 14px; }
-.row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-.window progress { width: 100%; height: 5px; display: block; appearance: none; border: 0; border-radius: 4px; background: color-mix(in srgb, currentColor 15%, transparent); margin-bottom: 5px; }
-.window progress::-webkit-progress-bar { background: transparent; border-radius: 4px; }
-.window progress::-webkit-progress-value { background: #39a878; border-radius: 4px; }
-.window progress::-moz-progress-bar { background: #39a878; border-radius: 4px; }
+.back:focus-visible, .switch:focus-visible, .option:focus-visible, .retry:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+/* One window per row: label, bar and percentage share a line, and the reset stamp
+   sits under it. The bar is the settings card's pill shrunk one step, so both
+   surfaces read as the same meter. */
+.window { padding: 10px 12px; }
+.windowRow { display: flex; align-items: center; gap: 10px; }
+.windowLabel { flex: none; width: 48px; font-size: 12.5px; color: var(--dsw-alias-label-secondary, currentColor); }
+.windowPercent { flex: none; width: 38px; text-align: right; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.window progress { flex: 1; min-width: 60px; height: 10px; display: block; appearance: none; border: 0; border-radius: 99px; background: color-mix(in srgb, currentColor 15%, transparent); }
+.window progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
+.window progress::-webkit-progress-value { background: #39a878; border-radius: 99px; }
+.window progress::-moz-progress-bar { background: #39a878; border-radius: 99px; }
+.windowReset { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--dsw-alias-label-tertiary, currentColor); }
+.foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 6px 1px; font-size: 11px; color: var(--dsw-alias-label-tertiary, currentColor); }
 .window progress.high::-webkit-progress-value { background: #e0a100; }
 .window progress.high::-moz-progress-bar { background: #e0a100; }
 .window progress.limited::-webkit-progress-value { background: #e5484d; }

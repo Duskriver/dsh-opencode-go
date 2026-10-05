@@ -81,6 +81,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
      * for the whole refresh interval.
      */
     private catalogCache;
+    /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
+    private readonly rejectedKeys;
     constructor(options: OpencodeGoAdapterOptions);
     /**
      * The catalog resolver for one configuration, rebuilding on the facts it
@@ -109,6 +111,9 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
     private streamWithSnapshot;
+    private rememberRejectedKey;
+    /** A stored change to a reference outranks the gateway's last rejection of it. */
+    forgetRejectedKey(ref: string): void;
     /** One account, one SDK attempt; host recovery still owns failures after output. */
     private streamAttempt;
 }

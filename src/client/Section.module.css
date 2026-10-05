@@ -2,14 +2,60 @@
    hints, and actions. */
 
 .accounts { display: grid; gap: 10px; margin: 12px 0; }
-.account { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; }
+/* One row per account: the summary line stays readable, and the detail opens under
+   it. The row is the drag unit, so nothing inside it may swallow the pointer. The
+   summary line is a grid of fixed columns — handle, name, key state, bar, reading,
+   reset, disclosure — so two accounts whose names differ in length still line up
+   their key state, their bar and their countdown. Only the bar's track takes
+   slack, which is why the name and state columns may clip a long value instead of
+   pushing their neighbours. */
+.accountRow { border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
+.accountRow[data-dragging='true'] { opacity: .55; }
+.accountMain { display: grid; grid-template-columns: 16px 112px 92px minmax(0, 1fr) 38px 106px 14px; align-items: center; gap: 9px; padding: 9px 11px; }
+.accountHandle { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; -webkit-user-drag: element; }
+.accountHandle:disabled { cursor: default; opacity: .5; }
+.accountHandle:focus-visible, .accountToggle:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+.accountName { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.accountState { min-width: 0; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+.accountDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #39a878; }
+.accountDot[data-off='true'] { background: #d9a441; }
+/* The reading follows the bar: a bar wide enough to answer "how close to the
+   limit" at a glance, with the number right after it. */
+.accountPercent { text-align: right; font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.accountBar { position: relative; height: 12px; border-radius: 99px; background: rgba(255, 255, 255, .10); overflow: hidden; }
+.accountBarFill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: #39a878; }
+.accountBar[data-level='high'] .accountBarFill { background: #e0a100; }
+.accountBar[data-level='limited'] .accountBarFill { background: #e5484d; }
+/* Quarter marks: "three quarters spent" reads without measuring pixels. */
+.accountBarTick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .20); }
+.accountReset { text-align: right; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
+/* A row with nothing to read yet speaks across the bar, the reading and the
+   countdown instead of squeezing into one column. */
+.accountIdle { grid-column: 4 / 7; text-align: right; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.accountToggle { display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 11px 9px 36px; }
+.accountRetry { flex: none; border: none; background: none; padding: 0; font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-brand-primary); cursor: pointer; }
+.accountRetry:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+.accountHandle:active { cursor: grabbing; }
+.accountDetail { display: flex; flex-direction: column; gap: 8px; padding: 9px 11px 10px 36px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+/* The drop slot: a line where the dragged row would land. */
+.accountDropLine { height: 2px; border-radius: 2px; background: var(--dsw-alias-brand-primary); }
 .accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
-.accountUsage progress { display: block; width: 100%; height: 6px; accent-color: #39a878; margin: 6px 0; }
+.accountUsage progress { display: block; width: 100%; height: 8px; accent-color: #39a878; margin: 6px 0; }
+.accountUsage progress[data-level='high'] { accent-color: #e0a100; }
+.accountUsage progress[data-level='limited'] { accent-color: #e5484d; }
 .accountUsage .hint { display: block; overflow-wrap: anywhere; }
 .accountActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.accountEditor { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; margin-top: 12px; }
-.accountSubmit { border: 1px solid var(--dsw-alias-border-l3); border-radius: 6px; padding: 5px 12px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font: inherit; cursor: pointer; }
-.accountSubmit:disabled { opacity: .5; cursor: default; }
+/* The row's editor sits inside the row it edits: same inset as the detail, one
+   step quieter than the card, and every control on the page's own type scale. */
+.accountEditor { display: flex; flex-direction: column; gap: 8px; margin: 0 11px 10px 36px; padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 25%, transparent); }
+.accountEditorHead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.accountEditorTitle { flex: none; font-size: 12.5px; font-weight: 600; line-height: 1.5; color: var(--dsw-alias-label-primary); }
+.accountEditorFor { min-width: 0; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+.accountField { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.accountEditorActions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 @media (max-width: 480px) { .accountUsage { grid-template-columns: 1fr; } }
 
 .page {
@@ -271,6 +317,16 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* The one refresh stamp the card carries: every row is read in the same pass, so
+   the time belongs to the header rather than to each row's detail. */
+.cardStamp {
+  flex: none;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .cardBody {
   display: flex;
   flex-direction: column;
@@ -323,6 +379,10 @@
 .cardTrigger:hover .cardTitle {
   color: var(--dsw-alias-brand-primary);
 }
+
+/* A header that carries its own trailing control keeps the trigger flush: the row
+   owns the padding, so the button inside it is not inset twice. */
+.cardHead > .cardTrigger { padding: 0; }
 
 /* Tuning fields pair up inside the advanced card, and every divider they carry
    as a stacked field is dropped: the grid gap does that job here. */
