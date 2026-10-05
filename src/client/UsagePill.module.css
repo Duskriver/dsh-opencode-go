@@ -12,10 +12,12 @@
    " · Last data" wording and the account name. The container is the composer row (InputBar .row) — an anonymous query
    because CSS modules hash container names per module. */
 @container (max-width: 460px) {
-  .brand, .stale, .account { display: none; }
-  /* The stale wording is gone at this tier; keep the signal as a bare marker that stays out of
-     textContent (::after), appended to the reading instead of the removed suffix. */
+  .brand, .stale, .account, .fallback { display: none; }
+  /* The stale and fallback wordings are gone at this tier; keep each signal as a bare
+     marker that stays out of textContent (::after): the stale one appended to the
+     reading, the fallback one to the trigger, which exists in every state. */
   .reading[data-stale]::after { content: '*'; }
+  .trigger[data-fallback]::after { content: ' ↳'; }
 }
 
 /* Narrow composer, tier 2: drop the unit words ("5h ", "week ") below this row width.

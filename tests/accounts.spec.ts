@@ -92,6 +92,41 @@ it('does not replay a partially emitted response on another account', async () =
   expect(gateway.bodies).toHaveLength(1)
 })
 
+it('attributes a multi-hop fallback notice to the first account that failed', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  const three = [...accounts, { id: 'c', name: 'Third', apiKeyEnv: 'ACCOUNT_C' }]
+  const config = configOf(gateway.url, { accounts: three, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const switched = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => config.apiKeyEnv, onAccountSwitch: switched })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(switched).toHaveBeenCalledWith({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_C', reason: 'quota', at: expect.any(Number) }, expect.any(Object))
+})
+
+it('skips a gateway-rejected key on later requests until the credential changes', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  const rejection = { status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) }
+  gateway.pushCompletions(rejection)
+  gateway.pushCompletions({ events: textEvents })
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => config.apiKeyEnv })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(gateway.bodies).toHaveLength(2)
+  gateway.pushCompletions({ events: textEvents })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  // The rejected preferred key is not re-sent; the backup answers directly.
+  expect(gateway.bodies).toHaveLength(3)
+  expect(gateway.headers.filter(header => header.authorization).at(-1)!.authorization).toBe('Bearer ACCOUNT_B')
+  // A stored change to the reference outranks the remembered rejection.
+  adapter.forgetRejectedKey('ACCOUNT_A')
+  gateway.pushCompletions(rejection)
+  gateway.pushCompletions({ events: textEvents })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(gateway.bodies).toHaveLength(5)
+})
+
 it('can use a backup when the preferred credential is missing and stops fallback on cancellation', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ events: textEvents })

@@ -10,6 +10,8 @@ type Translate = (key: keyof typeof en, params?: Record<string, unknown>) => str
 type Editor = { kind: 'add' | 'rename' | 'key' | 'remove'; ref?: string }
 /** The three quota windows, in the order the panel reads them. */
 const WINDOWS = ['rolling', 'weekly', 'monthly'] as const
+/** Where the wide bar carries its quarter marks. */
+const TICKS = [25, 50, 75] as const
 
 /** The disclosure chevron the page's other cards use, across host versions. */
 const ChevronDown = (primitives as typeof primitives & {
@@ -34,6 +36,21 @@ function resetText(resetsAt: string, t: Translate): string {
   return t('usageResetDays', { days: Math.round(hours / 24) })
 }
 
+/** The bar's reading, on the scale the composer pill already uses: amber from
+ * 80%, red once the window is spent. */
+function barLevel(window: { percent: number; status: string }): 'ok' | 'high' | 'limited' {
+  if (window.status === 'rate-limited' || window.percent >= 100) return 'limited'
+  return window.percent >= 80 ? 'high' : 'ok'
+}
+
+/** The card's one refresh stamp: the clock time while it is today, the date it
+ * happened otherwise. */
+function stampText(at: number, locale?: string): string {
+  const date = new Date(at)
+  const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+  return date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString(locale)} ${time}`
+}
+
 /** The drag handle: six dots, the page's reorder affordance and the drag source. */
 function GripIcon() {
   return <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true">
@@ -48,7 +65,8 @@ function GripIcon() {
  * account inside. Rows keep the identity, key state, rolling quota and its reset
  * countdown; everything else opens under the row. The handle is the drag source —
  * dragging it, or the arrow keys on it, reorders the list, and the first row is
- * the preferred account.
+ * the preferred account. Every row is read in the same pass, so the one refresh
+ * stamp belongs to the card and sits in its header.
  */
 export function AccountsCard({ state, actions, writable, t, locale }: {
   state: GoAccountsState
@@ -70,6 +88,8 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
   const unreadable = state.entries.filter(entry => entry.failed === true).length
   const preferred = state.entries.find(entry => entry.apiKeyEnv === state.activeRef)
   const reorderable = !disabled && total > 1
+  // One pass reads every row, so the card carries a single refresh stamp.
+  const updatedAt = state.entries.reduce((latest, entry) => Math.max(latest, entry.updatedAt ?? 0), 0)
   useEffect(() => {
     actions.loadAccounts()
     const timer = setInterval(() => { if (document.visibilityState !== 'hidden') actions.loadAccounts() }, 60_000)
@@ -77,6 +97,12 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
   }, [actions.loadAccounts])
   const start = (next: Editor, label = '') => { setEditor(next); setName(label); setKey('') }
   const cancel = () => { setEditor(null); setName(''); setKey('') }
+  // A row editor renders inside its row; when the row leaves the list — a
+  // remove whose entry went but whose key cleanup did not — the editor would
+  // strand itself with no visible Cancel and no Add button. Drop it instead.
+  useEffect(() => {
+    if (editor?.ref != null && !state.entries.some(entry => entry.apiKeyEnv === editor.ref)) cancel()
+  }, [state.entries, editor])
   const submit = async () => {
     if (!editor) return
     const accepted = editor.kind === 'add' ? await actions.addAccount(name, key)
@@ -114,20 +140,17 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
       <Button variant="outline" size="sm" type="button" disabled={state.busy} onClick={cancel}>{t('accountCancel')}</Button>
     </div>
   </form> : null
-  const detail = (account: GoAccountView, label: string, index: number) => <div className={css.accountDetail}>
+  const detail = (account: GoAccountView, label: string) => <div className={css.accountDetail}>
     {account.usage ? <div className={css.accountUsage}>
       {WINDOWS.map(window => <div key={window}>
         <span>{t(`usage_${window}`)} · {account.usage![window].percent}%</span>
-        <progress aria-label={`${label} ${t(`usage_${window}`)}`} max={100} value={Math.min(100, account.usage![window].percent)} />
+        <progress data-level={barLevel(account.usage![window])} max={100}
+          value={Math.min(100, account.usage![window].percent)}
+          aria-label={`${label} ${t(`usage_${window}`)}`} />
         <span className={css.hint}>{t('usageResets')} {new Date(account.usage![window].resetsAt).toLocaleString(locale)}</span>
       </div>)}
     </div> : <p className={css.hint}>{t(account.loading ? 'usageLoading' : 'usageUnavailable')}</p>}
-    {account.updatedAt ? <p className={css.hint}>{t('usageLastUpdated')} {new Date(account.updatedAt).toLocaleString(locale)}</p> : null}
     <div className={css.accountActions}>
-      <Button variant="outline" size="sm" disabled={!reorderable || index === 0}
-        onClick={() => { move(account.apiKeyEnv, index - 1) }}>{t('accountMoveUp')}</Button>
-      <Button variant="outline" size="sm" disabled={!reorderable || index === total - 1}
-        onClick={() => { move(account.apiKeyEnv, index + 1) }}>{t('accountMoveDown')}</Button>
       <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
       <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false} onClick={() => { start({ kind: 'key', ref: account.apiKeyEnv }, label) }}>{t('accountReplaceKey')}</Button>
       <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
@@ -144,14 +167,18 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         </Tag> : null}
         <ChevronDown className={open ? css.chevronOpen : css.chevron} />
       </button>
-      <span className={css.trailing}><Button variant="outline" size="sm" disabled={state.refreshing}
-        onClick={actions.loadAccounts}>{t(state.refreshing ? 'usageRefreshing' : 'accountsRefresh')}</Button></span>
+      <span className={css.trailing}>
+        {updatedAt > 0 ? <span className={css.cardStamp} title={new Date(updatedAt).toLocaleString(locale)}>
+          {t('usageLastUpdated')} {stampText(updatedAt, locale)}
+        </span> : null}
+        <Button variant="outline" size="sm" disabled={state.refreshing}
+          onClick={actions.loadAccounts}>{t(state.refreshing ? 'usageRefreshing' : 'accountsRefresh')}</Button>
+      </span>
     </div>
     {open ? <div id="opencode-go-accounts" className={css.cardBody}>
-      <p className={css.hint}>{t('accountsHint')}</p>
-      {total > 0 ? <p className={css.hint}>{t('accountsOrderHint')}</p> : null}
       {state.blocked ? <p className={css.hint}>{t('accountsBlocked')}</p> : null}
       {state.failure ? <p className={css.failedNote} role="alert">{t(state.failure === 'cleanup' ? 'accountsCleanupFailed'
+        : state.failure === 'remove' ? 'accountsRemoveKeyFailed'
         : state.failure === 'read' ? 'accountsReadFailed' : 'accountsWriteFailed')}</p> : null}
       {!total ? <p className={css.hint}>{t('accountsEmpty')}</p> : null}
       <div className={css.accounts}>
@@ -200,7 +227,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
               onDragEnd={() => { setDragging(null); setDropAt(null) }}>
               <div className={css.accountMain}>
                 <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
-                  disabled={!reorderable}
+                  disabled={!reorderable} title={t('accountDragHandle', { name: label })}
                   aria-label={t('accountDragHandle', { name: label })}
                   onKeyDown={event => {
                     if (event.key === 'ArrowUp' && index > 0) { event.preventDefault(); move(account.apiKeyEnv, index - 1) }
@@ -211,13 +238,17 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                 <strong className={css.accountName}>{label}</strong>
                 <span className={css.accountState}>
                   <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
-                  {account.configured === undefined ? t('usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
+                  {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
                 </span>
                 <span className={css.accountSpacer} />
                 {rolling ? <>
+                  <span className={css.accountBar} role="progressbar" data-level={barLevel(rolling)}
+                    aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
+                    aria-label={`${label} ${t('usage_rolling')}`}>
+                    <span className={css.accountBarFill} style={{ width: `${Math.min(100, rolling.percent)}%` }} />
+                    {TICKS.map(at => <span key={at} className={css.accountBarTick} style={{ left: `${at}%` }} />)}
+                  </span>
                   <span className={css.accountPercent}>{rolling.percent}%</span>
-                  <progress className={css.accountProgress} max={100} value={Math.min(100, rolling.percent)}
-                    aria-label={`${label} ${t('usage_rolling')}`} />
                   <span className={css.accountReset}>{resetText(rolling.resetsAt, t)}</span>
                 </> : <span className={css.accountReset}>{account.configured === false
                   ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>}
@@ -232,7 +263,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                 <button type="button" className={css.accountRetry} disabled={state.refreshing}
                   onClick={actions.loadAccounts}>{t('usageRetry')}</button>
               </div> : null}
-              {expanded ? detail(account, label, index) : null}
+              {expanded ? detail(account, label) : null}
               {editor?.ref === account.apiKeyEnv ? editorForm(label) : null}
             </div>
           </Fragment>

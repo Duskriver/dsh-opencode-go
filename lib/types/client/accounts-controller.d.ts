@@ -20,7 +20,7 @@ export interface GoAccountsState {
     busy: boolean;
     blocked: boolean;
     refreshing: boolean;
-    failure?: 'write' | 'cleanup' | 'read';
+    failure?: 'write' | 'cleanup' | 'remove' | 'read';
 }
 export interface GoAccountsActions {
     loadAccounts: () => void;
@@ -56,6 +56,8 @@ export declare class GoAccountsController {
     dispose(): void;
     invalidate(ref: string): void;
     refresh(): Promise<void>;
+    /** Mark every account row as unreadable with the Host's own diagnostic. */
+    private markUnreadable;
     actions(): GoAccountsActions;
     /**
      * Reorder the visible accounts and keep the preferred reference on the first row.
@@ -67,6 +69,9 @@ export declare class GoAccountsController {
     private account;
     private mutate;
     private add;
+    /** Loaded rows answer from cache; anything they do not know is described on
+     * the spot, so a placeholder decision never races the page's first describe. */
+    private configuredOf;
     private rename;
     private select;
     private remove;

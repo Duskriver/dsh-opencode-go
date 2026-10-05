@@ -59,6 +59,15 @@ function accountFailureReason(failure: { code: string; message: string }): GoAcc
   return undefined
 }
 
+/** How long the adapter remembers a gateway key rejection before re-checking. */
+const REJECTED_KEY_TTL_MS = 5 * 60_000
+
+/** The gateway itself refused the key — a fact worth remembering for a while.
+ * A locally missing credential is re-checked for free on every request. */
+function isGatewayKeyRejection(failure: { code: string }): boolean {
+  return failure.code === 'INVALID_CREDENTIAL' || failure.code === 'AUTH'
+}
+
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
   const limit = limits[model.id]
@@ -138,6 +147,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * for the whole refresh interval.
    */
   private catalogCache: { key: string; catalog: OpencodeGoCatalog } | undefined
+
+  /** References whose key the gateway lately rejected, and when to re-check. */
+  private readonly rejectedKeys = new Map<string, number>()
 
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
@@ -292,19 +304,40 @@ export class OpencodeGoAdapter extends LlmAdapter {
   private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
     const accounts = accountsOf(snapshot.config)
     if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
-    const refs = snapshot.config.autoSwitch
+    const ordered = snapshot.config.autoSwitch
       ? [...new Set([snapshot.config.apiKeyEnv, ...accounts.map(account => account.apiKeyEnv)])]
       : [snapshot.config.apiKeyEnv]
+    // Keys the gateway rejected lately are skipped for a bounded window:
+    // re-sending a full transcript to a rejected key is pure waste. If every
+    // candidate is in that window the original order stands, so the gateway's
+    // own error — not a synthetic local one — reaches the caller.
+    const now = Date.now()
+    const usable = ordered.filter(ref => {
+      const until = this.rejectedKeys.get(ref)
+      if (until === undefined) return true
+      if (now >= until) { this.rejectedKeys.delete(ref); return true }
+      return false
+    })
+    const refs = usable.length > 0 ? usable : ordered
+    const skippedRef = ordered.find(ref => !refs.includes(ref))
     let switchReason: GoAccountSwitch['reason'] | undefined
+    let failedRef: string | undefined
     for (let attempt = 0; attempt < refs.length; attempt++) {
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
       const announce = (): void => {
         if (emitted) return
-        if (attempt === 0) this.options.onAccountSwitch?.(undefined, snapshot.config)
-        else if (switchReason) this.options.onAccountSwitch?.({
-          fromRef: refs[0]!, toRef: refs[attempt]!, reason: switchReason, at: Date.now(),
+        const serving = refs[attempt]!
+        if (serving === snapshot.config.apiKeyEnv) this.options.onAccountSwitch?.(undefined, snapshot.config)
+        else this.options.onAccountSwitch?.({
+          // The notice names the account the journey left: the first one that
+          // failed this request, else the first one skipped for a remembered
+          // rejection.
+          fromRef: failedRef ?? skippedRef ?? snapshot.config.apiKeyEnv,
+          toRef: serving,
+          reason: switchReason ?? 'credential',
+          at: Date.now(),
         }, snapshot.config)
       }
       try {
@@ -313,10 +346,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
         })) {
           if (chunk.type === 'usage') { usage = chunk; continue }
           if (chunk.type === 'finish') {
-            const reason = chunk.reason.kind === 'error' ? accountFailureReason(chunk.reason.failure) : undefined
-            if (reason && !emitted && !options.signal?.aborted && !((usage?.usage.totalTokens ?? 0) > 0)
+            const failure = chunk.reason.kind === 'error' ? chunk.reason.failure : undefined
+            const reason = failure === undefined ? undefined : accountFailureReason(failure)
+            if (reason && failure !== undefined && !emitted && !options.signal?.aborted && !((usage?.usage.totalTokens ?? 0) > 0)
               && attempt + 1 < refs.length) {
+              if (isGatewayKeyRejection(failure)) this.rememberRejectedKey(refs[attempt]!)
               switchReason ??= reason
+              failedRef ??= refs[attempt]!
               retry = true
               break
             }
@@ -333,9 +369,20 @@ export class OpencodeGoAdapter extends LlmAdapter {
       } catch (error) {
         const reason = error instanceof LlmError ? accountFailureReason(error) : undefined
         if (!reason || emitted || options.signal?.aborted || attempt + 1 >= refs.length) throw error
+        if (error instanceof LlmError && isGatewayKeyRejection(error)) this.rememberRejectedKey(refs[attempt]!)
         switchReason ??= reason
+        failedRef ??= refs[attempt]!
       }
     }
+  }
+
+  private rememberRejectedKey(ref: string): void {
+    this.rejectedKeys.set(ref, Date.now() + REJECTED_KEY_TTL_MS)
+  }
+
+  /** A stored change to a reference outranks the gateway's last rejection of it. */
+  forgetRejectedKey(ref: string): void {
+    this.rejectedKeys.delete(ref)
   }
 
   /** One account, one SDK attempt; host recovery still owns failures after output. */

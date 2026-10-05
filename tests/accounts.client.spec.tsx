@@ -64,6 +64,58 @@ it('replaces an unconfigured legacy placeholder with the first added account', a
   fixture.controller.dispose()
 })
 
+it('replaces the placeholder without waiting for the page\'s first describe', async () => {
+  const fixture = setup({})
+  // No refresh(): the rows carry nothing yet, as when the card mounts and the
+  // user submits the first account before describe answers.
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  const config = fixture.host.scope.getSnapshot().value!
+  expect(config.accounts).toEqual([expect.objectContaining({ name: 'Work' })])
+  expect(config.apiKeyEnv).toBe(config.accounts![0]!.apiKeyEnv)
+  fixture.controller.dispose()
+})
+
+it('describes the legacy reference directly while the first refresh is still pending', async () => {
+  const fixture = setup({})
+  const pending = Promise.withResolvers<{ ok: true, value: Record<string, { configured: boolean, writable: boolean }> }>()
+  fixture.credentials.describe.mockImplementationOnce(() => pending.promise)
+  void fixture.controller.refresh()
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  // The add asked for itself even though the page's first describe never answered.
+  expect(fixture.credentials.describe.mock.calls.length).toBeGreaterThanOrEqual(2)
+  const config = fixture.host.scope.getSnapshot().value!
+  expect(config.accounts).toEqual([expect.objectContaining({ name: 'Work' })])
+  expect(config.apiKeyEnv).toBe(config.accounts![0]!.apiKeyEnv)
+  pending.resolve({ ok: true, value: {} })
+  fixture.controller.dispose()
+})
+
+it('never stores the legacy placeholder and keeps the selection when the credential service cannot answer', async () => {
+  const fixture = setup({})
+  fixture.credentials.describe.mockRejectedValue(new Error('no credential provider mounted'))
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  const config = fixture.host.scope.getSnapshot().value!
+  // Only the new account is stored: the placeholder stays a read-side view, and
+  // the legacy selection is kept because its key state is unknown, not false.
+  expect(config.accounts).toEqual([expect.objectContaining({ name: 'Work' })])
+  expect(config.apiKeyEnv).toBeUndefined()
+  fixture.controller.dispose()
+})
+
+it('retries an add that lost a concurrent settings write, reusing the stored credential', async () => {
+  const fixture = setup({ accounts: [] })
+  const conflict = Object.assign(new Error('settings revision moved'), { name: 'SettingsConflictError' })
+  fixture.host.mutate.mockImplementationOnce(async () => { throw conflict })
+  expect(await fixture.actions.addAccount('Work', 'private-key')).toBe(true)
+  const config = fixture.host.scope.getSnapshot().value!
+  expect(config.accounts).toHaveLength(1)
+  // One credential, one reference: the retry re-applies the same account.
+  expect(fixture.credentials.set).toHaveBeenCalledTimes(1)
+  expect(fixture.credentials.set).toHaveBeenCalledWith(config.accounts![0]!.apiKeyEnv, 'private-key')
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
 it('keeps a possibly committed credential after an ambiguous metadata transport failure', async () => {
   const fixture = setup()
   fixture.host.mutate.mockRejectedValueOnce(new Error('transport lost after write'))
@@ -103,13 +155,29 @@ it('removes the selected account and chooses its replacement in one write; an em
   fixture.controller.dispose()
 })
 
-it('removes managed credentials and retains the account entry when the config removal is refused', async () => {
+it('removes the stored key first, so a refused settings write leaves a retryable row', async () => {
   const fixture = setup({ accounts: [] })
   await fixture.actions.addAccount('Work', 'private-key')
   const ref = fixture.host.scope.getSnapshot().value!.apiKeyEnv!
   fixture.host.mutate.mockImplementationOnce(async () => {})
   expect(await fixture.actions.removeAccount(ref)).toBe(false)
-  expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  // The key is gone but the row stays visible and the remove is retryable — no orphan credential.
+  expect(fixture.secrets.has(ref)).toBe(false)
+  expect(fixture.controller.snapshot().entries.some(entry => entry.apiKeyEnv === ref)).toBe(true)
+  expect(await fixture.actions.removeAccount(ref)).toBe(true)
+  expect(fixture.credentials.unset).toHaveBeenCalledTimes(1)
+  fixture.controller.dispose()
+})
+
+it('keeps the account when its stored key cannot be deleted', async () => {
+  const fixture = setup({ accounts: [] })
+  await fixture.actions.addAccount('Work', 'private-key')
+  const ref = fixture.host.scope.getSnapshot().value!.apiKeyEnv!
+  fixture.credentials.unset.mockResolvedValueOnce({ ok: false as const, error: new Error('provider refused') })
+  expect(await fixture.actions.removeAccount(ref)).toBe(false)
+  expect(fixture.secrets.has(ref)).toBe(true)
+  expect(fixture.controller.snapshot().failure).toBe('remove')
+  expect(fixture.controller.snapshot().entries.some(entry => entry.apiKeyEnv === ref)).toBe(true)
   expect(await fixture.actions.removeAccount(ref)).toBe(true)
   expect(fixture.secrets.has(ref)).toBe(false)
   fixture.controller.dispose()
@@ -331,6 +399,72 @@ it('marks the handle as the drag source, so a real browser can start the reorder
   // Dragging is inert without this attribute: the browser never dispatches dragstart.
   expect(handle.getAttribute('draggable')).toBe('true')
   expect(handle.closest('[data-account-row]')?.getAttribute('data-account-row')).toBe('ACCOUNT_A')
+  // The hint paragraph is gone, so the handle's own tooltip carries the affordance.
+  expect(handle.getAttribute('title')).toBe(t('accountDragHandle', { name: 'Primary' }))
+  fixture.controller.dispose()
+})
+
+it('carries one refresh stamp in the header and none under a row', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable t={t} />)
+  // Every row is read in the same pass, so the stamp belongs to the card and is
+  // visible while it is folded; opening every row must not add a second one.
+  expect(screen.getAllByText(new RegExp(`^${en.usageLastUpdated}`))).toHaveLength(1)
+  const trigger = screen.getByRole('button', { name: new RegExp(en.accountsTitle) })
+  expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(trigger)
+  for (const name of ['Primary', 'Backup']) {
+    fireEvent.click(screen.getByRole('button', { name: t('accountsDetails', { name }) }))
+  }
+  expect(screen.getAllByText(new RegExp(`^${en.usageLastUpdated}`))).toHaveLength(1)
+  fixture.controller.dispose()
+})
+
+it('keeps the row actions to rename, replace key and remove', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const row = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) }).closest('[data-account-row]') as HTMLElement
+  fireEvent.click(within(row).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+  for (const name of [en.accountRename, en.accountReplaceKey, en.accountRemove]) {
+    expect(within(row).getByRole('button', { name })).toBeTruthy()
+  }
+  // Reordering is drag and arrow keys only: no per-row move buttons survive.
+  expect(within(row).queryByRole('button', { name: /^move/i })).toBeNull()
+  fixture.controller.dispose()
+})
+
+it('draws the row quota as one wide bar with quarter marks and a trailing reading', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const bar = screen.getByRole('progressbar', { name: `Primary ${en.usage_rolling}` })
+  expect(bar.getAttribute('aria-valuenow')).toBe('10')
+  expect(bar.getAttribute('data-level')).toBe('ok')
+  // One fill plus the three quarter marks, and the fill is the reading itself.
+  expect(bar.querySelectorAll('span')).toHaveLength(4)
+  expect((bar.firstElementChild as HTMLElement).style.width).toBe('10%')
+  fixture.controller.dispose()
+})
+
+it('turns the row bar amber at 80% and red once the window is spent', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const state = fixture.controller.snapshot()
+  const level = (rolling: GoUsage['rolling']): string | null => {
+    render(<AccountsCard state={{ ...state, entries: [{ ...state.entries[0]!, usage: { ...usage('ACCOUNT_A'), rolling } }] }}
+      actions={fixture.actions} writable t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+    const found = screen.getByRole('progressbar', { name: `Primary ${en.usage_rolling}` }).getAttribute('data-level')
+    cleanup()
+    return found
+  }
+  expect(level({ status: 'ok', percent: 79, resetsAt: window.resetsAt })).toBe('ok')
+  expect(level({ status: 'ok', percent: 80, resetsAt: window.resetsAt })).toBe('high')
+  expect(level({ status: 'rate-limited', percent: 100, resetsAt: window.resetsAt })).toBe('limited')
   fixture.controller.dispose()
 })
 
@@ -352,6 +486,61 @@ it('edits a row in place and reports why a quota read failed', async () => {
   fireEvent.click(within(row).getByRole('button', { name: en.accountRename }))
   expect(within(row).getByLabelText(en.accountName)).toBeTruthy()
   expect(screen.queryByRole('button', { name: en.accountAdd })).toBeNull()
+  fixture.controller.dispose()
+})
+
+it('marks every row unreadable instead of eternally loading when the describe fails', async () => {
+  const fixture = setup()
+  fixture.credentials.describe.mockResolvedValue({ ok: false as const, error: new Error('no credential provider mounted') })
+  await fixture.controller.refresh()
+  const state = fixture.controller.snapshot()
+  expect(state.failure).toBe('read')
+  expect(state.entries.every(entry => entry.failed === true && entry.configured === undefined)).toBe(true)
+  render(<AccountsCard state={state} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  expect(screen.queryByText(en.usageLoading)).toBeNull()
+  expect(screen.getAllByText(en.accountsStatusUnknown)).toHaveLength(2)
+  expect(screen.getByText(en.accountsReadFailed)).toBeTruthy()
+  fixture.controller.dispose()
+})
+
+it('recovers the add entry after a failed remove left the card without its row', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const removeAccount = vi.fn(async () => false)
+  const base = { actions: { ...fixture.actions, removeAccount }, writable: true, t }
+  const view = render(<AccountsCard {...base} state={fixture.controller.snapshot()} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const row = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) }).closest('[data-account-row]') as HTMLElement
+  fireEvent.click(within(row).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+  fireEvent.click(within(row).getByRole('button', { name: en.accountRemove }))
+  expect(screen.queryByRole('button', { name: en.accountAdd })).toBeNull()
+  // The entry left the list, but the key cleanup failed: the action reports false
+  // and the editor would otherwise strand inside a row that no longer exists.
+  fixture.host.publish({ value: { accounts: [accounts[1]!], apiKeyEnv: 'ACCOUNT_B' } })
+  await act(async () => { view.rerender(<AccountsCard {...base} state={fixture.controller.snapshot()} />) })
+  expect(screen.getByRole('button', { name: en.accountAdd })).toBeTruthy()
+  fixture.controller.dispose()
+})
+
+it('keeps the loaded rows when only a name changes', async () => {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const reads = fixture.read.mock.calls.length
+  expect(await fixture.actions.renameAccount('ACCOUNT_A', 'Renamed')).toBe(true)
+  expect(fixture.read.mock.calls.length).toBe(reads)
+  expect(fixture.controller.snapshot().entries[0]).toMatchObject({ name: 'Renamed', usage: { source: 'ACCOUNT_A' } })
+  fixture.controller.dispose()
+})
+
+it('marks the collapsed pill when a fallback notice is active', async () => {
+  const fixture = setup()
+  const directory = createSnapshotStore({ current: { provider: 'dsh-opencode-go', model: 'test' }, routable: true, groups: [], failures: [], status: 'ready', error: null })
+  const read = vi.fn().mockResolvedValue({ ...usage('ACCOUNT_A'), lastSwitch: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'quota' as const, at: 1 } })
+  await act(async () => { render(<UsagePill directory={directory as never} settings={fixture.host.scope} readUsage={read} t={t as never} />) })
+  const trigger = screen.getByRole('button', { name: /OpenCode Go usage/ })
+  expect(trigger.textContent).toContain('fallback')
+  expect(trigger.textContent).toContain('Primary')
   fixture.controller.dispose()
 })
 

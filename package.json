@@ -1,6 +1,6 @@
 {
   "name": "dsh-opencode-go",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "OpenCode Go model provider and settings UI for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
@@ -34,6 +34,7 @@
     "cordis.patch.yml",
     "THIRD_PARTY_NOTICES.md",
     "docs",
+    "!docs/multi-account-review-plan.md",
     "examples"
   ],
   "dsh": {

@@ -2,12 +2,13 @@
 export declare const en: {
     accountsTitle: string;
     accountsRefresh: string;
-    accountsHint: string;
     accountsBlocked: string;
     accountsEmpty: string;
     accountsWriteFailed: string;
     accountsReadFailed: string;
     accountsCleanupFailed: string;
+    accountsRemoveKeyFailed: string;
+    accountsStatusUnknown: string;
     accountDefault: string;
     accountAdd: string;
     accountRename: string;
@@ -28,12 +29,9 @@ export declare const en: {
     accountsSummaryEmpty: string;
     accountsAvailability: string;
     accountsAvailabilityFailed: string;
-    accountsOrderHint: string;
     accountsDetails: string;
     accountsDetailsHide: string;
     accountDragHandle: string;
-    accountMoveUp: string;
-    accountMoveDown: string;
     accountConfigureHint: string;
     usageResetMinutes: string;
     usageResetHours: string;
@@ -52,6 +50,7 @@ export declare const en: {
     usageLoading: string;
     usageUnavailable: string;
     usageStaleShort: string;
+    usageFallbackShort: string;
     usageStaleHint: string;
     usageRefreshFailed: string;
     usageLastUpdated: string;

@@ -144,7 +144,7 @@ autoSwitch: false
 
 Supply both keys through the credential service or environment variables. `apiKeyEnv` selects the preferred account. Omitting `accounts` preserves legacy single-key behavior; `accounts: []` explicitly removes every account.
 
-The Accounts card folds: collapsed, it reports the account count, the preferred account, and how many accounts are ready. Expanded, each account takes one row showing its key state, the rolling reading, and its reset countdown; the row's chevron opens the weekly and monthly windows, the last successful update, and the rename, replace-key, and remove actions. Drag a row's handle — or focus it and press ↑ / ↓ — to reorder. The list reads top to bottom: the first row is the preferred account and becomes preferred on drop, and automatic fallback follows the same order.
+The Accounts card folds: collapsed, it reports the account count, the preferred account, how many accounts are ready, and the one refresh stamp every row shares (the clock time on the day it happened, the full date and time on hover). Expanded, each account takes one row showing its key state, a wide rolling-quota bar (12px, full row width, quarter marks at 25/50/75%, amber from 80% and red once spent), and its reset countdown; the row's chevron opens the weekly and monthly windows and the rename, replace-key, and remove actions. Drag a row's handle — or focus it and press ↑ / ↓ — to reorder. The list reads top to bottom: the first row is the preferred account and becomes preferred on drop, and automatic fallback follows the same order.
 
 ## Subscription usage display
 
