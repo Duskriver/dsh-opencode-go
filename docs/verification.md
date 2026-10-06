@@ -1,10 +1,10 @@
 # Verification
 
-## Release 0.1.22: include the frosted usage panel (2026-10-07)
+## Release 0.1.21: include the frosted usage panel (2026-10-07)
 
-The release combines the network proxy settings and DSH 0.2.1-alpha.1 compatibility with PR #39's dedicated usage-panel material and inner scroll container. Version 0.1.21 was prepared but never published to npm; its existing Git tag remains on the earlier proxy commit, while the merged implementation is released as 0.1.22.
+The release combines the network proxy settings and DSH 0.2.1-alpha.1 compatibility with PR #39's dedicated usage-panel material and inner scroll container. The release includes the final merged implementation of both changes.
 
-An independent PR checkout passed strict `npm ci`, **487 tests in 32 files**, and freshness checks for **39 shipped artifacts** on macOS / Node 24.14.1. A direct Lightning CSS probe reproduced the declaration merge: placing the prefixed spelling last emitted only that spelling; an unprefixed declaration retained `backdrop-filter`. The PR's [13 GitHub checks](https://github.com/Duskriver/dsh-opencode-go/actions/runs/37408981047) and the [merged main checks](https://github.com/Duskriver/dsh-opencode-go/actions/runs/37493340359) passed, including the ten installed-host generations and npm/pnpm Git installs. The 0.1.22 core suite and shipped-artifact check also passed after the version update.
+An independent PR checkout passed strict `npm ci`, **487 tests in 32 files**, and freshness checks for **39 shipped artifacts** on macOS / Node 24.14.1. A direct Lightning CSS probe reproduced the declaration merge: placing the prefixed spelling last emitted only that spelling; an unprefixed declaration retained `backdrop-filter`. The PR's [13 GitHub checks](https://github.com/Duskriver/dsh-opencode-go/actions/runs/37408981047) and the [merged main checks](https://github.com/Duskriver/dsh-opencode-go/actions/runs/37493340359) passed, including the ten installed-host generations and npm/pnpm Git installs. The complete local verification passed 487 tests, 39 shipped artifacts, all ten installed-host generations and both npm/pnpm Git installation checks.
 
 ## Usage panel frosted glass: the build dropped the working blur (2026-10-06)
 
