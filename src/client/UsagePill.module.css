@@ -23,10 +23,32 @@
 @container (max-width: 360px) {
   .unit { display: none; }
 }
-.panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 320px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; box-sizing: border-box; padding: 10px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; color: var(--dsw-alias-label-primary, CanvasText); box-shadow: 0 8px 30px #0003; font-size: 12px; isolation: isolate; display: flex; flex-direction: column; gap: 6px;
-  /* The host menu token is translucent: tint an opaque surface with it so chat text never shows through. */
-  background-color: Canvas;
-  background-image: linear-gradient(var(--dsw-specific-menu, transparent), var(--dsw-specific-menu, transparent)), linear-gradient(var(--dsw-alias-bg-layer-2, Canvas), var(--dsw-alias-bg-layer-2, Canvas)); }
+/* The panel wears the host menu's frosted material, exactly like the model
+   selector: the fill and blur live on a dedicated child (.material), the way the
+   host's own MenuSurface paints them, so the panel's content never shares the
+   filtered element. The panel's own isolation keeps the material's z-index: -1
+   inside the panel instead of slipping behind the composer card, and the scroll
+   region is the inner .body so the material never rides a scroll container. */
+.panel { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 100; width: 320px; max-width: calc(100vw - 32px); max-height: 70vh; box-sizing: border-box; border: 0; border-radius: var(--dsw-radius-lg, 16px); color: var(--dsw-alias-label-primary, CanvasText); font-size: 12px; isolation: isolate; display: flex; flex-direction: column;
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1, color-mix(in srgb, currentColor 10%, transparent));
+  box-shadow: var(--dsw-elevation-prominent, 0 8px 30px #0003); }
+
+/* Only the UNPREFIXED backdrop-filter may appear in this stylesheet: the build
+   runs every module through lightningcss, which merges the two spellings and
+   ships just the last one — and current Chromium ignores -webkit-backdrop-filter
+   entirely, so a prefixed declaration would silently disable the glass in the
+   real host (that is what sank every earlier frosted-panel attempt). */
+.material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: var(--dsw-menu-surface-fill, var(--dsw-specific-menu, rgba(67, 69, 74, .45)));
+  backdrop-filter: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); }
+
+/* A host without backdrop-filter would leave the readings floating over the
+   chat, so fall back to an opaque surface. */
+@supports not (backdrop-filter: blur(1px)) {
+  .material { background: var(--dsw-alias-bg-layer-2, Canvas); }
+}
+
+.body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 
 /* The panel speaks the model selector's card language: 42px rows on a raised tile,
    and the account choice here is the user's own — a drill-down inside the popup —
