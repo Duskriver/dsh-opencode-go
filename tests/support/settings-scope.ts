@@ -102,9 +102,9 @@ class StubScope<T> implements SettingsScope<T> {
  * @returns the stub handle.
  */
 export function stubSettingsScope<T>(): StubSettingsScope<T> {
-  const set = vi.fn(() => Promise.resolve())
-  const mutate = vi.fn(() => Promise.resolve())
-  const unset = vi.fn(() => Promise.resolve())
+  const set = vi.fn((): Promise<void | boolean> => Promise.resolve())
+  const mutate = vi.fn((): Promise<void | boolean> => Promise.resolve())
+  const unset = vi.fn((): Promise<void | boolean> => Promise.resolve())
   const scope = new StubScope<T>({ set, mutate, unset })
   return {
     scope,

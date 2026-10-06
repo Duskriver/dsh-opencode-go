@@ -8,6 +8,8 @@ export type GoAccount = {
 export const MAX_ACCOUNTS = 20
 export const ACCOUNT_REF_PREFIX = 'DSH_OPENCODE_GO_ACCOUNT_'
 export const DEFAULT_ACCOUNT_REF = 'OPENCODE_API_KEY'
+/** A credential reference is a bare environment variable name, never empty or decorated. */
+export const ACCOUNT_REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 export interface AccountSettings {
   apiKeyEnv?: string
@@ -42,7 +44,7 @@ export function assertAccounts(accounts: readonly GoAccount[] | null | undefined
     if (!account || typeof account.id !== 'string' || !account.id || account.id.length > 128
       || account.id.startsWith('legacy:') && account.id !== `legacy:${account.apiKeyEnv}`
       || typeof account.name !== 'string' || (!account.name.trim() && account.id !== `legacy:${account.apiKeyEnv}`) || account.name.length > 80
-      || typeof account.apiKeyEnv !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(account.apiKeyEnv)
+      || typeof account.apiKeyEnv !== 'string' || !ACCOUNT_REF_PATTERN.test(account.apiKeyEnv)
       || ids.has(account.id) || refs.has(account.apiKeyEnv)) throw new Error('Invalid or duplicate OpenCode Go account')
     ids.add(account.id)
     refs.add(account.apiKeyEnv)

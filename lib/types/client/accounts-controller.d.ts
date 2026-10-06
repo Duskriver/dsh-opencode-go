@@ -40,6 +40,14 @@ export declare class GoAccountsController {
     private readonly readUsage;
     private readonly publish;
     private readonly blocked;
+    /**
+     * Server-side confirmation for a settings write whose settlement carries
+     * no verdict: legacy scopes resolve `mutate` without saying whether the
+     * write committed, and a concurrent write can keep a committed account out
+     * of the local snapshot. `true`/`false` answer from the settings document;
+     * `undefined` means the answer is unavailable and callers stay conservative.
+     */
+    private readonly probeServerAccount;
     private rows;
     private busy;
     private refreshing;
@@ -51,7 +59,15 @@ export declare class GoAccountsController {
     constructor(scope: SettingsScope<AccountSettings & {
         baseURL?: string;
         proxyURL?: string;
-    }>, ctx: Context, readUsage: (ref: string) => Promise<GoUsage>, publish: () => void, blocked: () => boolean);
+    }>, ctx: Context, readUsage: (ref: string) => Promise<GoUsage>, publish: () => void, blocked: () => boolean, 
+    /**
+     * Server-side confirmation for a settings write whose settlement carries
+     * no verdict: legacy scopes resolve `mutate` without saying whether the
+     * write committed, and a concurrent write can keep a committed account out
+     * of the local snapshot. `true`/`false` answer from the settings document;
+     * `undefined` means the answer is unavailable and callers stay conservative.
+     */
+    probeServerAccount?: (id: string) => Promise<boolean | undefined>);
     snapshot(): GoAccountsState;
     sync(): void;
     dispose(): void;

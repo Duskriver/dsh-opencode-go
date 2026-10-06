@@ -7,6 +7,8 @@ export type GoAccount = {
 export declare const MAX_ACCOUNTS = 20;
 export declare const ACCOUNT_REF_PREFIX = "DSH_OPENCODE_GO_ACCOUNT_";
 export declare const DEFAULT_ACCOUNT_REF = "OPENCODE_API_KEY";
+/** A credential reference is a bare environment variable name, never empty or decorated. */
+export declare const ACCOUNT_REF_PATTERN: RegExp;
 export interface AccountSettings {
     apiKeyEnv?: string;
     /** Omission/null preserves legacy credentials; an explicit empty list removes all accounts. */

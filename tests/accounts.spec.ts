@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import Gateway from '@deepseek-ai/dsh-api-gateway'
+import Registry from '@deepseek-ai/dsh-typert-registry'
 import LlmRuntime, { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { accountsOf, assertAccounts } from '../src/accounts.ts'
@@ -46,7 +48,7 @@ it.each([
   expect(headers.map(header => header['x-opencode-session'])).toEqual(['account-session', 'account-session'])
   expect(gateway.bodies[0]).toEqual(gateway.bodies[1])
   expect(config.apiKeyEnv).toBe('ACCOUNT_A')
-  expect(switched).toHaveBeenCalledWith({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: failure.reason, at: expect.any(Number) }, expect.any(Object))
+  expect(switched).toHaveBeenCalledWith({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: failure.reason, at: expect.any(Number) }, expect.any(Object), expect.any(Number))
   expect(JSON.stringify(switched.mock.calls)).not.toContain('secret')
 })
 
@@ -102,7 +104,7 @@ it('attributes a multi-hop fallback notice to the first account that failed', as
   const switched = vi.fn()
   const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => config.apiKeyEnv, onAccountSwitch: switched })
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-  expect(switched).toHaveBeenCalledWith({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_C', reason: 'quota', at: expect.any(Number) }, expect.any(Object))
+  expect(switched).toHaveBeenCalledWith({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_C', reason: 'quota', at: expect.any(Number) }, expect.any(Object), expect.any(Number))
 })
 
 it('skips a gateway-rejected key on later requests until the credential changes', async () => {
@@ -187,6 +189,36 @@ it('can use a backup when the preferred credential is missing and stops fallback
   resolve.mockClear()
   await expect(drain(adapter.stream({ ...request(), signal: signal.signal }))).rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })
   expect(resolve).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the newest request\'s switch outcome when an older request announces late', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  const ctx = new Context()
+  await ctx.plugin(LlmRuntime)
+  await ctx.plugin(Registry)
+  await ctx.plugin(Gateway)
+  ctx.provide('credentials', {
+    describe: async () => ({ configured: true, writable: true }),
+    resolve: async ref => ({ value: `${ref}-secret`, source: 'test' }),
+  } as never)
+  apply(ctx, configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }))
+  try {
+    await vi.waitFor(() => { expect(ctx.llm.listProviders().some(provider => provider.id === 'dsh-opencode-go')).toBe(true) })
+    // R1: the preferred account is over quota, and the backup's content is slow.
+    gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
+    gateway.pushCompletions({ events: textEvents, delayMs: 120 })
+    const first = drain(ctx.llm.stream(request()))
+    await vi.waitFor(() => { expect(gateway.bodies).toHaveLength(2) })
+    // R2 starts later and succeeds on the preferred account immediately; its
+    // outcome must survive R1's fallback notice arriving after it.
+    gateway.pushCompletions({ events: textEvents })
+    await drain(ctx.llm.stream(request()))
+    await first
+    const okWindow = { status: 'ok', percent: 10, resetsAt: '2026-09-21T00:00:00Z' }
+    gateway.pushCompletions({ status: 200, body: JSON.stringify({ usage: { rolling: okWindow, weekly: okWindow, monthly: okWindow } }) })
+    const read = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
+    expect(read.lastSwitch).toBeUndefined()
+  } finally { await ctx.fiber.dispose() }
 })
 
 it('ignores an old credential check after the user switches the active reference', async () => {

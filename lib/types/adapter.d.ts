@@ -68,7 +68,12 @@ export interface OpencodeGoAdapterOptions {
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
-    onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig) => void;
+    /**
+     * Observe the account a request settled on. `seq` is the request's monotonic
+     * sequence, taken when its stream began, so a consumer can tell a late notice
+     * from an older request apart from a newer request's outcome.
+     */
+    onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void;
 }
 /**
  * The single route's adapter. The catalog snapshot freezes at each operation,
@@ -87,6 +92,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly transport;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
+    /** Monotonic sequence of the latest request this adapter started. */
+    private callSeq;
     constructor(options: OpencodeGoAdapterOptions);
     dispose(): Promise<void>;
     /**
@@ -115,6 +122,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     /** Validate an explicit effort against the model's own levels, without clamping. */
     private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
+    /** Latest started request's sequence; a consumer fences late switch notices against it. */
+    accountSwitchWatermark(): number;
     private streamWithSnapshot;
     private rememberRejectedKey;
     /** A stored change to a reference outranks the gateway's last rejection of it. */

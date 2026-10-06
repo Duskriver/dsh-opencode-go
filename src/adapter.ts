@@ -50,7 +50,7 @@ import { ProxyTransport } from './proxy.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, withRequestReasoning } from './reasoning.ts'
-import { accountsOf, type GoAccountSwitch } from './accounts.ts'
+import { accountsOf, accountRefOf, type GoAccountSwitch } from './accounts.ts'
 
 /** A generic 403/rate limit is not proof that another subscription can help. */
 function accountFailureReason(failure: { code: string; message: string }): GoAccountSwitch['reason'] | undefined {
@@ -118,7 +118,12 @@ export interface OpencodeGoAdapterOptions {
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
-  onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig) => void
+  /**
+   * Observe the account a request settled on. `seq` is the request's monotonic
+   * sequence, taken when its stream began, so a consumer can tell a late notice
+   * from an older request apart from a newer request's outcome.
+   */
+  onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void
 }
 
 /** Configuration, model and provider captured together before dispatch. */
@@ -155,6 +160,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
   private readonly rejectedKeys = new Map<string, Map<string, number>>()
+
+  /** Monotonic sequence of the latest request this adapter started. */
+  private callSeq = 0
 
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
@@ -310,12 +318,19 @@ export class OpencodeGoAdapter extends LlmAdapter {
     yield* this.streamWithSnapshot(options, snapshot)
   }
 
+  /** Latest started request's sequence; a consumer fences late switch notices against it. */
+  accountSwitchWatermark(): number { return this.callSeq }
+
   private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
+    const seq = ++this.callSeq
     const accounts = accountsOf(snapshot.config)
     if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
+    // The preferred reference resolves through accountRefOf: an empty string
+    // keeps the default reference's semantics rather than naming no account.
+    const preferred = accountRefOf(snapshot.config)
     const ordered = snapshot.config.autoSwitch
-      ? [...new Set([snapshot.config.apiKeyEnv, ...accounts.map(account => account.apiKeyEnv)])]
-      : [snapshot.config.apiKeyEnv]
+      ? [...new Set([preferred, ...accounts.map(account => account.apiKeyEnv)])]
+      : [preferred]
     // Keys the gateway rejected lately are skipped for a bounded window:
     // re-sending a full transcript to a rejected key is pure waste. If every
     // candidate is in that window the original order stands, so the gateway's
@@ -344,16 +359,16 @@ export class OpencodeGoAdapter extends LlmAdapter {
       const announce = (): void => {
         if (emitted) return
         const serving = refs[attempt]!
-        if (serving === snapshot.config.apiKeyEnv) this.options.onAccountSwitch?.(undefined, snapshot.config)
+        if (serving === preferred) this.options.onAccountSwitch?.(undefined, snapshot.config, seq)
         else this.options.onAccountSwitch?.({
           // The notice names the account the journey left: the first one that
           // failed this request, else the first one skipped for a remembered
           // rejection.
-          fromRef: failedRef ?? skippedRef ?? snapshot.config.apiKeyEnv,
+          fromRef: failedRef ?? skippedRef ?? preferred,
           toRef: serving,
           reason: switchReason ?? 'credential',
           at: Date.now(),
-        }, snapshot.config)
+        }, snapshot.config, seq)
       }
       try {
         for await (const chunk of this.streamAttempt(options, {

@@ -87,3 +87,11 @@ export declare function readConfig(config: LiveConfig): OpencodeGoConfig;
  * @returns the normalized base URL without trailing slashes.
  */
 export declare function assertBaseURL(raw: string): string;
+/**
+ * Reject a selected credential reference that is not a bare environment
+ * variable name. The schema pattern above fails the composition layer and the
+ * settings write; this assert gives the load and validate paths a message that
+ * names the field, instead of schemastery's generic regexp complaint.
+ * @param raw - the configured credential reference.
+ */
+export declare function assertApiKeyEnv(raw: string): void;

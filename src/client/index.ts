@@ -87,6 +87,24 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
       return result.value
     }
   })
+  // Ground truth for settings writes a legacy scope settles without a verdict:
+  // whether the server-side document already lists an account the local
+  // snapshot cannot see (a concurrent write suppresses the fold). Sessions
+  // without the settings remote stay conservative through the default probe.
+  let serverAccountProbe: (id: string) => Promise<boolean | undefined> = async () => undefined
+  ctx.inject(['remote.settings'], ready => {
+    serverAccountProbe = async id => {
+      try {
+        const response = await (ready as ClientContext).remote.settings.describe()
+        if (!response.ok) return undefined
+        return response.value.namespaces.some(section => {
+          const accounts = (section.value as { accounts?: unknown } | null)?.accounts
+          return Array.isArray(accounts)
+            && accounts.some(entry => entry !== null && typeof entry === 'object' && (entry as { id?: unknown }).id === id)
+        })
+      } catch { return undefined }
+    }
+  })
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
@@ -96,7 +114,7 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
     // of reaching for a context that never injected it.
     if (readAccount === undefined) throw new Error('OpenCode Go account usage is unavailable in this session')
     return readAccount(ref)
-  })
+  }, (id: string) => serverAccountProbe(id))
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
   const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t, getLocale: () => ctx.locale.getLocale().active })

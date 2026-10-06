@@ -65,6 +65,14 @@ export class GoAccountsController {
     private readonly readUsage: (ref: string) => Promise<GoUsage>,
     private readonly publish: () => void,
     private readonly blocked: () => boolean,
+    /**
+     * Server-side confirmation for a settings write whose settlement carries
+     * no verdict: legacy scopes resolve `mutate` without saying whether the
+     * write committed, and a concurrent write can keep a committed account out
+     * of the local snapshot. `true`/`false` answer from the settings document;
+     * `undefined` means the answer is unavailable and callers stay conservative.
+     */
+    private readonly probeServerAccount: (id: string) => Promise<boolean | undefined> = async () => undefined,
   ) { this.sync() }
 
   snapshot(): GoAccountsState {
@@ -214,8 +222,8 @@ export class GoAccountsController {
     return accountsOf(this.scope.getSnapshot().value ?? {}).find(account => account.apiKeyEnv === ref)
   }
 
-  private async mutate(ops: readonly SettingsPathOpView[], revision = this.scope.getSnapshot().revision): Promise<void> {
-    await this.scope.mutate(ops, revision)
+  private async mutate(ops: readonly SettingsPathOpView[], revision = this.scope.getSnapshot().revision): Promise<void | boolean> {
+    return this.scope.mutate(ops, revision)
   }
 
   private add(name: string, key: string): Promise<boolean> {
@@ -241,8 +249,9 @@ export class GoAccountsController {
         // The new account becomes preferred only when every account the page
         // already shows — placeholder included — is known to hold no key.
         const first = existing.length === 0 || existing.every(entry => configured.get(entry.apiKeyEnv) === false)
+        let accepted: void | boolean
         try {
-          await this.mutate([
+          accepted = await this.mutate([
             { op: 'set', path: ['accounts'], value: [...accounts, account] },
             ...(first ? [{ op: 'set' as const, path: ['apiKeyEnv'], value: ref }] : []),
           ], snapshot.revision)
@@ -254,8 +263,20 @@ export class GoAccountsController {
           // rather than removing a credential a late accepted response could name.
           return false
         }
+        // 0.1.7 forms settle true/false, and the snapshot folds only the latest
+        // write, so the settlement outranks the snapshot.
+        if (accepted === true) return true
         if (this.scope.getSnapshot().value?.accounts?.some(entry => entry.id === id)) return true
-        break // Transport accepted, value refused: roll the fresh key back.
+        if (accepted === false) break // The host refused the value: roll the fresh key back.
+        // A legacy scope settles void whether the write committed or was
+        // refused, and a concurrent write (the usage pill's account switch, any
+        // other surface) can keep a committed account out of the snapshot. Only
+        // a server-side absence justifies deleting the fresh key; an unanswered
+        // probe keeps it, like the transport branch above.
+        const committed = await this.probeServerAccount(id)
+        if (committed === true) return true
+        if (committed === false) break
+        return false
       }
       try { if (!(await this.ctx.remote.credentials.unset(ref)).ok) this.failure = 'cleanup' }
       catch { this.failure = 'cleanup' }
