@@ -194,6 +194,11 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
     <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}
       aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open); setView('usage') }}>{segments}</button>
     {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
+      {/* The frosted material is a dedicated child, the way the host's own
+          MenuSurface paints it, so the panel's content and the body's scrolling
+          never share the filtered element. */}
+      <div className={css.material} aria-hidden="true" />
+      <div className={css.body}>
       {accountsView ? <>
         <div className={css.panelHead}>
           <button type="button" className={css.back} aria-label={t('accountSwitchBack')} onClick={() => { setView('usage') }}>
@@ -268,6 +273,7 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
           <span>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</span>
         </div> : null}
       </>}
+      </div>
     </div>}
   </span>
 }
