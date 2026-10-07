@@ -242,75 +242,92 @@ it('ignores an old credential check after the user switches the active reference
   } finally { await ctx.fiber.dispose() }
 })
 
-it('makes the account a pre-output fallback settled on the current one', async () => {
+it('settles a pre-output fallback once with its captured identity and notice', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
   gateway.pushCompletions({ events: textEvents })
-  const adopted = vi.fn()
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const settled = vi.fn()
   const adapter = new OpencodeGoAdapter({
-    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
-    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+    config: () => config, accountGeneration: () => 7,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
   })
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-  expect(adopted).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B', 'ACCOUNT_A')
+  expect(settled).toHaveBeenCalledExactlyOnceWith({
+    seq: 1, generation: 7, config, ref: 'ACCOUNT_B',
+    notice: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'quota', at: expect.any(Number) },
+  })
 })
 
-it('adopts nothing while the preferred account serves the request', async () => {
+it('settles a preferred-account success once without a fallback notice', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ events: textEvents })
-  const adopted = vi.fn()
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const settled = vi.fn()
   const adapter = new OpencodeGoAdapter({
-    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
-    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+    config: () => config, accountGeneration: () => 7,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
   })
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-  expect(adopted).not.toHaveBeenCalled()
+  expect(settled).toHaveBeenCalledExactlyOnceWith({
+    seq: 1, generation: 7, config, ref: 'ACCOUNT_A', notice: undefined,
+  })
 })
 
-it('adopts nothing when every account fails', async () => {
+it('settles no account when every account fails before output', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   const rejection = { status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) }
   gateway.pushCompletions(rejection)
   gateway.pushCompletions(rejection)
-  const adopted = vi.fn()
+  const settled = vi.fn()
   const adapter = new OpencodeGoAdapter({
     config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
-    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
   })
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'error' } })
-  expect(adopted).not.toHaveBeenCalled()
+  expect(settled).not.toHaveBeenCalled()
 })
 
-it('adopts nothing when the failure arrives after output has begun', async () => {
+it('keeps the first-output settlement when the response later fails', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ events: textEvents.slice(0, 2) })
-  const adopted = vi.fn()
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const settled = vi.fn()
   const adapter = new OpencodeGoAdapter({
-    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
-    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+    config: () => config, accountGeneration: () => 7,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
   })
   const chunks = await drain(adapter.stream(request()))
   expect(chunks.some(chunk => chunk.type === 'text-delta')).toBe(true)
   expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'error' } })
-  expect(adopted).not.toHaveBeenCalled()
+  expect(settled).toHaveBeenCalledExactlyOnceWith({
+    seq: 1, generation: 7, config, ref: 'ACCOUNT_A', notice: undefined,
+  })
 })
 
-it('adopts the backup even when a remembered rejection made it the first candidate', async () => {
+it('settles the backup even when a remembered rejection made it the first candidate', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
   gateway.pushCompletions({ events: textEvents })
-  const adopted = vi.fn()
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const settled = vi.fn()
   const adapter = new OpencodeGoAdapter({
-    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
-    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+    config: () => config, accountGeneration: () => 7,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
   })
   // Request 1: the preferred key is rejected and the backup serves it.
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-  expect(adopted).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B', 'ACCOUNT_A')
-  adopted.mockClear()
+  expect(settled).toHaveBeenCalledExactlyOnceWith({
+    seq: 1, generation: 7, config, ref: 'ACCOUNT_B',
+    notice: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'credential', at: expect.any(Number) },
+  })
+  settled.mockClear()
   // Request 2: the rejection is remembered, so the backup is attempted first —
-  // it is still an account the preference does not name, so it is adopted.
+  // its settlement still names the skipped preferred account in the notice.
   gateway.pushCompletions({ events: textEvents })
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-  expect(adopted).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B', 'ACCOUNT_A')
+  expect(settled).toHaveBeenCalledExactlyOnceWith({
+    seq: 2, generation: 7, config, ref: 'ACCOUNT_B',
+    notice: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'credential', at: expect.any(Number) },
+  })
 })

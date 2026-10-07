@@ -10,8 +10,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply } from '../src/index.ts'
+import { accountsOf } from '../src/accounts.ts'
+import type { OpencodeGoConfig } from '../src/config.ts'
 import { configOf } from './config-of.ts'
 import { mockGateway, listingBody, textEvents, closeMockGateways } from './mock-gateway.ts'
+import type { MockGateway } from './mock-gateway.ts'
 
 /**
  * A fallback that lands on a usable account has to become the current one: the
@@ -60,6 +63,53 @@ async function quotaThenText() {
   gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
   gateway.pushCompletions({ events: textEvents })
   return gateway
+}
+
+async function withFileSettings(config: OpencodeGoConfig, run: (ctx: Context, path: string) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'opencode-go-adopt-'))
+  const ctx = new Context()
+  try {
+    const path = join(dir, 'settings.yaml')
+    await writeFile(path, '')
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(Registry)
+    await ctx.plugin(Gateway)
+    await ctx.plugin(FileSettingsProvider, { path, watch: false })
+    ctx.provide('credentials', {
+      describe: async () => ({ configured: true, writable: true }),
+      resolve: async (ref: string) => ({ value: `${ref}-secret`, source: 'test' }),
+    } as never)
+    apply(ctx, config)
+    await vi.waitFor(() => { expect(ctx.llm.listProviders().some(provider => provider.id === 'dsh-opencode-go')).toBe(true) })
+    await run(ctx, path)
+  } finally {
+    await ctx.fiber.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+/** Hold the backup's real HTTP response until the competing action has committed. */
+function holdBackupResponse(gateway: MockGateway) {
+  const received = Promise.withResolvers<void>()
+  const released = Promise.withResolvers<void>()
+  const fetch = globalThis.fetch
+  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const response = await fetch(input, init)
+    const url = input instanceof Request ? input.url : String(input)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    if (url.startsWith(gateway.url) && headers.get('authorization') === 'Bearer ACCOUNT_B-secret') {
+      received.resolve()
+      await released.promise
+    }
+    return response
+  })
+  return { received: received.promise, release: released.resolve, restore: () => spy.mockRestore() }
+}
+
+async function readUsage(ctx: Context, gateway: MockGateway) {
+  const window = { status: 'ok', percent: 10, resetsAt: '2026-09-21T00:00:00Z' }
+  gateway.pushCompletions({ status: 200, body: JSON.stringify({ usage: { rolling: window, weekly: window, monthly: window } }) })
+  return ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
 }
 
 it('makes the account a fallback settled on the profile current one', async () => {
@@ -132,31 +182,14 @@ it('never adopts when automatic fallback is off', async () => {
 })
 
 it('writes the adopted account into the settings document a legacy Host serves', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'opencode-go-adopt-'))
-  const ctx = new Context()
-  try {
-    const path = join(dir, 'settings.yaml')
-    await writeFile(path, '')
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(Registry)
-    await ctx.plugin(Gateway)
-    await ctx.plugin(FileSettingsProvider, { path, watch: false })
-    ctx.provide('credentials', {
-      describe: async () => ({ configured: true, writable: true }),
-      resolve: async (ref: string) => ({ value: `${ref}-secret`, source: 'test' }),
-    } as never)
-    const gateway = await quotaThenText()
-    apply(ctx, configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }))
-    await vi.waitFor(() => { expect(ctx.llm.listProviders().some(provider => provider.id === 'dsh-opencode-go')).toBe(true) })
+  const gateway = await quotaThenText()
+  await withFileSettings(configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx, path) => {
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     await vi.waitFor(() => {
       expect((ctx.settings.get('llm-opencode-go') as { apiKeyEnv?: string } | undefined)?.apiKeyEnv).toBe('ACCOUNT_B')
     })
     expect(await readFile(path, 'utf8')).toContain('apiKeyEnv: ACCOUNT_B')
-  } finally {
-    await ctx.fiber.dispose()
-    await rm(dir, { recursive: true, force: true })
-  }
+  })
 })
 
 it('follows the second hop when the stored preference still names the account the request began with', async () => {
@@ -208,33 +241,17 @@ it('prefers the profile entry over a legacy row that coexists with it', async ()
 })
 
 it('lets a manual switch back to a rejected account serve, and keeps the fallback notice', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'opencode-go-adopt-'))
-  const ctx = new Context()
-  try {
-    const path = join(dir, 'settings.yaml')
-    await writeFile(path, '')
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(Registry)
-    await ctx.plugin(Gateway)
-    await ctx.plugin(FileSettingsProvider, { path, watch: false })
-    ctx.provide('credentials', {
-      describe: async () => ({ configured: true, writable: true }),
-      resolve: async (ref: string) => ({ value: `${ref}-secret`, source: 'test' }),
-    } as never)
-    const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
-    gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
-    gateway.pushCompletions({ events: textEvents })
-    apply(ctx, configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }))
-    await vi.waitFor(() => { expect(ctx.llm.listProviders().some(provider => provider.id === 'dsh-opencode-go')).toBe(true) })
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  await withFileSettings(configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx) => {
     // Request 1: the preferred key is rejected, the backup serves it and is adopted.
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     await vi.waitFor(() => {
       expect((ctx.settings.get('llm-opencode-go') as { apiKeyEnv?: string } | undefined)?.apiKeyEnv).toBe('ACCOUNT_B')
     })
     // The adoption's own write must not retire the notice that reports it.
-    const window = { status: 'ok', percent: 10, resetsAt: '2026-09-21T00:00:00Z' }
-    gateway.pushCompletions({ status: 200, body: JSON.stringify({ usage: { rolling: window, weekly: window, monthly: window } }) })
-    const read = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
+    const read = await readUsage(ctx, gateway)
     expect(read.lastSwitch).toMatchObject({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B' })
     // The reader switches back: a stored selection outranks the remembered
     // rejection, so the next request must start from the chosen account again.
@@ -244,8 +261,97 @@ it('lets a manual switch back to a rejected account serve, and keeps the fallbac
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     expect(gateway.bodies).toHaveLength(before + 1)
     expect(gateway.headers.at(-1)?.authorization).toBe('Bearer ACCOUNT_A-secret')
-  } finally {
-    await ctx.fiber.dispose()
-    await rm(dir, { recursive: true, force: true })
-  }
+  })
+})
+
+it.each(['removing the backup', 'disabling automatic fallback', 'switching away and back', 'updating the current credential', 'a newer successful request'] as const)(
+  'ignores an old fallback after %s', async (change) => {
+    const gateway = await quotaThenText()
+    const three = [...accounts, { id: 'c', name: 'Third', apiKeyEnv: 'ACCOUNT_C' }]
+    await withFileSettings(configOf(gateway.url, { accounts: three, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx, path) => {
+      const gate = holdBackupResponse(gateway)
+      const writes = vi.spyOn(ctx.settings, 'mutate')
+      const pending = drain(ctx.llm.stream(request()))
+      try {
+        await gate.received
+        if (change === 'removing the backup') {
+          await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['accounts'], value: [three[0], three[2]] }])
+        } else if (change === 'disabling automatic fallback') {
+          await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['autoSwitch'], value: false }])
+        } else if (change === 'switching away and back') {
+          await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_C' }])
+          await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_A' }])
+        } else if (change === 'updating the current credential') {
+          // Repairing the selected key changes no settings value or revision.
+          // Its credential event must still retire the old fallback's decision.
+          ctx.emit('credentials/reference-updated', 'ACCOUNT_A')
+        } else {
+          gateway.pushCompletions({ events: textEvents })
+          expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+          expect(gateway.headers.at(-1)?.authorization).toBe('Bearer ACCOUNT_A-secret')
+        }
+        gate.release()
+        expect((await pending).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+        // Adoption does not block output. Settle every observed settings write
+        // before checking the persisted preference, without timing guesses.
+        await Promise.all(writes.mock.results.map(result => result.value))
+        const stored = ctx.settings.get('llm-opencode-go') as OpencodeGoConfig
+        expect(stored.apiKeyEnv).toBe('ACCOUNT_A')
+        expect(await readFile(path, 'utf8')).not.toMatch(/^  apiKeyEnv: ACCOUNT_B$/m)
+        if (change === 'removing the backup') {
+          expect(accountsOf(stored).map(account => account.apiKeyEnv)).toEqual(['ACCOUNT_A', 'ACCOUNT_C'])
+        }
+        if (change === 'disabling automatic fallback') expect(stored.autoSwitch).toBe(false)
+        expect((await readUsage(ctx, gateway)).lastSwitch).toBeUndefined()
+      } finally {
+        gate.release()
+        await pending.catch(() => {})
+        gate.restore()
+        writes.mockRestore()
+      }
+    })
+  },
+)
+
+it('keeps a manual selection made after preparation when that old call is dispatched later', async () => {
+  const gateway = await quotaThenText()
+  const three = [...accounts, { id: 'c', name: 'Third', apiKeyEnv: 'ACCOUNT_C' }]
+  await withFileSettings(configOf(gateway.url, { accounts: three, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx, path) => {
+    const options = request()
+    const prepared = await ctx.llm.prepareCall({ provider: options.provider, model: options.model })
+    await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_C' }])
+    await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_A' }])
+    const gate = holdBackupResponse(gateway)
+    const writes = vi.spyOn(ctx.settings, 'mutate')
+    const pending = drain(prepared.stream({ ...options, ...prepared.config }))
+    try {
+      await gate.received
+      gate.release()
+      expect((await pending).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+      await Promise.all(writes.mock.results.map(result => result.value))
+      expect((ctx.settings.get('llm-opencode-go') as OpencodeGoConfig).apiKeyEnv).toBe('ACCOUNT_A')
+      expect(await readFile(path, 'utf8')).toMatch(/^  apiKeyEnv: ACCOUNT_A$/m)
+      expect((await readUsage(ctx, gateway)).lastSwitch).toBeUndefined()
+    } finally {
+      gate.release()
+      await pending.catch(() => {})
+      gate.restore()
+      writes.mockRestore()
+    }
+  })
+})
+
+it('clears a refused adoption before a later manual selection of the same account', async () => {
+  const gateway = await quotaThenText()
+  await withFileSettings(configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx) => {
+    const writes = vi.spyOn(ctx.settings, 'mutate').mockRejectedValueOnce(new Error('settings write refused'))
+    try {
+      expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+      expect(writes).toHaveBeenCalledTimes(1)
+      expect((ctx.settings.get('llm-opencode-go') as OpencodeGoConfig).apiKeyEnv).toBe('ACCOUNT_A')
+      expect((await readUsage(ctx, gateway)).lastSwitch).toMatchObject({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B' })
+      await ctx.settings.mutate('llm-opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' }])
+      expect((await readUsage(ctx, gateway)).lastSwitch).toBeUndefined()
+    } finally { writes.mockRestore() }
+  })
 })

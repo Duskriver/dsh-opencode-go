@@ -93,6 +93,15 @@ export interface OpencodeGoImageAccess {
   resolveImageAccess: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined
 }
 
+/** One request's serving account, with the identity captured before discovery. */
+export interface GoAccountSettlement {
+  seq: number
+  generation: number
+  config: OpencodeGoConfig
+  ref: string
+  notice?: GoAccountSwitch
+}
+
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions {
   /** Shared with Host usage reads for this plugin mount. */
@@ -118,24 +127,17 @@ export interface OpencodeGoAdapterOptions {
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
-  /**
-   * Observe the account a request settled on. `seq` is the request's monotonic
-   * sequence, taken when its stream began, so a consumer can tell a late notice
-   * from an older request apart from a newer request's outcome.
-   */
+  /** Host account-state version, captured before asynchronous model discovery. */
+  accountGeneration?: () => number
+  /** One outcome for both the displayed notice and the persisted selection. */
+  onAccountSettled?: (event: GoAccountSettlement) => void
+  /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
   onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void
-  /**
-   * A fallback settled on this account and it is producing output, so it is the
-   * account the next request should start from. `startedFrom` is the account the
-   * request began with — the value the stored preference must still hold for the
-   * adoption to be the caller's intent rather than an overwrite of a selection
-   * the user made meanwhile.
-   */
-  onAccountAdopted?: (ref: string, startedFrom: string) => void
 }
 
 /** Configuration, model and provider captured together before dispatch. */
 interface OpencodeGoCallSnapshot {
+  generation: number
   config: OpencodeGoConfig
   catalog: CatalogSnapshot
   model: Model<Api>
@@ -238,13 +240,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   /** Copy nested limits before discovery can yield to a settings update. */
   private async callSnapshot(model: string, signal?: AbortSignal): Promise<OpencodeGoCallSnapshot> {
+    const generation = this.options.accountGeneration?.() ?? 0
     const config = structuredClone(this.options.config())
     const catalog = await this.catalogOf(config).forModel(model, signal)
     const resolved = catalog.models.get(model)
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
     }
-    return { config, catalog, model: withModelLimit(resolved, config.modelLimits) }
+    return { generation, config, catalog, model: withModelLimit(resolved, config.modelLimits) }
   }
 
   /** Keep capability resolution and eventual dispatch on the same configuration. */
@@ -252,10 +255,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: LlmResolvedModelInfo
     stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>
   }> {
+    const seq = ++this.callSeq
     const snapshot = await this.callSnapshot(model, signal)
     return {
       model: this.modelInfo(snapshot.model),
-      stream: options => this.streamWithSnapshot(options, snapshot),
+      stream: options => this.streamWithSnapshot(options, snapshot, seq),
     }
   }
 
@@ -313,6 +317,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
+    const seq = ++this.callSeq
     let snapshot: OpencodeGoCallSnapshot
     try {
       snapshot = await this.callSnapshot(options.model, options.signal)
@@ -323,14 +328,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
       } }
       return
     }
-    yield* this.streamWithSnapshot(options, snapshot)
+    yield* this.streamWithSnapshot(options, snapshot, seq)
   }
 
-  /** Latest started request's sequence; a consumer fences late switch notices against it. */
-  accountSwitchWatermark(): number { return this.callSeq }
-
-  private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
-    const seq = ++this.callSeq
+  private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, seq: number): AsyncIterable<StreamChunk> {
     const accounts = accountsOf(snapshot.config)
     if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
     // The preferred reference resolves through accountRefOf: an empty string
@@ -368,11 +369,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         if (emitted) return
         const serving = refs[attempt]!
         const replaced = failedRef ?? skippedRef ?? preferred
-        if (serving === preferred) {
-          this.options.onAccountSwitch?.(undefined, snapshot.config, seq)
-          return
-        }
-        this.options.onAccountSwitch?.({
+        const notice: GoAccountSwitch | undefined = serving === preferred ? undefined : {
           // The notice names the account the journey left: the first one that
           // failed this request, else the first one skipped for a remembered
           // rejection.
@@ -380,13 +377,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
           toRef: serving,
           reason: switchReason ?? 'credential',
           at: Date.now(),
-        }, snapshot.config, seq)
-        // The account that just proved usable becomes the current one: the next
-        // request starts from it instead of walking into the same wall again.
-        // The guard names the account this request started from, not the one it
-        // left: a journey may hop twice, and the stored preference is only the
-        // caller's to overwrite while it still points where the request began.
-        this.options.onAccountAdopted?.(serving, preferred)
+        }
+        this.options.onAccountSettled?.({ seq, generation: snapshot.generation, config: snapshot.config, ref: serving, notice })
+        this.options.onAccountSwitch?.(notice, snapshot.config, seq)
       }
       try {
         for await (const chunk of this.streamAttempt(options, {

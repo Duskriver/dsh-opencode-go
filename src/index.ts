@@ -49,7 +49,8 @@ import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
 import { registerGoRemotes } from './remotes.ts'
-import { accountsOf, accountRefOf, assertAccounts, type GoAccountSwitch } from './accounts.ts'
+import { accountsOf, accountRefOf, assertAccounts } from './accounts.ts'
+import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
 import { assertProxyURL } from './proxy-url.ts'
 import { ProxyTransport } from './proxy.ts'
 
@@ -60,7 +61,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export { OpencodeGoAdapter } from './adapter.ts'
-export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess } from './adapter.ts'
+export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement } from './adapter.ts'
 export {
   DEFAULT_BASE_URL,
   DISPLAY_NAME,
@@ -78,53 +79,6 @@ export const inject = ['llm']
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const NS = 'llm-opencode-go'
-
-/** Profile entry id the Web settings page edits; this plugin's bundle patch inserts it. */
-const PROFILE_ENTRY_ID = 'opencode-go'
-
-/**
- * The settings face an adoption needs: the editable rows and one path edit.
- * 0.1.7 serves profile entries (the ids the Web page addresses) and older Hosts
- * serve the `llm-opencode-go` section, but both answer the same two methods.
- */
-interface SettingsWriteFace {
-  describe(): readonly { ns: string; revision: number; value: unknown }[]
-  mutate(ns: string, ops: readonly { op: 'set'; path: string[]; value: unknown }[], expectedRevision?: number): Promise<unknown>
-}
-
-/**
- * Make the account a fallback settled on the profile's current one. The write
- * goes through the same service the Settings page edits, so the page and the
- * usage pill follow it. A read-only Host, a lost revision, or a manual switch
- * that landed first all leave the stored value alone, and none of them may
- * disturb the request in flight.
- * @param settings - the Host settings service.
- * @param logger - plugin logger, for a refusal worth reporting.
- * @param ref - the account the fallback settled on.
- * @param startedFrom - the account the request began with; the stored value must
- *   still name it, or the user has chosen since and this adoption is stale.
- */
-async function adoptCurrentAccount(
-  settings: SettingsWriteFace, logger: Context['logger'], ref: string, startedFrom: string,
-): Promise<void> {
-  try {
-    const rows = settings.describe()
-    // The profile entry is the row the Web page edits; the namespace is what an
-    // older Host serves. Both can coexist on an upgraded profile, and only the
-    // entry moves the page and the pill.
-    const row = rows.find(entry => entry.ns === PROFILE_ENTRY_ID) ?? rows.find(entry => entry.ns === NS)
-    if (row === undefined) {
-      logger.debug(`llm-opencode-go: no settings row for "${PROFILE_ENTRY_ID}" or "${NS}"; the fallback stays per request`)
-      return
-    }
-    const current = (row.value as { apiKeyEnv?: unknown } | undefined)?.apiKeyEnv
-    // A manual switch that landed meanwhile outranks this adoption.
-    if (current !== startedFrom) return
-    await settings.mutate(row.ns, [{ op: 'set', path: ['apiKeyEnv'], value: ref }], row.revision)
-  } catch (error: unknown) {
-    logger.warn(`llm-opencode-go: could not make "${ref}" the current account (${String(error)})`)
-  }
-}
 
 /**
  * Register the route, its discovery, the settings section, and their
@@ -163,9 +117,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     )
   }
   registerGoRemotes(ctx)
-  let lastSwitch: GoAccountSwitch | undefined
-  /** Request sequence of the newest switch notice accepted; older requests must not overwrite newer ones. */
-  let lastSwitchSeq = -1
+  const selection = new GoAccountSelection(() => current(), ctx.logger)
   const transport = new ProxyTransport()
   ctx.effect(() => () => transport.dispose())
   ctx.plugin(GoUsageService, {
@@ -175,7 +127,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     resolveApiKey: (ref?: string) => resolveApiKey({ ...current(), apiKeyEnv: ref ?? current().apiKeyEnv }),
     activeRef: () => accountRefOf(current()),
     accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
-    lastSwitch: () => lastSwitch,
+    lastSwitch: () => selection.lastSwitch(),
   })
   const logger = {
     fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {
@@ -186,29 +138,12 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     },
   }
   let registration: AdapterRegistrationHandle | undefined
-  /**
-   * Follow a fallback by making the account that just proved usable current.
-   * Unset until the settings service is present, and unset forever without one:
-   * a Host that cannot edit the profile keeps the per-request fallback only.
-   */
-  let adoptAccount: ((ref: string, startedFrom: string) => void) | undefined
-  /** Account an adoption is moving to; the settings change it causes keeps the notice. */
-  let adoptedRef: string | undefined
   const adapter = new OpencodeGoAdapter({
     transport,
     config: () => current(),
     resolveApiKey,
-    onAccountSwitch: (notice, captured, seq) => {
-      const config = current()
-      if (config.baseURL === captured.baseURL && config.proxyURL === captured.proxyURL && config.apiKeyEnv === captured.apiKeyEnv
-        && JSON.stringify(config.accounts) === JSON.stringify(captured.accounts)
-        // A slow request may announce after a newer one already did: only the
-        // newest request's outcome may define what the usage pill shows.
-        && seq >= lastSwitchSeq) {
-        lastSwitchSeq = seq
-        lastSwitch = notice
-      }
-    },
+    accountGeneration: () => selection.capture(),
+    onAccountSettled: event => { selection.settle(event) },
     imageAccess: {
       resolveAttachments: () => ctx.get('attachments'),
       resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(
@@ -223,15 +158,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     onReplayDegrade: (reason) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
-    onAccountAdopted: (ref, replaced) => { adoptAccount?.(ref, replaced) },
   })
-  /** Clear the displayed switch notice and raise the sequence fence, so a late
-   * notice from any request older than the newest one in flight cannot
-   * repopulate it. */
-  const clearAccountSwitch = (): void => {
-    lastSwitch = undefined
-    lastSwitchSeq = adapter.accountSwitchWatermark()
-  }
   ctx.plugin(GoModelsService, {
     catalog: () => adapter.catalogOf(current()),
     onRefresh: () => { registration?.replace([PROVIDER_ID]) },
@@ -270,22 +197,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     }
   }
   let routeCheck = 0
-  let accountIdentity = ''
   let selectedRef = accountRefOf(current())
   const syncRoute = (): void => {
     const check = ++routeCheck
     const config = current()
-    const identity = JSON.stringify([config.apiKeyEnv, config.accounts, config.baseURL, config.proxyURL, config.autoSwitch])
-    if (identity !== accountIdentity) {
-      accountIdentity = identity
-      // The adoption's own write is the news the notice carries: clearing it here
-      // would hide the switch from the reader it was written for. Any other
-      // change still retires the notice.
-      if (adoptedRef !== undefined && accountRefOf(config) === adoptedRef) {
-        adoptedRef = undefined
-        lastSwitchSeq = adapter.accountSwitchWatermark()
-      } else clearAccountSwitch()
-    }
+    selection.capture()
     const visibility = pickerVisibilityOf()
     if (pickerVisibility !== visibility) {
       pickerVisibility = visibility
@@ -342,13 +258,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // entry as its base layer and follows the settings provider while attached.
   // Without a settings provider the plugin still loads and serves the entry.
   ctx.inject(['settings'], (settingsCtx) => {
-    const forms = settingsCtx.settings as unknown as SettingsWriteFace
-    adoptAccount = (ref, startedFrom) => {
-      // Recorded before the write: the settings event it emits is what has to
-      // recognize this change as the one the fallback notice reports.
-      adoptedRef = ref
-      void adoptCurrentAccount(forms, settingsCtx.logger, ref, startedFrom)
-    }
+    settingsCtx.effect(() => selection.connect(settingsCtx.settings as unknown as AccountSettingsWriter))
     if ('configure' in settingsCtx.settings) {
       const settings = settingsCtx.settings as unknown as {
         configure(policy: { auto: boolean }, owner: typeof ctx.fiber): () => void
@@ -397,7 +307,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       // A stored change to a reference outranks the gateway's last rejection
       // of it, so the very next request re-checks the new key.
       adapter.forgetRejectedKey(ref)
-      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { clearAccountSwitch(); syncRoute() }
+      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { selection.credentialChanged(); syncRoute() }
     })
     // The seam becomes visible only once its provider is active, which can be
     // after this plugin applied: the boot-time call above then found no seam

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { OpencodeGoAdapter } from '../src/adapter.ts'
+import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { Config } from '../src/config.ts'
 import type { LiveConfig, OpencodeGoConfig } from '../src/config.ts'
 import { apply } from '../src/index.ts'
@@ -109,4 +109,79 @@ it('keeps the credential reference paired with the endpoint while a direct strea
     release.resolve()
     await ctx.fiber.dispose()
   }
+})
+
+it.each(['stream', 'prepare'] as const)('captures account identity before asynchronous discovery for %s, preserving request order when the newer request finishes first', async mode => {
+  const first = await mockGateway({ status: 200, body: listingBody([model]) })
+  const second = await mockGateway({ status: 200, body: listingBody([model]) })
+  first.pushCompletions({ events: textEvents })
+  second.pushCompletions({ events: textEvents })
+  const initial = configOf(first.url, { apiKeyEnv: 'SNAPSHOT_KEY_A' })
+  let config = initial
+  let generation = 7
+  const settled = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => config, accountGeneration: () => generation,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
+  })
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const catalog = adapter.catalogOf(initial)
+  const forModel = catalog.forModel.bind(catalog)
+  vi.spyOn(catalog, 'forModel').mockImplementationOnce(async (...args) => {
+    started.resolve()
+    await release.promise
+    return forModel(...args)
+  })
+  try {
+    const pending = mode === 'stream' ? drain(adapter.stream(request())) : adapter.prepareCall(provider, model)
+    await started.promise
+    config = configOf(second.url, { apiKeyEnv: 'SNAPSHOT_KEY_B' })
+    generation = 8
+    // Picker/capability reads must not advance real request sequencing.
+    await adapter.resolveModel(provider, model)
+    await drain(adapter.stream(request()))
+    expect(settled).toHaveBeenCalledExactlyOnceWith({
+      seq: 2, generation: 8, config, ref: 'SNAPSHOT_KEY_B', notice: undefined,
+    })
+    release.resolve()
+    const prepared = await pending
+    if (prepared) await drain(prepared.stream(request()))
+    expect(settled).toHaveBeenNthCalledWith(2, {
+      seq: 1, generation: 7, config: initial, ref: 'SNAPSHOT_KEY_A', notice: undefined,
+    })
+    expect(settled).toHaveBeenCalledTimes(2)
+    expect(first.headers.at(-1)?.authorization).toBe('Bearer SNAPSHOT_KEY_A')
+    expect(second.headers.at(-1)?.authorization).toBe('Bearer SNAPSHOT_KEY_B')
+  } finally {
+    release.resolve()
+    await adapter.dispose()
+  }
+})
+
+it('keeps a prepared request identity before dispatch while newer preparations and model reads occur', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
+  gateway.pushCompletions({ events: textEvents })
+  gateway.pushCompletions({ events: textEvents })
+  const config = configOf(gateway.url, { apiKeyEnv: 'SNAPSHOT_KEY_A' })
+  let generation = 13
+  const settled = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => config, accountGeneration: () => generation,
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
+  })
+  try {
+    const first = await adapter.prepareCall(provider, model)
+    // An account generation can change while the visible settings return to
+    // the same values. The preparation still belongs to its original generation.
+    generation = 14
+    await adapter.resolveModel(provider, model)
+    const second = await adapter.prepareCall(provider, model)
+    await drain(second.stream(request()))
+    await drain(first.stream(request()))
+    expect(settled.mock.calls).toEqual([
+      [{ seq: 2, generation: 14, config, ref: 'SNAPSHOT_KEY_A', notice: undefined }],
+      [{ seq: 1, generation: 13, config, ref: 'SNAPSHOT_KEY_A', notice: undefined }],
+    ])
+  } finally { await adapter.dispose() }
 })

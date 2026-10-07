@@ -39,6 +39,14 @@ export interface OpencodeGoImageAccess {
     /** Bridge one attachment reference into the current model-tool execution world. */
     resolveImageAccess: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined;
 }
+/** One request's serving account, with the identity captured before discovery. */
+export interface GoAccountSettlement {
+    seq: number;
+    generation: number;
+    config: OpencodeGoConfig;
+    ref: string;
+    notice?: GoAccountSwitch;
+}
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions {
     /** Shared with Host usage reads for this plugin mount. */
@@ -68,20 +76,12 @@ export interface OpencodeGoAdapterOptions {
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
-    /**
-     * Observe the account a request settled on. `seq` is the request's monotonic
-     * sequence, taken when its stream began, so a consumer can tell a late notice
-     * from an older request apart from a newer request's outcome.
-     */
+    /** Host account-state version, captured before asynchronous model discovery. */
+    accountGeneration?: () => number;
+    /** One outcome for both the displayed notice and the persisted selection. */
+    onAccountSettled?: (event: GoAccountSettlement) => void;
+    /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
     onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void;
-    /**
-     * A fallback settled on this account and it is producing output, so it is the
-     * account the next request should start from. `startedFrom` is the account the
-     * request began with — the value the stored preference must still hold for the
-     * adoption to be the caller's intent rather than an overwrite of a selection
-     * the user made meanwhile.
-     */
-    onAccountAdopted?: (ref: string, startedFrom: string) => void;
 }
 /**
  * The single route's adapter. The catalog snapshot freezes at each operation,
@@ -130,8 +130,6 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     /** Validate an explicit effort against the model's own levels, without clamping. */
     private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
-    /** Latest started request's sequence; a consumer fences late switch notices against it. */
-    accountSwitchWatermark(): number;
     private streamWithSnapshot;
     private rememberRejectedKey;
     /** A stored change to a reference outranks the gateway's last rejection of it. */
