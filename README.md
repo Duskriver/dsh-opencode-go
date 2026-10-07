@@ -198,6 +198,20 @@ DSH 0.1.5 的卸载只影响本次请求；DSH 0.1.6 及以上版本通过宿主
 
 升级前保存为 `provider: opencode-go` 的会话、Agent 预设和 headless 默认模型，需要重新选择 **DSH OpenCode Go**，或将 provider 改为 `dsh-opencode-go`。API Key、模型设置和元数据缓存继续沿用。旧会话内容保留；跨 provider 切换时，DSH 会按其规则去除旧适配器的专用回放元数据。
 
+### 模型请求返回 400，或提示 `(no body)`
+
+`(no body)` 是 SDK 的错误摘要，不能单独证明 HTTP 响应体为空：有 JSON 内容但缺少 SDK 预期的 `error` 字段，也会显示该文字。插件会在 HTTP 错误中补充 provider、模型和实际响应体状态，并恢复这类被 SDK 忽略的错误内容。失败时的 `inputTokens=0` 也可能只是没有取得用量，不能据此确定请求在哪一层被拒绝。
+
+需要进一步排查时，在启动 DSH 的同一终端设置 `DSH_OPENCODE_GO_DEBUG_DIR`，然后重启 Host 并复现。Windows PowerShell 示例：
+
+```powershell
+$env:DSH_OPENCODE_GO_DEBUG_DIR = "$env:TEMP\dsh-opencode-go-debug"
+```
+
+每次失败的模型 HTTP 请求会在该目录生成独立 JSON，错误信息会显示文件路径。记录包含请求 URL（去除认证、查询参数）、消息/工具数量、请求字节数、输出上限、思考参数、会话标识的哈希、HTTP 状态，以及可用的 request ID、server、via、cf-ray 等部分响应头。错误响应体最多读取前 16 KiB，读取限时 1 秒；记录会标明截断或读取不完整。API Key 和已配置的代理认证会脱敏，请求提示词、工具定义、图片、认证头和 Cookie 不写入文件；上游错误响应本身仍可能含服务返回的敏感内容，分享前请检查。清空该变量并重启 Host 即关闭落盘，成功请求不产生诊断文件。
+
+插件保留 400 的 `INVALID_REQUEST` 分类，不自动重发它。SDK 重试次数为零，任务恢复由 DSH 的重试插件和 provider 策略负责；默认策略不包含 `INVALID_REQUEST`。应先用诊断记录核对参数和上游响应，再判断是否需要针对特定暂时故障重试。
+
 ### 没有出现预期的模型
 
 先在 **设置 → OpenCode Go** 检查该模型的开关是否开启。过时模型默认关闭，单独打开它的开关后即可出现在会话模型选择器中，无需开启其他全局选项。

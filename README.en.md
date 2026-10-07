@@ -207,6 +207,20 @@ Version 0.1.17 and later use the independent `dsh-opencode-go` provider, shown a
 
 Sessions, Agent presets and headless defaults previously saved with `provider: opencode-go` need to select **DSH OpenCode Go** again, or change the provider to `dsh-opencode-go`. API keys, model settings and metadata caches are retained. Existing session content remains available; when switching providers, DSH removes the previous adapter's private replay metadata according to its ownership rules.
 
+### Model requests return 400 or `(no body)`
+
+`(no body)` is an SDK error summary, not proof that the HTTP response was empty. Valid JSON without the SDK's expected `error` field can produce the same message. The plugin adds the provider, model and observed response body state to HTTP failures, and restores error content discarded in this case. Failed requests can also retain the SDK's initial zero usage counters, so `inputTokens=0` cannot identify the layer that rejected the request.
+
+For diagnostics, set `DSH_OPENCODE_GO_DEBUG_DIR` in the terminal used to launch DSH, restart the Host, and reproduce the failure. On Windows PowerShell:
+
+```powershell
+$env:DSH_OPENCODE_GO_DEBUG_DIR = "$env:TEMP\dsh-opencode-go-debug"
+```
+
+Each failed model HTTP request writes a separate JSON file, whose path appears in the error message. It includes the URL without authentication or query parameters, request byte size, message/tool counts, output cap, reasoning settings, a session hash, HTTP status and selected response headers such as request ID, server, via and cf-ray. Error body capture is limited to the first 16 KiB and one second, with truncation and incomplete reads marked. API keys and configured proxy credentials are redacted. Request prompts, tool definitions, images, authentication headers and cookies are omitted; upstream error content can still contain sensitive information, so review it before sharing. Clear the variable and restart the Host to stop writing files. Successful requests produce no diagnostic files.
+
+HTTP 400 retains its `INVALID_REQUEST` classification and is not automatically resent by the plugin. SDK retries remain disabled; DSH's retry plugin and provider policy own task recovery, and the default policy excludes `INVALID_REQUEST`. Use the captured evidence to distinguish invalid parameters from a temporary upstream failure before changing retry behavior.
+
 ### An expected model is missing
 
 Check that the model's switch is on in **Settings → OpenCode Go**. Deprecated models default to off; turning on an individual model makes it available in conversation pickers without another global option.
