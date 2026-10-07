@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -20,6 +20,7 @@ const sharp = createRequire(import.meta.resolve(localPackage))('sharp')
 const usage = Object.fromEntries(['rolling', 'weekly', 'monthly'].map(key => [key,
   { status: 'ok', percent: 12, resetsAt: '2026-10-01T00:00:00Z' }]))
 const bodies = []
+let rejectCompletion = false
 const networkFetch = globalThis.fetch
 globalThis.fetch = (input, init) => {
   const url = input instanceof Request ? input.url : String(input)
@@ -51,6 +52,11 @@ const server = createServer((request, response) => {
     assert.equal(request.headers.authorization, 'Bearer fixture-key')
     assert.equal(request.headers['x-opencode-session'], 'compat-session')
     bodies.push(JSON.parse(body))
+    if (rejectCompletion) {
+      response.writeHead(400, { 'content-type': 'application/json', 'x-request-id': 'compat-edge-40' })
+      response.end('{"message":"fixture edge rejection"}')
+      return
+    }
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     for (const event of [
       { choices: [{ delta: { role: 'assistant', content: 'compat-ok' }, index: 0, finish_reason: null }] },
@@ -111,6 +117,25 @@ try {
   const text = await drain(ctx.llm.stream({ ...request([user([{ type: 'text', text: 'hello' }])]), maxTokens: 8192 }))
   assert.ok(text.some(c => c.type === 'text-delta' && c.text === 'compat-ok'))
   assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 1024)
+  // A nonstandard JSON error must not be presented as an empty HTTP response.
+  rejectCompletion = true
+  process.env.DSH_OPENCODE_GO_DEBUG_DIR = join(attachmentHome, 'http-debug')
+  const failed = await drain(ctx.llm.stream(request([user([{ type: 'text', text: 'hello' }])])))
+  const failure = failed.find(c => c.type === 'finish').reason.failure
+  assert.equal(failure.code, 'INVALID_REQUEST')
+  assert.ok(failure.message.includes('dsh-opencode-go/compat-model'))
+  assert.ok(failure.message.includes('response body: nonempty'))
+  assert.ok(failure.message.includes('fixture edge rejection'))
+  const debugFiles = await readdir(process.env.DSH_OPENCODE_GO_DEBUG_DIR)
+  assert.equal(debugFiles.length, 1)
+  const debugText = await readFile(join(process.env.DSH_OPENCODE_GO_DEBUG_DIR, debugFiles[0]), 'utf8')
+  assert.equal(JSON.parse(debugText).response.headers['x-request-id'], 'compat-edge-40')
+  assert.ok(!debugText.includes('fixture-key'))
+  if (host.startsWith('v02')) {
+    assert.ok(!ctx.llm.providerRetryPolicy('dsh-opencode-go').retryableCodes.includes('INVALID_REQUEST'))
+  }
+  delete process.env.DSH_OPENCODE_GO_DEBUG_DIR
+  rejectCompletion = false
   // Every host reads the next configuration without mutating catalog references.
   let limitsConfig = { ...config }
   const limitsAdapter = new plugin.OpencodeGoAdapter({ config: () => limitsConfig, resolveApiKey: async () => 'fixture-key' })

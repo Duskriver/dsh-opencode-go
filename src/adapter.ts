@@ -47,6 +47,7 @@ import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } fr
 import { assertBaseURL } from './config.ts'
 import { assertProxyURL } from './proxy-url.ts'
 import { ProxyTransport } from './proxy.ts'
+import { GatewayDiagnostics } from './gateway-diagnostics.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, withRequestReasoning } from './reasoning.ts'
@@ -97,6 +98,8 @@ export interface OpencodeGoImageAccess {
 export interface OpencodeGoAdapterOptions {
   /** Shared with Host usage reads for this plugin mount. */
   transport?: ProxyTransport
+  /** Optional directory for bounded HTTP error evidence; request contents are omitted. */
+  debugDirectory?: () => string | undefined
   /**
    * The current configuration, re-read at every operation: a settings write
    * reaches the next request without a restart, and one operation never mixes
@@ -458,9 +461,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
         : await toPiContext({ ...options, signal: watchdog.signal }, imageRequest, this.options.onReplayDegrade)
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
+      const diagnostics = new GatewayDiagnostics({
+        provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
+        fetch: this.transport.forProxy(config.proxyURL),
+        directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
+      })
       const events = catalog.provider.streamSimple(withRequestReasoning(model, reasoning), normalizeContext(context), {
         apiKey,
-        fetch: this.transport.forProxy(config.proxyURL),
+        fetch: diagnostics.fetch,
         ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
@@ -489,7 +497,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
             exhausted = true
             return
           }
-          yield result.value
+          const chunk = result.value
+          if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
+            const message = await diagnostics.failureMessage(chunk.reason.failure.message)
+            yield { ...chunk, reason: options.signal?.aborted
+              ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }
+              : { ...chunk.reason, failure: { ...chunk.reason.failure, message } } }
+          } else yield chunk
         }
       } finally {
         if (!exhausted) {
