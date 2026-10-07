@@ -457,6 +457,94 @@ it('reorders when a row handle is dragged onto another row', async () => {
   fixture.controller.dispose()
 })
 
+/**
+ * jsdom reports no layout, so the boxes the insertion-slot math reads are
+ * supplied here: two 40px rows with the 10px grid gap between them.
+ * @returns the list element that carries the drop handlers.
+ */
+function stackRows(): HTMLElement {
+  const boxes: Record<string, { top: number; height: number }> = {
+    ACCOUNT_A: { top: 100, height: 40 }, ACCOUNT_B: { top: 150, height: 40 },
+  }
+  for (const [ref, box] of Object.entries(boxes)) {
+    const row = document.querySelector<HTMLElement>(`[data-account-row="${ref}"]`)!
+    row.getBoundingClientRect = () => ({
+      top: box.top, bottom: box.top + box.height, height: box.height,
+      left: 0, right: 320, width: 320, x: 0, y: box.top, toJSON: () => ({}),
+    }) as DOMRect
+  }
+  return document.querySelector<HTMLElement>('[data-account-row="ACCOUNT_A"]')!.parentElement!
+}
+
+/**
+ * jsdom has no DragEvent and its events carry no pointer position, so the
+ * transfer and the pointer's Y are attached to a plain bubbling event — the two
+ * facts the drop handlers read.
+ */
+function fireDrag(type: 'dragstart' | 'dragover' | 'drop' | 'dragend', element: HTMLElement,
+  dataTransfer: unknown, clientY?: number): void {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.assign(event, { dataTransfer, clientY })
+  fireEvent(element, event)
+}
+
+/** Mount the unfolded card with a spy standing in for the settings write. */
+async function dragFixture() {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const moveAccount = vi.fn(async () => true)
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={{ ...fixture.actions, moveAccount }} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const list = stackRows()
+  const dataTransfer = { effectAllowed: 'none', dropEffect: 'none', setData: vi.fn() }
+  const handle = (name: string) => screen.getByRole('button', { name: t('accountDragHandle', { name }) })
+  return { fixture, moveAccount, list, dataTransfer, handle }
+}
+
+it('reorders when the row is released on the list itself, above the target row', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Backup'), dataTransfer)
+  // The list is the drop surface: a release over a row, over the gap between two
+  // rows or over the insertion mark all reach the same handler.
+  fireDrag('dragover', list, dataTransfer, 110)
+  expect(screen.getByText('Primary').closest('[data-account-row]')!.getAttribute('data-drop')).toBe('before')
+  fireDrag('drop', list, dataTransfer, 110)
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_B', 0)
+  fixture.controller.dispose()
+})
+
+it('reorders downward and marks the end of the list', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Primary'), dataTransfer)
+  fireDrag('dragover', list, dataTransfer, 175)
+  expect(screen.getByText('Backup').closest('[data-account-row]')!.getAttribute('data-drop')).toBe('after')
+  fireDrag('drop', list, dataTransfer, 175)
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_A', 1)
+  fixture.controller.dispose()
+})
+
+it('keeps a drop on the dragged row\'s own slot silent: no mark and no write', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Backup'), dataTransfer)
+  // The lower half of the row above names the position the row already holds.
+  fireDrag('dragover', list, dataTransfer, 135)
+  expect(document.querySelectorAll('[data-drop]')).toHaveLength(0)
+  fireDrag('drop', list, dataTransfer, 135)
+  expect(moveAccount).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
+it('takes the release position over the last hovered slot', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Backup'), dataTransfer)
+  // The drag last reported the end of the list — the row's own slot, a no-op —
+  // and then the pointer crossed to the top without a hover in between.
+  fireDrag('dragover', list, dataTransfer, 175)
+  fireDrag('drop', list, dataTransfer, 110)
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_B', 0)
+  fixture.controller.dispose()
+})
+
 it('reorders with the arrow keys on a row handle', async () => {
   const fixture = setup()
   await fixture.controller.refresh()

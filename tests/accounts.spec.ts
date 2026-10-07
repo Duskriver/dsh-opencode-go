@@ -241,3 +241,76 @@ it('ignores an old credential check after the user switches the active reference
     expect(ctx.llm.listProviders().some(provider => provider.id === 'dsh-opencode-go')).toBe(true)
   } finally { await ctx.fiber.dispose() }
 })
+
+it('makes the account a pre-output fallback settled on the current one', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  const adopted = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+  })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(adopted).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B', 'ACCOUNT_A')
+})
+
+it('adopts nothing while the preferred account serves the request', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ events: textEvents })
+  const adopted = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+  })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(adopted).not.toHaveBeenCalled()
+})
+
+it('adopts nothing when every account fails', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  const rejection = { status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) }
+  gateway.pushCompletions(rejection)
+  gateway.pushCompletions(rejection)
+  const adopted = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+  })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'error' } })
+  expect(adopted).not.toHaveBeenCalled()
+})
+
+it('adopts nothing when the failure arrives after output has begun', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ events: textEvents.slice(0, 2) })
+  const adopted = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+  })
+  const chunks = await drain(adapter.stream(request()))
+  expect(chunks.some(chunk => chunk.type === 'text-delta')).toBe(true)
+  expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'error' } })
+  expect(adopted).not.toHaveBeenCalled()
+})
+
+it('adopts the backup even when a remembered rejection made it the first candidate', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  const adopted = vi.fn()
+  const adapter = new OpencodeGoAdapter({
+    config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountAdopted: adopted,
+  })
+  // Request 1: the preferred key is rejected and the backup serves it.
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(adopted).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B', 'ACCOUNT_A')
+  adopted.mockClear()
+  // Request 2: the rejection is remembered, so the backup is attempted first —
+  // it is still an account the preference does not name, so it is adopted.
+  gateway.pushCompletions({ events: textEvents })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(adopted).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B', 'ACCOUNT_A')
+})

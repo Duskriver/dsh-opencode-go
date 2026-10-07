@@ -1,15 +1,21 @@
 /* OpenCode Go settings page: page header, section cards, field rows, badges,
    hints, and actions. */
 
-.accounts { display: grid; gap: 10px; margin: 12px 0; }
+/* The 12px band above the first row and below the last one is the drop surface
+   too: a slot-0 or end-of-list mark is painted in it, so a release there has to
+   land on this element rather than on the card behind it. Padding keeps the rows
+   exactly where the margins put them. */
+.accounts { display: grid; gap: 10px; margin: 6px 0; padding: 6px 0; }
 /* One row per account: the summary line stays readable, and the detail opens under
-   it. The row is the drag unit, so nothing inside it may swallow the pointer. The
-   summary line is a grid of fixed columns — handle, name, key state, bar, reading,
-   reset, disclosure — so two accounts whose names differ in length still line up
+   it. The row hosts the drag handle, so nothing inside it may swallow the pointer;
+   the drop handlers live on the list, which leaves a row only needing to be
+   positioned for its own insertion mark. The summary line is a grid of fixed
+   columns — handle, name, key state, bar, reading, reset, disclosure — so two
+   accounts whose names differ in length still line up
    their key state, their bar and their countdown. Only the bar's track takes
    slack, which is why the name and state columns may clip a long value instead of
    pushing their neighbours. */
-.accountRow { border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
+.accountRow { position: relative; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 10px; }
 .accountRow[data-dragging='true'] { opacity: .55; }
 .accountMain { display: grid; grid-template-columns: 16px 112px 92px minmax(0, 1fr) 38px 106px 14px; align-items: center; gap: 9px; padding: 9px 11px; }
 .accountHandle { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--dsw-alias-label-tertiary); cursor: grab; -webkit-user-drag: element; }
@@ -38,8 +44,15 @@
 .accountRetry:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
 .accountHandle:active { cursor: grabbing; }
 .accountDetail { display: flex; flex-direction: column; gap: 8px; padding: 9px 11px 10px 36px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
-/* The drop slot: a line where the dragged row would land. */
-.accountDropLine { height: 2px; border-radius: 2px; background: var(--dsw-alias-brand-primary); }
+/* The insertion mark: the edge bar the dragged row would land on, centred in the
+   grid gap and drawn inside the row it belongs to. It must never take part in the
+   layout — a mark that pushed the rows down would move the pointer's own target
+   out from under it, and the browser answers a drag whose target moved under the
+   pointer by dispatching no drop at all. */
+.accountRow::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; border-radius: 2px;
+  background: var(--dsw-alias-brand-primary); opacity: 0; pointer-events: none; }
+.accountRow[data-drop='before']::after { top: -6px; opacity: 1; }
+.accountRow[data-drop='after']::after { bottom: -6px; opacity: 1; }
 .accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
 .accountUsage progress { display: block; width: 100%; height: 8px; accent-color: #39a878; margin: 6px 0; }
 .accountUsage progress[data-level='high'] { accent-color: #e0a100; }

@@ -74,6 +74,14 @@ export interface OpencodeGoAdapterOptions {
      * from an older request apart from a newer request's outcome.
      */
     onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void;
+    /**
+     * A fallback settled on this account and it is producing output, so it is the
+     * account the next request should start from. `startedFrom` is the account the
+     * request began with — the value the stored preference must still hold for the
+     * adoption to be the caller's intent rather than an overwrite of a selection
+     * the user made meanwhile.
+     */
+    onAccountAdopted?: (ref: string, startedFrom: string) => void;
 }
 /**
  * The single route's adapter. The catalog snapshot freezes at each operation,

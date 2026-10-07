@@ -124,6 +124,14 @@ export interface OpencodeGoAdapterOptions {
    * from an older request apart from a newer request's outcome.
    */
   onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void
+  /**
+   * A fallback settled on this account and it is producing output, so it is the
+   * account the next request should start from. `startedFrom` is the account the
+   * request began with — the value the stored preference must still hold for the
+   * adoption to be the caller's intent rather than an overwrite of a selection
+   * the user made meanwhile.
+   */
+  onAccountAdopted?: (ref: string, startedFrom: string) => void
 }
 
 /** Configuration, model and provider captured together before dispatch. */
@@ -359,16 +367,26 @@ export class OpencodeGoAdapter extends LlmAdapter {
       const announce = (): void => {
         if (emitted) return
         const serving = refs[attempt]!
-        if (serving === preferred) this.options.onAccountSwitch?.(undefined, snapshot.config, seq)
-        else this.options.onAccountSwitch?.({
+        const replaced = failedRef ?? skippedRef ?? preferred
+        if (serving === preferred) {
+          this.options.onAccountSwitch?.(undefined, snapshot.config, seq)
+          return
+        }
+        this.options.onAccountSwitch?.({
           // The notice names the account the journey left: the first one that
           // failed this request, else the first one skipped for a remembered
           // rejection.
-          fromRef: failedRef ?? skippedRef ?? preferred,
+          fromRef: replaced,
           toRef: serving,
           reason: switchReason ?? 'credential',
           at: Date.now(),
         }, snapshot.config, seq)
+        // The account that just proved usable becomes the current one: the next
+        // request starts from it instead of walking into the same wall again.
+        // The guard names the account this request started from, not the one it
+        // left: a journey may hop twice, and the stored preference is only the
+        // caller's to overwrite while it still points where the request began.
+        this.options.onAccountAdopted?.(serving, preferred)
       }
       try {
         for await (const chunk of this.streamAttempt(options, {
