@@ -140,6 +140,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   let registration: AdapterRegistrationHandle | undefined
   const adapter = new OpencodeGoAdapter({
     transport,
+    debugDirectory: () => launchEnvironmentOf(ctx).get('DSH_OPENCODE_GO_DEBUG_DIR')?.value,
     config: () => current(),
     resolveApiKey,
     accountGeneration: () => selection.capture(),

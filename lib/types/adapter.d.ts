@@ -51,6 +51,8 @@ export interface GoAccountSettlement {
 export interface OpencodeGoAdapterOptions {
     /** Shared with Host usage reads for this plugin mount. */
     transport?: ProxyTransport;
+    /** Optional directory for bounded HTTP error evidence; request contents are omitted. */
+    debugDirectory?: () => string | undefined;
     /**
      * The current configuration, re-read at every operation: a settings write
      * reaches the next request without a restart, and one operation never mixes
