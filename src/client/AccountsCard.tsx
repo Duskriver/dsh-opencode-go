@@ -61,6 +61,25 @@ function GripIcon() {
 }
 
 /**
+ * The insertion slot the pointer names, read from the rows' own boxes: the slot
+ * before the first row whose midline sits below the pointer, or the end of the
+ * list. The boxes are stable for the whole gesture — the insertion mark is drawn
+ * inside a row instead of as a grid item of its own, so showing it never reflows
+ * the list the pointer is measured against.
+ * @param container - the list element carrying the drop handlers.
+ * @param clientY - pointer position, in viewport coordinates.
+ * @returns the slot index between 0 and the row count.
+ */
+function slotAt(container: HTMLElement, clientY: number): number {
+  const rows = container.querySelectorAll<HTMLElement>('[data-account-row]')
+  for (let index = 0; index < rows.length; index++) {
+    const box = rows[index]!.getBoundingClientRect()
+    if (clientY < box.top + box.height / 2) return index
+  }
+  return rows.length
+}
+
+/**
  * The account card: a folded header that summarizes the set, and one row per
  * account inside. Rows keep the identity, key state, rolling quota and its reset
  * countdown; everything else opens under the row. The handle is the drag source —
@@ -88,6 +107,23 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
   const unreadable = state.entries.filter(entry => entry.failed === true).length
   const preferred = state.entries.find(entry => entry.apiKeyEnv === state.activeRef)
   const reorderable = !disabled && total > 1
+  /** Row the drag started on, or -1 while nothing is being dragged. */
+  const draggingFrom = dragging === null ? -1 : state.entries.findIndex(entry => entry.apiKeyEnv === dragging)
+  /** A slot at the dragged row's own position changes nothing: no mark, and no write. */
+  const noopSlot = draggingFrom >= 0 && (dropAt === draggingFrom || dropAt === draggingFrom + 1)
+  /**
+   * The edge of a row that carries the insertion mark for the current slot. The
+   * mark lives inside the row it belongs to, so showing it never reflows the
+   * list — a mark that pushed the rows down would move the pointer's own target
+   * out from under it and the browser would cancel the drop entirely.
+   * @param index - row being rendered.
+   * @returns the edge to mark, or undefined for an unmarked row.
+   */
+  const markAt = (index: number): 'before' | 'after' | undefined => {
+    if (!reorderable || dropAt === null || noopSlot) return undefined
+    if (dropAt === index) return 'before'
+    return dropAt === total && index === total - 1 ? 'after' : undefined
+  }
   // One pass reads every row, so the card carries a single refresh stamp.
   const updatedAt = state.entries.reduce((latest, entry) => Math.max(latest, entry.updatedAt ?? 0), 0)
   useEffect(() => {
@@ -103,6 +139,15 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
   useEffect(() => {
     if (editor?.ref != null && !state.entries.some(entry => entry.apiKeyEnv === editor.ref)) cancel()
   }, [state.entries, editor])
+  // The row a drag started on can leave the list under it — a remove from the
+  // usage pill, a settings write from elsewhere. Its handle goes with it, so the
+  // dragend that would clear the drag never reaches this card: clear it here.
+  useEffect(() => {
+    if (dragging !== null && !state.entries.some(entry => entry.apiKeyEnv === dragging)) {
+      setDragging(null)
+      setDropAt(null)
+    }
+  }, [state.entries, dragging])
   const submit = async () => {
     if (!editor) return
     const accepted = editor.kind === 'add' ? await actions.addAccount(name, key)
@@ -181,16 +226,51 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         : state.failure === 'remove' ? 'accountsRemoveKeyFailed'
         : state.failure === 'read' ? 'accountsReadFailed' : 'accountsWriteFailed')}</p> : null}
       {!total ? <p className={css.hint}>{t('accountsEmpty')}</p> : null}
-      <div className={css.accounts}>
+      {/* The list is the drop surface, not an individual row: the slots between
+          rows, the insertion mark and the pointer's own row all belong to it, so
+          a release never lands on an element with no handler — which the browser
+          answers by dispatching no drop at all. */}
+      <div className={css.accounts}
+        onDragEnter={event => {
+          // Accept the entry, not only the hover: a drag whose last event is an
+          // uncancelled dragenter — the pointer stopped moving while a child
+          // mounted under it — is one the browser answers with no drop at all.
+          if (reorderable && dragging !== null) event.preventDefault()
+        }}
+        onDragOver={event => {
+          if (!reorderable || dragging === null) return
+          event.preventDefault()
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+          setDropAt(slotAt(event.currentTarget, event.clientY))
+        }}
+        onDrop={event => {
+          const source = dragging
+          setDragging(null)
+          setDropAt(null)
+          if (source === null) return
+          event.preventDefault()
+          const from = state.entries.findIndex(entry => entry.apiKeyEnv === source)
+          if (from < 0) return
+          // Where the release landed decides, not the last hover: a drop can
+          // arrive at a point the drag never reported, and the browser does not
+          // promise a hover for every pixel the pointer crossed.
+          const slot = Number.isFinite(event.clientY) ? slotAt(event.currentTarget, event.clientY) : dropAt
+          if (slot === null) return
+          const to = slot > from ? slot - 1 : slot
+          // A drop that lands where the row already sits changes nothing; it is
+          // not a refused write, so it neither writes nor reports a failure.
+          if (to !== from) move(source, to)
+        }}
+        onDragEnd={() => { setDragging(null); setDropAt(null) }}>
         {state.entries.map((account, index) => {
           const label = account.name || t('accountDefault')
           const rolling = account.usage?.rolling
           const expanded = details === account.apiKeyEnv
           const panelId = `opencode-go-account-${index}`
           return <Fragment key={account.id}>
-            {reorderable && dropAt === index ? <div className={css.accountDropLine} /> : null}
             <div className={css.accountRow} data-account-row={account.apiKeyEnv}
               data-dragging={dragging === account.apiKeyEnv ? 'true' : undefined}
+              data-drop={markAt(index)}
               onDragStart={event => {
                 // Only the handle is a drag source; a stray text drag stays a text drag.
                 if (!reorderable || (event.target as HTMLElement | null)?.closest?.('[data-account-handle]') == null) {
@@ -206,25 +286,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                   }
                 }
                 setDragging(account.apiKeyEnv)
-              }}
-              onDragOver={event => {
-                if (!reorderable || dragging === null || dragging === account.apiKeyEnv) return
-                event.preventDefault()
-                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-                const box = event.currentTarget.getBoundingClientRect()
-                setDropAt(event.clientY < box.top + box.height / 2 ? index : index + 1)
-              }}
-              onDrop={event => {
-                const source = dragging
-                const slot = dropAt
-                setDragging(null)
-                setDropAt(null)
-                if (source === null || slot === null) return
-                event.preventDefault()
-                const from = state.entries.findIndex(entry => entry.apiKeyEnv === source)
-                if (from >= 0) move(source, slot > from ? slot - 1 : slot)
-              }}
-              onDragEnd={() => { setDragging(null); setDropAt(null) }}>
+              }}>
               <div className={css.accountMain} data-account-main="">
                 <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
                   disabled={!reorderable} title={t('accountDragHandle', { name: label })}
@@ -267,7 +329,6 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
             </div>
           </Fragment>
         })}
-        {reorderable && dropAt === total ? <div className={css.accountDropLine} /> : null}
       </div>
       {editor ? (editor.kind === 'add' ? editorForm() : null)
         : <Button variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}

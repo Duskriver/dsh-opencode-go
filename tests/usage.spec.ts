@@ -58,6 +58,13 @@ it('keeps unavailable or malformed usage distinct from zero', () => {
   }
 })
 
+it('rejects a window percentage outside 0..100 rather than rendering it raw', () => {
+  for (const percent of [100.5, 5000, 1e308]) {
+    expect(() => parseGoUsage({ ...usage, rolling: { ...window, percent } })).toThrow('Invalid OpenCode Go usage response')
+  }
+  expect(parseGoUsage({ ...usage, rolling: { ...window, percent: 100 } }).rolling.percent).toBe(100)
+})
+
 it('reads named accounts through the real RPC contract without switching the active account or exposing keys', async () => {
   const calls: string[] = []
   let status = 200

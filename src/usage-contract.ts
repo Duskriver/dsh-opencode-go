@@ -43,7 +43,7 @@ export function parseGoUsage(value: unknown): GoUsage {
   for (const key of ['rolling', 'weekly', 'monthly'] as const) {
     const row = source[key] as Partial<UsageWindow> | undefined
     if (!row || (row.status !== 'ok' && row.status !== 'rate-limited')
-      || typeof row.percent !== 'number' || !Number.isFinite(row.percent) || row.percent < 0
+      || typeof row.percent !== 'number' || !Number.isFinite(row.percent) || row.percent < 0 || row.percent > 100
       || typeof row.resetsAt !== 'string' || !Number.isFinite(Date.parse(row.resetsAt))) {
       throw new Error('Invalid OpenCode Go usage response')
     }

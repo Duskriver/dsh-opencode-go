@@ -166,7 +166,7 @@ export declare class OpencodeGoSectionController {
      * @param ctx - the page plugin's context, whose `remote.credentials` namespace
      *   answers for the credential the section references.
      */
-    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<import('../usage-contract.ts').GoUsage>);
+    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<import('../usage-contract.ts').GoUsage>, probeServerAccount?: (id: string) => Promise<boolean | undefined>);
     /** Release subscriptions without disposing the host's shared form. */
     dispose(): void;
     private projection;

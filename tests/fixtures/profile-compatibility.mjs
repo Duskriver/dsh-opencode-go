@@ -4,9 +4,13 @@ import assert from 'node:assert/strict'
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const { default: Settings } = await import('@deepseek-ai/dsh-settings')
+const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
 const ctx = new Context()
+const inferenceKeys = []
+const usage = Object.fromEntries(['rolling', 'weekly', 'monthly'].map(key => [key,
+  { status: 'ok', percent: 12, resetsAt: '2026-10-01T00:00:00Z' }]))
 process.env.OPENCODE_GO_COMPAT_KEY = 'fixture-key'
-globalThis.fetch = async (input) => {
+globalThis.fetch = async (input, init) => {
   const url = input instanceof Request ? input.url : String(input)
   if (url === 'https://models.dev/api.json') return Response.json({
     'opencode-go': { npm: '@ai-sdk/openai-compatible', models: {
@@ -14,12 +18,32 @@ globalThis.fetch = async (input) => {
         modalities: { input: ['text'] }, limit: { context: 100000, output: 4096 } },
     } },
   })
+  const authorization = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)).get('authorization')
+  if (url === 'https://opencode.ai/zen/go/v1/usage') {
+    assert.equal(authorization, 'Bearer backup-fixture-key', 'usage follows the adopted account')
+    return Response.json({ usage })
+  }
+  if (url === 'https://opencode.ai/zen/go/v1/chat/completions') {
+    inferenceKeys.push(authorization)
+    if (authorization === 'Bearer fixture-key') {
+      return Response.json({ error: { message: 'Monthly usage limit exceeded' } }, { status: 429 })
+    }
+    assert.equal(authorization, 'Bearer backup-fixture-key')
+    const events = [
+      { choices: [{ delta: { role: 'assistant', content: 'compat-ok' }, index: 0, finish_reason: null }] },
+      { choices: [{ delta: {}, index: 0, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } },
+    ]
+    return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } })
+  }
   assert.equal(url, 'https://opencode.ai/zen/go/v1/models')
   return Response.json({ data: [{ id: 'compat-model' }] })
 }
 try {
   ctx.baseUrl = new URL('../package.json', import.meta.url).href
   await ctx.plugin(Loader)
+  await ctx.plugin((await import('@deepseek-ai/dsh-typert-registry')).default)
+  await ctx.plugin((await import('@deepseek-ai/dsh-api-gateway')).default)
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const id = await ctx.loader.create({ id: 'opencode-go', name: 'dsh-opencode-go',
     config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY', legacyOption: true,
@@ -83,6 +107,45 @@ try {
   assert.equal(view().value.autoSwitch, true)
   await assert.rejects(ctx.settings.update('opencode-go', { accounts: [accounts[0], accounts[0]] }))
   assert.deepEqual(view().value.accounts, accounts, 'duplicate account writes are refused')
+  await ctx.settings.update('opencode-go', { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY' })
+  const beforeAdoption = view().revision
+  // Observe the real write promise so assertions wait for persistence without
+  // sleeping or replacing the SettingsForms implementation.
+  const mutate = ctx.settings.mutate
+  const adoptionWrites = []
+  ctx.settings.mutate = function (...args) {
+    const pending = mutate.apply(this, args)
+    adoptionWrites.push(pending)
+    return pending
+  }
+  try {
+    const chunks = []
+    for await (const chunk of ctx.llm.stream({ provider: 'dsh-opencode-go', model: 'compat-model',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'hello' }],
+        source: { kind: 'plugin', plugin: 'profile-compat-test' } })],
+    })) chunks.push(chunk)
+    assert.equal(chunks.at(-1).reason.kind, 'stop')
+    assert.ok(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'compat-ok'))
+    assert.deepEqual(inferenceKeys, ['Bearer fixture-key', 'Bearer backup-fixture-key'])
+    assert.equal(adoptionWrites.length, 1, 'fallback performs one real profile mutation')
+    await Promise.all(adoptionWrites)
+    assert.equal(view().value.apiKeyEnv, 'OPENCODE_GO_BACKUP_COMPAT_KEY', 'fallback adopts the serving account')
+    assert.deepEqual(view().value.accounts, accounts, 'adoption preserves the account order')
+    assert.equal(entry.fiber, fiber, 'adoption preserves the running plugin')
+    const revision = view().revision
+    assert.equal(revision, beforeAdoption + 1, 'adoption changes exactly one profile revision')
+    let notice
+    for (let read = 0; read < 3; read++) {
+      assert.equal(view().revision, revision, 'repeated describe does not advance the profile revision')
+      const reading = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
+      assert.deepEqual(reading.rolling, usage.rolling)
+      assert.equal(reading.lastSwitch?.fromRef, 'OPENCODE_GO_COMPAT_KEY')
+      assert.equal(reading.lastSwitch?.toRef, 'OPENCODE_GO_BACKUP_COMPAT_KEY')
+      assert.equal(reading.lastSwitch?.reason, 'quota')
+      if (notice) assert.deepEqual(reading.lastSwitch, notice, 'describe and usage reads preserve the adoption notice')
+      notice = reading.lastSwitch
+    }
+  } finally { ctx.settings.mutate = mutate }
   await ctx.settings.mutate('opencode-go', [
     { op: 'set', path: ['accounts'], value: [] },
     { op: 'set', path: ['apiKeyEnv'], value: 'OPENCODE_GO_COMPAT_KEY' },
@@ -136,7 +199,7 @@ try {
   assert.equal(entry.options.config.legacyOption, true, 'unknown profile fields survive live updates without breaking reads')
   assert.equal(entry.options.config.showDeprecatedModels, true, 'the legacy toggle remains an inert unknown profile field')
   assert.deepEqual(entry.options.config.visibleModelIds, ['compat-model'], 'the legacy selection remains an inert unknown profile field')
-  console.log('PASS: profile settings, live updates, capacities, reset, route toggle, validation')
+  console.log('PASS: profile settings, account adoption and notice, live updates, capacities, reset, route toggle, validation')
 } finally {
   await ctx.fiber.dispose()
 }

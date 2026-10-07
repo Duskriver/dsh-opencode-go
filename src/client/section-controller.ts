@@ -208,6 +208,7 @@ export class OpencodeGoSectionController {
       if (!result.ok) throw result.error
       return result.value
     },
+    probeServerAccount: (id: string) => Promise<boolean | undefined> = async () => undefined,
   ) {
     this.form = new StagedForm(
       scope as SettingsScope<Record<string, unknown>>,
@@ -243,7 +244,8 @@ export class OpencodeGoSectionController {
     this.store = this.form.bind(() => this.projection())
     this.accounts = new GoAccountsController(scope, ctx, readUsage,
       () => { this.store.set(this.projection()) },
-      () => this.form.shell().saving || this.pickerSaving || Boolean(this.form.field(API_KEY_FIELD).text.trim()))
+      () => this.form.shell().saving || this.pickerSaving || Boolean(this.form.field(API_KEY_FIELD).text.trim()),
+      probeServerAccount)
     this.store.set(this.projection())
     const networkIdentity = () => JSON.stringify([
       scope.getSnapshot().value?.baseURL, scope.getSnapshot().value?.proxyURL,

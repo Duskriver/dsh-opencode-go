@@ -39,6 +39,14 @@ export interface OpencodeGoImageAccess {
     /** Bridge one attachment reference into the current model-tool execution world. */
     resolveImageAccess: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined;
 }
+/** One request's serving account, with the identity captured before discovery. */
+export interface GoAccountSettlement {
+    seq: number;
+    generation: number;
+    config: OpencodeGoConfig;
+    ref: string;
+    notice?: GoAccountSwitch;
+}
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions {
     /** Shared with Host usage reads for this plugin mount. */
@@ -70,7 +78,12 @@ export interface OpencodeGoAdapterOptions {
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
-    onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig) => void;
+    /** Host account-state version, captured before asynchronous model discovery. */
+    accountGeneration?: () => number;
+    /** One outcome for both the displayed notice and the persisted selection. */
+    onAccountSettled?: (event: GoAccountSettlement) => void;
+    /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
+    onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void;
 }
 /**
  * The single route's adapter. The catalog snapshot freezes at each operation,
@@ -89,6 +102,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly transport;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
+    /** Monotonic sequence of the latest request this adapter started. */
+    private callSeq;
     constructor(options: OpencodeGoAdapterOptions);
     dispose(): Promise<void>;
     /**

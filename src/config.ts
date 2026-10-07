@@ -18,7 +18,7 @@ import {
 import z from '@deepseek-ai/schemastery'
 import { DEFAULT_BASE_URL } from './catalog.ts'
 import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } from './usage-display.ts'
-import { MAX_ACCOUNTS, type GoAccount } from './accounts.ts'
+import { ACCOUNT_REF_PATTERN, MAX_ACCOUNTS, type GoAccount } from './accounts.ts'
 
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
@@ -88,10 +88,13 @@ const fields = {
   enabled: z.boolean().default(true),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   modelVisibility: z.dict(z.boolean().required()).default({}),
-  apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
+  // A bare environment variable name: an empty string would otherwise pass the
+  // schema, then never match any account (accountRefOf normalizes it away) and
+  // silently deregister the route while the default credential still resolves.
+  apiKeyEnv: z.string().role('credential-ref').pattern(ACCOUNT_REF_PATTERN).default(DEFAULT_API_KEY_ENV),
   accounts: z.union([z.const(null), z.array(z.object({
     id: z.string().required(), name: z.string().required(),
-    apiKeyEnv: z.string().role('credential-ref').required(),
+    apiKeyEnv: z.string().role('credential-ref').pattern(ACCOUNT_REF_PATTERN).required(),
   })).max(MAX_ACCOUNTS)]).default(null),
   autoSwitch: z.boolean().default(false),
   baseURL: z.string().default(DEFAULT_BASE_URL),
@@ -149,4 +152,17 @@ export function assertBaseURL(raw: string): string {
     throw new Error(`llm-opencode-go: baseURL "${raw}" must not carry a query or fragment`)
   }
   return url.toString().replace(/\/+$/, '')
+}
+
+/**
+ * Reject a selected credential reference that is not a bare environment
+ * variable name. The schema pattern above fails the composition layer and the
+ * settings write; this assert gives the load and validate paths a message that
+ * names the field, instead of schemastery's generic regexp complaint.
+ * @param raw - the configured credential reference.
+ */
+export function assertApiKeyEnv(raw: string): void {
+  if (!ACCOUNT_REF_PATTERN.test(raw)) {
+    throw new Error(`llm-opencode-go: apiKeyEnv "${raw}" must be an environment variable name ([A-Za-z_][A-Za-z0-9_]*)`)
+  }
 }

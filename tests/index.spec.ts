@@ -12,6 +12,7 @@ import type {
 import LlmRuntime, { LlmAdapter, createUserMessage, MessageId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { apply } from '../src/index.ts'
+import { Config, type LiveConfig } from '../src/config.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { configOf } from './config-of.ts'
 import { OpencodeGoCatalog } from '../src/catalog.ts'
@@ -119,6 +120,25 @@ describe('llm-opencode-go plugin mount', () => {
     // value does not depend on owning the route — still registers.
     apply(ctx, configOf(gateway.url))
 
+    const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })
+    expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
+  })
+
+  it('keeps a duplicate mount loading when it already owns the discovery namespace', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    apply(ctx, configOf(gateway.url))
+    const errors: string[] = []
+    ctx.logger.error = ((message: string) => { errors.push(message) }) as typeof ctx.logger.error
+
+    // A second mount on the same context meets the first one's discovery
+    // registration; the refusal must degrade the way the route's does instead
+    // of failing the whole entry.
+    apply(ctx, configOf(gateway.url))
+
+    expect(errors.some(message => message.includes('not registering model discovery'))).toBe(true)
     const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })
     expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
   })
@@ -411,5 +431,17 @@ describe('llm-opencode-go plugin mount', () => {
       await ctx.plugin(LlmRuntime)
       apply(ctx, configOf(baseURL))
     })).rejects.toThrow(message)
+  })
+
+  it('refuses an empty selected apiKeyEnv instead of silently deregistering the route', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    // Composition layer: the schema pattern fails the load rather than letting
+    // an empty reference match no account while the default credential works.
+    expect(() => apply(ctx, configOf('https://gateway.example/v1', { apiKeyEnv: '' }))).toThrow(/match regexp/)
+    // A live reference carries the field-level message.
+    const config = configOf('https://gateway.example/v1', { apiKeyEnv: '' })
+    const live = Object.fromEntries(Object.keys(Config()).map(key => [key, { get: () => config[key as keyof typeof config] }])) as LiveConfig
+    expect(() => apply(ctx, live)).toThrow(/apiKeyEnv "" must be an environment variable name/)
   })
 })

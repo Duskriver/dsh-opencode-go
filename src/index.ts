@@ -44,12 +44,13 @@ import {
   PROVIDER_ID,
   discoverCatalogModels,
 } from './catalog.ts'
-import { Config, PlainConfig, readConfig, assertBaseURL } from './config.ts'
+import { Config, PlainConfig, readConfig, assertBaseURL, assertApiKeyEnv } from './config.ts'
 import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
 import { registerGoRemotes } from './remotes.ts'
-import { accountsOf, accountRefOf, assertAccounts, type GoAccountSwitch } from './accounts.ts'
+import { accountsOf, accountRefOf, assertAccounts } from './accounts.ts'
+import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
 import { assertProxyURL } from './proxy-url.ts'
 import { ProxyTransport } from './proxy.ts'
 
@@ -60,7 +61,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export { OpencodeGoAdapter } from './adapter.ts'
-export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess } from './adapter.ts'
+export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement } from './adapter.ts'
 export {
   DEFAULT_BASE_URL,
   DISPLAY_NAME,
@@ -92,11 +93,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // refuses the write through the section's validate hook.
   assertBaseURL(entry.baseURL)
   assertProxyURL(entry.proxyURL)
+  assertApiKeyEnv(entry.apiKeyEnv)
   assertAccounts(entry.accounts, entry.apiKeyEnv)
   let current: () => OpencodeGoConfig = () => readConfig(config)
 
   const resolveApiKey = async (config: OpencodeGoConfig = current()): Promise<string | undefined> => {
-    const ref = config.apiKeyEnv
+    // Compare through accountRefOf so a stray empty string keeps the default
+    // reference's semantics instead of matching nothing.
+    const ref = accountRefOf(config)
     if (!accountsOf(config).some(account => account.apiKeyEnv === ref)) {
       throw new LlmError('OpenCode Go has no selected account', 'MISSING_CREDENTIAL')
     }
@@ -113,7 +117,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     )
   }
   registerGoRemotes(ctx)
-  let lastSwitch: GoAccountSwitch | undefined
+  const selection = new GoAccountSelection(() => current(), ctx.logger)
   const transport = new ProxyTransport()
   ctx.effect(() => () => transport.dispose())
   ctx.plugin(GoUsageService, {
@@ -123,7 +127,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     resolveApiKey: (ref?: string) => resolveApiKey({ ...current(), apiKeyEnv: ref ?? current().apiKeyEnv }),
     activeRef: () => accountRefOf(current()),
     accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
-    lastSwitch: () => lastSwitch,
+    lastSwitch: () => selection.lastSwitch(),
   })
   const logger = {
     fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {
@@ -139,11 +143,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     debugDirectory: () => launchEnvironmentOf(ctx).get('DSH_OPENCODE_GO_DEBUG_DIR')?.value,
     config: () => current(),
     resolveApiKey,
-    onAccountSwitch: (notice, captured) => {
-      const config = current()
-      if (config.baseURL === captured.baseURL && config.proxyURL === captured.proxyURL && config.apiKeyEnv === captured.apiKeyEnv
-        && JSON.stringify(config.accounts) === JSON.stringify(captured.accounts)) lastSwitch = notice
-    },
+    accountGeneration: () => selection.capture(),
+    onAccountSettled: event => { selection.settle(event) },
     imageAccess: {
       resolveAttachments: () => ctx.get('attachments'),
       resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(
@@ -197,12 +198,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     }
   }
   let routeCheck = 0
-  let accountIdentity = ''
+  let selectedRef = accountRefOf(current())
   const syncRoute = (): void => {
     const check = ++routeCheck
     const config = current()
-    const identity = JSON.stringify([config.apiKeyEnv, config.accounts, config.baseURL, config.proxyURL, config.autoSwitch])
-    if (identity !== accountIdentity) { accountIdentity = identity; lastSwitch = undefined }
+    selection.capture()
     const visibility = pickerVisibilityOf()
     if (pickerVisibility !== visibility) {
       pickerVisibility = visibility
@@ -210,7 +210,14 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       registration?.replace([PROVIDER_ID])
     }
     const credentials = ctx.get('credentials')
-    const refs = accountsOf(config).filter(account => config.autoSwitch || account.apiKeyEnv === config.apiKeyEnv)
+    const selected = accountRefOf(config)
+    // A stored selection outranks the gateway's last rejection of it: choosing an
+    // account back must try it again rather than skip it for the whole window.
+    if (selected !== selectedRef) {
+      selectedRef = selected
+      adapter.forgetRejectedKey(selected)
+    }
+    const refs = accountsOf(config).filter(account => config.autoSwitch || account.apiKeyEnv === selected)
       .map(account => account.apiKeyEnv)
     if (credentials === undefined) {
       applyRoute(refs.some(ref => Boolean(launchEnvironmentOf(ctx).get(ref)?.value)))
@@ -223,16 +230,24 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       })
   }
   syncRoute()
-  const undiscover = ctx.llm.registerModelDiscovery(name, async (request: LlmModelDiscoveryRequest) => {
-    if (request.provider !== PROVIDER_ID
-      && !(request.baseURL ?? '').includes('opencode.ai')) {
-      throw new LlmError(
-        'llm-opencode-go discovers only OpenCode zen/go endpoints; enter this provider\'s models by hand',
-        'DISCOVERY_UNSUPPORTED',
-      )
-    }
-    return discoverCatalogModels(adapter.catalogOf(current()))
-  })
+  let undiscover: () => void = () => {}
+  try {
+    undiscover = ctx.llm.registerModelDiscovery(name, async (request: LlmModelDiscoveryRequest) => {
+      if (request.provider !== PROVIDER_ID
+        && !(request.baseURL ?? '').includes('opencode.ai')) {
+        throw new LlmError(
+          'llm-opencode-go discovers only OpenCode zen/go endpoints; enter this provider\'s models by hand',
+          'DISCOVERY_UNSUPPORTED',
+        )
+      }
+      return discoverCatalogModels(adapter.catalogOf(current()))
+    })
+  } catch (error: unknown) {
+    // A duplicate mount may already own our discovery registration — the same
+    // refusal the route registration above absorbs. The surviving mount keeps
+    // serving discovery, and everything else this mount does keeps working.
+    ctx.logger.error(`llm-opencode-go: not registering model discovery for "${name}" (${String(error)})`)
+  }
   ctx.effect(() => () => {
     /* v8 ignore start -- plugin unload never runs in tests: no Context disposal API is exercised */
     registration?.()
@@ -244,6 +259,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // entry as its base layer and follows the settings provider while attached.
   // Without a settings provider the plugin still loads and serves the entry.
   ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.effect(() => selection.connect(settingsCtx.settings as unknown as AccountSettingsWriter))
     if ('configure' in settingsCtx.settings) {
       const settings = settingsCtx.settings as unknown as {
         configure(policy: { auto: boolean }, owner: typeof ctx.fiber): () => void
@@ -255,6 +271,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       validate: (value) => {
         assertBaseURL(value.baseURL)
         assertProxyURL(value.proxyURL)
+        if (typeof value.apiKeyEnv === 'string') assertApiKeyEnv(value.apiKeyEnv)
         assertAccounts(value.accounts, value.apiKeyEnv)
       },
       setSource: (source) => {
@@ -271,6 +288,10 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   ctx.on('internal/config', function (_raw, next) {
     const value = next()
     if (this === ctx.fiber) {
+      // Pre-check the raw field so the refusal names it, before the schema's
+      // generic regexp complaint takes the throw.
+      const raw = value as { apiKeyEnv?: unknown }
+      if (typeof raw.apiKeyEnv === 'string') assertApiKeyEnv(raw.apiKeyEnv)
       const config = PlainConfig(value)
       assertBaseURL(config.baseURL)
       assertProxyURL(config.proxyURL)
@@ -287,7 +308,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       // A stored change to a reference outranks the gateway's last rejection
       // of it, so the very next request re-checks the new key.
       adapter.forgetRejectedKey(ref)
-      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { lastSwitch = undefined; syncRoute() }
+      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { selection.credentialChanged(); syncRoute() }
     })
     // The seam becomes visible only once its provider is active, which can be
     // after this plugin applied: the boot-time call above then found no seam

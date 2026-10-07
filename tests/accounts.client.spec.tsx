@@ -17,7 +17,10 @@ const usage = (source: string, percent = 10): GoUsage => ({ source, rolling: { .
 const t = (key: keyof typeof en, params?: Record<string, unknown>) => Object.entries(params ?? {}).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), en[key])
 afterEach(cleanup)
 
-function setup(value: OpencodeGoSettings = { accounts, apiKeyEnv: 'ACCOUNT_A' }) {
+function setup(
+  value: OpencodeGoSettings = { accounts, apiKeyEnv: 'ACCOUNT_A' },
+  probeServerAccount?: (id: string) => Promise<boolean | undefined>,
+) {
   const host = stubSettingsScope<OpencodeGoSettings>()
   host.publish({ status: 'ready', writable: true, value, user: {}, revision: 1 })
   const mutate = async (ops: readonly SettingsPathOpView[], revision?: number) => {
@@ -36,7 +39,7 @@ function setup(value: OpencodeGoSettings = { accounts, apiKeyEnv: 'ACCOUNT_A' })
     unset: vi.fn(async (ref: string) => { secrets.delete(ref); return { ok: true as const, value: undefined } }),
   }
   const read = vi.fn(async (ref: string) => usage(ref))
-  const controller = new GoAccountsController(host.scope, { remote: { credentials } } as never, read, () => {}, () => false)
+  const controller = new GoAccountsController(host.scope, { remote: { credentials } } as never, read, () => {}, () => false, probeServerAccount)
   host.scope.subscribe(() => { controller.sync() })
   return { host, credentials, secrets, read, controller, actions: controller.actions() }
 }
@@ -156,13 +159,56 @@ it('allows replacing a writable key even when the settings document is read-only
   fixture.controller.dispose()
 })
 
-it('rolls back the fresh credential when a metadata write is refused and preserves existing secrets', async () => {
-  const fixture = setup()
+it('rolls back the fresh credential when the settings document confirms the write was refused', async () => {
+  const fixture = setup(undefined, async () => false)
   fixture.host.mutate.mockImplementation(async () => {})
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
   expect(fixture.secrets.size).toBe(2)
   expect(fixture.credentials.unset).toHaveBeenCalledWith(expect.stringMatching(/^DSH_OPENCODE_GO_ACCOUNT_/))
   expect(fixture.controller.snapshot().failure).toBe('write')
+  fixture.controller.dispose()
+})
+
+it('keeps a committed credential when a concurrent write keeps it out of the local snapshot', async () => {
+  const fixture = setup(undefined, async () => true)
+  // The legacy scope settles void and a concurrent write (the usage pill's
+  // account switch, any other surface) suppresses the fold: the write
+  // committed, but the snapshot the add re-reads still lags it.
+  fixture.host.mutate.mockImplementation(async () => {})
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
+it('keeps the fresh credential when the server cannot confirm either way', async () => {
+  const fixture = setup()
+  // No settings remote in this session: the add must not delete a key a
+  // committed write may already reference.
+  fixture.host.mutate.mockImplementation(async () => {})
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
+it('treats an accepted settlement as committed even before the snapshot folds it', async () => {
+  const fixture = setup()
+  // A 0.1.7 form settles true; a concurrent write may still keep the fold out
+  // of the snapshot the add re-reads.
+  fixture.host.mutate.mockImplementation(async () => true)
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
+it('rolls the fresh credential back on a refused settlement without consulting the probe', async () => {
+  const probe = vi.fn(async () => true as const)
+  const fixture = setup(undefined, probe)
+  // A 0.1.7 form settles false: the host refused the value, so the rollback
+  // needs no server-side confirmation.
+  fixture.host.mutate.mockImplementation(async () => false)
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
+  expect(fixture.credentials.unset).toHaveBeenCalledWith(expect.stringMatching(/^DSH_OPENCODE_GO_ACCOUNT_/))
+  expect(probe).not.toHaveBeenCalled()
   fixture.controller.dispose()
 })
 
@@ -408,6 +454,94 @@ it('reorders when a row handle is dragged onto another row', async () => {
   fireEvent.dragOver(target, { dataTransfer })
   fireEvent.drop(target, { dataTransfer })
   expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_A', 1)
+  fixture.controller.dispose()
+})
+
+/**
+ * jsdom reports no layout, so the boxes the insertion-slot math reads are
+ * supplied here: two 40px rows with the 10px grid gap between them.
+ * @returns the list element that carries the drop handlers.
+ */
+function stackRows(): HTMLElement {
+  const boxes: Record<string, { top: number; height: number }> = {
+    ACCOUNT_A: { top: 100, height: 40 }, ACCOUNT_B: { top: 150, height: 40 },
+  }
+  for (const [ref, box] of Object.entries(boxes)) {
+    const row = document.querySelector<HTMLElement>(`[data-account-row="${ref}"]`)!
+    row.getBoundingClientRect = () => ({
+      top: box.top, bottom: box.top + box.height, height: box.height,
+      left: 0, right: 320, width: 320, x: 0, y: box.top, toJSON: () => ({}),
+    }) as DOMRect
+  }
+  return document.querySelector<HTMLElement>('[data-account-row="ACCOUNT_A"]')!.parentElement!
+}
+
+/**
+ * jsdom has no DragEvent and its events carry no pointer position, so the
+ * transfer and the pointer's Y are attached to a plain bubbling event — the two
+ * facts the drop handlers read.
+ */
+function fireDrag(type: 'dragstart' | 'dragover' | 'drop' | 'dragend', element: HTMLElement,
+  dataTransfer: unknown, clientY?: number): void {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.assign(event, { dataTransfer, clientY })
+  fireEvent(element, event)
+}
+
+/** Mount the unfolded card with a spy standing in for the settings write. */
+async function dragFixture() {
+  const fixture = setup()
+  await fixture.controller.refresh()
+  const moveAccount = vi.fn(async () => true)
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={{ ...fixture.actions, moveAccount }} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const list = stackRows()
+  const dataTransfer = { effectAllowed: 'none', dropEffect: 'none', setData: vi.fn() }
+  const handle = (name: string) => screen.getByRole('button', { name: t('accountDragHandle', { name }) })
+  return { fixture, moveAccount, list, dataTransfer, handle }
+}
+
+it('reorders when the row is released on the list itself, above the target row', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Backup'), dataTransfer)
+  // The list is the drop surface: a release over a row, over the gap between two
+  // rows or over the insertion mark all reach the same handler.
+  fireDrag('dragover', list, dataTransfer, 110)
+  expect(screen.getByText('Primary').closest('[data-account-row]')!.getAttribute('data-drop')).toBe('before')
+  fireDrag('drop', list, dataTransfer, 110)
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_B', 0)
+  fixture.controller.dispose()
+})
+
+it('reorders downward and marks the end of the list', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Primary'), dataTransfer)
+  fireDrag('dragover', list, dataTransfer, 175)
+  expect(screen.getByText('Backup').closest('[data-account-row]')!.getAttribute('data-drop')).toBe('after')
+  fireDrag('drop', list, dataTransfer, 175)
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_A', 1)
+  fixture.controller.dispose()
+})
+
+it('keeps a drop on the dragged row\'s own slot silent: no mark and no write', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Backup'), dataTransfer)
+  // The lower half of the row above names the position the row already holds.
+  fireDrag('dragover', list, dataTransfer, 135)
+  expect(document.querySelectorAll('[data-drop]')).toHaveLength(0)
+  fireDrag('drop', list, dataTransfer, 135)
+  expect(moveAccount).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
+it('takes the release position over the last hovered slot', async () => {
+  const { fixture, moveAccount, list, dataTransfer, handle } = await dragFixture()
+  fireDrag('dragstart', handle('Backup'), dataTransfer)
+  // The drag last reported the end of the list — the row's own slot, a no-op —
+  // and then the pointer crossed to the top without a hover in between.
+  fireDrag('dragover', list, dataTransfer, 175)
+  fireDrag('drop', list, dataTransfer, 110)
+  expect(moveAccount).toHaveBeenCalledWith('ACCOUNT_B', 0)
   fixture.controller.dispose()
 })
 
