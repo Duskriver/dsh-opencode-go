@@ -1,4 +1,4 @@
-import type { Api, Model, Provider } from 'opencode-go-pi-ai';
+import type { Api, Model, Provider } from './sdk-types.ts';
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm';
 import { type GoModelCatalog } from './models-contract.ts';
 import type { ModelMetadata } from './model-metadata.ts';

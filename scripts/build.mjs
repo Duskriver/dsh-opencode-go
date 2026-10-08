@@ -1,10 +1,14 @@
 /** Build Node ESM and the DSH browser module factory using installed dependencies. */
 import { build } from 'esbuild'
 import { transform } from 'lightningcss'
+import { rollup } from 'rollup'
+import { dts } from 'rollup-plugin-dts'
 import { readFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { findPackageJSON } from 'node:module'
+import { pathToFileURL } from 'node:url'
 
 const args = process.argv.slice(2)
 if (args.length > 1 || (args.length === 1 && args[0] !== '--check')) {
@@ -55,7 +59,60 @@ async function compile(output) {
   for (const face of ['host', 'client']) {
     execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', `tsconfig.${face}.json`, '--outDir', join(output, 'types')], { stdio: 'inherit' })
   }
-  await build({ entryPoints: ['src/index.ts'], outfile: join(output, 'index.js'), bundle: true, packages: 'external', format: 'esm', platform: 'node', target: 'node22' })
+  // Keep host service identities and the two wire SDKs external. Bundle our
+  // private pi-ai implementation without its unrelated providers/dependencies.
+  const hostExternals = ['@deepseek-ai/*', 'undici', 'openai', '@anthropic-ai/sdk']
+  const host = await build({
+    entryPoints: ['src/index.ts'], outfile: join(output, 'index.js'), bundle: true,
+    external: hostExternals, format: 'esm', platform: 'node', target: 'node22', metafile: true,
+    banner: { js: "import { createRequire as __createRequire } from 'node:module'; var require = __createRequire(import.meta.url);" },
+  })
+  // Consumers must also resolve exported types without installing pi-ai.
+  const bundledTypes = ['opencode-go-pi-ai', '@earendil-works/pi-telemetry', 'typebox']
+  const sdkDirectory = resolve('node_modules/opencode-go-pi-ai')
+  const sdk = JSON.parse(await readFile(join(sdkDirectory, 'package.json'), 'utf8'))
+  const declarations = await rollup({
+    input: join(output, 'types/sdk-types.d.ts'),
+    external: id => !id.startsWith('.') && !isAbsolute(id)
+      && !bundledTypes.some(name => id === name || id.startsWith(`${name}/`)),
+    plugins: [{
+      name: 'private-sdk-types',
+      // check:dist emits declarations outside the checkout. Resolve this
+      // build-time alias from our dependencies, not the temporary directory.
+      resolveId: id => id === 'opencode-go-pi-ai' ? join(sdkDirectory, sdk.types) : undefined,
+    }, dts({ respectExternal: true })],
+    onwarn(warning, warn) {
+      if (warning.code === 'UNRESOLVED_IMPORT') throw new Error(warning.message)
+      warn(warning)
+    },
+  })
+  try {
+    await declarations.write({ file: join(output, 'types/sdk-types.d.ts'), format: 'es' })
+  } finally {
+    await declarations.close()
+  }
+  // Include the original licenses for every package retained in the host bundle.
+  const sdkEntry = pathToFileURL(resolve('node_modules/opencode-go-pi-ai/dist/index.js'))
+  const bundledPackages = new Set(bundledTypes.map(name => dirname(findPackageJSON(name, sdkEntry))))
+  for (const artifact of Object.values(host.metafile.outputs)) {
+    for (const [path, input] of Object.entries(artifact.inputs)) {
+      if (!input.bytesInOutput) continue
+      const match = path.match(/^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//)
+      if (match) bundledPackages.add(resolve(match[1]))
+    }
+  }
+  const licenses = []
+  for (const directory of [...bundledPackages].sort()) {
+    const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+    const filename = (await readdir(directory)).find(name => /^licen[sc]e(?:\.(?:txt|md))?$/i.test(name))
+    // The pi monorepo omits its root license from the published SDK packages.
+    const licensePath = filename ? join(directory, filename)
+      : ['@earendil-works/pi-ai', '@earendil-works/pi-telemetry'].includes(manifest.name)
+        ? new URL(`./licenses/pi-${manifest.version}-LICENSE`, import.meta.url) : undefined
+    if (!licensePath) throw new Error(`Missing license for bundled package ${manifest.name}`)
+    licenses.push(`${manifest.name}@${manifest.version}\n\n${(await readFile(licensePath, 'utf8')).trim()}\n`)
+  }
+  await writeFile(join(output, 'vendor-licenses.txt'), licenses.join('\n---\n\n'))
 
   // These identities are supplied by the DSH Web module table.
   const external = ['react', 'react/jsx-runtime', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-ui-primitives']
@@ -89,5 +146,5 @@ async function compile(output) {
       if (item.external && !external.includes(item.path)) throw new Error(`Unsupported DSH client external: ${item.path}`)
     }
   }
-  await writeFile(join(output, 'build-info.json'), JSON.stringify({ clientExternals: external }, null, 2) + '\n')
+  await writeFile(join(output, 'build-info.json'), JSON.stringify({ clientExternals: external, hostExternals, sdkVersion: sdk.version }, null, 2) + '\n')
 }

@@ -10,7 +10,7 @@
 
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { Message, ModelMessageSource, ReplayEnvelope } from '@deepseek-ai/dsh-llm'
-import type { Api, AssistantMessage, ToolCall, Usage as PiUsage } from 'opencode-go-pi-ai'
+import type { Api, AssistantMessage, ToolCall, Usage as PiUsage } from '../sdk-types.ts'
 
 /** Per-block half of the pi-ai replay envelope, one entry per content block. */
 export type PiAiReplayBlock =

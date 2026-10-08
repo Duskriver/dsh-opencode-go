@@ -1,10 +1,10 @@
 /** Runtime discovery: gateway availability plus online protocol and capability metadata. */
 import { createProvider } from 'opencode-go-pi-ai'
-import type { Api, Model, Provider } from 'opencode-go-pi-ai'
-import { getBuiltinModels } from 'opencode-go-pi-ai/providers/all'
-import { anthropicMessagesApi } from 'opencode-go-pi-ai/api/anthropic-messages.lazy'
-import { openAICompletionsApi } from 'opencode-go-pi-ai/api/openai-completions.lazy'
-import { openAIResponsesApi } from 'opencode-go-pi-ai/api/openai-responses.lazy'
+import type { Api, Model, Provider } from './sdk-types.ts'
+import { OPENCODE_GO_MODELS } from 'opencode-go-pi-ai/providers/opencode-go.models'
+import * as anthropicMessagesApi from 'opencode-go-pi-ai/api/anthropic-messages'
+import * as openAICompletionsApi from 'opencode-go-pi-ai/api/openai-completions'
+import * as openAIResponsesApi from 'opencode-go-pi-ai/api/openai-responses'
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
@@ -71,7 +71,7 @@ function waitForSnapshot(pending: Promise<CatalogSnapshot>, signal?: AbortSignal
 
 /** Built-ins are outage fallbacks and compatibility hints, never a membership whitelist. */
 function builtinModels(baseURL: string): Map<string, Model<Api>> {
-  return new Map((getBuiltinModels(SDK_PROVIDER_ID) as Model<Api>[]).map(model => [model.id, withGatewayReasoning({
+  return new Map(Object.values(OPENCODE_GO_MODELS).map(model => [model.id, withGatewayReasoning({
     ...model, provider: SDK_PROVIDER_ID, baseUrl: modelBaseURL(model.api, baseURL),
   })]))
 }
@@ -128,9 +128,9 @@ function buildProvider(baseURL: string, models: readonly Model<Api>[]): Provider
     id: SDK_PROVIDER_ID, name: DISPLAY_NAME, baseUrl: baseURL,
     auth: harnessApiKeyAuth(), models: [...models],
     api: {
-      'anthropic-messages': anthropicMessagesApi(),
-      'openai-completions': openAICompletionsApi(),
-      'openai-responses': openAIResponsesApi(),
+      'anthropic-messages': anthropicMessagesApi,
+      'openai-completions': openAICompletionsApi,
+      'openai-responses': openAIResponsesApi,
     },
   })
 }

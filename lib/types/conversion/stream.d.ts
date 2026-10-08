@@ -8,7 +8,7 @@
  * @module dsh-opencode-go/conversion/stream
  */
 import type { FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
-import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from 'opencode-go-pi-ai';
+import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '../sdk-types.ts';
 /**
  * Map pi-ai usage (reasoning folded into output by pi-ai).
  * @param usage - cumulative usage from the terminal pi-ai event.

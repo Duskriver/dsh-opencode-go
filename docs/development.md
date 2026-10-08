@@ -13,9 +13,9 @@ The root package contains one coherent DSH 0.1.6-alpha.1 development environment
 | `npm test` | Rebuild, then run the core Vitest suite |
 | `npm run test:compat` | Pack once and test the installed artifact across every supported host fixture |
 | `npm run test:compat -- v015-rc1 v017-rc2 v021-alpha1` | Test only the named fixtures; unknown names fail |
-| `npm run test:install` | Test npm and pnpm 11.7.0 Git installs of prebuilt artifacts without plugin build approval |
+| `npm run test:install` | Test npm Git installation and fresh pnpm 11.7.0 Git/tarball installs with no script approvals, plus consumer type resolution |
 | `npm run test:install -- npm` / `-- pnpm` | Run just one package manager; unknown names fail |
-| `npm run verify` | Run core, compatibility, and Git-installation checks |
+| `npm run verify` | Run core, compatibility, and installation checks |
 
 The checks use loopback gateways and local fixtures, not paid inference or an installed user profile. Compatibility and installation checks need registry access; installation checks also require Git. Temporary consumers are created outside the repository and removed on success or failure. Tests never implicitly skip a missing host environment.
 
@@ -25,7 +25,7 @@ The default Git branch ships `lib/` so a GitHub URL, an npm release, and an npm 
 
 After source or build-tool changes, run `npm run compile` and commit the regenerated `lib/` with those changes. `npm run check:dist` checks missing, changed, and extra artifacts against an independent rebuild. CI uses `npm run test:ci` so it checks the committed files before running tests, instead of silently replacing stale files first. CSS module filenames are repository-relative, CSS export keys are sorted, and declaration line endings are fixed to LF so artifacts are independent of the checkout path and operating system.
 
-The Git-installation regression creates a fresh repository containing the shipped artifacts but no `src/`, `scripts/`, `tests/`, or `node_modules/`, then installs it with both package managers. Each installed package must expose its host and client entrypoints, declarations, build metadata, and importable host module, and must not declare scripts that trigger Git preparation or dependency installation hooks. pnpm receives no approval for this plugin; only unrelated Google/protobuf scripts are explicitly skipped. The cold Git identity changes for each temporary repository, preventing a previously approved Git build from hiding a missing approval. Consumer profiles and their trust settings are never modified by these tests.
+The installation regression creates a fresh repository containing the shipped artifacts but no `src/`, `scripts/`, `tests/`, or `node_modules/`, then installs it with both package managers. Each installed package must expose its host and client entrypoints, declarations, build metadata, and importable host module, and must not declare scripts that trigger Git preparation or dependency installation hooks. Fresh pnpm consumers install both the Git artifact and a packed npm artifact with `strictDepBuilds=true`, separate empty stores and isolated user configuration. They receive no `allowBuilds` entries, including Google/protobuf skips. The fixtures assert that the private SDK alias, Google SDK and protobufjs are absent, and type-check exported model types without access to development dependencies. The cold Git identity changes for each temporary repository. Consumer profiles and their trust settings are never modified by these tests.
 
 ## Installed-package matrix
 
@@ -43,9 +43,11 @@ Local compatibility runs are serial by default. Set `DSH_COMPAT_CONCURRENCY` to 
 
 All host JavaScript imports use ordinary Node resolution. The fixtures do not redirect DSH imports to alternate packages or load the plugin from the source checkout. The client fixture uses the consumer's React, store, and UI primitives, with a CSS loader for published host styles. It verifies the installed browser factory, settings registration, catalog injection, rendering, CSS, and cleanup. Host fixtures retain text streaming, real image processing, history/offload, limits, reasoning, live settings, and profile-bundle checks. Each host also runs all three wire protocols through prompt and tool declaration checks, a streamed tool call, JSON-restored assistant replay, tool-result continuation, and a one-shot request with no tools.
 
-## Isolated pi-ai dependency
+## Bundled pi-ai implementation
 
-The runtime dependency `opencode-go-pi-ai` is an npm alias for `@earendil-works/pi-ai@0.87.1`. All plugin imports, including declaration types and lazy API factories, use the alias. It keeps this plugin's SDK requirement separate from the host's public `@earendil-works/pi-ai` name, so an older plugin that declares pi-ai only as a peer is not redirected by our dependency. The npm and pnpm Git-installation checks include a public pi-ai 0.85.1 and a peer-only probe, and verify that the probe retains 0.85.1 while this plugin resolves its own 0.87.1.
+The development dependency `opencode-go-pi-ai` is an npm alias for `@earendil-works/pi-ai@0.87.1`. esbuild retains the three supported protocol implementations and the OpenCode Go model table, and discards unrelated provider implementations. Public SDK types are flattened into `lib/types/sdk-types.d.ts`; consumers do not need the private alias to resolve them. OpenAI 6.40.0 and Anthropic 0.124.0 remain runtime dependencies at the same versions pi-ai uses. Bundled code and type licenses ship in `lib/vendor-licenses.txt`.
+
+The published package does not depend on pi-ai, so it no longer introduces pi-ai's unrelated Google SDK and protobufjs install hooks. This avoids the pnpm 11 script-approval interruption that triggered issue #43 without changing the host's policy. An npm consumer separately includes public pi-ai 0.85.1 and a peer-only probe, and verifies that the probe retains 0.85.1. Other plugins' dependencies still follow the user's host trust settings.
 
 DSH requests still convert through `toPiContext`, preserving the existing host input and durable replay contracts. Immediately before calling a provider directly, the adapter applies pi-ai's `normalizeContext`. In 0.87.1, direct providers require `TranscriptContext`; only `Models` streaming entry points normalize legacy Context automatically. Normalizing at this call site preserves the system prompt and tool declarations on both text and image paths without tying the SDK format to the DSH version.
 

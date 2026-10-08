@@ -24,7 +24,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { getSupportedThinkingLevels, normalizeContext } from 'opencode-go-pi-ai'
-import type { Api, Model, ModelThinkingLevel } from 'opencode-go-pi-ai'
+import type { Api, Model, ModelThinkingLevel } from './sdk-types.ts'
 import {
   LlmAdapter,
   LlmError,

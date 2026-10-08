@@ -6,5 +6,12 @@
     "@deepseek-ai/dsh-client-store",
     "@deepseek-ai/dsh-client-ui-slots",
     "@deepseek-ai/dsh-client-ui-primitives"
-  ]
+  ],
+  "hostExternals": [
+    "@deepseek-ai/*",
+    "undici",
+    "openai",
+    "@anthropic-ai/sdk"
+  ],
+  "sdkVersion": "0.87.1"
 }

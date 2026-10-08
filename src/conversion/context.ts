@@ -14,7 +14,7 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import type { Context as PiContext, ImageContent, Message as PiMessage, TextContent, Tool as PiTool } from 'opencode-go-pi-ai'
+import type { Context as PiContext, ImageContent, Message as PiMessage, TextContent, Tool as PiTool } from '../sdk-types.ts'
 import { toPiAssistant } from './replay.ts'
 import { requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'

@@ -37,7 +37,9 @@ The plugin can also be installed by entering this Git repository URL:
 https://github.com/Duskriver/dsh-opencode-go
 ```
 
-The current default branch includes the compiled plugin. Installation needs neither a local build nor a plugin-specific `allowBuilds` entry. URLs pinned to older commits retain those commits' installation behavior; update them to the current branch.
+The current default branch includes the compiled plugin and the required model SDK code. The plugin no longer introduces the `@google/genai` or `protobufjs` install scripts, so first installation needs neither build approvals for them nor a local build. Older npm releases and URLs pinned to older commits retain their original dependencies and installation behavior.
+
+If retrying a failed installation reports success but the plugin is still missing, uninstall it and install it again. This retry path in DSH 0.2.0-rc.2 can omit plugin activation registration; see [issue #43](https://github.com/Duskriver/dsh-opencode-go/issues/43).
 
 If your DSH version does not have an **Add plugin** entry, use the command-line method below.
 
@@ -98,7 +100,7 @@ npm run compile       # Regenerate lib/ and commit it with source changes
 npm test              # Core tests, rebuilding the plugin first
 npm run check:dist    # Verify shipped artifacts match the source
 npm run test:compat   # One tarball tested in 9 independent DSH environments
-npm run test:install  # npm / pnpm Git installs without plugin build approval
+npm run test:install  # npm Git and fresh pnpm Git/tarball installs and types; no script approvals
 npm run verify        # All of the above
 ```
 

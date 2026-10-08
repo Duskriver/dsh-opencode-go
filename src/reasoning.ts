@@ -1,5 +1,5 @@
 /** Gateway reasoning controls shared by live metadata, fallbacks and requests. */
-import type { Api, Model, ModelThinkingLevel, ThinkingLevelMap } from 'opencode-go-pi-ai'
+import type { Api, Model, ModelThinkingLevel, ThinkingLevelMap } from './sdk-types.ts'
 
 export const THINKING_LEVELS: readonly ModelThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 /** Formats that explicitly disable thinking when no SDK effort is supplied. */

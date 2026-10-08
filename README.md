@@ -38,7 +38,9 @@
 https://github.com/Duskriver/dsh-opencode-go
 ```
 
-当前主分支附带编译好的插件，安装时无需本地构建，也无需为本插件修改 `allowBuilds`。固定到旧提交的 Git 地址仍沿用旧提交的安装方式，请更新到当前主分支。
+当前主分支附带编译好的插件和所需模型 SDK 代码。插件不再引入 `@google/genai`、`protobufjs` 的安装脚本，首次安装无需为它们设置 `allowBuilds`，也无需本地构建。旧 npm 版本和固定到旧提交的 Git 地址仍沿用原来的依赖与安装方式。
+
+如果旧版本安装失败后重试显示成功，但插件仍没有出现，请先卸载再重新安装；DSH 0.2.0-rc.2 的这类重试可能漏掉插件启用登记，详见 [issue #43](https://github.com/Duskriver/dsh-opencode-go/issues/43)。
 
 若当前 DSH 没有「添加插件」入口，可使用下面的命令行方式。
 
@@ -99,7 +101,7 @@ npm run compile       # 更新 lib/，与源码一起提交
 npm test              # 基础功能测试（自动重新构建）
 npm run check:dist    # 检查已提交产物是否与源码一致
 npm run test:compat   # 同一安装包在 9 套独立 DSH 环境中测试
-npm run test:install  # npm / pnpm 无额外构建授权的 Git 安装检查
+npm run test:install  # npm Git、pnpm Git/打包文件首次安装及类型检查，无预设脚本授权
 npm run verify        # 执行以上全部检查
 ```
 

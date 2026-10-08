@@ -1,7 +1,7 @@
-/** Install the shipped Git artifacts without source, build tools, or plugin build approval. */
+/** Install prebuilt Git and npm artifacts, including a fresh pnpm profile with no approvals. */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -35,7 +35,7 @@ const start = performance.now()
 const scratch = await realpath(await mkdtemp(join(process.env.RUNNER_TEMP || tmpdir(), 'dsh-git-install-')))
 console.log(`[install] Node ${process.version} on ${process.platform}; managers: ${managers.join(', ')}`)
 try {
-  const { manifest, gitURL } = await measure('Prepare source fixture', async () => {
+  const { gitURL, tarball } = await measure('Prepare prebuilt artifacts', async () => {
     const source = join(scratch, 'source')
     await mkdir(source)
     const { stdout } = await exec('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root })
@@ -46,7 +46,6 @@ try {
       try { await copyFile(join(root, path), destination) }
       catch (error) { if (error.code !== 'ENOENT') throw error } // tracked deletions
     }
-    const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
     await exec('git', ['init', '--quiet', source])
     await exec('git', ['add', '.'], { cwd: source })
     const hooks = join(scratch, 'empty-hooks')
@@ -55,41 +54,56 @@ try {
       '-c', `core.hooksPath=${hooks}`, 'commit', '--no-gpg-sign', '--quiet', '-m', 'Installation fixture'], { cwd: source })
     const { stdout: revision } = await exec('git', ['rev-parse', 'HEAD'], { cwd: source })
     const gitURL = `git+${pathToFileURL(source).href}#${revision.trim()}`
-    return { manifest, gitURL }
+    // The source fixture has no build script files. Packing it must use lib/ as-is.
+    await npm(['pack', '--ignore-scripts', '--pack-destination', scratch], source)
+    const [filename] = (await readdir(scratch)).filter(name => name.endsWith('.tgz'))
+    return { gitURL, tarball: join(scratch, filename) }
   })
   for (const manager of managers) {
     console.log(`\nChecking ${manager} Git installation from prebuilt artifacts`)
     const consumer = join(scratch, manager)
     await mkdir(consumer)
-    // Reproduce a profile with an older SDK and a plugin that only declares a
-    // broad peer. Our private alias must never replace that peer's SDK.
-    await mkdir(join(consumer, 'pi-ai-peer-probe'))
-    await writeFile(join(consumer, 'pi-ai-peer-probe/package.json'), JSON.stringify({
-      name: 'pi-ai-peer-probe', version: '1.0.0', type: 'module', exports: './index.js',
-      peerDependencies: { '@earendil-works/pi-ai': '0.82.1 || 0.85.1 || 0.87.1' },
-    }))
-    await writeFile(join(consumer, 'pi-ai-peer-probe/index.js'), 'export * from "@earendil-works/pi-ai";\n')
-    await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: `install-test-${manager}`, private: true,
-      dependencies: { '@earendil-works/pi-ai': '0.85.1', 'pi-ai-peer-probe': 'file:./pi-ai-peer-probe' },
-    }))
     if (manager === 'npm') {
+      // Preserve another plugin's older peer SDK. Its own install hooks are
+      // unrelated to our fresh-profile check, so keep it in this npm consumer.
+      await mkdir(join(consumer, 'pi-ai-peer-probe'))
+      await writeFile(join(consumer, 'pi-ai-peer-probe/package.json'), JSON.stringify({
+        name: 'pi-ai-peer-probe', version: '1.0.0', type: 'module', exports: './index.js',
+        peerDependencies: { '@earendil-works/pi-ai': '0.82.1 || 0.85.1 || 0.87.1' },
+      }))
+      await writeFile(join(consumer, 'pi-ai-peer-probe/index.js'), 'export * from "@earendil-works/pi-ai";\n')
+      await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-npm', private: true,
+        dependencies: { '@earendil-works/pi-ai': '0.85.1', 'pi-ai-peer-probe': 'file:./pi-ai-peer-probe' },
+      }))
       await measure('npm Git installation', () => npm(['install', '--no-audit', '--no-fund', gitURL], consumer))
     } else {
-      await writeFile(join(consumer, 'pnpm-workspace.yaml'), [
-        'allowBuilds:',
-        '  "@google/genai": false', '  protobufjs: false', '',
-      ].join('\n'))
-      // No plugin allowBuilds entry: users must be able to install with the default trust policy.
-      // Pin the same pnpm generation used by DSH desktop; npm exec works on Windows too.
-      const store = process.env.DSH_PNPM_STORE_DIR ? ['--store-dir', process.env.DSH_PNPM_STORE_DIR] : []
+      await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-pnpm', private: true }))
+      // No allowBuilds, cached side effects, or global trust configuration.
+      // Pin the same pnpm generation used by the issue #43 reporter.
       await measure('pnpm Git installation', () => npm([
-        'exec', '--yes', '--package=pnpm@11.7.0', '--', 'pnpm', 'add', '--prefer-offline', ...store, gitURL,
-      ], consumer))
+        'exec', '--yes', '--package=pnpm@11.7.0', '--', 'pnpm', 'add',
+        '--config.strict-dep-builds=true', '--store-dir', join(scratch, 'git-store'), gitURL,
+      ], consumer, { env: { ...process.env, XDG_CONFIG_HOME: join(scratch, 'config') } }))
     }
     await copyFile(join(root, 'tests/fixtures/installation.mjs'), join(consumer, 'installation.mjs'))
-    await measure(`${manager} artifact verification`, () => run(process.execPath, ['installation.mjs'], { cwd: consumer }))
+    await measure(`${manager} artifact verification`, () => run(process.execPath,
+      ['installation.mjs', ...manager === 'npm' ? ['legacy-peer'] : []], { cwd: consumer }))
+    await checkConsumerTypes(consumer, manager)
+    if (manager === 'pnpm') {
+      const packedConsumer = join(scratch, 'pnpm-packed')
+      await mkdir(packedConsumer)
+      await writeFile(join(packedConsumer, 'package.json'), JSON.stringify({ name: 'install-test-packed', private: true }))
+      await measure('pnpm packed npm installation', () => npm([
+        'exec', '--yes', '--package=pnpm@11.7.0', '--', 'pnpm', 'add',
+        '--config.strict-dep-builds=true', '--store-dir', join(scratch, 'packed-store'), tarball,
+      ], packedConsumer, { env: { ...process.env, XDG_CONFIG_HOME: join(scratch, 'packed-config') } }))
+      await copyFile(join(root, 'tests/fixtures/installation.mjs'), join(packedConsumer, 'installation.mjs'))
+      await measure('pnpm packed artifact verification', () => run(process.execPath, ['installation.mjs'], { cwd: packedConsumer }))
+      await checkConsumerTypes(packedConsumer, 'pnpm packed')
+    }
   }
-  console.log(`\nPASS: ${managers.join(' and ')} Git installation without source builds or plugin build approval`)
+  console.log(`\nPASS: ${managers.join(' and ')} installation without source builds`
+    + (managers.includes('pnpm') ? '; fresh pnpm needs no build approvals' : '; existing peer SDK preserved'))
 } finally {
   try {
     await measure('Clean temporary consumers', () => rm(scratch, { recursive: true, force: true }))
@@ -98,11 +112,29 @@ try {
     console.log(`[install] Total: ${total}s`)
     if (process.env.GITHUB_STEP_SUMMARY) {
       await appendFile(process.env.GITHUB_STEP_SUMMARY, [
-        `## Git installation: ${managers.join(', ')}`, '',
+        `## Prebuilt installation: ${managers.join(', ')}`, '',
         '| Phase | Seconds | Result |', '| --- | ---: | --- |',
         ...timings.map(({ phase, seconds, status }) => `| ${phase} | ${seconds} | ${status} |`),
         '', `Total: ${total}s.`, '',
       ].join('\n'))
     }
   }
+}
+
+async function checkConsumerTypes(consumer, label) {
+  await writeFile(join(consumer, 'consumer.mts'), [
+    'import { OpencodeGoCatalog } from "dsh-opencode-go";',
+    'declare const catalog: OpencodeGoCatalog;',
+    'const snapshot = await catalog.snapshot();',
+    'const model = snapshot.models.values().next().value;',
+    'if (model) { const id: string = model.id; const context: number = model.contextWindow; void [id, context]; }',
+    // This would pass silently if missing private SDK declarations became any.
+    '// @ts-expect-error Model.id is a string',
+    'const invalid: number = model!.id;',
+    'void invalid;', '',
+  ].join('\n'))
+  await measure(`${label} public types`, () => run(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'),
+    '--noEmit', '--strict', '--skipLibCheck', '--module', 'NodeNext', '--moduleResolution', 'NodeNext',
+    '--target', 'ES2024', 'consumer.mts',
+  ], { cwd: consumer }))
 }

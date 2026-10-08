@@ -5,7 +5,7 @@
  */
 import type { GenerateOptions, ImageAttachmentAccessResolver } from '@deepseek-ai/dsh-llm';
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment';
-import type { Context as PiContext } from 'opencode-go-pi-ai';
+import type { Context as PiContext } from '../sdk-types.ts';
 /** Inputs that bind deterministic request images to one current tool execution world. */
 export interface PiImageRequestContext {
     /** Durable provider that resolves request-image bytes and provider-owned host objects. */
