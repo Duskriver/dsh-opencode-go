@@ -110,7 +110,8 @@ async function compile(output) {
       : ['@earendil-works/pi-ai', '@earendil-works/pi-telemetry'].includes(manifest.name)
         ? new URL(`./licenses/pi-${manifest.version}-LICENSE`, import.meta.url) : undefined
     if (!licensePath) throw new Error(`Missing license for bundled package ${manifest.name}`)
-    licenses.push(`${manifest.name}@${manifest.version}\n\n${(await readFile(licensePath, 'utf8')).trim()}\n`)
+    const license = (await readFile(licensePath, 'utf8')).replace(/\r\n?/g, '\n').trim()
+    licenses.push(`${manifest.name}@${manifest.version}\n\n${license}\n`)
   }
   await writeFile(join(output, 'vendor-licenses.txt'), licenses.join('\n---\n\n'))
 

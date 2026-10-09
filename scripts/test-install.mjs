@@ -9,6 +9,8 @@ import { npm, run } from './test-process.mjs'
 
 const exec = promisify(execFile)
 const root = fileURLToPath(new URL('../', import.meta.url))
+const { devDependencies: { typescript } } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+const consumerDevDependencies = { typescript }
 const requested = process.argv.slice(2)
 const managers = requested.length ? [...new Set(requested)] : ['npm', 'pnpm']
 for (const manager of managers) {
@@ -73,12 +75,14 @@ try {
       }))
       await writeFile(join(consumer, 'pi-ai-peer-probe/index.js'), 'export * from "@earendil-works/pi-ai";\n')
       await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-npm', private: true,
+        devDependencies: consumerDevDependencies,
         dependencies: { '@earendil-works/pi-ai': '0.85.1', 'pi-ai-peer-probe': 'file:./pi-ai-peer-probe',
           openai: '6.40.0', '@anthropic-ai/sdk': '0.124.0' },
       }))
       await measure('npm Git installation', () => npm(['install', '--no-audit', '--no-fund', gitURL], consumer))
     } else {
-      await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-pnpm', private: true }))
+      await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-pnpm', private: true,
+        devDependencies: consumerDevDependencies }))
       // No allowBuilds, cached side effects, or global trust configuration.
       // Pin the same pnpm generation used by the issue #43 reporter.
       await measure('pnpm Git installation', () => npm([
@@ -93,7 +97,8 @@ try {
     if (manager === 'pnpm') {
       const packedConsumer = join(scratch, 'pnpm-packed')
       await mkdir(packedConsumer)
-      await writeFile(join(packedConsumer, 'package.json'), JSON.stringify({ name: 'install-test-packed', private: true }))
+      await writeFile(join(packedConsumer, 'package.json'), JSON.stringify({ name: 'install-test-packed', private: true,
+        devDependencies: consumerDevDependencies }))
       await measure('pnpm packed npm installation', () => npm([
         'exec', '--yes', '--package=pnpm@11.7.0', '--', 'pnpm', 'add',
         '--config.strict-dep-builds=true', '--store-dir', join(scratch, 'packed-store'), tarball,
@@ -134,7 +139,7 @@ async function checkConsumerTypes(consumer, label) {
     'const invalid: number = model!.id;',
     'void invalid;', '',
   ].join('\n'))
-  await measure(`${label} public types`, () => run(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'),
+  await measure(`${label} public types`, () => run(process.execPath, [join(consumer, 'node_modules/typescript/bin/tsc'),
     '--noEmit', '--strict', '--skipLibCheck', '--module', 'NodeNext', '--moduleResolution', 'NodeNext',
     '--target', 'ES2024', 'consumer.mts',
   ], { cwd: consumer }))
