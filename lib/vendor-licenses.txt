@@ -1,4 +1,4 @@
-@earendil-works/pi-ai@0.87.1
+@earendil-works/pi-telemetry@1.1.0
 
 MIT License
 
@@ -24,7 +24,7 @@ SOFTWARE.
 
 ---
 
-@earendil-works/pi-telemetry@0.87.1
+@earendil-works/pi-ai@1.1.0
 
 MIT License
 

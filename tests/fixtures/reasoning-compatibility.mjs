@@ -12,7 +12,7 @@ const plugin = await import('dsh-opencode-go')
 
 const models = {
   'deepseek-v4-flash': { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] },
-  'qwen3.6-plus': { reasoning_options: [{ type: 'toggle' }] },
+  'deepseek-v4-pro': { reasoning_options: [{ type: 'toggle' }] },
   'glm-5.3': { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] },
   'mimo-v2.6-flash': { reasoning_options: [] },
 }
@@ -72,8 +72,8 @@ try {
     ['deepseek-v4-flash', undefined, { thinking: { type: 'enabled' }, reasoning_effort: 'high' }],
     ['deepseek-v4-flash', 'low', { thinking: { type: 'enabled' }, reasoning_effort: 'low' }],
     ['deepseek-v4-flash', 'off', { thinking: { type: 'disabled' } }],
-    ['qwen3.6-plus', undefined, { enable_thinking: true, reasoning_effort: 'high' }],
-    ['qwen3.6-plus', 'off', { enable_thinking: false }],
+    ['deepseek-v4-pro', undefined, { thinking: { type: 'enabled' }, reasoning_effort: 'high' }],
+    ['deepseek-v4-pro', 'off', { thinking: { type: 'disabled' } }],
     ['glm-5.3', undefined, {}],
     ['glm-5.3', 'low', { reasoning_effort: 'low' }],
     ['mimo-v2.6-flash', undefined, {}],
@@ -105,7 +105,7 @@ try {
     assert.equal(chunks.some(c => c.type === 'reasoning-delta' && c.text === 'think'), effort !== 'off')
     assert.ok(chunks.some(c => c.type === 'text-delta' && c.text === 'ok'))
   }
-  console.log(`PASS: reasoning compatibility (${host}): defaults, explicit low/off, qwen toggle, MiMo wire mappings; ${cases.length} streams`)
+  console.log(`PASS: reasoning compatibility (${host}): defaults, explicit low/off, native toggle, MiMo wire mappings; ${cases.length} streams`)
 } finally {
   await ctx.fiber.dispose()
   server.closeAllConnections()

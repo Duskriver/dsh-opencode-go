@@ -75,11 +75,11 @@ describe('gateway reasoning metadata', () => {
   it('retains native switches without inventing a wire effort for Off', () => {
     const result = readModelMetadata(metadataDocument({
       'deepseek-v4-flash': modelMetadata(),
-      'qwen3.6-plus': modelMetadata({ reasoning_options: [{ type: 'toggle' }] }),
+      'deepseek-v4-pro': modelMetadata({ reasoning_options: [{ type: 'toggle' }] }),
       'minimax-m3': modelMetadata({ provider: { npm: '@ai-sdk/anthropic' }, reasoning_options: [{ type: 'toggle' }] }),
     }), 'https://gateway.example/v1', builtin)
     expect(levels(result.models.get('deepseek-v4-flash')!)).toEqual(['off', 'low', 'high', 'max'])
-    for (const modelId of ['qwen3.6-plus', 'minimax-m3']) {
+    for (const modelId of ['deepseek-v4-pro', 'minimax-m3']) {
       expect(levels(result.models.get(modelId)!)).toEqual(['off', 'high'])
       expect(result.models.get(modelId)!.thinkingLevelMap).not.toHaveProperty('off')
     }
@@ -87,10 +87,10 @@ describe('gateway reasoning metadata', () => {
 
   it('does not add High beside explicit efforts for a native toggle', () => {
     const model = readModelMetadata(metadataDocument({
-      'qwen3.6-plus': modelMetadata({ reasoning_options: [
+      'deepseek-v4-pro': modelMetadata({ reasoning_options: [
         { type: 'toggle' }, { type: 'effort', values: ['low', 'medium'] },
       ] }),
-    }), 'https://gateway.example/v1', builtin).models.get('qwen3.6-plus')!
+    }), 'https://gateway.example/v1', builtin).models.get('deepseek-v4-pro')!
     expect(levels(model)).toEqual(['off', 'low', 'medium'])
   })
 
@@ -104,6 +104,43 @@ describe('gateway reasoning metadata', () => {
 })
 
 describe('reasoning through the Harness and SDK', () => {
+  it.each([false, true])('uses adaptive Haiku thinking with metadata outage=%s', async outage => {
+    const modelId = 'claude-haiku-5-5'
+    const original = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
+      String(input) === MODELS_METADATA_URL
+        ? Promise.resolve(outage ? new Response('', { status: 503 }) : Response.json(metadataDocument({
+            [modelId]: modelMetadata({ provider: { npm: '@ai-sdk/anthropic' },
+              reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['low', 'medium', 'high', 'xhigh', 'max'] }],
+            }),
+          }))) : original(input, init))
+    const gateway = await mockGateway({ status: 200, body: listingBody([modelId]) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
+    const events = [
+      { type: 'message_start', message: { id: 'msg_haiku', type: 'message', role: 'assistant', model: modelId,
+        content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello' } },
+      { type: 'content_block_stop', index: 0 },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
+      { type: 'message_stop' },
+    ].map(event => JSON.stringify(event))
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', 'off']) {
+      gateway.pushCompletions({ events, namedEvents: true })
+      const chunks = []
+      for await (const chunk of adapter.stream({
+        provider: 'dsh-opencode-go', model: modelId, reasoningEffort: ReasoningEffortId(effort),
+        messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
+      })) chunks.push(chunk)
+      expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+      const body = gateway.bodies.at(-1)
+      expect(body).toMatchObject({ model: modelId, thinking: { type: effort === 'off' ? 'disabled' : 'adaptive' } })
+      expect(body).not.toHaveProperty('thinking.budget_tokens')
+      if (effort === 'off') expect(body).not.toHaveProperty('output_config')
+      else expect(body).toMatchObject({ output_config: { effort } })
+    }
+  })
+
   it.each([false, true])('keeps MiMo Default separate from Off with metadata outage=%s', async outage => {
     const original = globalThis.fetch
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>

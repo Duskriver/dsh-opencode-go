@@ -73,7 +73,8 @@ try {
       }))
       await writeFile(join(consumer, 'pi-ai-peer-probe/index.js'), 'export * from "@earendil-works/pi-ai";\n')
       await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-npm', private: true,
-        dependencies: { '@earendil-works/pi-ai': '0.85.1', 'pi-ai-peer-probe': 'file:./pi-ai-peer-probe' },
+        dependencies: { '@earendil-works/pi-ai': '0.85.1', 'pi-ai-peer-probe': 'file:./pi-ai-peer-probe',
+          openai: '6.40.0', '@anthropic-ai/sdk': '0.124.0' },
       }))
       await measure('npm Git installation', () => npm(['install', '--no-audit', '--no-fund', gitURL], consumer))
     } else {

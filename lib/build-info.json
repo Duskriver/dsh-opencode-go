@@ -13,5 +13,5 @@
     "openai",
     "@anthropic-ai/sdk"
   ],
-  "sdkVersion": "0.87.1"
+  "sdkVersion": "1.1.0"
 }

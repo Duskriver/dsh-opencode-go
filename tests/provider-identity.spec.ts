@@ -97,11 +97,11 @@ it('preserves OpenCode reasoning replay across the DSH route and SDK provider id
   }
 })
 
-it('preserves signed Anthropic thinking across a returned model alias and JSON-restored continuation', async () => {
+it.each(['minimax-m3', 'claude-haiku-5-5'])('preserves signed %s thinking across a returned model alias and JSON-restored continuation', async modelId => {
   vi.stubEnv('OPENCODE_API_KEY', 'test-key')
-  const gateway = await mockGateway({ status: 200, body: listingBody(['minimax-m3', 'union-alpha']) })
+  const gateway = await mockGateway({ status: 200, body: listingBody([modelId, 'union-alpha']) })
   const events = [
-    { type: 'message_start', message: { id: 'msg_alias', type: 'message', role: 'assistant', model: 'minimax-m3-reported-alias',
+    { type: 'message_start', message: { id: 'msg_alias', type: 'message', role: 'assistant', model: `${modelId}-reported-alias`,
       content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
     { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
     { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'signed thought' } },
@@ -118,11 +118,11 @@ it('preserves signed Anthropic thinking across a returned model alias and JSON-r
   await ctx.plugin(LlmRuntime)
   try {
     apply(ctx, configOf(`${gateway.url}/v1`))
-    const request = { provider: route, model: 'minimax-m3', messages: [user()], reasoningEffort: ReasoningEffortId('high') }
+    const request = { provider: route, model: modelId, messages: [user()], reasoningEffort: ReasoningEffortId('high') }
     const chunks = await drain(ctx, request)
     const finish = chunks.find(chunk => chunk.type === 'finish')
     expect(finish).toMatchObject({ reason: { kind: 'stop' }, replayState: { response: {
-      model: request.model, responseModel: 'minimax-m3-reported-alias', provider: route, sdkProvider: 'opencode-go',
+      model: request.model, responseModel: `${modelId}-reported-alias`, provider: route, sdkProvider: 'opencode-go',
     } } })
     const restored = JSON.parse(JSON.stringify(createMessage({ role: 'assistant',
       content: chunks.filter(chunk => chunk.type === 'block-end').map(chunk => chunk.block),

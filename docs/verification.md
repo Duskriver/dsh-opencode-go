@@ -1,5 +1,31 @@
 # Verification
 
+
+## pi-ai 1.1.0 and Haiku 5.5 adaptive thinking (2026-10-09)
+
+Upgraded the private bundled pi-ai alias from 0.87.1 to 1.1.0, with its matching external transports: OpenAI 7.19.0 and Anthropic 0.129.0. The upstream OpenCode Go catalog now supplies Haiku 5.5's `forceAdaptiveThinking` compatibility flag; the existing metadata merge retains it without a model-specific production patch. Refreshed the bundled implementation, public declarations, and upstream v1.1.0 license.
+
+The Haiku regression captures real SDK requests against a loopback gateway for low, medium, high, xhigh, max, and off, with both live metadata and metadata failure. Enabled efforts use adaptive thinking and `output_config.effort`, never `budget_tokens`; off disables thinking. Native-toggle fixtures now use DeepSeek V4 Pro because the new upstream catalog removed Qwen 3.6 Plus.
+
+On macOS, `DSH_COMPAT_CONCURRENCY=4 npm run verify` passed 539 tests in 34 files, freshness checks for 43 shipped artifacts, all ten installed DSH generations (0.1.5-rc.1 through 0.2.1-alpha.1), and npm/pnpm installation checks. Existing three-protocol fixtures cover prompts, tools, restored replay, and continuations. Installation assertions additionally verify that a consumer keeps public pi-ai 0.85.1, OpenAI 6.40.0, and Anthropic 0.124.0 while the plugin resolves OpenAI 7.19.0 and Anthropic 0.129.0. Fresh pnpm Git and packed installs require no build approvals.
+
+Clean `npm ci --strict-peer-deps` and `npm run test:ci` passed with Node 22.19.0 / npm 10.9.3 and Node 24.14.1 / npm 11.11.0. Regenerated the lockfile with npm 10 to retain Vite's optional esbuild peer records. The initial automated run used local fixtures; live validation is recorded below. The user's installed profile was not changed, and nothing was published.
+
+
+### Expanded live validation (2026-10-09)
+
+With the user's authorization, used the existing default OpenCode Go credential in memory through the rebuilt plugin adapter. Requests used synthetic prompts, synthetic tool results, temporary DSH homes, no account switching, no retries, and bounded output. Credentials, headers, and private conversation data were not saved in the report.
+
+- Haiku 5.5: default, off, low, medium, high, xhigh, and max all completed. Wire capture confirmed adaptive thinking with the requested effort for every enabled level; max produced a reasoning block. Default/off send disabled thinking. Adaptive thinking can legitimately skip a reasoning block on an easy question.
+- Three real protocols: Haiku 5.5, DeepSeek V4 Flash, and GPT-6 Luna each called a synthetic `lookup_code` tool, then returned `CHECK-739` after JSON-restored assistant history and a tool-result continuation.
+- Haiku max reasoning solved a probability question as 7/22. Restoring that signed reasoning history and switching to off succeeded. Cancelling after the first text delta returned ABORTED, and a subsequent request on the same adapter succeeded. A supplied temperature was omitted for Haiku as expected.
+- MiniMax M3 high, Qwen 3.8 Max low, MiMo V2.6 Flash off, and DeepSeek V4 Flash low/off all completed with correct short answers. The 23 recorded live scenarios include one intentional cancellation; an additional initial tool call was repeated after fixing the test harness's attempt to mutate a frozen user message.
+- An offline old/new request-body comparison covered Haiku plus six current models (DeepSeek V4 Flash, GPT-6 Luna, MiniMax M3, Qwen 3.8 Max, MiMo V2.6 Flash, Kimi K3), including system prompts, tools, effort, temperature, and output caps. Only Haiku changed: adaptive thinking and output_config replace the old budget mode. MiniMax/Qwen's budget additions to max_tokens are unchanged existing behavior.
+
+The new upstream catalog removes Kimi K2.6, GLM 5.1, Qwen 3.7 Max, and Qwen 3.6 Plus from its built-ins even though the gateway still lists them. A Qwen 3.6 Plus Off request was rejected locally after its legacy compatibility hints disappeared. Per the user's instruction to discard obsolete models, no legacy catalog snapshots or compatibility exceptions are retained. Live metadata may still make some such models discoverable, but their old built-in fallback/controls are no longer guaranteed.
+
+Added Haiku to the durable signed-thinking/alias/replay regression alongside MiniMax; the final `npm run test:ci` passed all 540 tests in 34 files and all 43 artifact freshness checks. No further failures were observed in the current-model scenarios; live probes do not establish exhaustive compatibility or long-running reliability.
+
 ## Issue #43: first installation without dependency script approvals (2026-10-09, unreleased)
 
 The issue attachments report that DSH 0.2.0-rc.2 / pnpm 11.7.0 can leave the plugin dependency in `package.json` after script approval interrupts the first install. A successful retry can then miss bundle registration. Inspection of the published DSH plugin-manager source confirms that its reconciliation skips dependencies already present in the pre-install snapshot. This package change avoids the dependency-script interruption that triggers that path; it does not repair an already incomplete DSH profile or change DSH's installer.
