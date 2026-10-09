@@ -45,7 +45,9 @@ import type { PiImageRequestContext } from './conversion/index.ts'
 import { deadline, idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } from './catalog.ts'
 import { assertBaseURL, DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from './config.ts'
-import { assertProxyURL } from './proxy-url.ts'
+import { GoCatalogManager } from './catalog-manager.ts'
+import { withProtocolOverride } from './protocol-policy.ts'
+import { accountFallback, isGatewayKeyRejection } from './account-policy.ts'
 import { ProxyTransport } from './proxy.ts'
 import { GatewayDiagnostics } from './gateway-diagnostics.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
@@ -57,21 +59,8 @@ import { CallTrace, type GoCallTrace } from './call-trace.ts'
 import { ImagePayloadLease } from './conversion/image-pool.ts'
 export type { GoCallTrace } from './call-trace.ts'
 
-/** A generic 403/rate limit is not proof that another subscription can help. */
-function accountFailureReason(failure: { code: string; message: string }): GoAccountSwitch['reason'] | undefined {
-  if (failure.code === 'QUOTA') return 'quota'
-  if (failure.code === 'MISSING_CREDENTIAL' || failure.code === 'INVALID_CREDENTIAL') return 'credential'
-  return undefined
-}
-
-/** How long the adapter remembers a gateway key rejection before re-checking. */
+/** Recheck a gateway-rejected key after a bounded window. */
 const REJECTED_KEY_TTL_MS = 5 * 60_000
-
-/** The gateway itself refused the key — a fact worth remembering for a while.
- * A locally missing credential is re-checked for free on every request. */
-function isGatewayKeyRejection(failure: { code: string }): boolean {
-  return failure.code === 'INVALID_CREDENTIAL'
-}
 
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
@@ -110,6 +99,8 @@ export interface GoAccountSettlement {
 export interface OpencodeGoAdapterOptions {
   /** Shared with Host usage reads for this plugin mount. */
   transport?: ProxyTransport
+  /** Mount-owned discovery; direct construction supplies its own manager. */
+  catalog?: (config: OpencodeGoConfig) => OpencodeGoCatalog
   /** Optional directory for bounded HTTP error evidence; request contents are omitted. */
   debugDirectory?: () => string | undefined
   /**
@@ -168,13 +159,7 @@ function opencodeSessionValue(sessionId: string | undefined): string {
  * call.
  */
 export class OpencodeGoAdapter extends LlmAdapter {
-  /**
-   * One catalog instance per endpoint/refresh pair. A settings write that
-   * changes either gets a fresh resolver (and a fresh live-listing fetch) on
-   * the next operation; an unchanged configuration keeps its cached snapshot
-   * for the whole refresh interval.
-   */
-  private catalogCache: { key: string; catalog: OpencodeGoCatalog } | undefined
+  private readonly resolveCatalog: (config: OpencodeGoConfig) => OpencodeGoCatalog
   private readonly transport: ProxyTransport
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
@@ -186,6 +171,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
     this.transport = options.transport ?? new ProxyTransport()
+    const catalogs = options.catalog ? undefined : new GoCatalogManager({
+      transport: this.transport, onFallback: options.onFallback, onOmitted: options.onOmitted,
+      onRefresh: options.onCatalogRefresh, onWarning: options.onCatalogWarning,
+    })
+    this.resolveCatalog = options.catalog ?? (config => catalogs!.forConfig(config))
   }
 
   dispose(): Promise<void> { return this.transport.dispose() }
@@ -198,25 +188,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * @returns the resolver caching catalog values, independent of deployment limits.
    */
   catalogOf(config: OpencodeGoConfig): OpencodeGoCatalog {
-    const key = JSON.stringify([config.baseURL, config.refreshMinutes, assertProxyURL(config.proxyURL)])
-    if (this.catalogCache?.key !== key) {
-      const catalog = new OpencodeGoCatalog(
-        assertBaseURL(config.baseURL),
-        config.refreshMinutes * 60_000,
-        /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
-        this.options.onFallback ?? (() => {}),
-        /* v8 ignore next -- the plugin always passes both observers; the defaults exist for direct construction */
-        this.options.onOmitted ?? (() => {}),
-        () => {
-          // Late results from a replaced configuration cannot invalidate the current picker.
-          if (this.catalogCache?.catalog === catalog) this.options.onCatalogRefresh?.()
-        },
-        this.transport.forProxy(config.proxyURL),
-        this.options.onCatalogWarning,
-      )
-      this.catalogCache = { key, catalog }
-    }
-    return this.catalogCache.catalog
+    return this.resolveCatalog(config)
   }
 
   override providerInfo(provider: string): { id: string; name: string } {
@@ -248,7 +220,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     return this.modelInfo((await this.callSnapshot(model, signal)).model)
   }
 
-  /** Copy nested limits before discovery can yield to a settings update. */
+  /** Capture limits and protocol before discovery can yield to a settings update. */
   private async callSnapshot(model: string, signal?: AbortSignal,
     captured = { generation: this.options.accountGeneration?.() ?? 0, config: structuredClone(this.options.config()) },
   ): Promise<OpencodeGoCallSnapshot> {
@@ -264,7 +236,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
     }
-    return { generation, config, catalog, model: withModelLimit(resolved, config.modelLimits) }
+    return { generation, config, catalog, model: withModelLimit(withProtocolOverride(resolved, config), config.modelLimits) }
   }
 
   /** Keep capability resolution and eventual dispatch on the same configuration. */
@@ -388,6 +360,15 @@ export class OpencodeGoAdapter extends LlmAdapter {
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
+      const retryFailure = (failure: { code: string } | undefined): boolean => {
+        const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
+          aborted: options.signal?.aborted === true, hasNext: attempt + 1 < refs.length })
+        if (!reason || !failure) return false
+        if (isGatewayKeyRejection(failure)) this.rememberRejectedKey(refs[attempt]!, gateway)
+        switchReason ??= reason
+        failedRef ??= refs[attempt]!
+        return true
+      }
       const announce = (): void => {
         if (emitted) return
         const serving = refs[attempt]!
@@ -413,15 +394,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
             trace.endAttempt(chunk.reason.kind === 'error' ? 'failed' : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed',
               chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted' ? chunk.reason.failure?.code : undefined)
             const failure = chunk.reason.kind === 'error' ? chunk.reason.failure : undefined
-            const reason = failure === undefined ? undefined : accountFailureReason(failure)
-            if (reason && failure !== undefined && !emitted && !options.signal?.aborted && !((usage?.usage.totalTokens ?? 0) > 0)
-              && attempt + 1 < refs.length) {
-              if (isGatewayKeyRejection(failure)) this.rememberRejectedKey(refs[attempt]!, gateway)
-              switchReason ??= reason
-              failedRef ??= refs[attempt]!
-              retry = true
-              break
-            }
+            if (retryFailure(failure)) { retry = true; break }
             if (chunk.reason.kind === 'stop' || chunk.reason.kind === 'tool-calls' || chunk.reason.kind === 'max-tokens') announce()
             if (usage) yield usage
             yield chunk
@@ -435,11 +408,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       } catch (error) {
         trace.endAttempt(options.signal?.aborted && !(error instanceof LlmError && error.code === 'TIMEOUT') ? 'aborted' : 'failed',
           error instanceof LlmError ? error.code : 'PI_AI_ERROR')
-        const reason = error instanceof LlmError ? accountFailureReason(error) : undefined
-        if (!reason || emitted || options.signal?.aborted || attempt + 1 >= refs.length) throw error
-        if (error instanceof LlmError && isGatewayKeyRejection(error)) this.rememberRejectedKey(refs[attempt]!, gateway)
-        switchReason ??= reason
-        failedRef ??= refs[attempt]!
+        if (!retryFailure(error instanceof LlmError ? error : undefined)) throw error
       } finally { trace.endAttempt() }
     }
   }

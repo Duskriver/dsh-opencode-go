@@ -11,6 +11,8 @@ export interface ModelMetadata {
 }
 /** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */
 export declare function modelBaseURL(api: Api, baseURL: string): string;
+/** Shared Responses defaults for declared models and explicit protocol overrides. */
+export declare function responsesCompatibility(): NonNullable<Model<'openai-responses'>['compat']>;
 /**
  * Only read the opencode-go record. Online endpoints, headers and credentials
  * are deliberately ignored: model traffic always stays on the configured gateway.

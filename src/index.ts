@@ -44,17 +44,19 @@ import {
   PROVIDER_ID,
   discoverCatalogModels,
 } from './catalog.ts'
-import { Config, PlainConfig, readConfig, assertBaseURL, assertApiKeyEnv } from './config.ts'
+import { Config, readConfig } from './config.ts'
 import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
 import { registerGoRemotes } from './remotes.ts'
-import { accountsOf, accountRefOf, assertAccounts } from './accounts.ts'
+import { accountsOf, accountRefOf } from './accounts.ts'
 import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
-import { assertAccountOperations } from './account-operations.ts'
-import { GoAccountRecovery } from './account-recovery.ts'
-import { assertProxyURL } from './proxy-url.ts'
+import { GoAccountManager } from './account-manager.ts'
+import { GoAccountsService } from './account-service.ts'
 import { ProxyTransport } from './proxy.ts'
+import { GoCatalogManager } from './catalog-manager.ts'
+import { SETTINGS_NAMESPACE } from './config-contract.ts'
+import { installHostSettings, validateGoConfig } from './host-settings.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -80,7 +82,7 @@ export const name = 'llm-opencode-go'
 export const inject = ['llm']
 
 /** Settings namespace this plugin installs and the Web page edits. */
-export const NS = 'llm-opencode-go'
+export const NS = SETTINGS_NAMESPACE
 
 /**
  * Register the route, its discovery, the settings section, and their
@@ -93,11 +95,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const entry = readConfig(config)
   // Self-contained misconfiguration fails at load; a bad stored value instead
   // refuses the write through the section's validate hook.
-  assertBaseURL(entry.baseURL)
-  assertProxyURL(entry.proxyURL)
-  assertApiKeyEnv(entry.apiKeyEnv)
-  assertAccounts(entry.accounts, entry.apiKeyEnv)
-  assertAccountOperations(entry.accountOperations)
+  validateGoConfig(entry)
   let current: () => OpencodeGoConfig = () => readConfig(config)
 
   const resolveApiKey = async (config: OpencodeGoConfig = current()): Promise<string | undefined> => {
@@ -121,9 +119,10 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   }
   registerGoRemotes(ctx)
   const selection = new GoAccountSelection(() => current(), ctx.logger)
-  const recovery = new GoAccountRecovery(ctx.logger)
+  const accountManager = new GoAccountManager(ctx.logger)
+  ctx.plugin(GoAccountsService, { manager: accountManager })
   ctx.inject(['settings', 'credentials'], ready => {
-    ready.effect(() => recovery.connect(ready.settings as unknown as AccountSettingsWriter, ready.credentials))
+    ready.effect(() => accountManager.connect(ready.settings as unknown as AccountSettingsWriter, ready.credentials))
   })
   const transport = new ProxyTransport()
   ctx.effect(() => () => transport.dispose())
@@ -145,13 +144,18 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     },
   }
   let registration: AdapterRegistrationHandle | undefined
+  const catalogs = new GoCatalogManager({
+    transport, onFallback: logger.fallback, onOmitted: logger.omitted,
+    onWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
+    onRefresh: () => { registration?.replace([PROVIDER_ID]) },
+  })
   const adapter = new OpencodeGoAdapter({
     transport,
+    catalog: config => catalogs.forConfig(config),
     debugDirectory: () => launchEnvironmentOf(ctx).get('DSH_OPENCODE_GO_DEBUG_DIR')?.value,
     config: () => current(),
     resolveApiKey,
     onCallTrace: trace => { ctx.logger.debug(`llm-opencode-go call: ${JSON.stringify(trace)}`) },
-    onCatalogWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
     accountGeneration: () => selection.capture(),
     onAccountSettled: event => { selection.settle(event) },
     imageAccess: {
@@ -162,18 +166,15 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
         ref,
       ),
     },
-    onFallback: logger.fallback,
-    onOmitted: logger.omitted,
-    onCatalogRefresh: () => { registration?.replace([PROVIDER_ID]) },
     onReplayDegrade: (reason) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
   })
   ctx.plugin(GoModelsService, {
-    catalog: () => adapter.catalogOf(current()),
+    catalog: () => catalogs.forConfig(current()),
     onRefresh: () => { registration?.replace([PROVIDER_ID]) },
   })
-  const pickerVisibilityOf = (): string => JSON.stringify(current().modelVisibility ?? {})
+  const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().protocolOverrides ?? {}])
   let pickerVisibility = pickerVisibilityOf()
   /**
    * Register the route while the switch is on and its credential resolves, and
@@ -209,7 +210,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   let routeCheck = 0
   let selectedRef = accountRefOf(current())
   const syncRoute = (): void => {
-    recovery.trigger()
+    accountManager.trigger()
     const check = ++routeCheck
     const config = current()
     selection.capture()
@@ -250,7 +251,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
           'DISCOVERY_UNSUPPORTED',
         )
       }
-      return discoverCatalogModels(adapter.catalogOf(current()))
+      return discoverCatalogModels(catalogs.forConfig(current()))
     })
   } catch (error: unknown) {
     // A duplicate mount may already own our discovery registration — the same
@@ -265,57 +266,10 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     undiscover()
     /* v8 ignore stop */
   })
-  // Settings-backed configuration: the section starts from the cordis.yml
-  // entry as its base layer and follows the settings provider while attached.
-  // Without a settings provider the plugin still loads and serves the entry.
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.effect(() => selection.connect(settingsCtx.settings as unknown as AccountSettingsWriter))
-    if ('configure' in settingsCtx.settings) {
-      const settings = settingsCtx.settings as unknown as {
-        configure(policy: { auto: boolean }, owner: typeof ctx.fiber): () => void
-      }
-      settingsCtx.effect(() => {
-        const dispose = settings.configure({ auto: false }, ctx.fiber)
-        recovery.trigger()
-        return dispose
-      })
-      return
-    }
-    settingsCtx.settings.installSection(ctx, NS, PlainConfig, entry, {
-      validate: (value) => {
-        assertBaseURL(value.baseURL)
-        assertProxyURL(value.proxyURL)
-        if (typeof value.apiKeyEnv === 'string') assertApiKeyEnv(value.apiKeyEnv)
-        assertAccounts(value.accounts, value.apiKeyEnv)
-        assertAccountOperations(value.accountOperations)
-      },
-      setSource: (source) => {
-        current = source
-      },
-      onChange: () => {
-        // The registered route set follows the credential the section names;
-        // every other fact is per-request and reaches it through `current`.
-        syncRoute()
-      },
-    })
-    // The credentials/settings injection can run before this section exists.
-    recovery.trigger()
-  })
-  // Validate before 0.1.7 persists a profile edit, then follow committed refs.
-  ctx.on('internal/config', function (_raw, next) {
-    const value = next()
-    if (this === ctx.fiber) {
-      // Pre-check the raw field so the refusal names it, before the schema's
-      // generic regexp complaint takes the throw.
-      const raw = value as { apiKeyEnv?: unknown }
-      if (typeof raw.apiKeyEnv === 'string') assertApiKeyEnv(raw.apiKeyEnv)
-      const config = PlainConfig(value)
-      assertBaseURL(config.baseURL)
-      assertProxyURL(config.proxyURL)
-      assertAccounts(config.accounts, config.apiKeyEnv)
-      assertAccountOperations(config.accountOperations)
-    }
-    return value
+  installHostSettings(ctx, entry, {
+    connect: settings => selection.connect(settings),
+    setSource: source => { current = source },
+    onChange: syncRoute, recover: () => accountManager.trigger(),
   })
   // The event is absent on older Loaders; registering it is harmless there.
   ctx.on('loader/volatile-update', syncRoute)
@@ -323,7 +277,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // included — flips the route's presence; the event names the reference.
   ctx.inject(['credentials'], (credentialsCtx) => {
     credentialsCtx.on('credentials/reference-updated', (ref) => {
-      recovery.trigger()
+      accountManager.trigger()
       // A stored change to a reference outranks the gateway's last rejection
       // of it, so the very next request re-checks the new key.
       adapter.forgetRejectedKey(ref)

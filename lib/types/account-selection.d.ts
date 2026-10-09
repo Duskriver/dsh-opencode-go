@@ -1,19 +1,8 @@
 import type { GoAccountSettlement } from './adapter.ts';
 import { type GoAccountSwitch } from './accounts.ts';
 import type { OpencodeGoConfig } from './config.ts';
-/** The common write interface of legacy sections and profile settings forms. */
-export interface AccountSettingsWriter {
-    describe(): readonly {
-        ns: string;
-        revision: number;
-        value: unknown;
-    }[];
-    mutate(ns: string, ops: readonly {
-        op: 'set';
-        path: string[];
-        value: unknown;
-    }[], expectedRevision?: number): Promise<unknown>;
-}
+import { type AccountSettingsWriter } from './settings-bridge.ts';
+export type { AccountSettingsWriter } from './settings-bridge.ts';
 /** Owns both the fallback notice and its optional persisted account selection. */
 export declare class GoAccountSelection {
     private readonly config;

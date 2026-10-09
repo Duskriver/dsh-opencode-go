@@ -29,7 +29,7 @@ function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = 
 }
 
 type SectionField = 'baseURL' | 'proxyURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
-  | 'usageDisplay'
+  | 'usageDisplay' | 'protocolOverrides'
   | 'maxImages'
   | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'apiKey' | 'models'
   | 'modelLimits' | 'modelLimitDraft'
@@ -64,6 +64,7 @@ function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSec
   return {
     ...settled,
     usageDisplay: field('auto'),
+    protocolOverrides: field('auto'),
     apiKeyEnv: field('OPENCODE_API_KEY'),
     baseURL: field('https://opencode.ai/zen/go/v1'),
     proxyURL: field(''),
@@ -125,6 +126,21 @@ function openModelLimits(): void {
 }
 
 describe('OpencodeGoSection', () => {
+  it('exposes only automatic and experimental Responses routing and stages the selection', () => {
+    const reading = actions()
+    renderSection(stateOf({ protocolOverrides: field('openai-responses', { overridden: true }) }), reading)
+    openAdvanced()
+    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: en.protocolOverridesLabel })
+    expect(select.value).toBe('openai-responses')
+    expect(within(select).getAllByRole('option').map(option => option.textContent))
+      .toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
+    fireEvent.change(select, { target: { value: 'auto' } })
+    expect(reading.edit).toHaveBeenCalledWith('protocolOverrides', 'auto')
+    expect(reading.save).not.toHaveBeenCalled()
+    fireEvent.click(within(select.parentElement!).getByRole('button', { name: en.reset }))
+    expect(reading.resetField).toHaveBeenCalledWith('protocolOverrides')
+  })
+
   it('stages the three usage display modes in advanced settings and offers reset', () => {
     const reading = actions()
     renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)

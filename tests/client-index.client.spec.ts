@@ -9,6 +9,7 @@ import { stubSettingsScope } from './support/client.ts'
 import { apply } from '../src/client/index.ts'
 import { OpencodeGoSection } from '../src/client/Section.tsx'
 import { en } from '../src/client/locales.ts'
+import { accountCommands } from '../src/client/host-compat.ts'
 
 interface ClientHarness {
   ctx: Record<string, unknown>
@@ -89,6 +90,20 @@ function clientHarness(): ClientHarness {
 }
 
 describe('client entry', () => {
+  it('uses the injected account service and releases it when its connection closes', async () => {
+    let connect!: (ready: unknown) => void
+    let disconnect!: () => void
+    const execute = vi.fn(async () => ({ ok: true, value: 'applied' }))
+    const command = accountCommands({ inject: (_services: unknown, callback: typeof connect) => { connect = callback } } as never)
+    await expect(command({ kind: 'auto-switch', value: true })).resolves.toBe('unknown')
+    connect({ remote: { opencodeGoAccounts: { execute } }, effect: (install: () => () => void) => { disconnect = install() } })
+    await expect(command({ kind: 'auto-switch', value: true })).resolves.toBe('applied')
+    expect(execute).toHaveBeenCalledWith({ kind: 'auto-switch', value: true })
+    disconnect()
+    await expect(command({ kind: 'auto-switch', value: false })).resolves.toBe('unknown')
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
   it('registers the copy dictionaries, the scope, and the section slot', () => {
     const harness = clientHarness()
 

@@ -7,6 +7,7 @@
 
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { LlmDiscoveredModel, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
+import type { AccountCommand } from '../src/accounts-contract.ts'
 import { RemoteError, stubSettingsScope, acceptSettingsWrites } from './support/client.ts'
 import {
   StagedForm,
@@ -38,8 +39,13 @@ function credentialsApi(configured: boolean, ref = 'OPENCODE_API_KEY') {
     ok: true as const,
     value: { [ref]: { configured, writable: true } },
   }))
-  const set = vi.fn(() => Promise.resolve({ ok: true as const, value: undefined }))
-  return { ctx: ctxWith({ credentials: { describe, set } }), describe, set }
+  const set = vi.fn((_ref: string, _key: string) => Promise.resolve({ ok: true as const, value: undefined }))
+  const execute = vi.fn(async (command: AccountCommand) => {
+    if (command.kind !== 'replace-key') throw new Error('Unexpected account command')
+    await set(command.ref, command.key)
+    return { ok: true as const, value: 'applied' as const }
+  })
+  return { ctx: ctxWith({ credentials: { describe }, opencodeGoAccounts: { execute } }), describe, set, execute }
 }
 
 /** A context whose credential reads answer, and whose model discovery is scripted. */
@@ -195,6 +201,19 @@ describe('StagedForm', () => {
     expect(form.shell()).toEqual(settled)
   })
 
+  it('accepts the modern host verdict while its browser snapshot is still catching up', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    host.mutate.mockResolvedValue(true)
+    const form = new StagedForm(host.scope as never, specs)
+    host.publish({ status: 'ready', writable: true, value: { refreshMinutes: 60 }, user: {} })
+    form.actions().edit('refreshMinutes', '15')
+    await form.save()
+    expect(form.shell()).toEqual(settled)
+    expect(host.scope.getSnapshot().value?.refreshMinutes).toBe(60)
+    host.publish({ value: { refreshMinutes: 15 }, user: { refreshMinutes: 15 } })
+    expect(form.field('refreshMinutes').text).toBe('15')
+  })
+
   it('does not start a second save while one is in flight and drops empty discards', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     const form = new StagedForm(host.scope as never, specs)
@@ -340,6 +359,42 @@ describe('OpencodeGoSectionController', () => {
     user,
   })
 
+  it('stages and restores the experimental protocol, including explicit auto over an inherited override', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptWrites(host)
+    const override = { 'deepseek-v4.1-flash': 'openai-responses' as const }
+    host.publish({ ...ready({ protocolOverrides: override }), base: { protocolOverrides: override } })
+    const controller = new OpencodeGoSectionController(host.scope, credentialsApi(false).ctx)
+    const face = controller.inject()
+    const state = () => face.hooks.opencodeGo.getSnapshot()
+    expect(state().protocolOverrides).toEqual(field('openai-responses'))
+    face.edit('protocolOverrides', 'auto')
+    expect(state().dirty).toBe(true)
+    expect(host.mutate).not.toHaveBeenCalled()
+    face.discard()
+    expect(state().protocolOverrides.text).toBe('openai-responses')
+    face.edit('protocolOverrides', 'auto')
+    face.save()
+    await vi.waitFor(() => { expect(state()).toMatchObject({ dirty: false, saving: false }) })
+    expect(host.scope.getSnapshot().value?.protocolOverrides).toEqual({ 'deepseek-v4.1-flash': null })
+    expect(state().protocolOverrides).toEqual(field('auto', { overridden: true }))
+    face.edit('protocolOverrides', 'invalid')
+    expect(state().invalid).toBe(true)
+    face.save()
+    expect(host.mutate).toHaveBeenCalledTimes(1)
+    face.discard()
+    face.resetField('protocolOverrides')
+    expect(state().protocolOverrides).toEqual(field('openai-responses'))
+    face.save()
+    await vi.waitFor(() => { expect(state()).toMatchObject({ dirty: false, saving: false }) })
+    expect(host.scope.getSnapshot().value?.protocolOverrides).toEqual(override)
+    face.edit('protocolOverrides', 'openai-responses')
+    face.save()
+    await vi.waitFor(() => { expect(state()).toMatchObject({ dirty: false, saving: false }) })
+    expect(state().invalid).toBe(false)
+    controller.dispose()
+  })
+
   it('stages, discards, saves, validates, and resets usage display to its inherited mode', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     acceptWrites(host)
@@ -469,7 +524,7 @@ describe('OpencodeGoSectionController', () => {
     await vi.waitFor(() => { expect(credentials.describe.mock.calls.length).toBeGreaterThan(calls) })
   })
 
-  it('writes the staged key through the credentials domain, never the settings section', async () => {
+  it('writes the staged key through the host account command, never the settings section', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     const credentials = credentialsApi(false)
     const controller = new OpencodeGoSectionController(host.scope, credentials.ctx)
@@ -488,6 +543,7 @@ describe('OpencodeGoSectionController', () => {
     await vi.waitFor(() => { expect(credentials.set).toHaveBeenCalled() })
 
     expect(credentials.set).toHaveBeenCalledWith('OPENCODE_API_KEY', 'opencode-secret')
+    expect(credentials.execute).toHaveBeenCalledWith({ kind: 'replace-key', ref: 'OPENCODE_API_KEY', key: 'opencode-secret' })
     expect(host.set).not.toHaveBeenCalled()
     await vi.waitFor(() => {
       expect(face.hooks.opencodeGo.getSnapshot()).toMatchObject({ dirty: false, apiKeyConfigured: true })

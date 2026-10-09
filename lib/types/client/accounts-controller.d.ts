@@ -2,6 +2,9 @@ import type { Context } from '@deepseek-ai/cordis';
 import { type AccountSettings, type GoAccount } from '../accounts.ts';
 import type { GoUsage } from '../usage-contract.ts';
 import type { SettingsScope } from './settings.ts';
+import type { AccountCommand } from '../accounts-contract.ts';
+import type { SettingsWriteResult } from '../settings-bridge.ts';
+export type ExecuteAccountCommand = (command: AccountCommand) => Promise<SettingsWriteResult>;
 export interface GoAccountView extends GoAccount {
     configured?: boolean;
     writable?: boolean;
@@ -40,14 +43,7 @@ export declare class GoAccountsController {
     private readonly readUsage;
     private readonly publish;
     private readonly blocked;
-    /**
-     * Server-side confirmation for a settings write whose settlement carries
-     * no verdict: legacy scopes resolve `mutate` without saying whether the
-     * write committed, and a concurrent write can keep a committed account out
-     * of the local snapshot. `true`/`false` answer from the settings document;
-     * `undefined` means the answer is unavailable and callers stay conservative.
-     */
-    private readonly probeServerAccount;
+    private readonly execute;
     private rows;
     private busy;
     private refreshing;
@@ -56,18 +52,11 @@ export declare class GoAccountsController {
     private identity;
     private loaded;
     private disposed;
+    private addition;
     constructor(scope: SettingsScope<AccountSettings & {
         baseURL?: string;
         proxyURL?: string;
-    }>, ctx: Context, readUsage: (ref: string) => Promise<GoUsage>, publish: () => void, blocked: () => boolean, 
-    /**
-     * Server-side confirmation for a settings write whose settlement carries
-     * no verdict: legacy scopes resolve `mutate` without saying whether the
-     * write committed, and a concurrent write can keep a committed account out
-     * of the local snapshot. `true`/`false` answer from the settings document;
-     * `undefined` means the answer is unavailable and callers stay conservative.
-     */
-    probeServerAccount?: (id: string) => Promise<boolean | undefined>);
+    }>, ctx: Context, readUsage: (ref: string) => Promise<GoUsage>, publish: () => void, blocked: () => boolean, execute?: ExecuteAccountCommand);
     snapshot(): GoAccountsState;
     sync(): void;
     dispose(): void;
@@ -76,23 +65,5 @@ export declare class GoAccountsController {
     /** Mark every account row as unreadable with the Host's own diagnostic. */
     private markUnreadable;
     actions(): GoAccountsActions;
-    /**
-     * Reorder the visible accounts and keep the preferred reference on the first row.
-     * The adapter tries the preferred reference first and the rest in array order, so
-     * one write is what makes top-to-bottom the real call order. A placeholder row the
-     * settings never stored is materialized here, which its `legacy:` id admits.
-     */
-    private move;
-    private account;
-    private mutate;
-    /** A durable intention must be confirmed before crossing the credential store. */
-    private begin;
-    private add;
-    /** Loaded rows answer from cache; anything they do not know is described on
-     * the spot, so a placeholder decision never races the page's first describe. */
-    private configuredOf;
-    private rename;
-    private select;
-    private remove;
     private run;
 }

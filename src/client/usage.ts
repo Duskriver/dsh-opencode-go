@@ -8,9 +8,9 @@ import type { OpencodeGoKey } from './locales.ts'
 import type { SettingsScope } from './settings.ts'
 import type { OpencodeGoSettings } from './section-controller.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { accountsOf, accountRefOf } from '../accounts.ts'
+import { accountsOf } from '../accounts.ts'
 
-export function registerUsagePill(ctx: Context, settings: SettingsScope<OpencodeGoSettings>): void {
+export function registerUsagePill(ctx: Context, settings: SettingsScope<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>): void {
   ctx.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
     scope.inject(['remote.opencodeGoUsage'], ready => {
       const credentialChanges = createSnapshotStore(0)
@@ -34,10 +34,7 @@ export function registerUsagePill(ctx: Context, settings: SettingsScope<Opencode
           selectAccount: async ref => {
             const snapshot = settings.getSnapshot()
             if (!snapshot.writable || !accountsOf(snapshot.value ?? {}).some(account => account.apiKeyEnv === ref)) return false
-            try {
-              await settings.mutate([{ op: 'set', path: ['apiKeyEnv'], value: ref }], snapshot.revision)
-              return accountRefOf(settings.getSnapshot().value ?? {}) === ref
-            } catch { return false }
+            return selectAccount ? selectAccount(ref).catch(() => false) : false
           },
           readUsage,
           getLocale: () => ready.locale.getLocale().active,

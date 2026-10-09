@@ -239,7 +239,7 @@ function Loaded(props: {
     resetLabel: t('reset'),
     disabled,
   }
-  const advancedOverridden = state.usageDisplay.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden || state.proxyURL.overridden
+  const advancedOverridden = state.usageDisplay.overridden || state.protocolOverrides.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden || state.proxyURL.overridden
     || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
     || state.maxImages.overridden
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
@@ -373,6 +373,19 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={text => { props.edit('usageDisplay', text) }}
                   onReset={() => { props.resetField('usageDisplay') }}
+                />
+                <ValueField
+                  id="opencode-go-protocol-overrides"
+                  label={t('protocolOverridesLabel')}
+                  hint={t('protocolOverridesHint')}
+                  field={state.protocolOverrides}
+                  options={[
+                    { value: 'auto', label: t('protocolOverridesAuto') },
+                    { value: 'openai-responses', label: t('protocolOverridesResponses') },
+                  ]}
+                  {...fieldProps}
+                  onEdit={text => { props.edit('protocolOverrides', text) }}
+                  onReset={() => { props.resetField('protocolOverrides') }}
                 />
                 <ValueField
                   id="opencode-go-api-key-env"

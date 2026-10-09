@@ -2,14 +2,11 @@ import type { GoAccountSettlement } from './adapter.ts'
 import { accountRefOf, accountsOf, type GoAccountSwitch } from './accounts.ts'
 import type { OpencodeGoConfig } from './config.ts'
 
-/** The common write interface of legacy sections and profile settings forms. */
-export interface AccountSettingsWriter {
-  describe(): readonly { ns: string; revision: number; value: unknown }[]
-  mutate(ns: string, ops: readonly { op: 'set'; path: string[]; value: unknown }[], expectedRevision?: number): Promise<unknown>
-}
+import { accountSettingsRow, type AccountSettingsWriter } from './settings-bridge.ts'
+export type { AccountSettingsWriter } from './settings-bridge.ts'
 
 function identity(config: OpencodeGoConfig): string {
-  return JSON.stringify([config.enabled, accountRefOf(config), config.accounts, config.autoSwitch, config.baseURL, config.proxyURL])
+  return JSON.stringify([config.enabled, accountRefOf(config), config.accounts, config.autoSwitch, config.baseURL, config.proxyURL, config.protocolOverrides])
 }
 
 /** Owns both the fallback notice and its optional persisted account selection. */
@@ -41,8 +38,7 @@ export class GoAccountSelection {
 
   private row() {
     try {
-      const rows = this.settings?.describe() ?? []
-      return rows.find(row => row.ns === 'opencode-go') ?? rows.find(row => row.ns === 'llm-opencode-go')
+      return this.settings && accountSettingsRow(this.settings)
     } catch { return undefined }
   }
 

@@ -144,6 +144,10 @@ export declare const en: {
     usageDisplay_auto: string;
     usageDisplay_always: string;
     usageDisplay_off: string;
+    protocolOverridesLabel: string;
+    protocolOverridesHint: string;
+    protocolOverridesAuto: string;
+    protocolOverridesResponses: string;
     apiKeyEnvLabel: string;
     apiKeyEnvHint: string;
     baseURLLabel: string;

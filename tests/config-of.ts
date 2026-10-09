@@ -10,6 +10,7 @@ export function configOf(baseURL: string, overrides: Partial<OpencodeGoConfig> =
     enabled: true,
     usageDisplay: 'auto',
     modelVisibility: {},
+    protocolOverrides: {},
     apiKeyEnv: 'OPENCODE_API_KEY',
     baseURL,
     proxyURL: '',

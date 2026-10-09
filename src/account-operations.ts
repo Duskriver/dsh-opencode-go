@@ -1,5 +1,5 @@
 /** Durable, client-safe intentions. Never put a credential value in this document. */
-import { ACCOUNT_REF_PATTERN, ACCOUNT_REF_PREFIX, MAX_ACCOUNTS, accountsOf, assertAccounts, type AccountSettings, type GoAccount } from './accounts.ts'
+import { ACCOUNT_REF_PATTERN, ACCOUNT_REF_PREFIX, MAX_ACCOUNTS, accountRefOf, accountsOf, assertAccounts, type AccountSettings, type GoAccount } from './accounts.ts'
 
 export type GoAccountOperation =
   | { id: string; kind: 'add'; account: GoAccount; previousRef: string; select: boolean }
@@ -38,4 +38,32 @@ export function visibleAccountsOf(settings: AccountSettings): readonly GoAccount
     if (!entries.some(account => account.apiKeyEnv === operation.account.apiKeyEnv)) entries.push(operation.account)
   }
   return entries
+}
+
+/** The same transition completes a foreground operation or a recovered intention. */
+export function accountOperationPatch(settings: AccountSettings, operation: GoAccountOperation, dropLegacyRef?: string) {
+  let accounts = [...accountsOf(settings)]
+  const ref = operation.account.apiKeyEnv
+  const occupied = accounts.find(account => account.apiKeyEnv === ref || account.id === operation.account.id)
+  if (occupied && (occupied.id !== operation.account.id || occupied.apiKeyEnv !== ref)) {
+    throw new Error('Account identity changed while operation was pending')
+  }
+  let selected: string | undefined
+  if (operation.kind === 'add') {
+    if (!occupied) {
+      if (settings.accounts == null && dropLegacyRef) accounts = accounts.filter(account => account.apiKeyEnv !== dropLegacyRef)
+      accounts.push(operation.account)
+    }
+    if (operation.select && accountRefOf(settings) === operation.previousRef) selected = ref
+  } else {
+    accounts = accounts.filter(account => account.apiKeyEnv !== ref)
+    if (accountRefOf(settings) === ref && accounts.length) selected = accounts[0]!.apiKeyEnv
+  }
+  assertAccounts(accounts, selected ?? accountRefOf(settings))
+  return [
+    { op: 'set' as const, path: ['accounts'], value: accounts },
+    ...selected ? [{ op: 'set' as const, path: ['apiKeyEnv'], value: selected }] : [],
+    ...settings.accountOperations?.some(entry => entry.id === operation.id) ? [{ op: 'set' as const,
+      path: ['accountOperations'], value: settings.accountOperations.filter(entry => entry.id !== operation.id) }] : [],
+  ]
 }

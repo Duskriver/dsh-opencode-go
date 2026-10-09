@@ -108,6 +108,19 @@ socks5://127.0.0.1:1080
 
 ### 手动配置
 
+在 **高级设置 → DeepSeek V4.1 Flash 协议** 中可选择 **Responses（实验性）** 并保存，便于比较同一模型的不同协议。默认 **自动** 跟随模型目录；改回自动即可恢复。选择只影响新请求，不会切换已准备或正在执行的调用，也不会在协议错误后自动改用另一协议。
+
+目前仅支持 `deepseek-v4.1-flash` 的 Responses 覆盖，沿用当前账号、代理、会话标识与用量处理。[issue #45](https://github.com/Duskriver/dsh-opencode-go/issues/45) 报告了更低延迟，但它不是网关的稳定性能承诺，也不能据此确认底层服务商；是否更快请以自己的测试为准。无需覆盖时省略以下配置：
+
+```yaml
+- id: opencode-go
+  config:
+    protocolOverrides:
+      deepseek-v4.1-flash: openai-responses
+```
+
+将该模型的值设为 `null` 会明确选择自动，即使继承的配置启用了 Responses；设置页的「恢复默认」会移除当前层覆盖，恢复继承值。其他模型或协议组合会被拒绝。
+
 在 patch 文件中添加 `opencode-go` 配置块，可与上面的默认模型配置一起使用：
 
 ```yaml
@@ -143,6 +156,7 @@ socks5://127.0.0.1:1080
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
 | `modelVisibility` | 按模型 ID 控制选择器中的显示状态 |
+| `protocolOverrides` | 实验性协议覆盖；目前仅支持 `deepseek-v4.1-flash: openai-responses`，省略或模型值为 `null` 时自动跟随目录 |
 | `modelLimits` | 按模型覆盖 `contextWindow`、`maxTokens`，或用 `thinkingBudgets` 添加思考预算选项；空值使用默认设置 |
 | `maxImages` | 单次请求历史中的图片数量上限，默认不设上限；超过时先卸载最旧图片 |
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |

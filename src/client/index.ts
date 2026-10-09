@@ -23,6 +23,7 @@ import { en, zh } from './locales.ts'
 import type { GoUsage } from '../usage-contract.ts'
 import { goRemote } from '../remote-contract.ts'
 import { registerUsagePill } from './usage.ts'
+import { accountCommands, mountSettingsScopes } from './host-compat.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -58,22 +59,12 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'llm-opencode-go: copy dictionaries')
   const modelsReady = ctx.remote.$mount(goRemote)
   ctx.effect(async () => await modelsReady)
-  ctx.inject(['configForms', 'remote.opencodeGoModels'], child => {
-    const forms = child.get('configForms') as { get<T>(id: string): SettingsScope<T> }
-    // Profile forms use the bundle entry id, not the legacy settings namespace.
-    mountSettings(child, forms.get<OpencodeGoSettings>('opencode-go'), modelsReady)
-  })
-  ctx.inject(['settingsScope', 'remote.opencodeGoModels'], child => {
-    mountSettings(child, child.settingsScope.bind({
-      namespace: 'llm-opencode-go',
-      decode: (section): OpencodeGoSettings | undefined =>
-        typeof section === 'object' && section !== null ? section as OpencodeGoSettings : undefined,
-    }), modelsReady)
-  })
+  mountSettingsScopes(ctx, (child, scope) => mountSettings(child, scope, modelsReady))
 }
 
 function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
-  registerUsagePill(ctx, scope)
+  const executeAccountCommand = accountCommands(ctx)
+  registerUsagePill(ctx, scope, async ref => (await executeAccountCommand({ kind: 'select', ref })) === 'applied')
   // The rows read the plugin's own usage namespace, and a context may only reach
   // a remote namespace it injected. It gets an injection of its own — the way the
   // pill declares it — because the two settings injections above must name
@@ -87,24 +78,6 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
       return result.value
     }
   })
-  // Ground truth for settings writes a legacy scope settles without a verdict:
-  // whether the server-side document already lists an account the local
-  // snapshot cannot see (a concurrent write suppresses the fold). Sessions
-  // without the settings remote stay conservative through the default probe.
-  let serverAccountProbe: (id: string) => Promise<boolean | undefined> = async () => undefined
-  ctx.inject(['remote.settings'], ready => {
-    serverAccountProbe = async id => {
-      try {
-        const response = await (ready as ClientContext).remote.settings.describe()
-        if (!response.ok) return undefined
-        return response.value.namespaces.some(section => {
-          const accounts = (section.value as { accounts?: unknown } | null)?.accounts
-          return Array.isArray(accounts)
-            && accounts.some(entry => entry !== null && typeof entry === 'object' && (entry as { id?: unknown }).id === id)
-        })
-      } catch { return undefined }
-    }
-  })
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
@@ -114,7 +87,7 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
     // of reaching for a context that never injected it.
     if (readAccount === undefined) throw new Error('OpenCode Go account usage is unavailable in this session')
     return readAccount(ref)
-  }, (id: string) => serverAccountProbe(id))
+  }, executeAccountCommand)
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
   const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t, getLocale: () => ctx.locale.getLocale().active })

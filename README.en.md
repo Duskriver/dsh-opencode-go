@@ -106,6 +106,21 @@ socks5://127.0.0.1:1080
 
 HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported. Subsequent conversations, catalog updates, and usage queries use the saved proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
 
+### Experimental Responses protocol
+
+Open **Settings → OpenCode Go → Advanced settings → DeepSeek V4.1 Flash protocol** to select Responses (experimental). Automatic remains the default and follows the gateway's declared protocol. This setting applies only to `deepseek-v4.1-flash` and to new requests. Existing conversation history can continue with either selection; a failed request does not automatically retry through another protocol.
+
+To configure the experiment manually:
+
+```yaml
+- id: opencode-go
+  config:
+    protocolOverrides:
+      deepseek-v4.1-flash: openai-responses
+```
+
+Select Automatic to revert. A null value for this model also clears an inherited override. Gateway routing and performance may change; Responses does not guarantee a particular provider or faster responses.
+
 ### Manual configuration
 
 Add an `opencode-go` configuration block to a patch file. It can be combined with the default-model configuration above:
@@ -143,6 +158,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
 | `modelVisibility` | Control model picker visibility by model ID |
+| `protocolOverrides` | Experimental `deepseek-v4.1-flash: openai-responses`; unset or null follows the gateway |
 | `modelLimits` | Per-model `contextWindow` and `maxTokens` overrides, plus additional `thinkingBudgets` options; null uses defaults |
 | `maxImages` | Maximum images in one request's history; unset by default, with oldest images offloaded when exceeded |
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |

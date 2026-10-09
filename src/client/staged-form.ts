@@ -20,6 +20,7 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
+import { settingsWriteResult } from '../settings-bridge.ts'
 
 /** The write one field's staged text performs when the page is saved. */
 export type FieldWrite =
@@ -332,8 +333,8 @@ export class StagedForm {
         : { op: 'set', path: [field], value: write!.value as Extract<SettingsPathOpView, { op: 'set' }>['value'] })
       try {
         const accepted = await this.scope.mutate(ops, revision)
-        landed = accepted !== false && settings.every(item => item.write!.kind === 'clear'
-          ? !this.stored(item.field) : sameJsonValue(this.userLayer()?.[item.field], item.write!.value))
+        landed = settingsWriteResult(accepted, () => settings.every(item => item.write!.kind === 'clear'
+          ? !this.stored(item.field) : sameJsonValue(this.userLayer()?.[item.field], item.write!.value))) === 'applied'
         if (landed) settings.forEach(accept)
       } catch { landed = false }
     }

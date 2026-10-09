@@ -94,6 +94,20 @@ it('does not replay a partially emitted response on another account', async () =
   expect(gateway.bodies).toHaveLength(1)
 })
 
+it.each(['finish', 'throw'])('does not retry billed work after usage is received and the attempt fails by %s', async failureMode => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv })
+  const attempt = vi.spyOn(adapter as never, 'streamAttempt').mockImplementation(async function* () {
+    yield { type: 'usage', usage: { inputTokens: 3, outputTokens: 0, totalTokens: 3 } }
+    if (failureMode === 'throw') throw new LlmError('Monthly usage limit exceeded', 'QUOTA')
+    yield { type: 'finish', reason: { kind: 'error', failure: { code: 'QUOTA', message: 'Monthly usage limit exceeded' } } }
+  } as never)
+  if (failureMode === 'throw') await expect(drain(adapter.stream(request()))).rejects.toMatchObject({ code: 'QUOTA' })
+  else expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: 'QUOTA' } } })
+  expect(attempt).toHaveBeenCalledTimes(1)
+})
+
 it('attributes a multi-hop fallback notice to the first account that failed', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
   gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })

@@ -4,8 +4,8 @@
  *
  * The key is the one control that does not live in the section: its literal
  * never rides a response, so the page learns only whether one is configured
- * and writes it through the credentials domain, addressed by the reference the
- * section names. It is still staged with the rest of the form, so one save
+ * and writes it through the host account service, pinned to the account where
+ * the draft began. It is still staged with the rest of the form, so one save
  * covers everything the page shows.
  */
 
@@ -20,9 +20,14 @@ import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
 import type { GoAccount } from '../accounts.ts'
-import { accountsOf } from '../accounts.ts'
+import { accountsOf, accountRefOf } from '../accounts.ts'
+import { SETTINGS_NAMESPACE } from '../config-contract.ts'
+import { settingsWriteResult } from '../settings-bridge.ts'
+import type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../config-contract.ts'
+export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../config-contract.ts'
 import { assertProxyURL } from '../proxy-url.ts'
-import { GoAccountsController, type GoAccountsState, type GoAccountsActions } from './accounts-controller.ts'
+import { RESPONSES_OVERRIDE_MODEL, type GoProtocolOverrides } from '../protocol-contract.ts'
+import { GoAccountsController, type GoAccountsState, type GoAccountsActions, type ExecuteAccountCommand } from './accounts-controller.ts'
 import {
   StagedForm,
   booleanField,
@@ -34,56 +39,11 @@ import {
   type FormShell,
 } from './staged-form.ts'
 
-/** Namespace of the OpenCode Go adapter. Spelled here rather than imported: a client package must not depend on a Host package. */
-export const OPENCODE_GO_NS = 'llm-opencode-go'
-
-/** Credential reference the provider resolves when the section names none. */
-const DEFAULT_API_KEY_REF = 'OPENCODE_API_KEY'
+/** Namespace shared with the host through the browser-safe configuration contract. */
+export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
 /** Form field the credential control stages under. */
 const API_KEY_FIELD = 'apiKey'
-
-/** The adapter fields this page edits. */
-export interface OpencodeGoSettings {
-  /** Whether the adapter serves its route; false withdraws it from every picker. */
-  enabled?: boolean
-  /** Usage pill visibility, independent of the selected model in always mode. */
-  usageDisplay?: UsageDisplayMode
-  /** Per-model switches; normal models default on, deprecated models default off. */
-  modelVisibility?: Record<string, boolean>
-  /** Credential reference naming the environment key. */
-  apiKeyEnv?: string
-  accounts?: GoAccount[] | null
-  accountOperations?: import('../account-operations.ts').GoAccountOperation[]
-  autoSwitch?: boolean
-  /** The gateway endpoint; also the live listing base. */
-  baseURL?: string
-  /** Optional network proxy used by the Host. */
-  proxyURL?: string
-  /** Live catalog re-resolution interval, in minutes. */
-  refreshMinutes?: number
-  /** Largest idle gap between stream events, in milliseconds. */
-  streamIdleTimeoutMs?: number
-  /** Optional retained image occurrence cap per request. */
-  maxImages?: number | null
-  /** Accumulated base64 image payload bound for one request. */
-  maxRequestImageBytes?: number
-  /** Total-pixel budget for one request image. */
-  requestImagePixelBudget?: number
-  /** Raw encoded-byte target for one request image. */
-  requestImageMaxBytes?: number
-  /** Per-model capacity overrides, keyed by the gateway model id. */
-  modelLimits?: OpencodeGoModelLimits
-}
-
-/** The two capacity values the settings table can override. */
-export interface OpencodeGoModelLimit {
-  contextWindow?: number | null
-  maxTokens?: number | null
-  thinkingBudgets?: number[] | null
-}
-
-export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
 
 /** What the credentials domain last reported, and for which reference. */
 interface CredentialState {
@@ -128,6 +88,7 @@ export interface OpencodeGoSectionState extends FormShell {
    */
   enabled: boolean
   usageDisplay: FieldState
+  protocolOverrides: FieldState
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
@@ -210,7 +171,10 @@ export class OpencodeGoSectionController {
       if (!result.ok) throw result.error
       return result.value
     },
-    probeServerAccount: (id: string) => Promise<boolean | undefined> = async () => undefined,
+    private readonly executeAccountCommand: ExecuteAccountCommand = async command => {
+      const result = await ctx.remote.opencodeGoAccounts.execute(command)
+      return result.ok ? result.value : 'unknown'
+    },
   ) {
     this.form = new StagedForm(
       scope as SettingsScope<Record<string, unknown>>,
@@ -222,6 +186,12 @@ export class OpencodeGoSectionController {
           field: 'usageDisplay',
           format: value => typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY,
           parse: text => USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text } : undefined,
+        },
+        {
+          field: 'protocolOverrides',
+          format: value => (value as GoProtocolOverrides | undefined)?.[RESPONSES_OVERRIDE_MODEL] ?? 'auto',
+          parse: text => text === 'auto' || text === 'openai-responses'
+            ? { kind: 'set', value: { [RESPONSES_OVERRIDE_MODEL]: text === 'auto' ? null : text } } : undefined,
         },
         textField('apiKeyEnv'),
         textField('baseURL'),
@@ -247,7 +217,7 @@ export class OpencodeGoSectionController {
     this.accounts = new GoAccountsController(scope, ctx, readUsage,
       () => { this.store.set(this.projection()) },
       () => this.form.shell().saving || this.pickerSaving || Boolean(this.form.field(API_KEY_FIELD).text.trim()),
-      probeServerAccount)
+      this.executeAccountCommand)
     this.store.set(this.projection())
     const networkIdentity = () => JSON.stringify([
       scope.getSnapshot().value?.baseURL, scope.getSnapshot().value?.proxyURL,
@@ -284,6 +254,7 @@ export class OpencodeGoSectionController {
       accounts: this.accounts?.snapshot(),
       enabled: this.enabled(),
       usageDisplay: this.form.field('usageDisplay'),
+      protocolOverrides: this.form.field('protocolOverrides'),
       modelVisibility: this.scope.getSnapshot().value?.modelVisibility ?? {},
       pickerSaving: this.pickerSaving,
       pickerFailed: this.pickerFailed,
@@ -363,8 +334,8 @@ export class OpencodeGoSectionController {
     this.pickerFailed = false
     this.store.set(this.projection())
     try {
-      await this.scope.set(field, value)
-      this.pickerFailed = !accepted()
+      const verdict = await this.scope.set(field, value)
+      this.pickerFailed = settingsWriteResult(verdict, accepted) !== 'applied'
     } catch {
       this.pickerFailed = true
     } finally {
@@ -500,19 +471,16 @@ export class OpencodeGoSectionController {
   }
 
   /**
-   * Write the staged key, then re-read whether the Host now holds one.
+   * Ask the account service to write the staged key, then refresh its display.
    * @param value - the staged credential literal.
-   * @returns whether the Host reports a configured credential afterwards.
+   * @returns whether the Host confirmed the write.
    */
   private async writeKey(value: string): Promise<boolean> {
-    // Refusals surface through the re-read below: the Host is the only
-    // authority on whether the key now exists.
     const ref = this.keyDraftRef ?? refOf(this.scope.getSnapshot())
-    const response = await this.ctx.remote.credentials.set(ref, value)
-    if (!response.ok) return false
+    if (await this.executeAccountCommand({ kind: 'replace-key', ref, key: value }) !== 'applied') return false
     this.accounts?.invalidate(ref)
     await this.readCredential()
-    return ref === this.credential.ref ? this.credential.configured : true
+    return true
   }
 }
 
@@ -552,6 +520,5 @@ function modelLimitsOf(value: unknown): OpencodeGoModelLimits {
  * @returns the reference to address.
  */
 function refOf(snapshot: SettingsScopeSnapshot<OpencodeGoSettings>): string {
-  const declared = snapshot.value?.apiKeyEnv
-  return declared !== undefined && declared.length > 0 ? declared : DEFAULT_API_KEY_REF
+  return accountRefOf(snapshot.value ?? {})
 }

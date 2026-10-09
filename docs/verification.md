@@ -1,5 +1,17 @@
 # Verification
 
+## Shared architecture and experimental Responses (2026-10-10)
+
+Settings row selection and write acknowledgements share one host/client contract. A mount-owned catalog manager supplies discovery to both the adapter and settings. Thrown and terminal inference failures share one pure fallback policy. Account commands and durable recovery run through one serialized host service, with revision checks, cancellation, deadlines, and idempotent command IDs. Client controllers retain staged edits and delegate account mutations to that service.
+
+The opt-in `deepseek-v4.1-flash` Responses override leaves Automatic as the default, resolves protocol compatibility on each captured request configuration, and does not mutate catalog entries or retry through another protocol. Eighteen focused regressions exercise real SDK wire payloads, tools, images, restored histories in both protocol directions, protocol errors, and captured configuration changes. Installed transcript and settings fixtures cover the override and clearing it through legacy and modern host services.
+
+Both TypeScript projects, all 655 tests in 41 files, freshness checks for 60 shipped artifacts, all ten installed DSH generations, npm/pnpm Git installations, and pnpm tarball installation passed. The desktop-installed build also passed offline benchmark observer/statistics checks.
+
+Twenty authorized synthetic live requests succeeded with one account, interleaved protocols, stable per-block sessions, and the same 4,096-token cap. Median first body-text latency changed from 3,340 to 3,298 ms under Default (1.3% faster) and from 3,161 to 3,085 ms under High (2.4% faster). Median total time changed from 3,920 to 3,695 ms (5.7%) and from 4,501 to 3,495 ms (22.3%). High's repeated samples instead showed 8.5% slower first text and 0.8% slower total time. Route identifiers differed between protocols; these identifiers alone do not establish the physical provider. Output lengths, reasoning tokens, caching, and small sample sizes limit conclusions: this experiment does not establish a stable latency benefit.
+
+Three preliminary live calls were excluded from those 20 samples; the third reached its earlier 1,024-token cap without body text, prompting the shared 4,096-token cap for the formal run. Desktop settings and credential-file hashes were unchanged after the formal benchmark. No private conversation was used.
+
 ## Token budget controls (2026-10-09)
 
 Budget-based models now display numeric token presets. The settings model card can stage, save, discard, and remove additional budgets through `modelLimits[modelId].thinkingBudgets`. Standard presets retain the old minimal/low/medium/high selection IDs; added values use `budget:N`. Models declaring both effort and budget keep their existing efforts and gain custom numeric choices. Adaptive Haiku continues using effort and exposes no legacy budget control.

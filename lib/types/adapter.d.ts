@@ -53,6 +53,8 @@ export interface GoAccountSettlement {
 export interface OpencodeGoAdapterOptions {
     /** Shared with Host usage reads for this plugin mount. */
     transport?: ProxyTransport;
+    /** Mount-owned discovery; direct construction supplies its own manager. */
+    catalog?: (config: OpencodeGoConfig) => OpencodeGoCatalog;
     /** Optional directory for bounded HTTP error evidence; request contents are omitted. */
     debugDirectory?: () => string | undefined;
     /**
@@ -97,13 +99,7 @@ export interface OpencodeGoAdapterOptions {
  */
 export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly options;
-    /**
-     * One catalog instance per endpoint/refresh pair. A settings write that
-     * changes either gets a fresh resolver (and a fresh live-listing fetch) on
-     * the next operation; an unchanged configuration keeps its cached snapshot
-     * for the whole refresh interval.
-     */
-    private catalogCache;
+    private readonly resolveCatalog;
     private readonly transport;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
@@ -125,7 +121,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     };
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(_provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
-    /** Copy nested limits before discovery can yield to a settings update. */
+    /** Capture limits and protocol before discovery can yield to a settings update. */
     private callSnapshot;
     /** Keep capability resolution and eventual dispatch on the same configuration. */
     prepareCall(_provider: string, model: string, signal?: AbortSignal): Promise<{

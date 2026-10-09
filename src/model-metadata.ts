@@ -84,6 +84,11 @@ export function modelBaseURL(api: Api, baseURL: string): string {
   return api === 'anthropic-messages' ? base.replace(/\/v1$/, '') : base
 }
 
+/** Shared Responses defaults for declared models and explicit protocol overrides. */
+export function responsesCompatibility(): NonNullable<Model<'openai-responses'>['compat']> {
+  return { sessionAffinityFormat: 'openai-nosession' }
+}
+
 /**
  * Only read the opencode-go record. Online endpoints, headers and credentials
  * are deliberately ignored: model traffic always stays on the configured gateway.
@@ -127,7 +132,7 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
             ...(record(metadata.interleaved).field === 'reasoning_content' ? { requiresReasoningContentOnAssistantMessages: true } : {}),
             ...known?.compat }
         : api === 'openai-responses'
-          ? { sessionAffinityFormat: 'openai-nosession' as const, ...known?.compat }
+          ? { ...responsesCompatibility(), ...known?.compat }
           : { ...known?.compat }
       const cost = rates(metadata.cost)
       const tiers = record(metadata.cost).tiers

@@ -24,10 +24,18 @@ it('preserves the usage account source and structured failures through the clien
       register: (definition: { inject: (id: string) => UsagePillProps }) => { props = definition.inject('fixture-session') },
     },
   }
-  const settings = stubSettingsScope<OpencodeGoSettings>().scope
-  registerUsagePill(ctx as never, settings)
+  const host = stubSettingsScope<OpencodeGoSettings>()
+  const settings = host.scope
+  host.publish({ status: 'ready', writable: true, value: { accounts: [{ id: 'a', name: 'Work', apiKeyEnv: 'ACCOUNT_A' }] } })
+  const select = vi.fn(async () => true)
+  registerUsagePill(ctx as never, settings, select)
   expect(props).toBeDefined()
   expect(props!.settings).toBe(settings)
   await expect(props!.readUsage()).resolves.toEqual(usage)
   await expect(props!.readUsage()).rejects.toBe(error)
+  await expect(props!.selectAccount!('ACCOUNT_A')).resolves.toBe(true)
+  expect(select).toHaveBeenCalledWith('ACCOUNT_A')
+  expect(host.mutate).not.toHaveBeenCalled()
+  await expect(props!.selectAccount!('UNKNOWN_ACCOUNT')).resolves.toBe(false)
+  expect(select).toHaveBeenCalledTimes(1)
 })

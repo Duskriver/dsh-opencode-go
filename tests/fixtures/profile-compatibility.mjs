@@ -92,6 +92,17 @@ try {
   assert.equal(view().value.usageDisplay, 'off', 'invalid modes leave the saved setting intact')
   await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['usageDisplay'] }])
   assert.equal(view().value.usageDisplay, 'auto', 'reset restores automatic usage display')
+  assert.deepEqual(view().value.protocolOverrides, {}, 'protocol routing defaults to the catalog')
+  const protocolOverride = { 'deepseek-v4.1-flash': 'openai-responses' }
+  await ctx.settings.update('opencode-go', { protocolOverrides: protocolOverride })
+  assert.deepEqual(view().value.protocolOverrides, protocolOverride)
+  await assert.rejects(ctx.settings.update('opencode-go', { protocolOverrides: { 'kimi-k3': 'openai-responses' } }))
+  await assert.rejects(ctx.settings.update('opencode-go', { protocolOverrides: { 'deepseek-v4.1-flash': 'anthropic-messages' } }))
+  assert.deepEqual(view().value.protocolOverrides, protocolOverride, 'invalid protocol writes leave the saved setting intact')
+  await ctx.settings.update('opencode-go', { protocolOverrides: { 'deepseek-v4.1-flash': null } })
+  assert.deepEqual(view().value.protocolOverrides, { 'deepseek-v4.1-flash': null }, 'null explicitly restores catalog routing')
+  await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['protocolOverrides'] }])
+  assert.deepEqual(view().value.protocolOverrides, {})
   process.env.OPENCODE_GO_BACKUP_COMPAT_KEY = 'backup-fixture-key'
   const accounts = [
     { id: 'primary', name: 'Primary', apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY' },
@@ -209,6 +220,7 @@ try {
     constructor(scope) { super(scope) }
     async resolve(ref) { return values.has(ref) ? { value: values.get(ref), source: 'file' } : undefined }
     async describe(ref) { return { configured: values.has(ref), writable: true, source: 'file' } }
+    async set(ref, value) { values.set(ref, value); this.notifyUpdated(ref) }
     async unset(ref) { values.delete(ref); this.notifyUpdated(ref) }
   }
   await ctx.plugin(FixtureCredentials)
@@ -228,7 +240,23 @@ try {
   assert.ok(!view().value.accounts.some(account => account.id === recovered.id), 'recovery removes stale account metadata')
   assert.ok(!values.has(recovered.apiKeyEnv), 'recovery removes only the generated credential')
   assert.equal(entry.fiber, fiber, 'recovery preserves the running plugin')
-  console.log('PASS: profile settings, account adoption and recovery, live updates, capacities, reset, route toggle, validation')
+  const execute = command => ctx.typertGateway.invoke({ namespace: 'opencodeGoAccounts', method: 'execute', args: { command } })
+  assert.equal(await execute({ kind: 'add', id: recovered.id, name: 'RPC account', key: 'rpc-fixture-key' }), 'applied')
+  assert.equal(await execute({ kind: 'add', id: recovered.id, name: 'RPC account', key: 'rpc-fixture-key' }), 'applied', 'RPC retries are idempotent')
+  assert.equal(await execute({ kind: 'rename', ref: recovered.apiKeyEnv, name: 'RPC renamed' }), 'applied')
+  assert.equal(await execute({ kind: 'move', ref: recovered.apiKeyEnv, toIndex: 0 }), 'applied')
+  assert.equal(view().value.accounts[0].name, 'RPC renamed')
+  assert.equal(await execute({ kind: 'select', ref: recovered.apiKeyEnv }), 'applied')
+  assert.equal(await execute({ kind: 'auto-switch', value: false }), 'applied')
+  assert.equal(view().value.autoSwitch, false)
+  assert.equal(await execute({ kind: 'replace-key', ref: recovered.apiKeyEnv, key: 'rpc-replaced-key' }), 'applied')
+  assert.equal(values.get(recovered.apiKeyEnv), 'rpc-replaced-key')
+  assert.ok(!JSON.stringify(view().value).includes('rpc-replaced-key'), 'account RPC keeps credentials out of profile settings')
+  await assert.rejects(execute({ kind: 'select', ref: recovered.apiKeyEnv, extra: true }))
+  assert.equal(await execute({ kind: 'remove', ref: recovered.apiKeyEnv }), 'applied')
+  assert.ok(!values.has(recovered.apiKeyEnv))
+  assert.equal(entry.fiber, fiber, 'account commands preserve the running plugin')
+  console.log('PASS: profile settings, account commands, adoption and recovery, live updates, capacities, reset, route toggle, validation')
 } finally {
   await ctx.fiber.dispose()
 }

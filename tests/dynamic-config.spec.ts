@@ -88,6 +88,56 @@ async function streamOnce(ctx: Context): Promise<void> {
 }
 
 describe('settings-backed configuration', () => {
+  it('persists supported protocol overrides and rejects other model/protocol combinations atomically', async () => {
+    const ctx = await boot({ settingsYaml: '{}', credentials: {}, baseURL: 'https://gateway.test/v1' })
+    cleanups.push(() => ctx.fiber.dispose())
+    const value = () => ctx.settings.describe().find(row => row.ns === NS)!.value.protocolOverrides
+    expect(value()).toEqual({})
+    const override = { 'deepseek-v4.1-flash': 'openai-responses' }
+    await ctx.settings.update(NS, { protocolOverrides: override })
+    expect(value()).toEqual(override)
+    for (const invalid of [{ 'kimi-k3': 'openai-responses' }, { 'deepseek-v4.1-flash': 'anthropic-messages' }]) {
+      await expect(ctx.settings.update(NS, { protocolOverrides: invalid })).rejects.toThrow()
+      expect(value()).toEqual(override)
+    }
+    await ctx.settings.update(NS, { protocolOverrides: { 'deepseek-v4.1-flash': null } })
+    expect(value()).toEqual({ 'deepseek-v4.1-flash': null })
+    await ctx.settings.mutate(NS, [{ op: 'unset', path: ['protocolOverrides'] }])
+    expect(value()).toEqual({})
+  })
+
+  it('executes account commands through the real RPC codec and durable stores', async () => {
+    const ctx = await boot({ settingsYaml: JSON.stringify({ [NS]: { accounts: [] } }), credentials: {}, baseURL: 'https://gateway.test/v1' })
+    cleanups.push(() => ctx.fiber.dispose())
+    await ctx.plugin(Registry)
+    await ctx.plugin(Gateway)
+    const execute = (command: unknown) => ctx.typertGateway.invoke({ namespace: 'opencodeGoAccounts', method: 'execute', args: { command } })
+    const id = 'a'.repeat(32), ref = ACCOUNT_REF_PREFIX + id.toUpperCase()
+    const secondId = 'b'.repeat(32), secondRef = ACCOUNT_REF_PREFIX + secondId.toUpperCase()
+    const value = () => ctx.settings.describe().find(row => row.ns === NS)!.value
+    expect(await execute({ kind: 'add', id, name: 'Work', key: 'rpc-private-key' })).toBe('applied')
+    expect(await execute({ kind: 'add', id, name: 'Work', key: 'rpc-private-key' })).toBe('applied')
+    expect(await execute({ kind: 'add', id: secondId, name: 'Backup', key: 'rpc-second-key' })).toBe('applied')
+    expect(await Promise.all([
+      execute({ kind: 'rename', ref, name: 'Renamed' }), execute({ kind: 'rename', ref: secondRef, name: 'Secondary' }),
+    ])).toEqual(['applied', 'applied'])
+    expect(await execute({ kind: 'move', ref: secondRef, toIndex: 0 })).toBe('applied')
+    expect(await execute({ kind: 'select', ref })).toBe('applied')
+    expect(await execute({ kind: 'auto-switch', value: true })).toBe('applied')
+    expect(value().accounts).toEqual([{ id: secondId, name: 'Secondary', apiKeyEnv: secondRef }, { id, name: 'Renamed', apiKeyEnv: ref }])
+    expect(value().apiKeyEnv).toBe(ref)
+    expect(value().autoSwitch).toBe(true)
+    expect(await execute({ kind: 'replace-key', ref, key: 'rpc-replacement-key' })).toBe('applied')
+    expect((await ctx.credentials.resolve(credentialRef(ref)))?.value).toBe('rpc-replacement-key')
+    expect(JSON.stringify(value())).not.toMatch(/rpc-.*key/)
+    expect(await execute({ kind: 'remove', ref })).toBe('applied')
+    expect(await ctx.credentials.resolve(credentialRef(ref))).toBeUndefined()
+    expect(value().accounts).toHaveLength(1)
+    expect(value().apiKeyEnv).toBe(secondRef)
+    expect(value().accountOperations).toEqual([])
+    await expect(execute({ kind: 'select', ref, extra: true })).rejects.toThrow()
+  })
+
   it('restores an interrupted addition from real durable settings and credential stores', async () => {
     const account = { id: 'c'.repeat(32), name: 'Recovered', apiKeyEnv: ACCOUNT_REF_PREFIX + 'C'.repeat(32) }
     const ctx = await boot({ settingsYaml: JSON.stringify({ [NS]: { accounts: [], accountOperations: [

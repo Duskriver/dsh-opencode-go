@@ -17,15 +17,17 @@ const protocols = [
   { id: 'compat-completions', npm: '@ai-sdk/openai-compatible', path: '/v1/chat/completions' },
   { id: 'compat-responses', npm: '@ai-sdk/openai', path: '/v1/responses' },
   { id: 'compat-anthropic', npm: '@ai-sdk/anthropic', path: '/v1/messages' },
+  { id: 'deepseek-v4.1-flash', npm: '@ai-sdk/openai', declaredNpm: '@ai-sdk/openai-compatible', path: '/v1/responses', override: true },
 ]
-const requests = new Map(protocols.map(protocol => [protocol.path, []]))
+const requests = new Map(protocols.map(protocol => [protocol.id, []]))
 const networkFetch = globalThis.fetch
 globalThis.fetch = (input, init) => {
   const url = input instanceof Request ? input.url : String(input)
   if (url === 'https://models.dev/api.json') return Promise.resolve(Response.json({
     'opencode-go': { npm: '@ai-sdk/openai-compatible', models: Object.fromEntries(protocols.map(protocol => [protocol.id, {
-      name: protocol.id, provider: { npm: protocol.npm }, reasoning: protocol.npm === '@ai-sdk/anthropic',
+      name: protocol.id, provider: { npm: protocol.declaredNpm ?? protocol.npm }, reasoning: protocol.npm === '@ai-sdk/anthropic' || protocol.override === true,
       ...protocol.npm === '@ai-sdk/anthropic' ? { reasoning_options: [{ type: 'toggle' }] } : {},
+      ...protocol.override ? { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] } : {},
       modalities: { input: ['text'] }, limit: { context: 100000, output: 4096 },
     }])) },
   }))
@@ -100,12 +102,20 @@ const server = createServer((request, response) => {
       response.end(JSON.stringify({ data: protocols.map(protocol => ({ id: protocol.id })) }))
       return
     }
-    const protocol = protocols.find(protocol => protocol.path === path)
+    const parsed = JSON.parse(body)
+    const protocol = protocols.find(protocol => protocol.id === parsed.model)
     assert.ok(protocol, `Unexpected path: ${request.url}`)
+    assert.equal(path, protocol.path, 'the configured wire protocol must select the endpoint')
     assert.equal(request.headers['x-opencode-session'], 'transcript-session')
-    requests.get(protocol.path).push(JSON.parse(body))
+    assert.match(request.headers['user-agent'], /^deepseek-harness\//)
+    requests.get(protocol.id).push(parsed)
+    if (protocol.override) {
+      assert.equal(parsed.reasoning.effort, 'high')
+      assert.equal(parsed.store, false)
+      assert.equal(parsed.prompt_cache_key, 'transcript-session')
+    }
     response.writeHead(200, { 'content-type': 'text/event-stream' })
-    for (const event of events(protocol, requests.get(protocol.path).length === 1)) {
+    for (const event of events(protocol, requests.get(protocol.id).length === 1)) {
       response.write(`${protocol.npm === '@ai-sdk/anthropic' ? `event: ${event.type}\n` : ''}data: ${JSON.stringify(event)}\n\n`)
     }
     if (protocol.npm === '@ai-sdk/openai-compatible') response.write('data: [DONE]\n\n')
@@ -116,7 +126,7 @@ const ctx = new Context()
 try {
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
-  const config = plugin.PlainConfig({ baseURL: `http://127.0.0.1:${server.address().port}/v1` })
+  const config = plugin.PlainConfig({ baseURL: `http://127.0.0.1:${server.address().port}/v1`, protocolOverrides: { 'deepseek-v4.1-flash': 'openai-responses' } })
   await ctx.plugin(llm.default)
   ctx.llm.registerAdapter(['dsh-opencode-go'], new plugin.OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'fixture-key' }))
   const user = content => llm.createUserMessage({ content, source: { kind: 'plugin', plugin: 'transcript-compat' } })
@@ -125,7 +135,7 @@ try {
     const leading = { id: 'system-header', role: 'system', content: [{ type: 'text', text: prompt }],
       source: { kind: 'plugin', plugin: 'transcript-compat' } }
     const initial = { provider: 'dsh-opencode-go', model: protocol.id, sessionId: 'transcript-session', tools: [tool],
-      ...protocol.npm === '@ai-sdk/anthropic' ? { reasoningEffort: 'high' } : {},
+      ...protocol.npm === '@ai-sdk/anthropic' || protocol.override ? { reasoningEffort: 'high' } : {},
       messages: [leading, user([{ type: 'text', text: 'hello' }])] }
     const chunks = await drain(initial)
     const finish = chunks.find(chunk => chunk.type === 'finish')
@@ -136,7 +146,7 @@ try {
     const call = blocks.find(block => block.type === 'tool-call')
     assert.equal(call?.name, tool.name)
     assert.deepEqual(JSON.parse(call.arguments), { query: 'hello' })
-    assertPromptAndTools(protocol, requests.get(protocol.path)[0])
+    assertPromptAndTools(protocol, requests.get(protocol.id)[0])
 
     // Round-trip the real streamed replay envelope as a restored session would.
     const assistant = JSON.parse(JSON.stringify({ id: 'assistant-tool-turn', role: 'assistant', content: blocks,
@@ -147,7 +157,7 @@ try {
     const continued = await drain({ ...initial, messages: [...initial.messages, assistant, result] })
     assert.equal(continued.find(chunk => chunk.type === 'finish')?.reason.kind, 'stop')
     assert.ok(continued.some(chunk => chunk.type === 'text-delta' && chunk.text === 'compat-ok'))
-    const replayed = requests.get(protocol.path)[1]
+    const replayed = requests.get(protocol.id)[1]
     assertPromptAndTools(protocol, replayed)
     assert.ok(JSON.stringify(replayed).includes(resultText), 'the tool result must reach the resumed request')
     assert.ok(JSON.stringify(replayed).includes('call_probe'), 'the resumed tool result must retain its call identity')
@@ -160,11 +170,11 @@ try {
     }
 
     await drain({ ...initial, system: prompt, tools: [], messages: [user([{ type: 'text', text: 'one-shot' }])] })
-    const oneShot = requests.get(protocol.path)[2]
+    const oneShot = requests.get(protocol.id)[2]
     assert.equal(JSON.stringify(oneShot).split(prompt).length - 1, 1)
     assert.ok(!oneShot.tools || oneShot.tools.length === 0, 'empty declarations must not leak tools from another request')
   }
-  console.log(`PASS: transcript compatibility (${host}): 3 protocols, prompts, declarations, tool calls, restored replay and one-shot requests`)
+  console.log(`PASS: transcript compatibility (${host}): 3 protocols + DeepSeek Responses override, prompts, declarations, tool calls, restored replay and one-shot requests`)
 } finally {
   await ctx.fiber.dispose()
   server.closeAllConnections()

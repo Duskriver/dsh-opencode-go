@@ -4,3 +4,5 @@ coverage/
 .env
 .verification-root
 mockups/
+.archify/
+opencode-protocol-benchmark-*/

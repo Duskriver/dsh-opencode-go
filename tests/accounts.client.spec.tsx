@@ -10,6 +10,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { stubSettingsScope } from './support/settings-scope.ts'
 import type { GoUsage } from '../src/usage-contract.ts'
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
+import { accountCommandHarness } from './support/account-commands.ts'
 
 const accounts = [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' }]
 const window = { status: 'ok' as const, percent: 10, resetsAt: '2026-10-03T00:00:00Z' }
@@ -39,9 +40,10 @@ function setup(
     unset: vi.fn(async (ref: string) => { secrets.delete(ref); return { ok: true as const, value: undefined } }),
   }
   const read = vi.fn(async (ref: string) => usage(ref))
-  const controller = new GoAccountsController(host.scope, { remote: { credentials } } as never, read, () => {}, () => false, probeServerAccount)
+  const execute = accountCommandHarness(host.scope, credentials, probeServerAccount)
+  const controller = new GoAccountsController(host.scope, { remote: { credentials } } as never, read, () => {}, () => false, execute)
   host.scope.subscribe(() => { controller.sync() })
-  return { host, credentials, secrets, read, controller, actions: controller.actions() }
+  return { host, credentials, secrets, read, execute, controller, actions: controller.actions() }
 }
 
 it('stores new keys only through credentials and persists metadata and selection atomically', async () => {
@@ -341,7 +343,7 @@ it('fences late usage from an old endpoint or removed account', async () => {
 
 it('pins an unsaved key draft to its original account when another surface switches accounts', async () => {
   const fixture = setup()
-  const controller = new OpencodeGoSectionController(fixture.host.scope, { remote: { credentials: fixture.credentials } } as never)
+  const controller = new OpencodeGoSectionController(fixture.host.scope, { remote: { credentials: fixture.credentials } } as never, undefined, undefined, fixture.execute)
   const face = controller.inject()
   face.edit('apiKey', 'new-a-secret')
   expect(await face.selectAccount('ACCOUNT_B')).toBe(false)
@@ -356,7 +358,7 @@ it('pins an unsaved key draft to its original account when another surface switc
 
 it('keeps a key draft pinned after a settings batch fails and a different surface switches accounts', async () => {
   const fixture = setup()
-  const controller = new OpencodeGoSectionController(fixture.host.scope, { remote: { credentials: fixture.credentials } } as never)
+  const controller = new OpencodeGoSectionController(fixture.host.scope, { remote: { credentials: fixture.credentials } } as never, undefined, undefined, fixture.execute)
   const face = controller.inject()
   face.edit('apiKey', 'new-a-secret')
   face.edit('refreshMinutes', '30')
