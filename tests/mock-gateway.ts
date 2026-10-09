@@ -96,7 +96,7 @@ export async function mockGateway(modelListing: {
         response.end(behavior.body)
         return
       }
-      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.writeHead(200, { 'content-type': 'text/event-stream', ...behavior.headers })
       if (behavior.hangOpen === true) {
         for (const event of behavior.events ?? []) response.write(`data: ${event}\n\n`)
         return

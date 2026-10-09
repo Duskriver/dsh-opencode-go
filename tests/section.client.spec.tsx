@@ -13,7 +13,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { OpencodeGoSection } from '../src/client/Section.tsx'
 import type { OpencodeGoSectionProps, OpencodeGoSectionState } from '../src/client/Section.tsx'
 import { OpencodeGoSectionController, type OpencodeGoSettings } from '../src/client/section-controller.ts'
-import { stubSettingsScope } from './support/client.ts'
+import { stubSettingsScope, acceptSettingsWrites } from './support/client.ts'
 import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
@@ -640,6 +640,7 @@ describe('OpencodeGoSection', () => {
 describe('OpencodeGoSectionController through the component', () => {
   it('adds, saves, discards, and removes a custom budget without changing capacities', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptSettingsWrites(host)
     host.set.mockImplementation((field: string, value: unknown) => {
       host.publish({ value: { ...host.scope.getSnapshot().value, [field]: structuredClone(value) },
         user: { ...host.scope.getSnapshot().user as object, [field]: structuredClone(value) } })
@@ -684,6 +685,7 @@ describe('OpencodeGoSectionController through the component', () => {
 
   it('validates, saves, clears and resets the proxy address in advanced settings', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptSettingsWrites(host)
     const base = { proxyURL: 'http://localhost:7890' }
     host.set.mockImplementation((field: string, value: unknown) => {
       host.publish({ value: { ...host.scope.getSnapshot().value, [field]: value },
@@ -715,20 +717,21 @@ describe('OpencodeGoSectionController through the component', () => {
       fireEvent.change(input(), { target: { value: 'socks5://localhost:1080' } })
       expect(host.set).not.toHaveBeenCalled()
       await act(async () => { screen.getByText(en.save).click() })
-      expect(host.set).toHaveBeenCalledWith('proxyURL', 'socks5://localhost:1080')
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: 'socks5://localhost:1080' }], expect.any(Number))
       fireEvent.change(input(), { target: { value: '' } })
       await act(async () => { screen.getByText(en.save).click() })
-      expect(host.set).toHaveBeenCalledWith('proxyURL', '')
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: '' }], expect.any(Number))
       expect(input().value).toBe('')
       fireEvent.click(within(input().parentElement!).getByRole('button', { name: en.reset }))
       await act(async () => { screen.getByText(en.save).click() })
-      expect(host.unset).toHaveBeenCalledWith('proxyURL')
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['proxyURL'] }], expect.any(Number))
       expect(input().value).toBe(base.proxyURL)
     } finally { controller.dispose() }
   })
 
   it('saves an optional image count, rejects invalid counts, and clears or resets the override', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptSettingsWrites(host)
     host.set.mockImplementation((field: string, value: unknown) => {
       host.publish({
         value: { ...host.scope.getSnapshot().value, [field]: value },
@@ -765,11 +768,11 @@ describe('OpencodeGoSectionController through the component', () => {
       expect(host.set).not.toHaveBeenCalled()
       fireEvent.change(input(), { target: { value: '30' } })
       await act(async () => { screen.getByText(en.save).click() })
-      expect(host.set).toHaveBeenCalledWith('maxImages', 30)
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['maxImages'], value: 30 }], expect.any(Number))
       expect(input().value).toBe('30')
       fireEvent.change(input(), { target: { value: '' } })
       await act(async () => { screen.getByText(en.save).click() })
-      expect(host.unset).toHaveBeenCalledWith('maxImages')
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['maxImages'] }], expect.any(Number))
       expect(host.scope.getSnapshot().value?.maxImages).toBeUndefined()
       expect(input().value).toBe('')
 
@@ -787,6 +790,7 @@ describe('OpencodeGoSectionController through the component', () => {
 
   it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptSettingsWrites(host)
     host.set.mockImplementation((field: string, value: unknown) => {
       host.publish({
         value: { ...host.scope.getSnapshot().value, [field]: structuredClone(value) },
@@ -833,6 +837,7 @@ describe('OpencodeGoSectionController through the component', () => {
 
   it('drives a staged edit end to end against the stub scope', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptSettingsWrites(host)
     host.set.mockImplementation((field: string, value: unknown) => {
       const section = { ...host.scope.getSnapshot().value as object }
       const user = { ...host.scope.getSnapshot().user as object }
@@ -861,6 +866,6 @@ describe('OpencodeGoSectionController through the component', () => {
     fireEvent.change(screen.getByLabelText(en.baseURLLabel), { target: { value: 'https://edited.test/v1' } })
     await act(async () => { screen.getByText(en.save).click() })
 
-    await vi.waitFor(() => { expect(host.set).toHaveBeenCalledWith('baseURL', 'https://edited.test/v1') })
+    await vi.waitFor(() => { expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['baseURL'], value: 'https://edited.test/v1' }], expect.any(Number)) })
   })
 })

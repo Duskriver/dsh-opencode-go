@@ -40,8 +40,8 @@ export function mapUsage(usage: PiUsage): TokenUsage {
 // If pi-ai ever forwards the original Error (or a fetch/dispatcher hook that lets
 // us capture the cause ourselves), classify on `code`/`cause` instead of text.
 function classifyPiAiError(message: string): string {
-  if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
   if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
+  if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
   // A rejected request body (gateway or provider size cap): resending the
   // same request cannot succeed, so it is invalid, not transient.
@@ -227,9 +227,10 @@ export async function* toStreamChunks(
           ),
         }
         return
-      // no default: AssistantMessageEvent is pi-ai's closed union; a new
-      // event type should fail compilation here via tsc's exhaustiveness
-      // when one is added (switch covers all current variants).
+      default: {
+        const unsupported: never = event
+        throw new LlmError(`Unsupported pi-ai stream event: ${(unsupported as { type?: unknown }).type}`, 'UNSUPPORTED_CONTENT')
+      }
     }
   }
   throw new LlmError('pi-ai event stream ended without done/error', 'STREAM_CLOSED')

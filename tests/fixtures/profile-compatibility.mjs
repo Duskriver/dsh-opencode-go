@@ -5,6 +5,7 @@ const { Context } = await import('@deepseek-ai/cordis')
 const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader')
 const { default: Settings } = await import('@deepseek-ai/dsh-settings')
 const { createUserMessage } = await import('@deepseek-ai/dsh-llm')
+const { CredentialProvider } = await import('@deepseek-ai/dsh-credentials')
 const ctx = new Context()
 const inferenceKeys = []
 const usage = Object.fromEntries(['rolling', 'weekly', 'monthly'].map(key => [key,
@@ -199,7 +200,35 @@ try {
   assert.equal(entry.options.config.legacyOption, true, 'unknown profile fields survive live updates without breaking reads')
   assert.equal(entry.options.config.showDeprecatedModels, true, 'the legacy toggle remains an inert unknown profile field')
   assert.deepEqual(entry.options.config.visibleModelIds, ['compat-model'], 'the legacy selection remains an inert unknown profile field')
-  console.log('PASS: profile settings, account adoption and notice, live updates, capacities, reset, route toggle, validation')
+  // Recovery must use the same real SettingsForms write/revision contract as
+  // adoption, including hosts that expose live profile refs instead of sections.
+  const recovered = { id: 'c'.repeat(32), name: 'Recovered', apiKeyEnv: 'DSH_OPENCODE_GO_ACCOUNT_' + 'C'.repeat(32) }
+  const values = new Map([['OPENCODE_GO_COMPAT_KEY', 'fixture-key'],
+    ['OPENCODE_GO_BACKUP_COMPAT_KEY', 'backup-fixture-key'], [recovered.apiKeyEnv, 'recovered-fixture-key']])
+  class FixtureCredentials extends CredentialProvider {
+    constructor(scope) { super(scope) }
+    async resolve(ref) { return values.has(ref) ? { value: values.get(ref), source: 'file' } : undefined }
+    async describe(ref) { return { configured: values.has(ref), writable: true, source: 'file' } }
+    async unset(ref) { values.delete(ref); this.notifyUpdated(ref) }
+  }
+  await ctx.plugin(FixtureCredentials)
+  await ctx.loader.await()
+  const waitForRecovery = async () => {
+    for (let attempt = 0; attempt < 100 && view().value.accountOperations.length; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    assert.deepEqual(view().value.accountOperations, [], 'profile recovery clears committed intentions')
+  }
+  await ctx.settings.update('opencode-go', { accountOperations: [{ id: recovered.id, kind: 'add', account: recovered,
+    previousRef: view().value.apiKeyEnv, select: false }] })
+  await waitForRecovery()
+  assert.ok(view().value.accounts.some(account => account.id === recovered.id), 'recovery attaches the already committed key')
+  await ctx.settings.update('opencode-go', { accountOperations: [{ id: 'd'.repeat(32), kind: 'remove', account: recovered }] })
+  await waitForRecovery()
+  assert.ok(!view().value.accounts.some(account => account.id === recovered.id), 'recovery removes stale account metadata')
+  assert.ok(!values.has(recovered.apiKeyEnv), 'recovery removes only the generated credential')
+  assert.equal(entry.fiber, fiber, 'recovery preserves the running plugin')
+  console.log('PASS: profile settings, account adoption and recovery, live updates, capacities, reset, route toggle, validation')
 } finally {
   await ctx.fiber.dispose()
 }

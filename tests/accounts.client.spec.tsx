@@ -53,7 +53,11 @@ it('stores new keys only through credentials and persists metadata and selection
   expect(config.apiKeyEnv).toBe(config.accounts![0]!.apiKeyEnv)
   expect(fixture.credentials.set).toHaveBeenCalledWith(config.apiKeyEnv, 'private-new-key')
   expect(JSON.stringify([config, fixture.controller.snapshot(), fixture.host.mutate.mock.calls])).not.toContain('private-new-key')
-  expect(fixture.host.mutate.mock.calls[0]![0]).toHaveLength(2)
+  expect(fixture.host.mutate.mock.calls[0]![0]).toEqual([{ op: 'set', path: ['accountOperations'], value: [
+    expect.objectContaining({ kind: 'add', account: config.accounts![0] }),
+  ] }])
+  expect(fixture.host.mutate.mock.calls[1]![0]).toHaveLength(3)
+  expect(config.accountOperations).toEqual([])
   expect(await fixture.actions.renameAccount(config.apiKeyEnv!, 'Renamed')).toBe(true)
   fixture.controller.dispose()
 })
@@ -142,11 +146,39 @@ it('retries an add that lost a concurrent settings write, reusing the stored cre
   fixture.controller.dispose()
 })
 
-it('keeps a possibly committed credential after an ambiguous metadata transport failure', async () => {
+it('does not store a key when the durable intention cannot be confirmed', async () => {
   const fixture = setup()
   fixture.host.mutate.mockRejectedValueOnce(new Error('transport lost after write'))
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
+  expect(fixture.credentials.set).not.toHaveBeenCalled()
   expect(fixture.credentials.unset).not.toHaveBeenCalled()
+  fixture.controller.dispose()
+})
+
+it('keeps a confirmed addition recoverable after the final metadata response is lost', async () => {
+  const fixture = setup({ accounts: [] })
+  fixture.host.mutate.mockImplementationOnce(fixture.host.mutate.getMockImplementation()!)
+    .mockRejectedValueOnce(new Error('final response lost'))
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
+  const operation = fixture.host.scope.getSnapshot().value!.accountOperations![0]!
+  expect(fixture.secrets.has(operation.account.apiKeyEnv)).toBe(true)
+  expect(fixture.controller.snapshot().entries).toContainEqual(expect.objectContaining({ name: 'Work' }))
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
+  expect(fixture.host.scope.getSnapshot().value!.accounts).toHaveLength(1)
+  expect(fixture.credentials.set.mock.calls.map(call => call[0])).toEqual([operation.account.apiKeyEnv, operation.account.apiKeyEnv])
+  fixture.controller.dispose()
+})
+
+it('keeps an addition with an unwritten key visible for replacement or removal', async () => {
+  const fixture = setup({ accounts: [] })
+  fixture.credentials.set.mockResolvedValueOnce({ ok: false as const, error: new Error('credential store unavailable') })
+  expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
+  const ref = fixture.controller.snapshot().entries[0]!.apiKeyEnv
+  expect(fixture.host.scope.getSnapshot().value?.accountOperations).toHaveLength(1)
+  expect(await fixture.actions.replaceAccountKey(ref, 'replacement')).toBe(true)
+  expect(fixture.secrets.has(ref)).toBe(true)
+  expect(await fixture.actions.removeAccount(ref)).toBe(true)
+  expect(fixture.controller.snapshot().entries).toEqual([])
   fixture.controller.dispose()
 })
 
@@ -159,22 +191,24 @@ it('allows replacing a writable key even when the settings document is read-only
   fixture.controller.dispose()
 })
 
-it('rolls back the fresh credential when the settings document confirms the write was refused', async () => {
+it('leaves credentials untouched when the settings document refuses the intention', async () => {
   const fixture = setup(undefined, async () => false)
   fixture.host.mutate.mockImplementation(async () => {})
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
   expect(fixture.secrets.size).toBe(2)
-  expect(fixture.credentials.unset).toHaveBeenCalledWith(expect.stringMatching(/^DSH_OPENCODE_GO_ACCOUNT_/))
+  expect(fixture.credentials.set).not.toHaveBeenCalled()
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
   expect(fixture.controller.snapshot().failure).toBe('write')
   fixture.controller.dispose()
 })
 
 it('keeps a committed credential when a concurrent write keeps it out of the local snapshot', async () => {
   const fixture = setup(undefined, async () => true)
+  const commit = fixture.host.mutate.getMockImplementation()!
   // The legacy scope settles void and a concurrent write (the usage pill's
   // account switch, any other surface) suppresses the fold: the write
   // committed, but the snapshot the add re-reads still lags it.
-  fixture.host.mutate.mockImplementation(async () => {})
+  fixture.host.mutate.mockImplementation(async () => {}).mockImplementationOnce(commit)
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
   expect(fixture.credentials.unset).not.toHaveBeenCalled()
   fixture.controller.dispose()
@@ -200,14 +234,15 @@ it('treats an accepted settlement as committed even before the snapshot folds it
   fixture.controller.dispose()
 })
 
-it('rolls the fresh credential back on a refused settlement without consulting the probe', async () => {
+it('refuses to write credentials after a refused intention without consulting the account probe', async () => {
   const probe = vi.fn(async () => true as const)
   const fixture = setup(undefined, probe)
   // A 0.1.7 form settles false: the host refused the value, so the rollback
   // needs no server-side confirmation.
   fixture.host.mutate.mockImplementation(async () => false)
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(false)
-  expect(fixture.credentials.unset).toHaveBeenCalledWith(expect.stringMatching(/^DSH_OPENCODE_GO_ACCOUNT_/))
+  expect(fixture.credentials.set).not.toHaveBeenCalled()
+  expect(fixture.credentials.unset).not.toHaveBeenCalled()
   expect(probe).not.toHaveBeenCalled()
   fixture.controller.dispose()
 })
@@ -224,15 +259,16 @@ it('removes the selected account and chooses its replacement in one write; an em
   fixture.controller.dispose()
 })
 
-it('removes the stored key first, so a refused settings write leaves a retryable row', async () => {
+it('retains the removal intention when metadata is refused after the key was removed', async () => {
   const fixture = setup({ accounts: [] })
   await fixture.actions.addAccount('Work', 'private-key')
   const ref = fixture.host.scope.getSnapshot().value!.apiKeyEnv!
-  fixture.host.mutate.mockImplementationOnce(async () => {})
+  fixture.host.mutate.mockImplementationOnce(fixture.host.mutate.getMockImplementation()!).mockImplementationOnce(async () => {})
   expect(await fixture.actions.removeAccount(ref)).toBe(false)
   // The key is gone but the row stays visible and the remove is retryable — no orphan credential.
   expect(fixture.secrets.has(ref)).toBe(false)
   expect(fixture.controller.snapshot().entries.some(entry => entry.apiKeyEnv === ref)).toBe(true)
+  expect(fixture.host.scope.getSnapshot().value?.accountOperations).toEqual([expect.objectContaining({ kind: 'remove' })])
   expect(await fixture.actions.removeAccount(ref)).toBe(true)
   expect(fixture.credentials.unset).toHaveBeenCalledTimes(1)
   fixture.controller.dispose()
@@ -318,19 +354,19 @@ it('pins an unsaved key draft to its original account when another surface switc
   fixture.controller.dispose()
 })
 
-it('keeps a key draft pinned after a partial save fails and a different surface switches accounts', async () => {
+it('keeps a key draft pinned after a settings batch fails and a different surface switches accounts', async () => {
   const fixture = setup()
   const controller = new OpencodeGoSectionController(fixture.host.scope, { remote: { credentials: fixture.credentials } } as never)
   const face = controller.inject()
   face.edit('apiKey', 'new-a-secret')
   face.edit('refreshMinutes', '30')
-  fixture.host.set.mockRejectedValueOnce(new Error('settings write failed'))
+  fixture.host.mutate.mockRejectedValueOnce(new Error('settings write failed'))
   face.save()
   await vi.waitFor(() => { expect(face.hooks.opencodeGo.getSnapshot()).toMatchObject({ failed: true, saving: false, dirty: true }) })
   fixture.host.publish({ value: { accounts, apiKeyEnv: 'ACCOUNT_B' } })
   face.save()
   await vi.waitFor(() => { expect(face.hooks.opencodeGo.getSnapshot().dirty).toBe(false) })
-  expect(fixture.credentials.set.mock.calls.map(([ref]) => ref)).toEqual(['ACCOUNT_A', 'ACCOUNT_A'])
+  expect(fixture.credentials.set.mock.calls.map(([ref]) => ref)).toEqual(['ACCOUNT_A'])
   controller.dispose()
   fixture.controller.dispose()
 })

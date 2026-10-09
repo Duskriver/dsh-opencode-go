@@ -28,12 +28,11 @@ export function projectRequestImages(messages: readonly Message[], policy: Image
   if (api.requiredImageOffload !== undefined && api.projectOffloadedImages !== undefined) {
     // New hosts own the durable offloaded marks. The adapter must neither
     // discard images from estimates nor replace the host's retry protocol.
-    if (!policy.exact) return messages
-    if (policy.maxBytes !== undefined || policy.maxImages !== undefined) {
+    if ((policy.exact && policy.maxBytes !== undefined) || policy.maxImages !== undefined) {
       const offloadImages = api.requiredImageOffload(
         messages,
-        { representation: 'base64', maxBytes: policy.maxBytes, maxImages: policy.maxImages, countQuantum: 1 },
-        block => policy.byteLength(block.attachment),
+        { representation: 'base64', maxBytes: policy.exact ? policy.maxBytes : undefined, maxImages: policy.maxImages, countQuantum: 1 },
+        block => policy.exact ? policy.byteLength(block.attachment) : 0,
       )
       if (offloadImages > 0) {
         throw new llm.LlmError(
@@ -43,6 +42,7 @@ export function projectRequestImages(messages: readonly Message[], policy: Image
         )
       }
     }
+    if (!policy.exact) return messages
     return api.projectOffloadedImages(messages, policy.placeholder)
   }
   if (api.offloadRequestImagesWithPolicy === undefined) {

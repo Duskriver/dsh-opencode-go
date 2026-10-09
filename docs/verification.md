@@ -706,3 +706,43 @@ Validation: `npm run compile` and `npm run test:ci` pass **537 tests in 34 files
 Installed-package compatibility also passes on **0.1.5-rc.1, 0.1.7-rc.2 and 0.2.0-rc.2**. The profile fixture now drives a real fallback through SettingsForms, verifies the saved selection without changing account order or remounting the plugin, and repeats describe/usage reads to check that the adoption notice survives.
 
 The freshness check applies before starting a settings mutation. A mutation already accepted by the Host remains subject to its persistence and revision semantics; the plugin does not cancel or roll back an in-progress Host write.
+
+## Architectural hardening: failure domains, bounded preparation and atomic settings (2026-10-09)
+
+Gateway HTTP evidence now drives failure classification before SDK message fallbacks. A 401 `ModelError` returns `UNKNOWN_MODEL` without account switching or rejected-key caching; 401 subscription limits switch with reason `quota` while retaining the key for later requests. Only explicit invalid credentials enter the rejection cache. Captured HTTP status also prevents a number such as 401 inside a 500 response message from masquerading as authentication failure.
+
+Modern image count overflow returns the host offload request before attachment reads. Four shared permits bound native preparation across simultaneous calls, and an occurrence-weighted base64 counter checks the payload as each unique attachment completes. The normal path updates this counter in constant time; only overflow invokes the host's prefix calculation. A byte overflow aborts queued work. Cancellation keeps a native operation's permit until that operation actually settles. Legacy hosts retain their existing transient image projection semantics.
+
+New positive integer settings `requestPreparationTimeoutMs` (60000 by default) and `requestTimeoutMs` (1800000 by default) bound discovery, credential/image preparation and whole dispatch, including account fallback. Caller cancellation ends credential/image/iterator/diagnostic waits even when their underlying service ignores its signal; SDK teardown no longer blocks cancellation. Caller aborts consistently produce an `ABORTED` finish, and deadline failures use `TIMEOUT`. Shared catalog refreshes remain independent of any single waiter's cancellation.
+
+The advanced form commits all ordinary set/unset operations through one revision-checked `scope.mutate`. A rejected batch writes no credentials and retains drafts. Accepted settings clear separately from failed credential drafts, so retry does not repeat successful operations. New edits typed during an in-flight save remain staged. Credentials keep their original account binding when another surface switches the selected account after a failed settings batch.
+
+Nonempty listings without valid IDs preserve the served catalog and report discovery failure; explicit empty listings still clear it. Cold listing failure reports `DISCOVERY_FAILED` rather than claiming a model is unknown. Closed SDK stream events are checked with a `never` assignment and rejected explicitly at runtime, and unknown host roles are refused. A safe `onCallTrace` summary supplies call ID, stage timing, attempt count and final outcome/code, including HTTP 200 stream truncation; observer failures do not affect requests.
+
+Validation on macOS with Node 24.14.1:
+
+- `npm run compile` and `npm run test:ci`: **590 tests in 37 files**, **47 shipped files** matching source, both TypeScript projects clean. The changes add 34 regression cases to the 556-test baseline.
+- `DSH_COMPAT_CONCURRENCY=4 npm run test:compat`: **all ten installed hosts pass**, including 0.1.5-rc.1/rc.2, 0.1.6-alpha.1/alpha.2, 0.1.7-alpha.1/alpha.2/rc.1/rc.2, 0.2.0-rc.2 and 0.2.1-alpha.1. The final artifact run completed in 73.4 seconds including cleanup.
+- `npm run test:install`: npm Git, pnpm Git and pnpm packed npm installations, ESM loading and public consumer types all pass without source builds or build approvals; 36.1 seconds including cleanup.
+- After isolating the short preparation-deadline cases from cold discovery timing, the adapter suite passes all 33 cases. `git diff --check` is clean.
+
+The tests use loopback gateways, fake credentials and fixture attachments. Settings and credentials still lack a cross-store crash transaction or durable recovery journal. Mixed valid/invalid listing rows still use the valid IDs; public disk metadata remains insufficient to establish gateway membership after restart. Underlying native work that permanently ignores cancellation can retain its image permits until host/service recovery. These boundaries are documented in `docs/development.md`.
+
+## Architectural hardening, second pass: admission, attempt evidence and account recovery (2026-10-10)
+
+Untyped quota text is now limited to HTTP 401/402/403/429. A 500 diagnostic quoting an earlier credits failure remains `SERVER` and does not switch accounts; 504 remains `TIMEOUT`. Known structured quota types retain precedence, including when an upstream uses an unexpected status. Regression cases cover the classifier and the actual account fallback path.
+
+Image preparation now admits four active tasks and at most 32 queued tasks within the plugin module. A shared 128 MiB logical budget charges prepared raw data and occurrence-weighted base64 bytes; the adapter holds each lease through streaming and releases it on failure or consumer stop. Admission failure reports `IMAGE_RESOURCE_BUSY`. Tests exercise queue saturation, cancellation, shared reservations and a paused real adapter stream, including resource release and diagnostics. The budget excludes native decoder RSS, SDK/JSON copies and history; native work still has to cooperate with cancellation or settle before its permit becomes reusable.
+
+Mixed model-listing rows retain valid IDs while exposing a bounded warning through the RPC codec, settings UI and Host logger. Diagnostics include counts and at most eight row positions, without copying malformed data. A clean listing clears the warning. Each dispatch now has bounded attempt details for failures and the serving account: stages, HTTP status, redacted upstream request ID, first nonempty output latency, error code and image pool occupancy/waiting. HTTP evidence files carry matching call and attempt IDs. Tests cover a quota fallback followed by success, HTTP 200 truncation, credential echoes, evidence correlation and consumer stop.
+
+Account operations first confirm a durable, secret-free intention in their own section/profile before touching credentials. Host reconciliation completes stored-key additions and interrupted removals, preserves later account selections, and uses revision guards for metadata and intention cleanup. An addition without a stored key stays visible for replacement or removal. Recovery retries on settings/credential reconnection and updates, bounds each operation to 30 seconds, and cancels obsolete connection waits. Only exact generated ID/reference pairs authorize credential deletion; external references retain their keys. This adds recoverable eventual consistency, without claiming a cross-store transaction or isolation from arbitrary simultaneous profile edits.
+
+Validation on macOS with Node 24.14.1:
+
+- `npm run compile` and `npm run test:ci`: **622 tests in 39 files**, **49 shipped files** matching source, both TypeScript projects clean. This pass adds 32 cases beyond the prior 590-test suite.
+- `DSH_COMPAT_CONCURRENCY=4 npm run test:compat`: **all ten installed hosts pass**, **71.4 seconds** including cleanup. The four 0.1.5/0.1.6 fixtures now recover additions and removals with real settings and managed credential files. All six 0.1.7/0.2 fixtures exercise the same operations through real profile SettingsForms.
+- `npm run test:install`: npm Git, pnpm Git and packed npm installs, ESM loading and public consumer types pass without source builds or build approvals; **31.9 seconds** including cleanup.
+- `git diff --check` is clean. Tests use temporary homes, fixture credentials and loopback gateways; no paid inference or user profile is changed.
+
+The deliberate costs are bounded overload rejection, partial listings that may omit malformed models, and eventual rather than atomic account recovery. A key never committed cannot be reconstructed, old orphan keys predating the journal cannot be enumerated through the credential seam, and manually sharing generated references across profiles shares their deletion lifecycle. Cold offline membership, forced native-task termination and newer host content capabilities remain deferred; HTTP 200 in-stream errors still use the SDK/stream mapper's fallback classification.

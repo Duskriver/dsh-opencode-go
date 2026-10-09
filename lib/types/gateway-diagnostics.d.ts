@@ -2,6 +2,7 @@
 export declare class GatewayDiagnostics {
     private readonly options;
     private evidence;
+    private code;
     private readonly secrets;
     constructor(options: {
         provider: string;
@@ -10,8 +11,12 @@ export declare class GatewayDiagnostics {
         proxyURL?: string;
         fetch?: typeof globalThis.fetch;
         directory?: string;
+        callId?: string;
+        attempt?: number;
+        onResponse?: (status: number, requestId?: string) => void;
     });
     private redact;
     readonly fetch: typeof globalThis.fetch;
+    failureCode(fallback: string): Promise<string>;
     failureMessage(original: string): Promise<string>;
 }

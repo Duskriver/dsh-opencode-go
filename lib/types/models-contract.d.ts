@@ -35,6 +35,7 @@ export declare function normalizeInputModalities(value: unknown): readonly Input
 export interface GoCatalogSourceStatus {
     readonly updatedAt?: number;
     readonly error?: string;
+    readonly warning?: string;
 }
 /** A failed refresh retains the Host's usable data with an explicit diagnostic. */
 export interface GoModelCatalog {

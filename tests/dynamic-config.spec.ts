@@ -19,6 +19,7 @@ import { apply } from '../src/index.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { configOf } from './config-of.ts'
 import type { GoModelCatalog } from '../src/models-contract.ts'
+import { ACCOUNT_REF_PREFIX } from '../src/accounts.ts'
 
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
@@ -41,7 +42,7 @@ async function home(): Promise<string> {
 /** The managed credential document's current layout: a versioned refs map. */
 function credentialsYaml(refs: Record<string, string>): string {
   const rows = Object.entries(refs).map(([ref, value]) => `  ${ref}: ${value}`).join('\n')
-  return `version: 1\nrefs:\n${rows}\n`
+  return rows ? `version: 1\nrefs:\n${rows}\n` : 'version: 1\nrefs: {}\n'
 }
 
 interface BootOptions {
@@ -87,6 +88,41 @@ async function streamOnce(ctx: Context): Promise<void> {
 }
 
 describe('settings-backed configuration', () => {
+  it('restores an interrupted addition from real durable settings and credential stores', async () => {
+    const account = { id: 'c'.repeat(32), name: 'Recovered', apiKeyEnv: ACCOUNT_REF_PREFIX + 'C'.repeat(32) }
+    const ctx = await boot({ settingsYaml: JSON.stringify({ [NS]: { accounts: [], accountOperations: [
+      { id: account.id, kind: 'add', account, select: true, previousRef: 'OPENCODE_API_KEY' },
+    ] } }), credentials: { [account.apiKeyEnv]: 'recovery-fixture-secret' }, baseURL: 'https://gateway.test/v1' })
+    cleanups.push(() => ctx.fiber.dispose())
+    await expect.poll(() => ctx.settings.describe().find(row => row.ns === NS)?.value.accounts).toEqual([account])
+    const value = ctx.settings.describe().find(row => row.ns === NS)!.value
+    expect(value.accountOperations).toEqual([])
+    expect(value.apiKeyEnv).toBe(account.apiKeyEnv)
+    expect(JSON.stringify(value)).not.toContain('recovery-fixture-secret')
+  })
+
+  it('resumes an addition after a later credential event, without keeping its key in settings', async () => {
+    const account = { id: 'd'.repeat(32), name: 'Recovered later', apiKeyEnv: ACCOUNT_REF_PREFIX + 'D'.repeat(32) }
+    const ctx = await boot({ settingsYaml: JSON.stringify({ [NS]: { accounts: [], accountOperations: [
+      { id: account.id, kind: 'add', account, select: true, previousRef: 'OPENCODE_API_KEY' },
+    ] } }), credentials: {}, baseURL: 'https://gateway.test/v1' })
+    cleanups.push(() => ctx.fiber.dispose())
+    expect(ctx.settings.describe().find(row => row.ns === NS)!.value.accounts).toEqual([])
+    await ctx.credentials.set(credentialRef(account.apiKeyEnv), 'recovery-fixture-secret')
+    await expect.poll(() => ctx.settings.describe().find(row => row.ns === NS)?.value.accountOperations).toEqual([])
+    expect(ctx.settings.describe().find(row => row.ns === NS)!.value.accounts).toEqual([account])
+  })
+
+  it('finishes a durable removal on restart using the managed credential provider', async () => {
+    const account = { id: 'e'.repeat(32), name: 'Removed', apiKeyEnv: ACCOUNT_REF_PREFIX + 'E'.repeat(32) }
+    const ctx = await boot({ settingsYaml: JSON.stringify({ [NS]: { accounts: [account], apiKeyEnv: account.apiKeyEnv,
+      accountOperations: [{ id: 'f'.repeat(32), kind: 'remove', account }],
+    } }), credentials: { [account.apiKeyEnv]: 'remove-fixture-secret' }, baseURL: 'https://gateway.test/v1' })
+    cleanups.push(() => ctx.fiber.dispose())
+    await expect.poll(() => ctx.settings.describe().find(row => row.ns === NS)?.value.accountOperations).toEqual([])
+    expect(ctx.settings.describe().find(row => row.ns === NS)!.value.accounts).toEqual([])
+    expect(await ctx.credentials.resolve(credentialRef(account.apiKeyEnv))).toBeUndefined()
+  })
   it('persists valid proxies, rejects invalid addresses and supports explicit clearing', async () => {
     const ctx = await boot({ settingsYaml: '', credentials: {}, baseURL: 'https://opencode.ai/zen/go/v1' })
     const value = () => ctx.settings.describe().find(row => row.ns === NS)?.value.proxyURL

@@ -1,4 +1,5 @@
 /** Client-safe account metadata. Secrets stay in the host credential service. */
+import type { GoAccountOperation } from './account-operations.ts';
 export type GoAccount = {
     id: string;
     name: string;
@@ -14,6 +15,8 @@ export interface AccountSettings {
     /** Omission/null preserves legacy credentials; an explicit empty list removes all accounts. */
     accounts?: readonly GoAccount[] | null;
     autoSwitch?: boolean;
+    /** Recovery intentions owned by this exact settings/profile document. */
+    accountOperations?: readonly GoAccountOperation[];
 }
 export declare function accountRefOf(settings: AccountSettings): string;
 /** Include an externally selected reference without rewriting existing configuration. */

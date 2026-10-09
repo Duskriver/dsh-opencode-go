@@ -52,6 +52,15 @@ async function mountOpen(options: Parameters<typeof mount>[0] = {}) {
   await openModels()
   return mounted
 }
+
+it('shows a mixed-listing warning while keeping valid models usable', async () => {
+  const warning = 'Model listing ignored 1 of 3 rows with invalid model ids; the listing may be incomplete'
+  const { snapshot } = await mountOpen({ catalog: { models, stale: false,
+    sources: { listing: { warning }, metadata: {} } } })
+  expect(screen.getByRole('alert').textContent).toContain(warning)
+  expect(toggle('Alpha').disabled).toBe(false)
+  expect(snapshot().models).toMatchObject({ stale: false, count: 3 })
+})
 const toggle = (name: string): HTMLButtonElement => screen.getByRole('switch', { name: t('modelVisibleLabel', { name }) })
 const checked = (name: string) => toggle(name).getAttribute('aria-checked') === 'true'
 async function flip(name: string) { await act(async () => { fireEvent.click(toggle(name)) }) }

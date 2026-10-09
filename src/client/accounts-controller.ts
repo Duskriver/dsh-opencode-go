@@ -3,6 +3,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import { ACCOUNT_REF_PREFIX, MAX_ACCOUNTS, accountsOf, accountRefOf, type AccountSettings, type GoAccount } from '../accounts.ts'
+import { ownsAccountCredential, visibleAccountsOf, type GoAccountOperation } from '../account-operations.ts'
 import type { GoUsage } from '../usage-contract.ts'
 import type { SettingsScope } from './settings.ts'
 
@@ -34,6 +35,10 @@ function isSettingsConflict(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false
   const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown }
   return /conflict/i.test(`${String(name ?? '')} ${String(code ?? '')} ${String(message ?? '')}`)
+}
+
+function operationId(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export interface GoAccountsActions {
@@ -78,7 +83,7 @@ export class GoAccountsController {
   snapshot(): GoAccountsState {
     const config = this.scope.getSnapshot().value ?? {}
     return {
-      entries: accountsOf(config).map(account => ({ ...this.rows.get(account.apiKeyEnv), ...account })),
+      entries: visibleAccountsOf(config).map(account => ({ ...this.rows.get(account.apiKeyEnv), ...account })),
       activeRef: accountRefOf(config), autoSwitch: config.autoSwitch === true,
       busy: this.busy, blocked: this.blocked(), refreshing: this.refreshing, failure: this.failure,
     }
@@ -91,7 +96,7 @@ export class GoAccountsController {
     // nothing. A name is presentation too: renaming renders from the settings
     // snapshot while the row keeps its quota, so it also refetches nothing.
     const identity = JSON.stringify([
-      accountsOf(config).map(account => [account.id, account.apiKeyEnv])
+      visibleAccountsOf(config).map(account => [account.id, account.apiKeyEnv])
         .sort((left, right) => left[1]! < right[1]! ? -1 : left[1]! > right[1]! ? 1 : 0),
       config.baseURL,
       config.proxyURL,
@@ -107,7 +112,7 @@ export class GoAccountsController {
   dispose(): void { this.disposed = true; this.epoch++ }
 
   invalidate(ref: string): void {
-    if (!accountsOf(this.scope.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) return
+    if (!visibleAccountsOf(this.scope.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) return
     this.epoch++
     this.rows.delete(ref)
     if (this.loaded) void this.refresh()
@@ -116,7 +121,7 @@ export class GoAccountsController {
   async refresh(): Promise<void> {
     this.loaded = true
     const epoch = ++this.epoch
-    const accounts = [...accountsOf(this.scope.getSnapshot().value ?? {})]
+    const accounts = [...visibleAccountsOf(this.scope.getSnapshot().value ?? {})]
     this.refreshing = true
     this.publish()
     try {
@@ -186,6 +191,7 @@ export class GoAccountsController {
       }),
       replaceAccountKey: (ref, key) => this.run(async () => {
         if (!key.trim() || !this.account(ref) || this.rows.get(ref)?.writable === false) return false
+        if (this.scope.getSnapshot().value?.accountOperations?.some(operation => operation.kind === 'remove' && operation.account.apiKeyEnv === ref)) return false
         const response = await this.ctx.remote.credentials.set(ref, key.trim())
         if (!response.ok) return false
         this.invalidate(ref)
@@ -219,41 +225,69 @@ export class GoAccountsController {
   }
 
   private account(ref: string): GoAccount | undefined {
-    return accountsOf(this.scope.getSnapshot().value ?? {}).find(account => account.apiKeyEnv === ref)
+    return visibleAccountsOf(this.scope.getSnapshot().value ?? {}).find(account => account.apiKeyEnv === ref)
   }
 
   private async mutate(ops: readonly SettingsPathOpView[], revision = this.scope.getSnapshot().revision): Promise<void | boolean> {
     return this.scope.mutate(ops, revision)
   }
 
+  /** A durable intention must be confirmed before crossing the credential store. */
+  private async begin(operation: GoAccountOperation): Promise<boolean> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const snapshot = this.scope.getSnapshot()
+      const operations = snapshot.value?.accountOperations ?? []
+      if (operations.some(entry => JSON.stringify(entry) === JSON.stringify(operation))) return true
+      if (operations.length >= MAX_ACCOUNTS && !operations.some(entry => entry.account.apiKeyEnv === operation.account.apiKeyEnv)) return false
+      try {
+        const accepted = await this.mutate([{ op: 'set', path: ['accountOperations'], value: [
+          ...operations.filter(entry => entry.account.apiKeyEnv !== operation.account.apiKeyEnv), operation,
+        ] }], snapshot.revision)
+        if (accepted === false) return false
+        return accepted === true || this.scope.getSnapshot().value?.accountOperations?.some(entry => entry.id === operation.id) === true
+      } catch (error) { if (attempt === 2 || !isSettingsConflict(error)) return false }
+    }
+    return false
+  }
+
   private add(name: string, key: string): Promise<boolean> {
     return this.run(async () => {
       if (!name.trim() || name.trim().length > 80 || !key.trim()) return false
-      const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
+      const resumed = this.scope.getSnapshot().value?.accountOperations?.find(operation => operation.kind === 'add' && operation.account.name === name.trim())
+      const id = resumed?.account.id ?? operationId()
       const ref = ACCOUNT_REF_PREFIX + id.replaceAll('-', '').toUpperCase()
       const account = { id, name: name.trim(), apiKeyEnv: ref }
+      const initial = this.scope.getSnapshot().value ?? {}
+      const visible = visibleAccountsOf(initial).filter(entry => entry.apiKeyEnv !== ref)
+      const configured = await this.configuredOf(visible.map(entry => entry.apiKeyEnv))
+      const retained = visible.filter(entry => !(initial.accounts == null && !entry.name && configured.get(entry.apiKeyEnv) === false))
+      if (retained.length >= MAX_ACCOUNTS) return false
+      const operation: GoAccountOperation = resumed ?? { id, kind: 'add', account, previousRef: accountRefOf(initial),
+        select: visible.length === 0 || visible.every(entry => configured.get(entry.apiKeyEnv) === false) }
+      if (!(await this.begin(operation))) return false
       const response = await this.ctx.remote.credentials.set(ref, key.trim())
       if (!response.ok) return false
       for (let attempt = 0; attempt < 3; attempt++) {
         const snapshot = this.scope.getSnapshot()
         const existing = accountsOf(snapshot.value ?? {})
         // An earlier ambiguous attempt may already have committed this account.
-        if (existing.some(entry => entry.id === id)) return true
+        if (existing.some(entry => entry.id === id) && !snapshot.value?.accountOperations?.some(entry => entry.id === operation.id)) return true
         // Persist an existing legacy account before selection can move away
         // from it. Only a confirmed empty placeholder can be dropped; an
         // unanswered describe must not lose an account that may hold a key.
         const configured = await this.configuredOf(existing.map(entry => entry.apiKeyEnv))
         const accounts = existing.filter(entry => !(snapshot.value?.accounts == null && !entry.name
           && configured.get(entry.apiKeyEnv) === false))
-        if (accounts.length >= MAX_ACCOUNTS) break
+        if (accounts.length >= MAX_ACCOUNTS && !accounts.some(entry => entry.id === id)) return false
         // The new account becomes preferred only when every account the page
         // already shows — placeholder included — is known to hold no key.
-        const first = existing.length === 0 || existing.every(entry => configured.get(entry.apiKeyEnv) === false)
+        const first = operation.kind === 'add' && operation.select && accountRefOf(snapshot.value ?? {}) === operation.previousRef
         let accepted: void | boolean
         try {
           accepted = await this.mutate([
-            { op: 'set', path: ['accounts'], value: [...accounts, account] },
+            { op: 'set', path: ['accounts'], value: accounts.some(entry => entry.id === id) ? accounts : [...accounts, account] },
             ...(first ? [{ op: 'set' as const, path: ['apiKeyEnv'], value: ref }] : []),
+            { op: 'set', path: ['accountOperations'], value: (snapshot.value?.accountOperations ?? []).filter(entry => entry.id !== operation.id) },
           ], snapshot.revision)
         } catch (error) {
           // A concurrent settings write moved the revision: re-read and re-apply
@@ -267,19 +301,16 @@ export class GoAccountsController {
         // write, so the settlement outranks the snapshot.
         if (accepted === true) return true
         if (this.scope.getSnapshot().value?.accounts?.some(entry => entry.id === id)) return true
-        if (accepted === false) break // The host refused the value: roll the fresh key back.
+        if (accepted === false) return false // Recovery still owns the confirmed intention.
         // A legacy scope settles void whether the write committed or was
         // refused, and a concurrent write (the usage pill's account switch, any
         // other surface) can keep a committed account out of the snapshot. Only
-        // a server-side absence justifies deleting the fresh key; an unanswered
-        // probe keeps it, like the transport branch above.
+        // server confirmation can complete the UI action. An unanswered probe
+        // leaves the durable intention for Host recovery.
         const committed = await this.probeServerAccount(id)
         if (committed === true) return true
-        if (committed === false) break
         return false
       }
-      try { if (!(await this.ctx.remote.credentials.unset(ref)).ok) this.failure = 'cleanup' }
-      catch { this.failure = 'cleanup' }
       return false
     })
   }
@@ -314,7 +345,7 @@ export class GoAccountsController {
 
   private select(ref: string): Promise<boolean> {
     return this.run(async () => {
-      if (!this.account(ref)) return false
+      if (!accountsOf(this.scope.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) return false
       await this.mutate([{ op: 'set', path: ['apiKeyEnv'], value: ref }])
       return accountRefOf(this.scope.getSnapshot().value ?? {}) === ref
     })
@@ -322,17 +353,20 @@ export class GoAccountsController {
 
   private remove(ref: string): Promise<boolean> {
     return this.run(async () => {
-      if (!this.account(ref)) return false
-      // The stored key goes first so a failure can never strand an orphan
-      // credential: a refused unset keeps the row — retryable — while a refused
-      // settings write leaves a row without its key, which stays visible and
-      // fixable instead of becoming a dangling secret.
-      if (ref.startsWith(ACCOUNT_REF_PREFIX)) {
+      const account = this.account(ref)
+      if (!account) return false
+      // Persist the intention before deleting a plugin-owned key. A refused
+      // unset keeps the row; a refused metadata write remains recoverable.
+      let operation: GoAccountOperation | undefined
+      if (ownsAccountCredential(account)) {
         const described = await this.ctx.remote.credentials.describe([ref]).catch(() => undefined)
         if (!described?.ok || described.value[ref] === undefined) {
           this.failure = 'remove'
           return false
         }
+        const existing = this.scope.getSnapshot().value?.accountOperations?.find(entry => entry.kind === 'remove' && entry.account.apiKeyEnv === ref)
+        operation = existing ?? { id: operationId(), kind: 'remove', account: { id: account.id, name: account.name, apiKeyEnv: ref } }
+        if (!(await this.begin(operation))) return false
         if (described.value[ref].configured === true) {
           let removed = false
           try { removed = (await this.ctx.remote.credentials.unset(ref)).ok }
@@ -345,6 +379,7 @@ export class GoAccountsController {
       await this.mutate([
         { op: 'set', path: ['accounts'], value: remaining },
         ...(accountRefOf(config) === ref && remaining.length ? [{ op: 'set' as const, path: ['apiKeyEnv'], value: remaining[0]!.apiKeyEnv }] : []),
+        ...operation ? [{ op: 'set' as const, path: ['accountOperations'], value: (config.accountOperations ?? []).filter(entry => entry.id !== operation.id) }] : [],
       ])
       return !this.account(ref)
     })

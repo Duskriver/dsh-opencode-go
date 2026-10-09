@@ -47,6 +47,7 @@ export function normalizeInputModalities(value: unknown): readonly InputModality
 export interface GoCatalogSourceStatus {
   readonly updatedAt?: number
   readonly error?: string
+  readonly warning?: string
 }
 
 /** A failed refresh retains the Host's usable data with an explicit diagnostic. */
@@ -135,9 +136,11 @@ function parseSources(value: unknown): NonNullable<GoModelCatalog['sources']> {
       throw new Error('Invalid OpenCode Go catalog source timestamp')
     }
     if (source.error !== undefined && typeof source.error !== 'string') throw new Error('Invalid OpenCode Go catalog source error')
+    if (source.warning !== undefined && typeof source.warning !== 'string') throw new Error('Invalid OpenCode Go catalog source warning')
     return {
       ...(source.updatedAt === undefined ? {} : { updatedAt: source.updatedAt as number }),
       ...(source.error === undefined ? {} : { error: source.error as string }),
+      ...(source.warning === undefined ? {} : { warning: source.warning as string }),
     }
   }
   return { listing: parse(sources.listing), metadata: parse(sources.metadata) }

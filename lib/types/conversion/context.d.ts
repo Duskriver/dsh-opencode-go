@@ -6,6 +6,7 @@
 import type { GenerateOptions, ImageAttachmentAccessResolver } from '@deepseek-ai/dsh-llm';
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment';
 import type { Context as PiContext } from '../sdk-types.ts';
+import { ImagePayloadLease, type ImagePoolObserver } from './image-pool.ts';
 /** Inputs that bind deterministic request images to one current tool execution world. */
 export interface PiImageRequestContext {
     /** Durable provider that resolves request-image bytes and provider-owned host objects. */
@@ -18,6 +19,9 @@ export interface PiImageRequestContext {
     maxRequestImageBytes?: number;
     /** Route pixel and raw encoded-byte budgets. */
     requestImagePolicy?: PiImageRequestBudget;
+    /** Adapter-owned lease retains its charge through provider streaming. */
+    payloadLease?: ImagePayloadLease;
+    onImagePool?: ImagePoolObserver;
 }
 /** Per-route budgets from which each request image's target is derived. */
 export interface PiImageRequestBudget {

@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { classifyGatewayError } from './gateway-error.ts'
 
 const MAX_BODY_BYTES = 16 * 1024
 const BODY_READ_TIMEOUT_MS = 1000
@@ -88,6 +89,8 @@ interface HttpEvidence {
   time: string
   provider: string
   model: string
+  callId?: string
+  attempt?: number
   request: Record<string, unknown>
   response: { status: number; headers: Record<string, string>; body: BodyPreview }
 }
@@ -95,6 +98,7 @@ interface HttpEvidence {
 /** One SDK attempt owns its capture; simultaneous requests cannot share evidence. */
 export class GatewayDiagnostics {
   private evidence: Promise<HttpEvidence> | undefined
+  private code: Promise<string> | undefined
   private readonly secrets: string[]
 
   constructor(private readonly options: {
@@ -104,6 +108,9 @@ export class GatewayDiagnostics {
     proxyURL?: string
     fetch?: typeof globalThis.fetch
     directory?: string
+    callId?: string
+    attempt?: number
+    onResponse?: (status: number, requestId?: string) => void
   }) {
     this.secrets = [options.apiKey]
     if (options.proxyURL) {
@@ -137,6 +144,11 @@ export class GatewayDiagnostics {
 
   readonly fetch: typeof globalThis.fetch = async (input, init) => {
     const response = await (this.options.fetch ?? globalThis.fetch)(input, init)
+    const rawRequestId = response.headers.get('x-request-id') ?? response.headers.get('request-id')
+      ?? response.headers.get('x-opencode-log-id')
+    const requestId = rawRequestId === null ? undefined : this.redact(rawRequestId, true).slice(0, 128)
+    try { this.options.onResponse?.(response.status, requestId) }
+    catch { /* A diagnostic observer cannot alter HTTP behavior. */ }
     if (!response.ok) {
       const headers: Record<string, string> = {}
       for (const name of RESPONSE_HEADERS) {
@@ -146,14 +158,24 @@ export class GatewayDiagnostics {
       const request = requestSummary(input, init)
       const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined)
       const time = new Date().toISOString()
-      this.evidence = previewBody(response, signal).then(body => ({
+      const preview = previewBody(response, signal)
+      this.code = preview.then(body => classifyGatewayError(response.status, body.text, 'PI_AI_ERROR'))
+      this.evidence = preview.then(body => ({
         time, provider: this.options.provider, model: this.options.model,
+        ...this.options.callId === undefined ? {} : { callId: this.options.callId, attempt: this.options.attempt },
         request, response: { status: response.status, headers, body: {
           ...body, text: this.redact(body.text, body.truncated || body.readFailed),
         } },
       }))
     }
     return response
+  }
+
+  async failureCode(fallback: string): Promise<string> {
+    const code = await this.code
+    // Preserve context-overflow detection made from the provider's message.
+    return code === undefined || code === 'PI_AI_ERROR'
+      || code === 'INVALID_REQUEST' && fallback === 'CONTEXT_WINDOW_EXCEEDED' ? fallback : code
   }
 
   async failureMessage(original: string): Promise<string> {

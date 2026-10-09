@@ -385,8 +385,8 @@ describe('pi-ai request context conversion', () => {
       .filter(block => block.type === 'image')).toHaveLength(30)
   })
 
-  it.each([[1, 12, 2], [2, 4, 2]])(
-    'satisfies both the count (%s) and byte (%s) budgets', async (maxImages, maxRequestImageBytes, offloadImages) => {
+  it.each([[1, 12, 2], [2, 4, 1]])(
+    'requests count offloading before preparing bytes (count %s, byte cap %s)', async (maxImages, maxRequestImageBytes, offloadImages) => {
       await expect(toPiContext(request([user(Array.from({ length: 3 }, () => (
         { type: 'image' as const, attachment: ref }
       )))]), imageContext(attachments, { maxImages, maxRequestImageBytes })))
@@ -663,4 +663,75 @@ describe('pi-ai unsupported history and tools', () => {
       message: 'Deferred tool loading is not supported yet',
     })
   })
+})
+
+it('rejects image count overflow before reading any attachment', async () => {
+  const read = vi.fn(async (value: ImageAttachmentRef) => requestImage(value, Uint8Array.of(1)))
+  await expect(toPiContext(request([user(Array.from({ length: 100 }, (_, index) => ({
+    type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
+  })))]), imageContext(projectionStore(read), { maxImages: 1 })))
+    .rejects.toMatchObject({ code: 'IMAGE_OFFLOAD_REQUIRED', failure: { offloadImages: 99 } })
+  expect(read).not.toHaveBeenCalled()
+})
+
+it('bounds image preparation across simultaneous requests', async () => {
+  let active = 0
+  let peak = 0
+  const read = vi.fn(async (value: ImageAttachmentRef) => {
+    active++; peak = Math.max(peak, active)
+    try { await new Promise(resolve => setTimeout(resolve, 3)); return requestImage(value, Uint8Array.of(1)) }
+    finally { active-- }
+  })
+  const messages = [user(Array.from({ length: 20 }, (_, index) => ({
+    type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
+  })))]
+  await Promise.all([toPiContext(request(messages), imageContext(projectionStore(read))),
+    toPiContext(request(messages), imageContext(projectionStore(read)))])
+  expect(read).toHaveBeenCalledTimes(40)
+  expect(peak).toBeLessThanOrEqual(4)
+  expect(active).toBe(0)
+})
+
+it('stops scheduling images as soon as the known encoded bytes exceed the request cap', async () => {
+  const read = vi.fn(async (value: ImageAttachmentRef) => {
+    await new Promise(resolve => setTimeout(resolve, 3))
+    return requestImage(value, Uint8Array.of(1, 2, 3, 4))
+  })
+  const messages = [user(Array.from({ length: 100 }, (_, index) => ({
+    type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
+  })))]
+  await expect(toPiContext(request(messages), imageContext(projectionStore(read), { maxRequestImageBytes: 4 })))
+    .rejects.toMatchObject({ code: 'IMAGE_OFFLOAD_REQUIRED' })
+  expect(read.mock.calls.length).toBeLessThanOrEqual(4)
+  // Allow still-running native reads to release their shared permits.
+  await new Promise(resolve => setTimeout(resolve, 10))
+})
+
+it('cancels a queued image request without releasing permits held by unresponsive reads', async () => {
+  const release = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
+  const reads = vi.fn(async (value: ImageAttachmentRef) => {
+    if (reads.mock.calls.length === 4) started.resolve()
+    await release.promise
+    return requestImage(value, Uint8Array.of(1))
+  })
+  const messages = [user(Array.from({ length: 4 }, (_, index) => ({
+    type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
+  })))]
+  const first = toPiContext(request(messages), imageContext(projectionStore(reads)))
+  await started.promise
+  const controller = new AbortController()
+  const queuedRead = vi.fn(async (value: ImageAttachmentRef) => requestImage(value, Uint8Array.of(1)))
+  const pending = toPiContext({ ...request(messages), signal: controller.signal }, imageContext(projectionStore(queuedRead)))
+  const outcome = pending.then(() => 'completed', () => 'aborted')
+  controller.abort()
+  try {
+    expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 100))])).toBe('aborted')
+    expect(queuedRead).not.toHaveBeenCalled()
+  } finally { release.resolve(); await first; await outcome }
+})
+
+it('rejects unknown message roles explicitly', () => {
+  expect(() => toPiContext(request([{ ...user([{ type: 'text', text: 'future' }]), role: 'future-role' } as unknown as Message])))
+    .toThrow(expect.objectContaining({ code: 'UNSUPPORTED_CONTENT' }))
 })

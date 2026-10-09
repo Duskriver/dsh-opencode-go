@@ -86,6 +86,7 @@ async function testHost({ id, version }, tarball, stdio) {
   await cp(join(root, 'tests/fixtures'), join(consumer, 'fixtures'), { recursive: true })
   const fixtures = ['host-compatibility', 'transcript-compatibility', 'reasoning-compatibility', 'client-compatibility']
   if (id.startsWith('v017') || id.startsWith('v02')) fixtures.push('profile-compatibility')
+  else fixtures.push('legacy-account-recovery')
   if (id.startsWith('v017-rc') || id.startsWith('v02')) fixtures.push('bundle-compatibility')
   for (const fixture of fixtures) {
     await run(process.execPath, ['--expose-internals', join(consumer, 'fixtures', `${fixture}.mjs`), id, version], {

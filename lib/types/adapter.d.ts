@@ -28,6 +28,8 @@ import { OpencodeGoCatalog } from './catalog.ts';
 import { ProxyTransport } from './proxy.ts';
 import type { OpencodeGoConfig } from './config.ts';
 import { type GoAccountSwitch } from './accounts.ts';
+import { type GoCallTrace } from './call-trace.ts';
+export type { GoCallTrace } from './call-trace.ts';
 /**
  * The attachment-service bridges one image request reads. Construction-time
  * (context-dependent); the config-dependent policy numbers are merged per
@@ -60,7 +62,9 @@ export interface OpencodeGoAdapterOptions {
      */
     config: () => OpencodeGoConfig;
     /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
-    resolveApiKey: (config: OpencodeGoConfig) => Promise<string | undefined>;
+    resolveApiKey: (config: OpencodeGoConfig, signal?: AbortSignal) => Promise<string | undefined>;
+    /** Observe one bounded, content-free summary for every dispatched call. */
+    onCallTrace?: (trace: GoCallTrace) => void;
     /**
      * Image input machinery; absent refuses image content, which is the posture
      * for direct construction without a durable attachment service behind it.
@@ -74,6 +78,7 @@ export interface OpencodeGoAdapterOptions {
     }) => void;
     /** Observe live ids the curated table cannot route. */
     onOmitted?: (ids: readonly string[]) => void;
+    onCatalogWarning?: (warning: string) => void;
     /** Observe assistant history degrading to provider-neutral conversion. */
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
@@ -133,6 +138,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
     private streamWithSnapshot;
+    private dispatch;
+    private streamAccounts;
     private rememberRejectedKey;
     /** A stored change to a reference outranks the gateway's last rejection of it. */
     forgetRejectedKey(ref: string): void;

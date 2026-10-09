@@ -54,6 +54,7 @@ export interface OpencodeGoSettings {
   /** Credential reference naming the environment key. */
   apiKeyEnv?: string
   accounts?: GoAccount[] | null
+  accountOperations?: import('../account-operations.ts').GoAccountOperation[]
   autoSwitch?: boolean
   /** The gateway endpoint; also the live listing base. */
   baseURL?: string

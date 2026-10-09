@@ -63,9 +63,10 @@ it('round-trips source diagnostics, accepts older responses, and rejects invalid
   const old = { models: [], stale: false }
   expect(parseGoModelCatalog(old)).toEqual(old)
   const catalog = { models: [], stale: true, sources: {
-    listing: { updatedAt: 1_000 }, metadata: { error: 'HTTP 503' },
+    listing: { updatedAt: 1_000, warning: 'one row ignored' }, metadata: { error: 'HTTP 503' },
   } }
   expect(parseGoModelCatalog(catalog)).toEqual(catalog)
+  expect(() => parseGoModelCatalog({ ...catalog, sources: { ...catalog.sources, listing: { warning: 3 } } })).toThrow(/warning/)
   for (const updatedAt of [-1, NaN, Infinity, 'yesterday', 8_640_000_000_000_001]) {
     expect(() => parseGoModelCatalog({ ...catalog, sources: { ...catalog.sources, listing: { updatedAt } } })).toThrow(/timestamp/)
   }

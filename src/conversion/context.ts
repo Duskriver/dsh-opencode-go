@@ -19,6 +19,8 @@ import { toPiAssistant } from './replay.ts'
 import { requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'
 import { projectRequestImages } from './image-offload.ts'
+import { IMAGE_PREPARATION_CONCURRENCY, ImagePayloadLease, withImagePermit, type ImagePoolObserver } from './image-pool.ts'
+import { waitWithSignal } from '../request-control.ts'
 
 /** Join the text blocks of a harness message. */
 function flattenText(message: Message): string {
@@ -53,6 +55,9 @@ function assertSupportedHistory(messages: readonly Message[]): void {
   for (const message of messages) {
     // Developer history is persisted for V4; provider serialization is intentionally deferred.
     if ((message as { role: string }).role === 'developer') throw new LlmError('Developer messages are not supported yet', 'UNSUPPORTED_CONTENT')
+    if (!['system', 'user', 'assistant', 'tool'].includes((message as { role: string }).role)) {
+      throw new LlmError(`Unsupported message role: ${message.role}`, 'UNSUPPORTED_CONTENT')
+    }
     if ((message.content as readonly { type: string }[]).some(block => block.type === 'tool-addition' || block.type === 'tool-removal')) {
       throw new LlmError('Tool-change blocks require developer role', 'UNSUPPORTED_CONTENT')
     }
@@ -111,12 +116,16 @@ async function userContent(
 function collectImageRefs(
   blocks: readonly ContentBlock[],
   refs: Map<AttachmentId, ImageAttachmentRef>,
+  occurrences: Map<AttachmentId, number>,
 ): void {
   for (const block of blocks) {
     if (block.type === 'image') {
-      if (block.offloaded !== true) refs.set(block.attachment.attachmentId, block.attachment)
+      if (block.offloaded !== true) {
+        refs.set(block.attachment.attachmentId, block.attachment)
+        occurrences.set(block.attachment.attachmentId, (occurrences.get(block.attachment.attachmentId) ?? 0) + 1)
+      }
     } else if (block.type === 'tool-result') {
-      collectImageRefs(block.content, refs)
+      collectImageRefs(block.content, refs, occurrences)
     }
   }
 }
@@ -126,17 +135,42 @@ async function prepareRequestImages(
   attachments: AttachmentStore,
   budget: PiImageRequestBudget,
   signal?: AbortSignal,
+  maxEncodedBytes?: number,
+  checkBudget?: (versions: ReadonlyMap<AttachmentId, RequestImageAttachment>) => void,
+  lease?: ImagePayloadLease,
+  observer?: ImagePoolObserver,
 ): Promise<Map<AttachmentId, RequestImageAttachment>> {
   const refs = new Map<AttachmentId, ImageAttachmentRef>()
-  for (const message of messages) collectImageRefs(message.content, refs)
+  const occurrences = new Map<AttachmentId, number>()
+  for (const message of messages) collectImageRefs(message.content, refs, occurrences)
   const orderedRefs = [...refs.values()]
-  const prepared = await Promise.all(orderedRefs.map(
-    ref => attachments.readImageRequest(ref, requestImageTarget(ref, budget), signal),
-  ))
   const versions = new Map<AttachmentId, RequestImageAttachment>()
-  for (const [index, ref] of orderedRefs.entries()) {
-    versions.set(ref.attachmentId, prepared[index] as RequestImageAttachment)
+  const cancelled = new AbortController()
+  const preparationSignal = signal ? AbortSignal.any([signal, cancelled.signal]) : cancelled.signal
+  let next = 0
+  let failed = false
+  let failure: unknown
+  let encodedBytes = 0
+  const worker = async (): Promise<void> => {
+    try {
+      while (next < orderedRefs.length) {
+        preparationSignal.throwIfAborted()
+        const ref = orderedRefs[next++]!
+        const image = await waitWithSignal(() => withImagePermit(
+          () => attachments.readImageRequest(ref, requestImageTarget(ref, budget), preparationSignal), preparationSignal, observer,
+        ), preparationSignal)
+        preparationSignal.throwIfAborted()
+        lease?.reserve(image.data.byteLength + Math.ceil(image.data.byteLength / 3) * 4 * occurrences.get(ref.attachmentId)!)
+        versions.set(ref.attachmentId, image)
+        encodedBytes += Math.ceil(image.bytes / 3) * 4 * occurrences.get(ref.attachmentId)!
+        if (maxEncodedBytes !== undefined && encodedBytes > maxEncodedBytes) checkBudget?.(versions)
+      }
+    } catch (error) {
+      if (!failed) { failed = true; failure = error; cancelled.abort(error) }
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(IMAGE_PREPARATION_CONCURRENCY, orderedRefs.length) }, worker))
+  if (failed) throw failure
   return versions
 }
 
@@ -261,6 +295,9 @@ export interface PiImageRequestContext {
   maxRequestImageBytes?: number
   /** Route pixel and raw encoded-byte budgets. */
   requestImagePolicy?: PiImageRequestBudget
+  /** Adapter-owned lease retains its charge through provider streaming. */
+  payloadLease?: ImagePayloadLease
+  onImagePool?: ImagePoolObserver
 }
 
 /** Per-route budgets from which each request image's target is derived. */
@@ -345,7 +382,15 @@ async function toPiContextWithImages(
     ...projection, exact: false,
     byteLength: ref => Math.min(ref.bytes, requestImagePolicy.maxBytes),
   })
-  const requestImages = await prepareRequestImages(requestMessages, attachments, requestImagePolicy, options.signal)
+  // Standalone conversion owns preparation admission; the adapter supplies a
+  // longer-lived lease because its returned context remains live while streaming.
+  using localLease = images.payloadLease === undefined ? new ImagePayloadLease() : undefined
+  const requestImages = await prepareRequestImages(requestMessages, attachments, requestImagePolicy, options.signal, maxRequestImageBytes, versions => {
+    // Unknown prepared sizes contribute zero: this is a lower bound, so it
+    // can stop excess work without offloading from source-size estimates.
+    projectRequestImages(requestMessages, { ...projection, exact: true,
+      byteLength: ref => versions.get(ref.attachmentId)?.bytes ?? 0 })
+  }, images.payloadLease ?? localLease, images.onImagePool)
   const exactMessages = projectRequestImages(requestMessages, {
     ...projection, exact: true,
     byteLength: ref => (requestImages.get(ref.attachmentId) as RequestImageAttachment).bytes,

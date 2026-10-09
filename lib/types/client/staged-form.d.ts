@@ -2,7 +2,7 @@
  * The staged form behind the OpenCode Go settings page.
  *
  * The page stages what the user types and writes it only when they save. Each
- * settings write is a durable, revision-fenced document mutation, so a control
+ * settings batch is a durable, revision-fenced document mutation, so a control
  * that committed as it settled turned one edit into a write the user never
  * asked for and could not preview; staged text makes what is on screen exactly
  * what a save would store.
@@ -182,8 +182,6 @@ export declare class StagedForm {
      * @returns the planned writes, in the order the fields were staged.
      */
     private plan;
-    private clear;
-    private store;
     private stage;
     private spec;
     private snapshotOf;

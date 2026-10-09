@@ -24,7 +24,7 @@ const MODEL_LISTING_MAX_BYTES = 1024 * 1024
 const RETRY_MIN_MS = 5_000
 const RETRY_MAX_MS = 60_000
 
-type ListingResult = PromiseSettledResult<{ ids: readonly string[]; updatedAtMs: number }>
+type ListingResult = PromiseSettledResult<{ ids: readonly string[]; warning?: string; updatedAtMs: number }>
 type MetadataStatus = Pick<CatalogSnapshot, 'metadataLive' | 'metadataUpdatedAtMs' | 'metadataFailure'>
 
 async function settled<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
@@ -42,6 +42,7 @@ export interface CatalogSnapshot {
   readonly metadataLive: boolean
   /** Retained for explicit discovery; runtime callers may still use the last catalog. */
   readonly listingFailure?: unknown
+  readonly listingWarning?: string
   readonly metadataFailure?: unknown
   /** Last successful fetch or revalidation, not the time of a failed attempt. */
   readonly listingUpdatedAtMs?: number
@@ -77,18 +78,23 @@ function builtinModels(baseURL: string): Map<string, Model<Api>> {
 }
 
 /** A valid empty listing means the gateway serves nothing; malformed replies are failures. */
-export function readLiveModelIds(body: unknown): readonly string[] {
+export function readLiveModelIds(body: unknown, onInvalidRows?: (warning: string) => void): readonly string[] {
   const data = (body as { data?: unknown } | null)?.data
   if (!Array.isArray(data)) throw new Error('the model listing has no "data" array')
   const ids: string[] = []
-  for (const entry of data) {
+  const invalidRows: number[] = []
+  let invalidCount = 0
+  for (const [index, entry] of data.entries()) {
     const id = (entry as { id?: unknown } | null)?.id
-    if (typeof id === 'string' && id.length > 0) ids.push(id)
+    if (typeof id === 'string' && id.trim().length > 0) ids.push(id)
+    else { invalidCount++; if (invalidRows.length < 8) invalidRows.push(index + 1) }
   }
+  if (data.length > 0 && ids.length === 0) throw new Error('the nonempty model listing has no valid model ids')
+  if (invalidCount > 0) onInvalidRows?.(`Model listing ignored ${invalidCount} of ${data.length} rows with invalid model ids (rows ${invalidRows.join(', ')}${invalidCount > invalidRows.length ? ', …' : ''}); the listing may be incomplete`)
   return [...new Set(ids)]
 }
 
-async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fetch): Promise<readonly string[]> {
+async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fetch): Promise<{ ids: readonly string[]; warning?: string }> {
   const url = `${baseURL.replace(/\/+$/, '')}/models`
   const endpoint = diagnosticURL(url)
   let result: Awaited<ReturnType<typeof fetchJsonResponse>>
@@ -109,9 +115,11 @@ async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fe
   const { response, body } = result
   if (!response.ok) throw new LlmError(`${endpoint} answered HTTP ${response.status}`, 'DISCOVERY_FAILED')
   try {
-    return readLiveModelIds(body)
+    let warning: string | undefined
+    const ids = readLiveModelIds(body, value => { warning = value })
+    return { ids, ...warning === undefined ? {} : { warning } }
   } catch (error: unknown) {
-    throw new LlmError(`${endpoint} returned an invalid model listing: expected a "data" array`, 'DISCOVERY_FAILED', { cause: error })
+    throw new LlmError(`${endpoint} returned an invalid model listing: ${error instanceof Error ? error.message : 'invalid data'}`, 'DISCOVERY_FAILED', { cause: error })
   }
 }
 
@@ -159,6 +167,7 @@ export class OpencodeGoCatalog {
     // Notify consumers after a background refresh commits its complete snapshot.
     private readonly onRefresh: () => void = () => {},
     private readonly fetcher?: typeof globalThis.fetch,
+    private readonly onWarning?: (warning: string) => void,
   ) {}
 
   snapshot(force = false, signal?: AbortSignal): Promise<CatalogSnapshot> {
@@ -195,7 +204,7 @@ export class OpencodeGoCatalog {
 
   private startRefresh(force: boolean): void {
     const builtin = builtinModels(this.baseURL)
-    const listing = settled(fetchLiveModelIds(this.baseURL, this.fetcher).then(ids => ({ ids, updatedAtMs: Date.now() })))
+    const listing = settled(fetchLiveModelIds(this.baseURL, this.fetcher).then(result => ({ ...result, updatedAtMs: Date.now() })))
     const restored = this.metadata
     if (!force && this.served === undefined && restored !== undefined) {
       const status: MetadataStatus = { metadataLive: false, metadataUpdatedAtMs: this.metadataUpdatedAtMs }
@@ -217,6 +226,9 @@ export class OpencodeGoCatalog {
       .then((snapshot) => {
         this.served = snapshot
         this.failures = snapshot.live && snapshot.metadataLive ? 0 : Math.min(this.failures + 1, 5)
+        if (snapshot.listingWarning && snapshot.live) {
+          try { this.onWarning?.(snapshot.listingWarning) } catch { /* Diagnostics cannot reject a refresh. */ }
+        }
         const lifetime = this.failures === 0 ? this.refreshMs
           : Math.min(this.refreshMs, RETRY_MIN_MS * 2 ** (this.failures - 1), RETRY_MAX_MS)
         this.refreshAtMs = snapshot.fetchedAtMs + lifetime
@@ -282,6 +294,7 @@ export class OpencodeGoCatalog {
         ...metadataStatus,
         ...this.served?.listingUpdatedAtMs === undefined ? {} : { listingUpdatedAtMs: this.served.listingUpdatedAtMs },
         listingFailure: listing.reason,
+        ...this.served?.listingWarning === undefined ? {} : { listingWarning: this.served.listingWarning },
       }
     }
     const models = new Map<string, Model<Api>>()
@@ -302,6 +315,7 @@ export class OpencodeGoCatalog {
       details: new Map(listing.value.ids.map(id => [id, metadata?.details.get(id) ?? {}])),
       models, unavailable, provider: buildProvider(this.baseURL, [...models.values()]),
       live: true, fetchedAtMs: Date.now(), listingUpdatedAtMs: listing.value.updatedAtMs, ...metadataStatus,
+      ...listing.value.warning === undefined ? {} : { listingWarning: listing.value.warning },
     }
   }
 
@@ -327,6 +341,7 @@ export class OpencodeGoCatalog {
         'MODEL_METADATA_UNAVAILABLE',
       )
     }
+    if (!snapshot.models.has(id) && !snapshot.live) throw listingError(snapshot)
     return snapshot
   }
 }
@@ -383,6 +398,7 @@ export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promis
       listing: {
         ...snapshot.listingUpdatedAtMs === undefined ? {} : { updatedAt: snapshot.listingUpdatedAtMs },
         ...snapshot.live ? {} : { error: listingError(snapshot).message },
+        ...snapshot.listingWarning === undefined ? {} : { warning: snapshot.listingWarning },
       },
       metadata: {
         ...snapshot.metadataUpdatedAtMs === undefined ? {} : { updatedAt: snapshot.metadataUpdatedAtMs },

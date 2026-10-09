@@ -58,13 +58,14 @@ it('saves bounded HTTP evidence only when opted in, omitting request content and
     'x-zen-model': 'deepseek-v4.1-flash', 'cf-placement': 'remote-fixture',
     'set-cookie': 'private-cookie', 'authorization': 'Bearer fixture-key',
   } })
-  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key' })
+  const trace = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key', onCallTrace: trace })
   await drain(adapter.stream(request()))
   const files = await readdir(directory)
   expect(files).toHaveLength(1)
   const text = await readFile(join(directory, files[0]!), 'utf8')
   const record = JSON.parse(text)
-  expect(record).toMatchObject({ provider: 'dsh-opencode-go', model,
+  expect(record).toMatchObject({ provider: 'dsh-opencode-go', model, callId: trace.mock.calls[0]?.[0].callId, attempt: 1,
     request: { method: 'POST', messageCount: 1, maxTokens: 512, bodyBytes: expect.any(Number) },
     response: { status: 400, headers: { 'x-request-id': 'edge-fixture-40', server: 'fixture-edge',
       'x-opencode-log-id': 'go-log-fixture-40', 'x-opencode-endpoint-id': 'fixture-route',
@@ -76,6 +77,15 @@ it('saves bounded HTTP evidence only when opted in, omitting request content and
   for (const secret of ['fixture-key', 'private prompt', 'private-cookie', 'Bearer', 'diagnostic-session']) {
     expect(text).not.toContain(secret)
   }
+})
+
+it('redacts credential echoes from successful response IDs before observing them', async () => {
+  const response = vi.fn()
+  const diagnostics = new GatewayDiagnostics({ provider: 'test', model, apiKey: 'fixture-key',
+    proxyURL: 'http://proxy-user:proxy-pass@proxy.example', onResponse: response,
+    fetch: async () => new Response('', { headers: { 'x-request-id': 'fixture-key-proxy-pass' } }) })
+  await diagnostics.fetch('https://gateway.example')
+  expect(response).toHaveBeenCalledWith(200, '[REDACTED]-[REDACTED]')
 })
 
 it('keeps the HTTP failure usable when the debug destination cannot be written', async () => {

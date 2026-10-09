@@ -19,6 +19,7 @@ import z from '@deepseek-ai/schemastery'
 import { DEFAULT_BASE_URL } from './catalog.ts'
 import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } from './usage-display.ts'
 import { ACCOUNT_REF_PATTERN, MAX_ACCOUNTS, type GoAccount } from './accounts.ts'
+import type { GoAccountOperation } from './account-operations.ts'
 
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = 'OPENCODE_API_KEY'
@@ -28,6 +29,8 @@ export const DEFAULT_REFRESH_MINUTES = 60
 
 /** Default maximum idle interval while a stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
+export const DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS = 60_000
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * 60_000
 
 /**
  * One model's configured capacities. Every field is optional so a deployment
@@ -63,6 +66,7 @@ export interface OpencodeGoConfig {
   /** Credential reference: the environment variable the key resolves from. */
   apiKeyEnv: string
   accounts?: GoAccount[] | null
+  accountOperations?: GoAccountOperation[]
   /** Try other saved accounts on quota/credential rejection before any content is emitted. */
   autoSwitch?: boolean
   /** The gateway endpoint; also the base of the live model listing. */
@@ -73,6 +77,10 @@ export interface OpencodeGoConfig {
   refreshMinutes: number
   /** Largest idle gap between stream events before the request fails. */
   streamIdleTimeoutMs: number
+  /** Bound discovery and each attempt's credential/image preparation. */
+  requestPreparationTimeoutMs?: number
+  /** Whole dispatch deadline, including discovery and account fallback. */
+  requestTimeoutMs?: number
   /** Optional retained image occurrence cap per request; omission or null leaves the count unlimited. */
   maxImages?: number | null
   /** Request-level bound on base64-encoded image payload, in bytes. */
@@ -99,10 +107,15 @@ const fields = {
     apiKeyEnv: z.string().role('credential-ref').pattern(ACCOUNT_REF_PATTERN).required(),
   })).max(MAX_ACCOUNTS)]).default(null),
   autoSwitch: z.boolean().default(false),
+  // Internal recovery state uses the same durable profile/section as its accounts.
+  // Cross-field ownership and discriminants are checked before any side effect.
+  accountOperations: z.array(z.any()).max(MAX_ACCOUNTS).default([]).hidden(),
   baseURL: z.string().default(DEFAULT_BASE_URL),
   proxyURL: z.string().default(''),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+  requestPreparationTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS),
+  requestTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_REQUEST_TIMEOUT_MS),
   maxImages: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
   // The image defaults are the generic pi-ai adapter's: one normalized
   // request image fits the budget, and fifteen of them fit the payload cap.

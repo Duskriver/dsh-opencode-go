@@ -49,6 +49,13 @@ beforeEach(() => {
 })
 
 describe('readLiveModelIds', () => {
+  it('reports bounded row positions without copying malformed content', () => {
+    const warning = vi.fn()
+    expect(readLiveModelIds({ data: [{ id: 'a' }, ...Array(12).fill({ secret: 'private-row' })] }, warning)).toEqual(['a'])
+    expect(warning.mock.calls[0]?.[0]).toContain('12 of 13')
+    expect(warning.mock.calls[0]?.[0]).toContain('rows 2, 3, 4, 5, 6, 7, 8, 9, …')
+    expect(warning.mock.calls[0]?.[0]).not.toContain('private-row')
+  })
   it('reads ids from the standard data array and skips rows without one', () => {
     expect(readLiveModelIds({ data: [{ id: 'a' }, { id: '' }, { id: 7 }, null, { id: 'b' }] }))
       .toEqual(['a', 'b'])
@@ -59,6 +66,17 @@ describe('readLiveModelIds', () => {
     expect(() => readLiveModelIds({})).toThrow(/no "data" array/)
     expect(() => readLiveModelIds({ data: {} })).toThrow(/no "data" array/)
   })
+})
+
+it('exposes mixed-listing warnings and clears them on a clean refresh', async () => {
+  const gateway = await mockGateway({ status: 200, body: { data: [{ id: 'deepseek-v4.1-flash' }, null] } })
+  const warning = vi.fn()
+  const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {}, () => {}, undefined, warning)
+  const result = await discoverSettingsModels(catalog)
+  expect(result).toMatchObject({ stale: false, sources: { listing: { warning: expect.stringContaining('1 of 2') } } })
+  expect(warning).toHaveBeenCalledTimes(1)
+  gateway.setModelListing(200, listingBody(['deepseek-v4.1-flash']))
+  expect((await discoverSettingsModels(catalog)).sources?.listing.warning).toBeUndefined()
 })
 
 describe('OpencodeGoCatalog', () => {
@@ -532,4 +550,27 @@ describe('discoverCatalogModels', () => {
     expect(listingReads).toBe(2)
     expect(fallback).not.toHaveBeenCalledWith(expect.objectContaining({ url: `${gateway.url}/models` }))
   })
+})
+
+it('retains a served catalog when a nonempty listing contains no valid ids', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {})
+  const good = await catalog.snapshot()
+  expect(good.models.has('deepseek-v4.1-flash')).toBe(true)
+  gateway.setModelListing(200, { data: [{ name: 'schema drift' }, { id: '   ' }, null] })
+  const stale = await catalog.snapshot(true)
+  expect(stale.live).toBe(false)
+  expect([...stale.models.keys()]).toEqual([...good.models.keys()])
+  expect((await discoverSettingsModels(catalog)).error).toMatch(/no valid model ids/)
+  gateway.setModelListing(200, { data: [] })
+  expect((await catalog.snapshot(true)).models.size).toBe(0)
+})
+
+it('distinguishes an unverifiable cold catalog from a confirmed unknown model', async () => {
+  const gateway = await mockGateway({ status: 503, body: {} })
+  const catalog = new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {})
+  await expect(catalog.forModel('deepseek-v4.1-flash')).rejects.toMatchObject({ code: 'DISCOVERY_FAILED' })
+  gateway.setModelListing(200, { data: [] })
+  await catalog.snapshot(true)
+  expect((await catalog.forModel('deepseek-v4.1-flash')).models.has('deepseek-v4.1-flash')).toBe(false)
 })

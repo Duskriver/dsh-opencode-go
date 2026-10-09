@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { LlmDiscoveredModel, SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
-import { RemoteError, stubSettingsScope } from './support/client.ts'
+import { RemoteError, stubSettingsScope, acceptSettingsWrites } from './support/client.ts'
 import {
   StagedForm,
   jsonField,
@@ -21,39 +21,11 @@ import {
   type OpencodeGoSettings,
 } from '../src/client/section-controller.ts'
 
-/** Make the stub behave like a Host that accepts every write. */
-function acceptWrites(host: ReturnType<typeof stubSettingsScope>): void {
-  const section = (): Record<string, unknown> => ({ ...host.scope.getSnapshot().value as object })
-  const layer = (): Record<string, unknown> => ({ ...host.scope.getSnapshot().user as object })
-  host.set.mockImplementation((field: string, value: unknown) => {
-    host.publish({ value: { ...section(), [field]: value }, user: { ...layer(), [field]: value } })
-  })
-  host.mutate.mockImplementation((ops: readonly SettingsPathOpView[]) => {
-    const value = { ...section() }
-    const user = { ...layer() }
-    for (const op of ops) {
-      const field = op.path[0]!
-      if (op.op === 'set') {
-        value[field] = op.value
-        user[field] = op.value
-      }
-    }
-    host.publish({ value, user })
-  })
-  host.unset.mockImplementation((field: string) => {
-    const user = Object.fromEntries(Object.entries(layer()).filter(([key]) => key !== field))
-    const base = host.scope.getSnapshot().base as Record<string, unknown> | undefined
-    host.publish({ value: { ...section(), [field]: base?.[field] }, user })
-  })
-}
+/** Accept document writes through the same atomic seam as a real Host. */
+const acceptWrites = acceptSettingsWrites
 
-/**
- * The stub's `set` spy under the scope face's declared signature. The untyped
- * `vi.fn()` receiver reads as void-returning to the linter, so promise
- * implementations need the promise-returning signature in force.
- */
-function setSpy(host: ReturnType<typeof stubSettingsScope>): Mock<(field: string, value: unknown) => Promise<void>> {
-  return host.set as Mock<(field: string, value: unknown) => Promise<void>>
+function mutateSpy(host: ReturnType<typeof stubSettingsScope>): Mock<(ops: readonly SettingsPathOpView[], revision?: number) => Promise<void>> {
+  return host.mutate as Mock<(ops: readonly SettingsPathOpView[], revision?: number) => Promise<void>>
 }
 
 /** The page plugin's context, scripted down to the namespaces it reaches. */
@@ -187,7 +159,7 @@ describe('StagedForm', () => {
     expect(form.shell().dirty).toBe(false)
     form.actions().resetField('refreshMinutes')
     await form.save()
-    expect(host.unset).toHaveBeenCalledWith('refreshMinutes')
+    expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['refreshMinutes'] }], expect.any(Number))
   })
 
   it('writes staged edits on save, clears accepted drafts, and re-reads from the Host', async () => {
@@ -200,8 +172,11 @@ describe('StagedForm', () => {
     form.actions().edit('refreshMinutes', '15')
     await form.save()
 
-    expect(host.set).toHaveBeenCalledWith('baseURL', 'https://new.test/v1')
-    expect(host.set).toHaveBeenCalledWith('refreshMinutes', 15)
+    expect(host.mutate).toHaveBeenCalledWith([
+      { op: 'set', path: ['baseURL'], value: 'https://new.test/v1' },
+      { op: 'set', path: ['refreshMinutes'], value: 15 },
+    ], 0)
+    expect(host.set).not.toHaveBeenCalled()
     expect(form.shell()).toEqual(settled)
   })
 
@@ -209,7 +184,7 @@ describe('StagedForm', () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     const form = new StagedForm(host.scope as never, specs)
     // The Host never publishes the write back: the read-back reports failure.
-    setSpy(host).mockImplementation(() => Promise.resolve())
+    mutateSpy(host).mockImplementation(() => Promise.resolve())
     host.publish({ status: 'ready', writable: true, value: {}, user: {} })
 
     form.actions().edit('baseURL', 'https://rejected.test/v1')
@@ -228,11 +203,11 @@ describe('StagedForm', () => {
     expect(form.shell()).toEqual(settled)
 
     let release!: () => void
-    setSpy(host).mockImplementation(() => new Promise<void>((resolve) => { release = resolve }))
+    mutateSpy(host).mockImplementation(() => new Promise<void>((resolve) => { release = resolve }))
     form.actions().edit('baseURL', 'https://slow.test/v1')
     const first = form.save()
     form.actions().save()
-    expect(host.set).toHaveBeenCalledTimes(1)
+    expect(host.mutate).toHaveBeenCalledTimes(1)
     release()
     await first
   })
@@ -246,7 +221,7 @@ describe('StagedForm', () => {
     form.actions().resetField('baseURL')
     await form.save()
 
-    expect(host.unset).toHaveBeenCalledWith('baseURL')
+    expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['baseURL'] }], expect.any(Number))
     expect(form.field('baseURL').overridden).toBe(false)
 
     // A second clear of an inherited field plans nothing.
@@ -272,12 +247,12 @@ describe('StagedForm', () => {
     expect(form.field('refreshMinutes')).toEqual(field('60', { overridden: false }))
 
     await form.save()
-    expect(host.unset).toHaveBeenCalledWith('refreshMinutes')
+    expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['refreshMinutes'] }], expect.any(Number))
 
     // A blank number draft parses to a clear, which plans the same write.
     actions.edit('refreshMinutes', '')
     await form.save()
-    expect(host.unset).toHaveBeenCalledTimes(2)
+    expect(host.mutate).toHaveBeenCalledTimes(2)
   })
 
   it('plans nothing for a secret staged blank, keeping the stored key', async () => {
@@ -341,7 +316,8 @@ describe('jsonField', () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     const form = new StagedForm(host.scope as never, [...specs, spec])
     const current = () => host.scope.getSnapshot()
-    setSpy(host).mockImplementation(async (field, value) => {
+    mutateSpy(host).mockImplementation(async (ops) => {
+      const { path: [field], value } = ops[0] as Extract<SettingsPathOpView, { op: 'set' }>
       host.publish({
         value: { ...current().value as object, [field]: structuredClone(value) },
         user: { ...current().user as object, [field]: structuredClone(value) },
@@ -381,19 +357,19 @@ describe('OpencodeGoSectionController', () => {
     face.edit('usageDisplay', 'always')
     face.save()
     await vi.waitFor(() => { expect(state()).toMatchObject({ dirty: false, saving: false }) })
-    expect(host.set).toHaveBeenCalledWith('usageDisplay', 'always')
+    expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['usageDisplay'], value: 'always' }], 0)
     expect(host.scope.getSnapshot().value?.usageDisplay).toBe('always')
     face.edit('usageDisplay', 'invalid')
     expect(state().invalid).toBe(true)
     face.save()
-    expect(host.set).toHaveBeenCalledTimes(1)
+    expect(host.mutate).toHaveBeenCalledTimes(1)
     face.discard()
     host.publish({ base: { usageDisplay: 'off' } })
     face.resetField('usageDisplay')
     expect(state().usageDisplay).toEqual(field('off'))
     face.save()
     await vi.waitFor(() => { expect(state()).toMatchObject({ dirty: false, saving: false }) })
-    expect(host.unset).toHaveBeenCalledWith('usageDisplay')
+    expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['usageDisplay'] }], expect.any(Number))
     expect(host.scope.getSnapshot().value?.usageDisplay).toBe('off')
     controller.dispose()
   })
@@ -659,4 +635,64 @@ describe('OpencodeGoSectionController', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(state().models).toEqual({ status: 'ready', stale: false, count: 1, preview: ['second'], entries: [{ id: 'second' }] })
   })
+})
+
+it('submits all settings at one revision and leaves both drafts after a refused batch', async () => {
+  const host = stubSettingsScope<OpencodeGoSettings>()
+  host.publish({ status: 'ready', writable: true, revision: 7,
+    value: { baseURL: 'https://old.test/v1', proxyURL: 'http://old.test:8080' },
+    user: { baseURL: 'https://old.test/v1', proxyURL: 'http://old.test:8080' } })
+  host.mutate.mockResolvedValue(false)
+  const secret = vi.fn(async () => true)
+  const form = new StagedForm(host.scope as never, [textField('baseURL'), textField('proxyURL')], [{ field: 'key', write: secret }])
+  form.actions().edit('baseURL', 'https://new.test/v1')
+  form.actions().edit('proxyURL', 'http://new.test:8080')
+  form.actions().edit('key', 'draft-key')
+  await form.save()
+  expect(host.mutate).toHaveBeenCalledExactlyOnceWith([
+    { op: 'set', path: ['baseURL'], value: 'https://new.test/v1' },
+    { op: 'set', path: ['proxyURL'], value: 'http://new.test:8080' },
+  ], 7)
+  expect(host.set).not.toHaveBeenCalled()
+  expect(secret).not.toHaveBeenCalled()
+  expect(host.scope.getSnapshot().value).toEqual({ baseURL: 'https://old.test/v1', proxyURL: 'http://old.test:8080' })
+  expect(form.field('baseURL').text).toBe('https://new.test/v1')
+  expect(form.field('proxyURL').text).toBe('http://new.test:8080')
+  expect(form.shell()).toMatchObject({ failed: true, dirty: true })
+})
+
+it('keeps only uncommitted drafts when a separate credential write fails', async () => {
+  const host = stubSettingsScope<OpencodeGoSettings>()
+  acceptWrites(host)
+  host.publish({ status: 'ready', writable: true, value: {}, user: {} })
+  const secret = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const form = new StagedForm(host.scope as never, specs, [{ field: 'key', write: secret }])
+  form.actions().edit('baseURL', 'https://new.test/v1')
+  form.actions().edit('key', 'draft-key')
+  await form.save()
+  expect(form.shell()).toMatchObject({ failed: true, dirty: true })
+  expect(form.field('key').text).toBe('draft-key')
+  await form.save()
+  expect(host.mutate).toHaveBeenCalledTimes(1)
+  expect(secret).toHaveBeenCalledTimes(2)
+  expect(form.shell()).toEqual(settled)
+})
+
+it('preserves a newer draft typed while the previous save is in flight', async () => {
+  const host = stubSettingsScope<OpencodeGoSettings>()
+  host.publish({ status: 'ready', writable: true, revision: 3, value: {}, user: {} })
+  const release = Promise.withResolvers<void>()
+  host.mutate.mockImplementation(async () => {
+    await release.promise
+    host.publish({ value: { baseURL: 'https://saved.test/v1' }, user: { baseURL: 'https://saved.test/v1' }, revision: 4 })
+    return true
+  })
+  const form = new StagedForm(host.scope as never, specs)
+  form.actions().edit('baseURL', 'https://saved.test/v1')
+  const pending = form.save()
+  form.actions().edit('baseURL', 'https://newer.test/v1')
+  release.resolve()
+  await pending
+  expect(form.field('baseURL').text).toBe('https://newer.test/v1')
+  expect(form.shell()).toMatchObject({ dirty: true, failed: false })
 })

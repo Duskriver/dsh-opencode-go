@@ -51,6 +51,8 @@ import { GoModelsService } from './models.ts'
 import { registerGoRemotes } from './remotes.ts'
 import { accountsOf, accountRefOf, assertAccounts } from './accounts.ts'
 import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
+import { assertAccountOperations } from './account-operations.ts'
+import { GoAccountRecovery } from './account-recovery.ts'
 import { assertProxyURL } from './proxy-url.ts'
 import { ProxyTransport } from './proxy.ts'
 
@@ -61,7 +63,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export { OpencodeGoAdapter } from './adapter.ts'
-export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement } from './adapter.ts'
+export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement, GoCallTrace } from './adapter.ts'
 export {
   DEFAULT_BASE_URL,
   DISPLAY_NAME,
@@ -95,6 +97,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   assertProxyURL(entry.proxyURL)
   assertApiKeyEnv(entry.apiKeyEnv)
   assertAccounts(entry.accounts, entry.apiKeyEnv)
+  assertAccountOperations(entry.accountOperations)
   let current: () => OpencodeGoConfig = () => readConfig(config)
 
   const resolveApiKey = async (config: OpencodeGoConfig = current()): Promise<string | undefined> => {
@@ -118,6 +121,10 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   }
   registerGoRemotes(ctx)
   const selection = new GoAccountSelection(() => current(), ctx.logger)
+  const recovery = new GoAccountRecovery(ctx.logger)
+  ctx.inject(['settings', 'credentials'], ready => {
+    ready.effect(() => recovery.connect(ready.settings as unknown as AccountSettingsWriter, ready.credentials))
+  })
   const transport = new ProxyTransport()
   ctx.effect(() => () => transport.dispose())
   ctx.plugin(GoUsageService, {
@@ -143,6 +150,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     debugDirectory: () => launchEnvironmentOf(ctx).get('DSH_OPENCODE_GO_DEBUG_DIR')?.value,
     config: () => current(),
     resolveApiKey,
+    onCallTrace: trace => { ctx.logger.debug(`llm-opencode-go call: ${JSON.stringify(trace)}`) },
+    onCatalogWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
     accountGeneration: () => selection.capture(),
     onAccountSettled: event => { selection.settle(event) },
     imageAccess: {
@@ -200,6 +209,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   let routeCheck = 0
   let selectedRef = accountRefOf(current())
   const syncRoute = (): void => {
+    recovery.trigger()
     const check = ++routeCheck
     const config = current()
     selection.capture()
@@ -264,7 +274,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       const settings = settingsCtx.settings as unknown as {
         configure(policy: { auto: boolean }, owner: typeof ctx.fiber): () => void
       }
-      settingsCtx.effect(() => settings.configure({ auto: false }, ctx.fiber))
+      settingsCtx.effect(() => {
+        const dispose = settings.configure({ auto: false }, ctx.fiber)
+        recovery.trigger()
+        return dispose
+      })
       return
     }
     settingsCtx.settings.installSection(ctx, NS, PlainConfig, entry, {
@@ -273,6 +287,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
         assertProxyURL(value.proxyURL)
         if (typeof value.apiKeyEnv === 'string') assertApiKeyEnv(value.apiKeyEnv)
         assertAccounts(value.accounts, value.apiKeyEnv)
+        assertAccountOperations(value.accountOperations)
       },
       setSource: (source) => {
         current = source
@@ -283,6 +298,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
         syncRoute()
       },
     })
+    // The credentials/settings injection can run before this section exists.
+    recovery.trigger()
   })
   // Validate before 0.1.7 persists a profile edit, then follow committed refs.
   ctx.on('internal/config', function (_raw, next) {
@@ -296,6 +313,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       assertBaseURL(config.baseURL)
       assertProxyURL(config.proxyURL)
       assertAccounts(config.accounts, config.apiKeyEnv)
+      assertAccountOperations(config.accountOperations)
     }
     return value
   })
@@ -305,6 +323,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // included — flips the route's presence; the event names the reference.
   ctx.inject(['credentials'], (credentialsCtx) => {
     credentialsCtx.on('credentials/reference-updated', (ref) => {
+      recovery.trigger()
       // A stored change to a reference outranks the gateway's last rejection
       // of it, so the very next request re-checks the new key.
       adapter.forgetRejectedKey(ref)

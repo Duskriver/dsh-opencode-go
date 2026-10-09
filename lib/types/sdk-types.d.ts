@@ -1535,6 +1535,7 @@ type InputModality = typeof INPUT_MODALITIES[number];
 interface GoCatalogSourceStatus {
     readonly updatedAt?: number;
     readonly error?: string;
+    readonly warning?: string;
 }
 /** A failed refresh retains the Host's usable data with an explicit diagnostic. */
 interface GoModelCatalog {

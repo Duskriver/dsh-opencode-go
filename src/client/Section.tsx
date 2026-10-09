@@ -134,6 +134,7 @@ function ModelsBody({ models, t, locale }: {
         {status.error ? t('modelsSourceFailed') : t('modelsSourceCurrent')}. {' '}
         {status.updatedAt === undefined ? t('modelsSourceNeverFetched')
           : t('modelsSourceUpdated', { time: new Date(status.updatedAt).toLocaleString(locale) })}
+        {status.warning ? <> {status.warning}</> : null}
       </p>
     }) : null
   if (models.status === 'failed') {
@@ -153,9 +154,9 @@ function ModelsBody({ models, t, locale }: {
     {models.message ? <p className={css.hint}>{models.message}</p> : null}
     {sourceStatus}
   </>
-  if (models.refreshing) return progress
-  if (models.count === 0) return <p className={css.hint}>{t('modelsEmpty')}</p>
-  return null
+  const warning = sources?.listing.warning
+    ? <p className={css.failedNote} role="alert">{sources.listing.warning}</p> : null
+  return <>{progress}{warning}{models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
 }
 
 /**

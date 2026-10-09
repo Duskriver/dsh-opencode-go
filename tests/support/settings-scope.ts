@@ -115,3 +115,25 @@ export function stubSettingsScope<T>(): StubSettingsScope<T> {
     publish: (next) => { scope.publish(next) },
   }
 }
+
+/** Accept one atomic settings batch and publish its effective/user layers. */
+export function acceptSettingsWrites(host: StubSettingsScope<unknown>): void {
+  host.publish({ revision: 0 })
+  const apply = (ops: readonly SettingsPathOpView[], expectedRevision?: number): boolean => {
+    const snapshot = host.scope.getSnapshot()
+    if (expectedRevision !== undefined && expectedRevision !== snapshot.revision) return false
+    const value = { ...snapshot.value as object } as Record<string, unknown>
+    const user = { ...snapshot.user as object } as Record<string, unknown>
+    const base = snapshot.base as Record<string, unknown> | undefined
+    for (const op of ops) {
+      const field = op.path[0]!
+      if (op.op === 'set') { value[field] = structuredClone(op.value); user[field] = structuredClone(op.value) }
+      else { delete user[field]; value[field] = base?.[field] }
+    }
+    host.publish({ value, user, revision: (snapshot.revision ?? 0) + 1 })
+    return true
+  }
+  host.mutate.mockImplementation(async (ops: readonly SettingsPathOpView[], revision?: number) => apply(ops, revision))
+  host.set.mockImplementation(async (field: string, value: never) => apply([{ op: 'set', path: [field], value }]))
+  host.unset.mockImplementation(async (field: string) => apply([{ op: 'unset', path: [field] }]))
+}

@@ -6,6 +6,8 @@ Use OpenCode Go subscription models in [DeepSeek Harness](https://github.com/dee
 
 Requires DSH `0.1.5-rc.1` or later.
 
+Installed compatibility is checked on ten host versions from `0.1.5-rc.1` through `0.2.1-alpha.1`; see the [compatibility matrix](docs/development.md#installed-package-matrix). Later hosts need verification. Developer messages, dynamic tool additions/removals, and deferred tool loading are explicitly rejected.
+
 ## Install
 
 ### From DSH
@@ -61,6 +63,8 @@ Under **Advanced settings → Usage display**, choose:
 Use **Accounts** to add accounts, rename them, or replace keys. Expand an account row for detailed usage. Drag its handle to reorder accounts; the first account becomes the current one.
 
 Enable **Auto switch** to try other accounts in list order when the current account runs out of quota or its key is unavailable, before output begins. To choose the account for subsequent requests directly, click **Switch** in the usage pill.
+
+If adding or removing an account is interrupted by closing the page or losing the connection, the host resumes recovery at startup or after settings and credential updates. An addition whose key was never stored stays visible so you can replace its key or remove it. Recovery preserves a current-account choice made in the meantime.
 
 ## Advanced usage
 
@@ -142,8 +146,14 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `modelLimits` | Per-model `contextWindow` and `maxTokens` overrides, plus additional `thinkingBudgets` options; null uses defaults |
 | `maxImages` | Maximum images in one request's history; unset by default, with oldest images offloaded when exceeded |
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |
+| `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
+| `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
 
 Image offloading keeps the original attachment and replaces the old image in the request with a text placeholder. Raising the limit does not automatically restore previously offloaded images.
+
+Image count overflow is detected before attachment reads. Preparation shares four execution slots and at most 32 queued tasks within the plugin module, and stops scheduling images when known encoded bytes exceed the payload cap. Active image attempts share a 128 MiB budget for prepared raw data plus base64 payloads; this is not a process memory limit. Queue or shared-budget overflow returns `IMAGE_RESOURCE_BUSY`; retry after another request completes. Count and byte limits may require successive host offload retries.
+
+A cold catalog outage reports `DISCOVERY_FAILED`; a warm catalog retains previously verified models. Only an explicit empty gateway listing clears membership. A partially malformed listing keeps its valid models and reports the ignored row count in settings and logs. Ordinary advanced form settings commit in one revision-checked batch. Credentials use a separate service; failed credential drafts remain, and retry submits only uncommitted parts.
 
 ### Export error diagnostics
 
@@ -162,6 +172,8 @@ dsh web
 ```
 
 Reproduce the failure to get a JSON file path in the error message. The record contains the model, request parameter summaries, HTTP status, upstream log and route IDs, and the error response, for use in an [issue report](https://github.com/Duskriver/dsh-opencode-go/issues). Review the returned error content before sharing. Clear the environment variable and restart DSH to disable diagnostics.
+
+DSH debug logs contain a call ID and each attempt's stage timings, HTTP status, upstream request ID, time to first output and error code, including stream failures after HTTP 200. Image attempts also report aggregate queue waiting and peak resource occupancy. Error files carry the same call ID and attempt number for correlation. These summaries exclude prompts, keys, proxy addresses and raw session IDs.
 
 ## Update and uninstall
 

@@ -187,7 +187,7 @@ it('can use a backup when the preferred credential is missing and stops fallback
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
   cancel = true
   resolve.mockClear()
-  await expect(drain(adapter.stream({ ...request(), signal: signal.signal }))).rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })
+  expect((await drain(adapter.stream({ ...request(), signal: signal.signal }))).at(-1)).toMatchObject({ reason: { kind: 'aborted', failure: { code: 'ABORTED' } } })
   expect(resolve).toHaveBeenCalledTimes(1)
 })
 
@@ -330,4 +330,59 @@ it('settles the backup even when a remembered rejection made it the first candid
     seq: 2, generation: 7, config, ref: 'ACCOUNT_B',
     notice: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: 'credential', at: expect.any(Number) },
   })
+})
+
+it('does not switch or remember a key rejection for a 401 ModelError', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { type: 'ModelError', message: 'Model not supported' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  const switched = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSwitch: switched })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: 'UNKNOWN_MODEL' } } })
+  expect(gateway.bodies).toHaveLength(1)
+  expect(switched).not.toHaveBeenCalled()
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+  expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual(['Bearer ACCOUNT_A', 'Bearer ACCOUNT_A'])
+})
+
+it.each(['CreditsError', 'MonthlyLimitError', 'UserLimitError'])('switches on 401 %s as quota without blacklisting the key', async type => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { type, message: 'Subscription unavailable' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  gateway.pushCompletions({ events: textEvents })
+  const switched = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSwitch: switched })
+  await drain(adapter.stream(request()))
+  expect(switched.mock.calls[0]?.[0]).toMatchObject({ reason: 'quota' })
+  await drain(adapter.stream(request()))
+  expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual(['Bearer ACCOUNT_A', 'Bearer ACCOUNT_B', 'Bearer ACCOUNT_A'])
+})
+
+it('does not switch accounts for an untyped 500 quoting a previous quota failure', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 500, body: JSON.stringify({ error: { message: 'Previous request had insufficient credits' } }) })
+  const switched = vi.fn(), trace = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onAccountSwitch: switched, onCallTrace: trace })
+  expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: 'SERVER' } } })
+  expect(gateway.bodies).toHaveLength(1)
+  expect(switched).not.toHaveBeenCalled()
+  expect(trace.mock.calls[0]?.[0]).toMatchObject({ attempts: 1, attemptDetails: [{ attempt: 1, outcome: 'failed', code: 'SERVER', httpStatus: 500 }] })
+})
+
+it('records each failed and serving attempt without account references or content', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { type: 'CreditsError' } }), headers: { 'x-request-id': 'quota-edge-1' } })
+  gateway.pushCompletions({ events: textEvents, headers: { 'x-request-id': 'success-edge-2' } })
+  const trace = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }),
+    resolveApiKey: async config => config.apiKeyEnv, onCallTrace: trace })
+  await drain(adapter.stream(request()))
+  expect(trace.mock.calls[0]?.[0]).toMatchObject({ attempts: 2, outcome: 'completed', attemptDetails: [
+    { attempt: 1, outcome: 'failed', code: 'QUOTA', httpStatus: 401, requestId: 'quota-edge-1', stages: { credential: expect.any(Number) } },
+    { attempt: 2, outcome: 'completed', httpStatus: 200, requestId: 'success-edge-2', firstOutputMs: expect.any(Number) },
+  ] })
+  expect(JSON.stringify(trace.mock.calls)).not.toMatch(/ACCOUNT_A|ACCOUNT_B|"hi"/)
 })

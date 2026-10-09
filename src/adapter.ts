@@ -42,9 +42,9 @@ import type {
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { toPiContext, toStreamChunks } from './conversion/index.ts'
 import type { PiImageRequestContext } from './conversion/index.ts'
-import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { deadline, idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } from './catalog.ts'
-import { assertBaseURL } from './config.ts'
+import { assertBaseURL, DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from './config.ts'
 import { assertProxyURL } from './proxy-url.ts'
 import { ProxyTransport } from './proxy.ts'
 import { GatewayDiagnostics } from './gateway-diagnostics.ts'
@@ -52,13 +52,15 @@ import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { reasoningChoices, reasoningIntent, reasoningRequest } from './reasoning.ts'
 import { accountsOf, accountRefOf, type GoAccountSwitch } from './accounts.ts'
+import { waitWithSignal } from './request-control.ts'
+import { CallTrace, type GoCallTrace } from './call-trace.ts'
+import { ImagePayloadLease } from './conversion/image-pool.ts'
+export type { GoCallTrace } from './call-trace.ts'
 
 /** A generic 403/rate limit is not proof that another subscription can help. */
 function accountFailureReason(failure: { code: string; message: string }): GoAccountSwitch['reason'] | undefined {
   if (failure.code === 'QUOTA') return 'quota'
-  if (failure.code === 'MISSING_CREDENTIAL' || failure.code === 'INVALID_CREDENTIAL'
-    || failure.code === 'AUTH' && (/\b401\b/.test(failure.message)
-      || /invalid[ _-]?(?:api[ _-]?)?key|incorrect[ _-]?(?:api[ _-]?)?key|expired[ _-]?(?:api[ _-]?)?key/i.test(failure.message))) return 'credential'
+  if (failure.code === 'MISSING_CREDENTIAL' || failure.code === 'INVALID_CREDENTIAL') return 'credential'
   return undefined
 }
 
@@ -68,7 +70,7 @@ const REJECTED_KEY_TTL_MS = 5 * 60_000
 /** The gateway itself refused the key — a fact worth remembering for a while.
  * A locally missing credential is re-checked for free on every request. */
 function isGatewayKeyRejection(failure: { code: string }): boolean {
-  return failure.code === 'INVALID_CREDENTIAL' || failure.code === 'AUTH'
+  return failure.code === 'INVALID_CREDENTIAL'
 }
 
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
@@ -117,7 +119,9 @@ export interface OpencodeGoAdapterOptions {
    */
   config: () => OpencodeGoConfig
   /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
-  resolveApiKey: (config: OpencodeGoConfig) => Promise<string | undefined>
+  resolveApiKey: (config: OpencodeGoConfig, signal?: AbortSignal) => Promise<string | undefined>
+  /** Observe one bounded, content-free summary for every dispatched call. */
+  onCallTrace?: (trace: GoCallTrace) => void
   /**
    * Image input machinery; absent refuses image content, which is the posture
    * for direct construction without a durable attachment service behind it.
@@ -127,6 +131,7 @@ export interface OpencodeGoAdapterOptions {
   onFallback?: (detail: { url: string; error: unknown; kept: number }) => void
   /** Observe live ids the curated table cannot route. */
   onOmitted?: (ids: readonly string[]) => void
+  onCatalogWarning?: (warning: string) => void
   /** Observe assistant history degrading to provider-neutral conversion. */
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
@@ -207,6 +212,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
           if (this.catalogCache?.catalog === catalog) this.options.onCatalogRefresh?.()
         },
         this.transport.forProxy(config.proxyURL),
+        this.options.onCatalogWarning,
       )
       this.catalogCache = { key, catalog }
     }
@@ -243,10 +249,17 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   /** Copy nested limits before discovery can yield to a settings update. */
-  private async callSnapshot(model: string, signal?: AbortSignal): Promise<OpencodeGoCallSnapshot> {
-    const generation = this.options.accountGeneration?.() ?? 0
-    const config = structuredClone(this.options.config())
-    const catalog = await this.catalogOf(config).forModel(model, signal)
+  private async callSnapshot(model: string, signal?: AbortSignal,
+    captured = { generation: this.options.accountGeneration?.() ?? 0, config: structuredClone(this.options.config()) },
+  ): Promise<OpencodeGoCallSnapshot> {
+    const { generation, config } = captured
+    using preparation = deadline(signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
+    let catalog: CatalogSnapshot
+    try { catalog = await this.catalogOf(config).forModel(model, preparation.signal) }
+    catch (error) {
+      if (timeoutOf(preparation.signal, 'LLM_PREPARATION_TIMEOUT')) throw new LlmError('opencode-go discovery preparation timeout', 'TIMEOUT', { cause: error })
+      throw error
+    }
     const resolved = catalog.models.get(model)
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
@@ -304,21 +317,43 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
-    const seq = ++this.callSeq
-    let snapshot: OpencodeGoCallSnapshot
-    try {
-      snapshot = await this.callSnapshot(options.model, options.signal)
-    } catch (error) {
-      if (!options.signal?.aborted) throw error
-      yield { type: 'finish', reason: {
-        kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' },
-      } }
-      return
-    }
-    yield* this.streamWithSnapshot(options, snapshot, seq)
+    yield* this.dispatch(options, ++this.callSeq)
   }
 
   private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, seq: number): AsyncIterable<StreamChunk> {
+    yield* this.dispatch(options, seq, snapshot)
+  }
+
+  private async *dispatch(options: GenerateOptions, seq: number, prepared?: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
+    const captured = prepared ?? { generation: this.options.accountGeneration?.() ?? 0, config: structuredClone(this.options.config()) }
+    const trace = new CallTrace(options.model, this.options.onCallTrace)
+    using whole = deadline(options.signal, captured.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, 'LLM_REQUEST_TIMEOUT')
+    try {
+      const snapshot = prepared ?? await trace.measure('discovery', () => this.callSnapshot(options.model, whole.signal, captured))
+      for await (const chunk of this.streamAccounts({ ...options, signal: whole.signal }, snapshot, seq, trace)) {
+        if (chunk.type === 'finish') {
+          trace.outcome = chunk.reason.kind === 'error' ? 'failed' : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed'
+          if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') trace.code = chunk.reason.failure?.code
+        }
+        yield chunk
+      }
+    } catch (error) {
+      trace.outcome = 'failed'
+      if (timeoutOf(whole.signal, 'LLM_REQUEST_TIMEOUT')) {
+        trace.code = 'TIMEOUT'
+        throw new LlmError('opencode-go whole request timeout', 'TIMEOUT', { cause: error })
+      }
+      if (options.signal?.aborted) {
+        trace.outcome = 'aborted'; trace.code = 'ABORTED'
+        yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } } }
+        return
+      }
+      trace.code = error instanceof LlmError ? error.code : 'PI_AI_ERROR'
+      throw error
+    } finally { trace.finish() }
+  }
+
+  private async *streamAccounts(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, seq: number, trace: CallTrace): AsyncIterable<StreamChunk> {
     const accounts = accountsOf(snapshot.config)
     if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
     // The preferred reference resolves through accountRefOf: an empty string
@@ -349,6 +384,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     let switchReason: GoAccountSwitch['reason'] | undefined
     let failedRef: string | undefined
     for (let attempt = 0; attempt < refs.length; attempt++) {
+      trace.startAttempt()
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
@@ -371,9 +407,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
       try {
         for await (const chunk of this.streamAttempt(options, {
           ...snapshot, config: { ...snapshot.config, apiKeyEnv: refs[attempt]! },
-        })) {
+        }, trace)) {
           if (chunk.type === 'usage') { usage = chunk; continue }
           if (chunk.type === 'finish') {
+            trace.endAttempt(chunk.reason.kind === 'error' ? 'failed' : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed',
+              chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted' ? chunk.reason.failure?.code : undefined)
             const failure = chunk.reason.kind === 'error' ? chunk.reason.failure : undefined
             const reason = failure === undefined ? undefined : accountFailureReason(failure)
             if (reason && failure !== undefined && !emitted && !options.signal?.aborted && !((usage?.usage.totalTokens ?? 0) > 0)
@@ -395,12 +433,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
         }
         if (!retry) return
       } catch (error) {
+        trace.endAttempt(options.signal?.aborted && !(error instanceof LlmError && error.code === 'TIMEOUT') ? 'aborted' : 'failed',
+          error instanceof LlmError ? error.code : 'PI_AI_ERROR')
         const reason = error instanceof LlmError ? accountFailureReason(error) : undefined
         if (!reason || emitted || options.signal?.aborted || attempt + 1 >= refs.length) throw error
         if (error instanceof LlmError && isGatewayKeyRejection(error)) this.rememberRejectedKey(refs[attempt]!, gateway)
         switchReason ??= reason
         failedRef ??= refs[attempt]!
-      }
+      } finally { trace.endAttempt() }
     }
   }
 
@@ -416,17 +456,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   /** One account, one SDK attempt; host recovery still owns failures after output. */
-  private async *streamAttempt(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
+  private async *streamAttempt(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, trace: CallTrace): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
     const { config, catalog, model } = snapshot
     const outputLimit = config.modelLimits[model.id]?.maxTokens
     const maxTokens = outputLimit == null ? options.maxTokens : Math.min(options.maxTokens ?? outputLimit, outputLimit)
-    const apiKey = await this.options.resolveApiKey(config)
-    if (apiKey === undefined || apiKey.length === 0) {
-      throw new LlmError('llm-opencode-go: no credential resolved for the route', 'MISSING_CREDENTIAL')
-    }
     const reasoning = this.resolveReasoningLevel(model, options.reasoningEffort)
 
     const consumer = new AbortController()
@@ -434,8 +470,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
       ? consumer.signal
       : AbortSignal.any([options.signal, consumer.signal])
     using watchdog = idleWatchdog(upstream, config.streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
+    using preparation = deadline(watchdog.signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
+    using payloadLease = new ImagePayloadLease(trace.imagePool)
 
     try {
+      const apiKey = await trace.measure('credential', () => waitWithSignal(
+        () => this.options.resolveApiKey(config, preparation.signal), preparation.signal,
+      ))
+      if (!apiKey) throw new LlmError('llm-opencode-go: no credential resolved for the route', 'MISSING_CREDENTIAL')
       // Image gate before any provider I/O: only catalog models declaring the
       // image modality accept one, and converting an attachment requires the
       // durable attachment service this adapter was constructed with. The gate
@@ -461,20 +503,26 @@ export class OpencodeGoAdapter extends LlmAdapter {
             maxPixels: config.requestImagePixelBudget,
             maxBytes: config.requestImageMaxBytes,
           },
+          payloadLease,
+          onImagePool: trace.imagePool,
         }
       }
       // The sync overload converts every message from the session log; the
       // images overload additionally converts attachment references through
       // the mounted attachment service.
-      const context = imageRequest === undefined
-        ? toPiContext(options, undefined, this.options.onReplayDegrade)
-        : await toPiContext({ ...options, signal: watchdog.signal }, imageRequest, this.options.onReplayDegrade)
+      const context = await trace.measure('images', () => waitWithSignal(() => imageRequest === undefined
+        ? Promise.resolve(toPiContext(options, undefined, this.options.onReplayDegrade))
+        : toPiContext({ ...options, signal: preparation.signal }, imageRequest, this.options.onReplayDegrade), preparation.signal))
+      preparation[Symbol.dispose]()
+      watchdog.signal.throwIfAborted()
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
       const diagnostics = new GatewayDiagnostics({
         provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
         fetch: this.transport.forProxy(config.proxyURL),
         directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
+        callId: trace.callId, attempt: trace.attempts,
+        onResponse: (status, requestId) => trace.response(status, requestId),
       })
       const events = catalog.provider.streamSimple(model, normalizeContext(context), {
         apiKey,
@@ -499,7 +547,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
       let exhausted = false
       try {
         while (true) {
-          const result = await watchdog.next(iterator)
+          const result = await trace.measure('stream', () => waitWithSignal(() => watchdog.next(iterator), watchdog.signal))
+          if (timeoutOf(watchdog.signal, 'LLM_REQUEST_TIMEOUT')) throw new LlmError('opencode-go whole request timeout', 'TIMEOUT')
           if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
             throw new LlmError('opencode-go stream idle timeout', 'TIMEOUT')
           }
@@ -508,24 +557,34 @@ export class OpencodeGoAdapter extends LlmAdapter {
             return
           }
           const chunk = result.value
+          if ((chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && chunk.text.length > 0
+            || chunk.type === 'tool-call-delta' && chunk.argumentsDelta.length > 0) trace.firstOutput()
           if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-            const message = await diagnostics.failureMessage(chunk.reason.failure.message)
+            const failure = chunk.reason.failure
+            const message = await waitWithSignal(() => diagnostics.failureMessage(failure.message), watchdog.signal)
+            const code = await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal)
             yield { ...chunk, reason: options.signal?.aborted
               ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }
-              : { ...chunk.reason, failure: { ...chunk.reason.failure, message } } }
+              : { ...chunk.reason, failure: { ...chunk.reason.failure, message, code } } }
           } else yield chunk
         }
       } finally {
         if (!exhausted) {
           consumer.abort('opencode-go stream consumer stopped')
           try {
-            await iterator.return(undefined)
+            void iterator.return(undefined).catch(() => {})
           } catch (_abortedSdkTeardown) {
             // The stable signal already owns SDK termination; return-time abort cannot add an outcome.
           }
         }
       }
     } catch (error: unknown) {
+      if (timeoutOf(preparation.signal, 'LLM_PREPARATION_TIMEOUT')) {
+        throw new LlmError('opencode-go credential/image preparation timeout', 'TIMEOUT', { cause: error })
+      }
+      if (timeoutOf(watchdog.signal, 'LLM_REQUEST_TIMEOUT')) {
+        throw new LlmError('opencode-go whole request timeout', 'TIMEOUT', { cause: error })
+      }
       if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
         throw new LlmError('opencode-go stream idle timeout', 'TIMEOUT', { cause: error })
       }

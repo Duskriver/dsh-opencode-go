@@ -85,6 +85,8 @@ export declare class GoAccountsController {
     private move;
     private account;
     private mutate;
+    /** A durable intention must be confirmed before crossing the credential store. */
+    private begin;
     private add;
     /** Loaded rows answer from cache; anything they do not know is described on
      * the spot, so a placeholder decision never races the page's first describe. */

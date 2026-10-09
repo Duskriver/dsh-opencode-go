@@ -2,7 +2,7 @@
  * The staged form behind the OpenCode Go settings page.
  *
  * The page stages what the user types and writes it only when they save. Each
- * settings write is a durable, revision-fenced document mutation, so a control
+ * settings batch is a durable, revision-fenced document mutation, so a control
  * that committed as it settled turned one edit into a write the user never
  * asked for and could not preview; staged text makes what is on screen exactly
  * what a save would store.
@@ -19,6 +19,7 @@
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SettingsScope, SettingsScopeSnapshot } from './settings.ts'
+import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 
 /** The write one field's staged text performs when the page is saved. */
 export type FieldWrite =
@@ -104,9 +105,11 @@ interface StagedEdit {
 interface PlannedWrite {
   /** Field this entry writes. */
   field: string
+  edit: StagedEdit
+  write?: FieldWrite
   /**
-   * Perform the write and report whether the Host holds the staged value
-   * afterwards; undefined when the draft is not a value the field accepts.
+   * Perform a secret write; regular settings use the atomic batch instead.
+   * An invalid draft carries neither a settings write nor this function.
    */
   run: (() => Promise<boolean>) | undefined
 }
@@ -253,7 +256,7 @@ export class StagedForm {
       available: snapshot.status === 'ready',
       writable: snapshot.writable,
       dirty: plan.length > 0,
-      invalid: plan.some(item => item.run === undefined),
+      invalid: plan.some(item => item.run === undefined && item.write === undefined),
       saving: this.saving,
       failed: this.failed,
     }
@@ -313,17 +316,33 @@ export class StagedForm {
    */
   async save(): Promise<void> {
     const plan = this.plan()
-    const writes = plan.flatMap(item => item.run === undefined ? [] : [item.run])
-    if (plan.length === 0 || this.saving || writes.length !== plan.length) return
+    if (plan.length === 0 || this.saving || plan.some(item => !item.write && !item.run)) return
+    const revision = this.snapshotOf().revision
     this.saving = true
     this.failed = false
     this.publish()
     let landed = true
-    for (const write of writes) {
-      try { landed = await write() && landed }
+    const settings = plan.filter(item => item.write !== undefined)
+    const accept = (item: PlannedWrite): void => {
+      if (this.staged.get(item.field) === item.edit) this.staged.delete(item.field)
+    }
+    if (settings.length > 0) {
+      const ops = settings.map(({ field, write }): SettingsPathOpView => write!.kind === 'clear'
+        ? { op: 'unset', path: [field] }
+        : { op: 'set', path: [field], value: write!.value as Extract<SettingsPathOpView, { op: 'set' }>['value'] })
+      try {
+        const accepted = await this.scope.mutate(ops, revision)
+        landed = accepted !== false && settings.every(item => item.write!.kind === 'clear'
+          ? !this.stored(item.field) : sameJsonValue(this.userLayer()?.[item.field], item.write!.value))
+        if (landed) settings.forEach(accept)
+      } catch { landed = false }
+    }
+    // Secrets live in a separate service. A refused settings batch must not
+    // change credentials; accepted parts are removed so retry is idempotent.
+    if (landed) for (const item of plan.filter(item => item.run !== undefined)) {
+      try { if (await item.run!()) accept(item); else landed = false }
       catch { landed = false }
     }
-    if (landed) this.staged.clear()
     this.saving = false
     this.failed = !landed
     this.publish()
@@ -341,31 +360,19 @@ export class StagedForm {
       const secret = this.secretSpecs.get(field)
       if (secret !== undefined) {
         const value = staged.text.trim()
-        if (value !== '') plan.push({ field, run: () => secret.write(value) })
+        if (value !== '') plan.push({ field, edit: staged, run: () => secret.write(value) })
         continue
       }
       const spec = this.spec(field)
       if (staged.clear) {
-        if (this.stored(field)) plan.push({ field, run: () => this.clear(field) })
+        if (this.stored(field)) plan.push({ field, edit: staged, write: { kind: 'clear' }, run: undefined })
         continue
       }
       if (this.unchangedDraft(field, staged)) continue
       const write = spec.parse(staged.text)
-      if (write === undefined) plan.push({ field, run: undefined })
-      else if (write.kind === 'clear') plan.push({ field, run: () => this.clear(field) })
-      else plan.push({ field, run: () => this.store(field, write.value) })
+      plan.push({ field, edit: staged, write, run: undefined })
     }
     return plan
-  }
-
-  private async clear(field: string): Promise<boolean> {
-    await this.scope.unset(field)
-    return !this.stored(field)
-  }
-
-  private async store(field: string, value: unknown): Promise<boolean> {
-    await this.scope.set(field, value)
-    return sameJsonValue(this.userLayer()?.[field], value)
   }
 
   private stage(field: string, edit: StagedEdit): void {

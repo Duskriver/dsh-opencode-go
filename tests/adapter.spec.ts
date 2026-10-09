@@ -8,6 +8,7 @@ import { PROVIDER_ID } from '../src/catalog.ts'
 import { configOf } from './config-of.ts'
 import { closeMockGateways, fullLiveListing, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { metadataDocument, MODELS_METADATA_URL } from './support/model-metadata.ts'
+import { IMAGE_PAYLOAD_BUDGET_BYTES, ImagePayloadLease } from '../src/conversion/image-pool.ts'
 
 const IMAGE_REF: ImageAttachmentRef = {
   attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
@@ -255,7 +256,7 @@ describe('OpencodeGoAdapter stream', () => {
     const failing = requestOf({ signal: controller.signal })
     failing.messages = [message as never]
 
-    await expect(drain(adapter.stream(failing))).rejects.toMatchObject({ code: 'ABORTED' })
+    expect((await drain(adapter.stream(failing))).at(-1)).toMatchObject({ reason: { kind: 'aborted', failure: { code: 'ABORTED' } } })
   })
 
   it('rethrows conversion failures that are neither timeouts nor aborts', async () => {
@@ -444,4 +445,130 @@ describe('OpencodeGoAdapter stream', () => {
     expect((await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')).context?.contextWindow).toBe(advertised)
     expect(gateway.modelListings).toBe(1)
   })
+})
+
+it.each(['caller', 'preparation', 'whole'] as const)('bounds an unresponsive credential resolver by %s cancellation', async kind => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  const started = Promise.withResolvers<void>()
+  const late = Promise.withResolvers<string>()
+  const controller = new AbortController()
+  let warmed = false
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, {
+    requestPreparationTimeoutMs: warmed && kind === 'preparation' ? 30 : 1000,
+    requestTimeoutMs: kind === 'whole' ? 30 : 1000,
+  }), resolveApiKey: () => { started.resolve(); return late.promise } })
+  await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+  warmed = true
+  const pending = drain(adapter.stream(requestOf({ signal: controller.signal })))
+  const outcome = pending.then(value => ({ value }), error => ({ error }))
+  await started.promise
+  if (kind === 'caller') controller.abort()
+  try {
+    const result = await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 200))])
+    if (kind === 'caller') expect(result).toMatchObject({ value: [{ reason: { kind: 'aborted', failure: { code: 'ABORTED' } } }] })
+    else expect(result).toMatchObject({ error: { code: 'TIMEOUT' } })
+    expect(gateway.bodies).toHaveLength(0)
+  } finally { late.resolve('late-key'); await outcome }
+  await Promise.resolve()
+  expect(gateway.bodies).toHaveLength(0)
+})
+
+it('enforces the whole deadline while stream events continue and records a safe summary', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  gateway.pushCompletions({ events: [textEvents[0]!, ...Array.from({ length: 40 }, () => textEvents[1]!), ...textEvents.slice(2)], delayMs: 5 })
+  const trace = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { requestTimeoutMs: 70, streamIdleTimeoutMs: 1000 }),
+    resolveApiKey: async () => 'private-key', onCallTrace: trace })
+  await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+  await expect(drain(adapter.stream(requestOf({ sessionId: 'private-session' as never })))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  expect(trace).toHaveBeenCalledTimes(1)
+  expect(trace.mock.calls[0]?.[0]).toMatchObject({ attempts: 1, outcome: 'failed', code: 'TIMEOUT', stages: { credential: expect.any(Number), stream: expect.any(Number) } })
+  expect(JSON.stringify(trace.mock.calls)).not.toMatch(/private-key|private-session|"hi"/)
+})
+
+it('records HTTP 200 stream truncation and contains observer failures', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  gateway.pushCompletions({ events: textEvents.slice(0, 2) })
+  const trace = vi.fn(() => { throw new Error('observer failed') })
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key', onCallTrace: trace })
+  expect((await drain(adapter.stream(requestOf()))).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: 'TRANSPORT' } } })
+  expect(trace.mock.calls[0]?.[0]).toMatchObject({ attempts: 1, outcome: 'failed', code: 'TRANSPORT' })
+})
+
+it('retains image payload admission through streaming and releases it when the consumer stops', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  gateway.pushCompletions({ events: textEvents })
+  const trace = vi.fn()
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key',
+    onCallTrace: trace, imageAccess: {
+      resolveAttachments: () => ({ readImageRequest: async () => ({
+        variantId: `sha256:${'b'.repeat(64)}`, attachment: IMAGE_REF, data: Uint8Array.of(1),
+        mediaType: 'image/png', bytes: 1, width: 1, height: 1, depth: 'uchar', space: 'srgb', hasAlpha: true,
+      }) }) as never, resolveImageAccess: () => undefined,
+    } })
+  const iterator = adapter.stream(requestOf({ messages: [createUserMessage({
+    content: [{ type: 'image', attachment: IMAGE_REF }], source: { kind: 'plugin', plugin: 'test' },
+  })] }))[Symbol.asyncIterator]()
+  try {
+    expect((await iterator.next()).done).toBe(false)
+    using competing = new ImagePayloadLease()
+    competing.reserve(IMAGE_PAYLOAD_BUDGET_BYTES - 5)
+    expect(() => competing.reserve(1)).toThrow(expect.objectContaining({ code: 'IMAGE_RESOURCE_BUSY' }))
+  } finally { await iterator.return?.() }
+  using available = new ImagePayloadLease()
+  available.reserve(IMAGE_PAYLOAD_BUDGET_BYTES)
+  expect(trace).toHaveBeenCalledTimes(1)
+  expect(trace.mock.calls[0]?.[0]).toMatchObject({ outcome: 'consumer-stopped', attemptDetails: [
+    { outcome: 'consumer-stopped', imagePool: { maxRetainedBytes: 5, rejected: false } },
+  ] })
+})
+
+it('times out image preparation even when the attachment service ignores cancellation', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  const late = Promise.withResolvers<never>()
+  const read = vi.fn(() => late.promise)
+  let warmed = false
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { requestPreparationTimeoutMs: warmed ? 30 : 1000 }),
+    resolveApiKey: async () => 'fixture-key', imageAccess: {
+      resolveAttachments: () => ({ readImageRequest: read }) as never,
+      resolveImageAccess: () => undefined,
+    } })
+  await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+  warmed = true
+  const pending = drain(adapter.stream(requestOf({ messages: [createUserMessage({
+    content: [{ type: 'image', attachment: IMAGE_REF }], source: { kind: 'plugin', plugin: 'test' },
+  })] })))
+  const outcome = pending.then(value => ({ value }), error => ({ error }))
+  try {
+    expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 200))]))
+      .toMatchObject({ error: { code: 'TIMEOUT' } })
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(gateway.bodies).toHaveLength(0)
+  } finally { late.reject(new Error('late attachment failure')); await outcome; await Promise.resolve() }
+})
+
+it('keeps one whole-request deadline across account fallback', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<string>()
+  const accounts = [{ id: 'a', name: 'A', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'B', apiKeyEnv: 'ACCOUNT_B' }]
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, {
+    accounts, autoSwitch: true, apiKeyEnv: 'ACCOUNT_A', requestTimeoutMs: 80, requestPreparationTimeoutMs: 1000,
+  }), resolveApiKey: async config => {
+    if (config.apiKeyEnv === 'ACCOUNT_A') {
+      await new Promise(resolve => setTimeout(resolve, 45))
+      return undefined
+    }
+    started.resolve()
+    return release.promise
+  } })
+  await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+  const pending = drain(adapter.stream(requestOf()))
+  const outcome = pending.then(value => ({ value }), error => ({ error }))
+  await started.promise
+  try {
+    expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 65))]))
+      .toMatchObject({ error: { code: 'TIMEOUT' } })
+  } finally { release.resolve('late-key'); await outcome }
+  expect(gateway.bodies).toHaveLength(0)
 })

@@ -14,6 +14,7 @@ export interface CatalogSnapshot {
     readonly metadataLive: boolean;
     /** Retained for explicit discovery; runtime callers may still use the last catalog. */
     readonly listingFailure?: unknown;
+    readonly listingWarning?: string;
     readonly metadataFailure?: unknown;
     /** Last successful fetch or revalidation, not the time of a failed attempt. */
     readonly listingUpdatedAtMs?: number;
@@ -21,7 +22,7 @@ export interface CatalogSnapshot {
     readonly fetchedAtMs: number;
 }
 /** A valid empty listing means the gateway serves nothing; malformed replies are failures. */
-export declare function readLiveModelIds(body: unknown): readonly string[];
+export declare function readLiveModelIds(body: unknown, onInvalidRows?: (warning: string) => void): readonly string[];
 /** Runtime requests reuse a snapshot; discovery revalidates it. Concurrent reads coalesce. */
 export declare class OpencodeGoCatalog {
     private readonly baseURL;
@@ -31,6 +32,7 @@ export declare class OpencodeGoCatalog {
     private readonly onOmitted;
     private readonly onRefresh;
     private readonly fetcher?;
+    private readonly onWarning?;
     private served;
     private pending;
     /** A cold runtime read can use disk metadata while the shared online refresh runs. */
@@ -49,7 +51,7 @@ export declare class OpencodeGoCatalog {
         kept: number;
     }) => void, 
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
-    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void, fetcher?: typeof globalThis.fetch | undefined);
+    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void, fetcher?: typeof globalThis.fetch | undefined, onWarning?: ((warning: string) => void) | undefined);
     snapshot(force?: boolean, signal?: AbortSignal): Promise<CatalogSnapshot>;
     private restoreMetadata;
     private readSnapshot;
