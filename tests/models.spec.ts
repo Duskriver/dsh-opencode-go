@@ -71,6 +71,13 @@ it('round-trips source diagnostics, accepts older responses, and rejects invalid
   }
 })
 
+it('keeps thinking budget bounds through the settings RPC codec', () => {
+  const catalog = { models: [{ id: 'budget', reasoningBudget: { min: 1024, max: 20000 } }], stale: false }
+  expect(parseGoModelCatalog(catalog)).toEqual(catalog)
+  expect(parseGoModelCatalog({ ...catalog, models: [{ id: 'budget', reasoningBudget: { min: 1024, max: 512 } }] }))
+    .toEqual({ models: [{ id: 'budget' }], stale: false })
+})
+
 it('keeps the declared input modalities across the Host RPC result codec', () => {
   const catalog = { models: [{ id: 'm', inputModalities: ['text', 'video'] }], stale: false }
   expect(parseGoModelCatalog(catalog)).toEqual(catalog)

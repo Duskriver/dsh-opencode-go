@@ -1,8 +1,8 @@
 /** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
-import type { Api, Model, ModelCost, ModelThinkingLevel, ThinkingLevelMap } from './sdk-types.ts'
+import type { Api, Model, ModelCost, ModelThinkingLevel } from './sdk-types.ts'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
-import { NATIVE_THINKING_FLAGS, THINKING_LEVELS, unsupportedThinkingLevels, withGatewayReasoning } from './reasoning.ts'
+import { NATIVE_THINKING_FLAGS, THINKING_LEVELS, supportsThinkingBudget, unsupportedThinkingLevels, withGatewayReasoning } from './reasoning.ts'
 
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
@@ -37,9 +37,12 @@ function rates(value: unknown): ModelCost {
 }
 
 /** Missing controls must not turn into SDK-default effort levels the gateway never advertised. */
-function thinkingLevels(id: string, api: Api, metadata: Record<string, unknown>, known?: Model<Api>): ThinkingLevelMap {
+function reasoningControls(id: string, api: Api, metadata: Record<string, unknown>, known?: Model<Api>): Pick<Model<Api>, 'thinkingLevelMap' | 'reasoningControl' | 'reasoningBudget'> {
   // A family can share wire quirks without sharing selectable effort levels.
-  if (!Array.isArray(metadata.reasoning_options) && known?.id === id && known.thinkingLevelMap !== undefined) return known.thinkingLevelMap
+  if (!Array.isArray(metadata.reasoning_options) && known?.id === id && known.thinkingLevelMap !== undefined) {
+    return { thinkingLevelMap: known.thinkingLevelMap, reasoningControl: known.reasoningControl ?? 'effort',
+      ...known.reasoningBudget === undefined ? {} : { reasoningBudget: known.reasoningBudget } }
+  }
   const map = unsupportedThinkingLevels()
   const options = (Array.isArray(metadata.reasoning_options) ? metadata.reasoning_options : []).map(record)
   const efforts = options.filter(option => option.type === 'effort' && Array.isArray(option.values))
@@ -52,7 +55,8 @@ function thinkingLevels(id: string, api: Api, metadata: Record<string, unknown>,
   const format = (known?.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat
   const native = api === 'anthropic-messages' || NATIVE_THINKING_FLAGS.has(format ?? '')
   const toggle = options.some(option => option.type === 'toggle')
-  const budget = options.some(option => option.type === 'budget_tokens')
+  const budget = options.find(option => option.type === 'budget_tokens')
+  const tokenBudget = budget !== undefined && supportsThinkingBudget(api, known?.compat)
   // The SDK represents a native switch/budget's enabled state with high. That
   // is not evidence that an OpenAI-compatible endpoint accepts effort "high".
   if (native && efforts.length === 0 && (toggle || budget)) map.high = 'high'
@@ -64,7 +68,14 @@ function thinkingLevels(id: string, api: Api, metadata: Record<string, unknown>,
   } else if (enabled && known?.id === id && known.reasoning && typeof known.thinkingLevelMap?.off === 'string') {
     map.off ??= known.thinkingLevelMap.off
   }
-  return map
+  const positive = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+  return { thinkingLevelMap: map,
+    reasoningControl: tokenBudget && efforts.length === 0 ? 'budget' : native && efforts.length === 0 && (toggle || budget) ? 'toggle' : 'effort',
+    ...tokenBudget ? { reasoningBudget: {
+      min: Math.max(api === 'anthropic-messages' ? 1024 : 1, positive(budget.min) ? budget.min : 1),
+      max: positive(budget.max) ? budget.max : Number.MAX_SAFE_INTEGER,
+    } } : {},
+  }
 }
 
 /** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */
@@ -132,7 +143,7 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
         name: typeof metadata.name === 'string' && metadata.name.length > 0 ? metadata.name : id,
         provider: 'opencode-go', api, baseUrl: modelBaseURL(api, baseURL),
         reasoning: metadata.reasoning,
-        thinkingLevelMap: thinkingLevels(id, api, metadata, known),
+        ...reasoningControls(id, api, metadata, known),
         input: input.includes('image') ? ['text', 'image'] : ['text'],
         contextWindow: positiveInteger(limit.context, 'context limit'),
         maxTokens: positiveInteger(limit.output, 'output limit'),

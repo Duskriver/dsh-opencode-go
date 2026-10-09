@@ -6,12 +6,19 @@ export interface GoModel {
   name?: string
   contextWindow?: number
   maxTokens?: number
+  /** Token budget controls available to this model, including their catalog bounds. */
+  reasoningBudget?: ThinkingBudgetRange
   deprecated?: boolean
   releaseDate?: string
   /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
   inputModalities?: readonly InputModality[]
   /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
   configurationMissing?: boolean
+}
+
+export interface ThinkingBudgetRange {
+  min: number
+  max: number
 }
 
 /**
@@ -89,6 +96,11 @@ export function parseGoModels(value: unknown): GoModel[] {
     if (typeof row.name === 'string') model.name = row.name
     for (const key of ['contextWindow', 'maxTokens'] as const) {
       if (typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] > 0) model[key] = row[key]
+    }
+    if (row.reasoningBudget !== null && typeof row.reasoningBudget === 'object') {
+      const { min, max } = row.reasoningBudget as Record<string, unknown>
+      if (typeof min === 'number' && Number.isSafeInteger(min) && min > 0
+        && typeof max === 'number' && Number.isSafeInteger(max) && max >= min) model.reasoningBudget = { min, max }
     }
     if (typeof row.deprecated === 'boolean') model.deprecated = row.deprecated
     if (typeof row.configurationMissing === 'boolean') model.configurationMissing = row.configurationMissing

@@ -79,6 +79,7 @@ export interface OpencodeGoSettings {
 export interface OpencodeGoModelLimit {
   contextWindow?: number | null
   maxTokens?: number | null
+  thinkingBudgets?: number[] | null
 }
 
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
@@ -528,13 +529,18 @@ function modelLimitsOf(value: unknown): OpencodeGoModelLimits {
     const limit: OpencodeGoModelLimit = {}
     if (fields.contextWindow === null) limit.contextWindow = null
     if (fields.maxTokens === null) limit.maxTokens = null
+    if (fields.thinkingBudgets === null) limit.thinkingBudgets = null
+    if (Array.isArray(fields.thinkingBudgets) && fields.thinkingBudgets.length <= 16
+      && fields.thinkingBudgets.every(value => typeof value === 'number' && Number.isSafeInteger(value) && value > 0)) {
+      limit.thinkingBudgets = fields.thinkingBudgets
+    }
     if (typeof fields.contextWindow === 'number' && Number.isSafeInteger(fields.contextWindow) && fields.contextWindow > 0) {
       limit.contextWindow = fields.contextWindow
     }
     if (typeof fields.maxTokens === 'number' && Number.isSafeInteger(fields.maxTokens) && fields.maxTokens > 0) {
       limit.maxTokens = fields.maxTokens
     }
-    if (limit.contextWindow !== undefined || limit.maxTokens !== undefined) limits[id] = limit
+    if (limit.contextWindow !== undefined || limit.maxTokens !== undefined || limit.thinkingBudgets !== undefined) limits[id] = limit
   }
   return limits
 }

@@ -23,8 +23,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { getSupportedThinkingLevels, normalizeContext } from 'opencode-go-pi-ai'
-import type { Api, Model, ModelThinkingLevel } from './sdk-types.ts'
+import { normalizeContext } from 'opencode-go-pi-ai'
+import type { Api, Model } from './sdk-types.ts'
 import {
   LlmAdapter,
   LlmError,
@@ -50,7 +50,7 @@ import { ProxyTransport } from './proxy.ts'
 import { GatewayDiagnostics } from './gateway-diagnostics.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
-import { NATIVE_THINKING_FLAGS, withRequestReasoning } from './reasoning.ts'
+import { reasoningChoices, reasoningIntent, reasoningRequest } from './reasoning.ts'
 import { accountsOf, accountRefOf, type GoAccountSwitch } from './accounts.ts'
 
 /** A generic 403/rate limit is not proof that another subscription can help. */
@@ -79,6 +79,7 @@ function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model
     ...model,
     contextWindow: limit.contextWindow ?? model.contextWindow,
     maxTokens: limit.maxTokens ?? model.maxTokens,
+    reasoningBudgetPresets: limit.thinkingBudgets ?? undefined,
   }
 }
 
@@ -269,27 +270,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
   /** Describe one model: capacities plus the reasoning levels it actually offers. */
   private modelInfo(model: Model<Api>): LlmResolvedModelInfo {
     const reasoning: Pick<LlmResolvedModelInfo, 'reasoning'> = {}
-    const levels = model.reasoning ? getSupportedThinkingLevels(model) : []
-    // Intrinsic reasoning does not imply adjustable efforts. DSH requires a
-    // nonempty choices list whenever reasoning controls are exposed.
-    if (levels.length > 0) {
-      // DSH resolves an unset effort through `defaultEffort` (`dsh-llm`'s
-      // resolveCallWithInfo). Formats listed above would otherwise send an
-      // explicit disable for exactly that case, so a model offering levels
-      // would silently lose its reasoning — and its thinking would land in the
-      // normal content instead of a reasoning block. `high` mirrors the
-      // fallback @deepseek-ai/dsh-llm-deepseek uses. Formats that leave the
-      // choice to the provider keep no default: there is nothing to correct.
-      const format = (model.compat as { thinkingFormat?: string } | undefined)?.thinkingFormat
-      const fallback = format !== undefined && NATIVE_THINKING_FLAGS.has(format)
-        ? levels.includes('high') ? 'high' : levels.findLast(level => level !== 'off')
-        : undefined
+    const choices = reasoningChoices(model)
+    if (choices.length > 0) {
       reasoning.reasoning = {
-        efforts: levels.map(level => ({
-          id: ReasoningEffortId(level),
-          name: `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
-        })),
-        ...fallback === undefined ? {} : { defaultEffort: ReasoningEffortId(fallback) },
+        efforts: choices.map(choice => ({ ...choice, id: ReasoningEffortId(choice.id) })),
       }
     }
     return {
@@ -306,10 +290,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
   private resolveReasoningLevel(
     model: Model<Api>,
     effort: GenerateOptions['reasoningEffort'],
-  ): ModelThinkingLevel | undefined {
+  ): string | undefined {
     if (effort === undefined) return undefined
-    const supported = getSupportedThinkingLevels(model)
-    if (supported.some(level => level === effort)) return effort as ModelThinkingLevel
+    const supported = reasoningChoices(model).map(choice => choice.id)
+    if (supported.some(level => level === effort)) return effort
     throw new LlmError(
       `opencode-go model "${model.id}" does not support reasoning effort "${effort}"`,
       'UNSUPPORTED_REASONING_EFFORT',
@@ -492,10 +476,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
         fetch: this.transport.forProxy(config.proxyURL),
         directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
       })
-      const events = catalog.provider.streamSimple(withRequestReasoning(model, reasoning), normalizeContext(context), {
+      const events = catalog.provider.streamSimple(model, normalizeContext(context), {
         apiKey,
         fetch: diagnostics.fetch,
-        ...reasoning === undefined || reasoning === 'off' ? {} : { reasoning },
+        ...reasoningRequest(reasoningIntent(model, reasoning)),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },

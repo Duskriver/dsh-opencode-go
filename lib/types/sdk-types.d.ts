@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ResponseCreateParamsStreaming } from 'openai/resources/responses/responses.js';
 import OpenAI from 'openai';
+import { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 
 interface TSchema {
 }
@@ -254,7 +255,7 @@ interface ProviderResponse {
     headers: Record<string, string>;
 }
 /** Authentication, HTTP transport, and lifecycle callbacks shared by provider requests. */
-interface ProviderRequestOptions<TModel = Model<Api>> {
+interface ProviderRequestOptions<TModel = Model$1<Api>> {
     signal?: AbortSignal;
     /** Explicit parent context for telemetry produced by this logical request. */
     telemetryContext?: TelemetryContext;
@@ -308,18 +309,18 @@ interface ProviderRequestOptions<TModel = Model<Api>> {
      */
     maxRetryDelayMs?: number;
 }
-interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
+interface StreamOptions extends ProviderRequestOptions<Model$1<Api>> {
     /**
      * Optional callback invoked after an HTTP response is received and before
      * its body stream is consumed.
      */
-    onResponse?: (response: ProviderResponse, model: Model<Api>) => void | Promise<void>;
+    onResponse?: (response: ProviderResponse, model: Model$1<Api>) => void | Promise<void>;
     /**
      * Optional observer for each parsed provider stream event before Pi normalization.
      * Event data is adapter-owned and must be treated as read-only.
      * Adapter support is explicit; unsupported adapters do not invoke it.
      */
-    onProviderStreamEvent?: (data: unknown, model: Model<Api>) => void | Promise<void>;
+    onProviderStreamEvent?: (data: unknown, model: Model$1<Api>) => void | Promise<void>;
     temperature?: number;
     /**
      * Arbitrary sampling parameters merged into the request body as-is, after the named request
@@ -359,7 +360,7 @@ interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
      */
     metadata?: Record<string, unknown>;
 }
-interface DeferredFetchOptions extends ProviderRequestOptions<Model<Api>> {
+interface DeferredFetchOptions extends ProviderRequestOptions<Model$1<Api>> {
     /**
      * Maximum provider long-poll duration in milliseconds.
      * Defaults to 0, which performs one status check.
@@ -367,7 +368,7 @@ interface DeferredFetchOptions extends ProviderRequestOptions<Model<Api>> {
     wait?: number;
 }
 /** Request options for best-effort deferred-response cancellation. */
-type DeferredCancelOptions = ProviderRequestOptions<Model<Api>>;
+type DeferredCancelOptions = ProviderRequestOptions<Model$1<Api>>;
 /**
  * Maps known APIs to their full provider-specific stream option types.
  * Type-only imports from API implementation modules are erased at emit, so
@@ -1088,7 +1089,7 @@ interface BaseModel<TApi extends string> {
     headers?: Record<string, string>;
 }
 /** Chat model: usable with `stream()` and friends. */
-interface Model<TApi extends Api> extends BaseModel<TApi> {
+interface Model$1<TApi extends Api> extends BaseModel<TApi> {
     /**
      * Optional: chat is the default model type, so models without `type` are chat
      * models. Narrow mixed model lists with `isModelType()` instead of comparing
@@ -1125,7 +1126,7 @@ interface ClassifierModel<TApi extends ClassifierApi> extends BaseModel<TApi> {
 }
 /** Model shape for each model type. */
 interface ModelTypeMap {
-    chat: Model<Api>;
+    chat: Model$1<Api>;
     image: ImageModel<ImageApi>;
     classifier: ClassifierModel<ClassifierApi>;
 }
@@ -1435,7 +1436,7 @@ interface RefreshModelsContext {
     signal: AbortSignal;
 }
 /** Any model a provider with chat APIs `TApi` can list. */
-type ProviderModel<TApi extends Api> = Model<TApi> | ImageModel<ImageApi> | ClassifierModel<ClassifierApi>;
+type ProviderModel<TApi extends Api> = Model$1<TApi> | ImageModel<ImageApi> | ClassifierModel<ClassifierApi>;
 /**
  * A provider is the concrete runtime unit. It owns id/name/base metadata,
  * auth methods, model listing, and the operations its models support
@@ -1466,7 +1467,7 @@ interface Provider<TApi extends Api = Api> {
      * before the first). Must not throw; `Models` treats a throwing
      * implementation as having no models.
      */
-    getModels(): readonly Model<TApi>[];
+    getModels(): readonly Model$1<TApi>[];
     /**
      * Current known models of every type, sync, with the same contract as
      * `getModels()`. Providers with only chat models may omit it; `Models` then
@@ -1486,7 +1487,7 @@ interface Provider<TApi extends Api = Api> {
      * `getModels()` remains the complete synchronous chat catalog; `Models.getAvailable()`
      * applies this filter after confirming that provider auth is configured.
      */
-    filterModels?(models: readonly Model<TApi>[], credential: Credential | undefined): readonly Model<TApi>[];
+    filterModels?(models: readonly Model$1<TApi>[], credential: Credential | undefined): readonly Model$1<TApi>[];
     /**
      * Optional credential-specific availability policy across every model type.
      * Without it, `Models.getAllAvailable()` applies `filterModels` to chat models
@@ -1494,14 +1495,73 @@ interface Provider<TApi extends Api = Api> {
      */
     filterAllModels?(models: readonly ProviderModel<TApi>[], credential: Credential | undefined): readonly ProviderModel<TApi>[];
     /** Stream a normalized transcript. `Models` normalizes the caller's `Context` before dispatching here. */
-    stream<T extends TApi>(model: Model<T>, context: TranscriptContext, options?: ApiStreamOptions<T>): AssistantMessageEventStream;
-    streamSimple(model: Model<TApi>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream;
-    fetchDeferred?(model: Model<TApi>, handle: DeferredHandle, options?: DeferredFetchOptions): AssistantMessageEventStream;
-    cancelDeferred?(model: Model<TApi>, handle: DeferredHandle, options?: DeferredCancelOptions): Promise<void>;
+    stream<T extends TApi>(model: Model$1<T>, context: TranscriptContext, options?: ApiStreamOptions<T>): AssistantMessageEventStream;
+    streamSimple(model: Model$1<TApi>, context: TranscriptContext, options?: SimpleStreamOptions): AssistantMessageEventStream;
+    fetchDeferred?(model: Model$1<TApi>, handle: DeferredHandle, options?: DeferredFetchOptions): AssistantMessageEventStream;
+    cancelDeferred?(model: Model$1<TApi>, handle: DeferredHandle, options?: DeferredCancelOptions): Promise<void>;
     /** Present when the provider supports dedicated image models. Never rejects. */
     generateImages?(model: ImageModel<ImageApi>, context: ImagesContext, options?: ImagesOptions): Promise<AssistantImages>;
     /** Present when the provider supports structured classifier models. Never rejects. */
     classify?(model: ClassifierModel<ClassifierApi>, context: ClassifierContext, options?: ClassifierOptions): Promise<ClassifierResult>;
 }
 
-export type { Api, AssistantMessage, AssistantMessageEvent, Context, ImageContent, Message, Model, ModelCost, ModelThinkingLevel, Provider, TextContent, ThinkingLevelMap, Tool, ToolCall, Usage };
+/** Settings discovery includes lifecycle data that the host's generic model DTO omits. */
+
+interface GoModel {
+    id: string;
+    name?: string;
+    contextWindow?: number;
+    maxTokens?: number;
+    /** Token budget controls available to this model, including their catalog bounds. */
+    reasoningBudget?: ThinkingBudgetRange;
+    deprecated?: boolean;
+    releaseDate?: string;
+    /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
+    inputModalities?: readonly InputModality[];
+    /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
+    configurationMissing?: boolean;
+}
+interface ThinkingBudgetRange {
+    min: number;
+    max: number;
+}
+/**
+ * Input modalities this page can name. models.dev uses these same five tokens, so
+ * an unknown token is dropped rather than rendered as an untranslatable chip.
+ */
+declare const INPUT_MODALITIES: readonly ["text", "image", "audio", "video", "pdf"];
+type InputModality = typeof INPUT_MODALITIES[number];
+/** Last successful check of one catalog source, plus any current refresh failure. */
+interface GoCatalogSourceStatus {
+    readonly updatedAt?: number;
+    readonly error?: string;
+}
+/** A failed refresh retains the Host's usable data with an explicit diagnostic. */
+interface GoModelCatalog {
+    readonly models: readonly GoModel[];
+    readonly stale: boolean;
+    readonly error?: string;
+    /** Optional for clients reading an older Host response. Timestamps are Unix milliseconds. */
+    readonly sources?: {
+        readonly listing: GoCatalogSourceStatus;
+        readonly metadata: GoCatalogSourceStatus;
+    };
+}
+declare module '@deepseek-ai/dsh-typert-protocol' {
+    interface TypertRemoteNamespaceMap {
+        opencodeGoModels: {
+            read(): Promise<RemoteResult<GoModelCatalog>>;
+        };
+    }
+}
+
+/** Public SDK types are bundled at build time, alongside the private implementation. */
+
+/** User controls are independent of the SDK's internal level used to enable a switch. */
+type Model<TApi extends Api> = Model$1<TApi> & {
+    reasoningControl?: 'toggle' | 'effort' | 'budget';
+    reasoningBudget?: ThinkingBudgetRange;
+    reasoningBudgetPresets?: readonly number[];
+};
+
+export type { Api, AssistantMessage, AssistantMessageEvent, Context, ImageContent, Message, Model, ModelCost, ModelThinkingLevel, Provider, TextContent, ThinkingBudgets, ThinkingLevelMap, Tool, ToolCall, Usage };

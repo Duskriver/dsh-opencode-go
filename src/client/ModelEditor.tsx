@@ -14,7 +14,7 @@ const MODALITY_COPY = {
 } as const satisfies Record<InputModality, keyof typeof en>
 
 export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefined): boolean {
-  return limit?.contextWindow != null || limit?.maxTokens != null
+  return limit?.contextWindow != null || limit?.maxTokens != null || (limit?.thinkingBudgets?.length ?? 0) > 0
 }
 
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
@@ -55,8 +55,8 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
     ['custom', 'filterCustom', customized],
     ['deprecated', 'filterDeprecated', all.filter(entry => entry.deprecated).length],
   ] as const
-  const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | undefined): void => {
-    const current = draft[id] === null ? { contextWindow: null, maxTokens: null } : draft[id] ?? {}
+  const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | number[] | undefined): void => {
+    const current = draft[id] === null ? { contextWindow: null, maxTokens: null, thinkingBudgets: null } : draft[id] ?? {}
     onEdit({ ...draft, [id]: { ...current, [field]: value ?? null } })
   }
   const badges = (entry: GoModel) => <>
@@ -117,6 +117,8 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
                   <Modalities model={model} t={t} />
                 </div>
               </div>
+              {model.reasoningBudget ? <BudgetPresets key={model.id} model={model} limit={draft[model.id]}
+                t={t} locale={locale} disabled={disabled} onChange={values => { write(model.id, 'thinkingBudgets', values) }} /> : null}
               {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
                 onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
               <p className={css.paneFoot}>
@@ -157,12 +159,12 @@ function Modalities({ model, t }: { model: GoModel; t: Translate }) {
 
 function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   model: GoModel
-  field: keyof OpencodeGoModelLimit
+  field: 'contextWindow' | 'maxTokens'
   limit: OpencodeGoModelLimit | null | undefined
   disabled: boolean
   t: Translate
   locale?: string
-  onChange: (id: string, field: keyof OpencodeGoModelLimit, value: number | undefined) => void
+  onChange: (id: string, field: 'contextWindow' | 'maxTokens', value: number | undefined) => void
 }) {
   const id = `opencode-go-${field}-${encodeURIComponent(model.id)}`
   const defaultValue = model[field]
@@ -183,4 +185,40 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
       {limit?.[field] != null ? ` · ${t('overridden')}` : ''}
     </span>
   </div>
+}
+
+function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
+  model: GoModel
+  limit: OpencodeGoModelLimit | null | undefined
+  disabled: boolean
+  t: Translate
+  locale?: string
+  onChange: (values: number[] | undefined) => void
+}) {
+  const [text, setText] = useState('')
+  const range = model.reasoningBudget!
+  const max = Math.min(range.max, (limit?.maxTokens ?? model.maxTokens ?? range.max + 1024) - 1024)
+  const values = limit?.thinkingBudgets ?? []
+  const tokens = Number(text)
+  const valid = text.trim() !== '' && Number.isSafeInteger(tokens) && tokens >= range.min && tokens <= max
+  const id = `opencode-go-thinking-budget-${encodeURIComponent(model.id)}`
+  return <details className={css.budgetEditor}>
+    <summary>{t('thinkingBudgets')}</summary>
+    <p className={css.hint}>{t('thinkingBudgetsHint', { min: range.min.toLocaleString(locale), max: max.toLocaleString(locale) })}</p>
+    <label className={css.statLabel} htmlFor={id}>{t('thinkingBudgetAddLabel', { name: model.name ?? model.id })}</label>
+    <div className={css.budgetInput}>
+      <input id={id} className={css.input} type="number" step={1} min={range.min} max={max} inputMode="numeric"
+        value={text} placeholder="4096" disabled={disabled} aria-invalid={text !== '' && !valid}
+        onChange={event => { setText(event.target.value) }} />
+      <Button variant="outline" size="sm" disabled={disabled || !valid || values.includes(tokens) || values.length >= 16}
+        onClick={() => { onChange([...values, tokens].sort((a, b) => a - b)); setText('') }}>{t('thinkingBudgetAdd')}</Button>
+    </div>
+    {values.length > 0 ? <div className={css.budgetPresets}>
+      {values.map(value => <button key={value} type="button" className={css.filter} disabled={disabled}
+        aria-label={t('thinkingBudgetRemove', { value })}
+        onClick={() => { const next = values.filter(tokens => tokens !== value); onChange(next.length > 0 ? next : undefined) }}>
+        {value.toLocaleString(locale)} tokens ×
+      </button>)}
+    </div> : null}
+  </details>
 }

@@ -54,6 +54,7 @@ export interface OpencodeGoSettings {
 export interface OpencodeGoModelLimit {
     contextWindow?: number | null;
     maxTokens?: number | null;
+    thinkingBudgets?: number[] | null;
 }
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
 /** The gateway's model listing as the page reports it. */

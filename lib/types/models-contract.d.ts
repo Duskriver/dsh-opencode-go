@@ -5,12 +5,18 @@ export interface GoModel {
     name?: string;
     contextWindow?: number;
     maxTokens?: number;
+    /** Token budget controls available to this model, including their catalog bounds. */
+    reasoningBudget?: ThinkingBudgetRange;
     deprecated?: boolean;
     releaseDate?: string;
     /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
     inputModalities?: readonly InputModality[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
+}
+export interface ThinkingBudgetRange {
+    min: number;
+    max: number;
 }
 /**
  * Input modalities this page can name. models.dev uses these same five tokens, so

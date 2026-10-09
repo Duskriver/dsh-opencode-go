@@ -39,6 +39,8 @@ export interface OpencodeGoModelLimit {
   contextWindow?: number | null
   /** Output cap per request, overriding what the catalog advertised. */
   maxTokens?: number | null
+  /** Additional selectable thinking budgets, in tokens; null keeps the standard presets. */
+  thinkingBudgets?: number[] | null
 }
 
 /** Per-model capacities; a null entry selects both original catalog values. */
@@ -111,6 +113,7 @@ const fields = {
   modelLimits: z.dict(z.union([z.const(null), z.object({
     contextWindow: z.union([z.const(null), z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)]),
     maxTokens: z.union([z.const(null), z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)]),
+    thinkingBudgets: z.union([z.const(null), z.array(z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).required()).max(16)]),
   })])).default({}),
 }
 

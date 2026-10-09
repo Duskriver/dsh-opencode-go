@@ -1,5 +1,26 @@
 # Verification
 
+## Token budget controls (2026-10-09)
+
+Budget-based models now display numeric token presets. The settings model card can stage, save, discard, and remove additional budgets through `modelLimits[modelId].thinkingBudgets`. Standard presets retain the old minimal/low/medium/high selection IDs; added values use `budget:N`. Models declaring both effort and budget keep their existing efforts and gain custom numeric choices. Adaptive Haiku continues using effort and exposes no legacy budget control.
+
+Both TypeScript projects, all 556 tests in 34 files, and freshness checks for 43 shipped artifacts passed. All ten installed DSH generations passed, including 19 reasoning streams per host with standard and custom budgets. The extended regression also verifies live settings snapshots, saved selection restoration, metadata outages, models supporting both control types, completion-format budget fields, budget bounds, and SDK reduction of a budget to preserve answer room. The first installed fixture run rejected Anthropic's query-bearing endpoint because the fixture compared the raw URL; comparing its pathname fixed the harness, and the final matrix passed.
+
+Twelve authorized, bounded synthetic requests through the rebuilt adapter passed: Qwen 3.7 Plus Default, Off, four standard budgets, and custom 4,096/6,000 budgets; Qwen 3.8 Max Low and a custom 4,096 budget; and a Qwen 3.7 Plus tool call followed by a continuation after JSON restoration of signed assistant/tool history. Captured requests carried the selected `budget_tokens` values, Default omitted thinking controls, and the restored continuation returned `CHECK-739`. Credentials stayed in memory and the user's installed profile was unchanged.
+
+## Unified reasoning intent (2026-10-09)
+
+Default now leaves thinking and effort controls to the service for all three protocols. Model information no longer declares a fallback `defaultEffort`. Switch-only models display On / Off, retain the previous `high` selection ID, and send the SDK's native switch/budget without an invented effort. Adjustable models retain their advertised levels. A shared request boundary removes automatic controls for Default while preserving other SDK output, rendering, and history configuration.
+
+`DSH_COMPAT_CONCURRENCY=4 npm run verify` passed all 549 tests in 34 files, freshness checks for 43 shipped artifacts, all ten installed DSH generations, and npm/pnpm installation checks. Each installed host also passed 14 reasoning streams, including Default, explicit Low/Off, native On/Off, and MiMo mappings. Type checking passed for both projects. Regressions cover Haiku adaptive efforts with live metadata and an outage, all four native completion switch formats, and nonmutating payload edits.
+
+With the user's authorized credential held in memory, 20 bounded synthetic requests through the rebuilt adapter passed:
+
+- Haiku 5.5, DeepSeek V4 Flash, GPT-6 Luna, MiniMax M3, and MiMo V2.6 Flash: 14 Default and explicit-choice requests. Every Default wire payload omitted thinking switches and effort settings. MiniMax's picker showed On / Off, and the saved `high` ID enabled its native thinking budget without an effort field.
+- Haiku, DeepSeek, and GPT: six Default requests covering tool calls and continuations after JSON restoration of assistant/tool history. All three returned the synthetic tool result `CHECK-739`.
+
+The service decided whether to reason under Default; observed reasoning blocks differed by model. The earlier pi-ai upgrade records below describe the behavior before this change, including its previous Default-to-disabled/native-High policy.
+
 
 ## pi-ai 1.1.0 and Haiku 5.5 adaptive thinking (2026-10-09)
 

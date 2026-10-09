@@ -38,6 +38,10 @@ dsh plugin --profile web add dsh-opencode-go
 
 在设置页刷新模型列表即可同步最新目录。每个模型旁的开关控制它是否出现在选择器中，修改后立即生效。模型的上下文窗口和最大输出默认使用目录配置，也可逐个修改并保存。
 
+思考选项中的 **默认** 使用服务商设置；**Off** 明确关闭思考。只有开关的模型显示 **On / Off**，支持强度的模型显示其可用档位，预算式模型显示具体的 token 数值。
+
+预算式模型提供 1,024 / 2,048 / 8,192 / 16,384 tokens 等常用选项。在设置页选择模型，展开“思考预算”，输入数值、点击“添加”并保存，即可在会话中选择自定义预算。可用范围随模型而定；SDK 会根据剩余输出空间缩小实际预算。
+
 插件跟随 DSH 的界面语言，支持中文和英文。
 
 ### 查看订阅用量
@@ -121,6 +125,8 @@ socks5://127.0.0.1:1080
     modelLimits:
       deepseek-v4.1-flash:
         maxTokens: 8192
+      qwen3.7-plus:
+        thinkingBudgets: [4096, 6000]
     maxImages: 30
 ```
 
@@ -133,7 +139,7 @@ socks5://127.0.0.1:1080
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
 | `modelVisibility` | 按模型 ID 控制选择器中的显示状态 |
-| `modelLimits` | 按模型覆盖 `contextWindow` 和 `maxTokens`；空值使用目录容量 |
+| `modelLimits` | 按模型覆盖 `contextWindow`、`maxTokens`，或用 `thinkingBudgets` 添加思考预算选项；空值使用默认设置 |
 | `maxImages` | 单次请求历史中的图片数量上限，默认不设上限；超过时先卸载最旧图片 |
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |
 

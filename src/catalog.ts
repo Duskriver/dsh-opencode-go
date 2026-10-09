@@ -13,7 +13,7 @@ import type { ModelMetadata } from './model-metadata.ts'
 import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-response.ts'
 import { MODEL_METADATA_MAX_BYTES, metadataCachePath, metadataETag, readMetadataCache, writeMetadataCache } from './metadata-cache.ts'
 import { DISPLAY_NAME, SDK_PROVIDER_ID } from './provider-identity.ts'
-import { withGatewayReasoning } from './reasoning.ts'
+import { reasoningBudgetRange, withGatewayReasoning } from './reasoning.ts'
 
 export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts'
 export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
@@ -372,7 +372,11 @@ export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promis
     models: sortModels([
       ...describeConfiguredModels(snapshot),
       ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
-    ].map(model => ({ ...model, ...snapshot.details.get(model.id) }))),
+    ].map(model => {
+      const configured = snapshot.models.get(model.id)
+      const budget = configured && reasoningBudgetRange(configured)
+      return { ...model, ...snapshot.details.get(model.id), ...budget === undefined ? {} : { reasoningBudget: budget } }
+    })),
     stale: errors.length > 0,
     ...(errors.length === 0 ? {} : { error: errors.join('; ') }),
     sources: {

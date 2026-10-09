@@ -38,6 +38,10 @@ Start or restart `dsh web` after installation. Web and Headless use separate pro
 
 Refresh the model list in Settings to synchronize the catalog. The switch beside each model controls its visibility in the picker and takes effect immediately. Context windows and output limits use catalog values by default; edit and save individual model limits as needed.
 
+**Default** leaves reasoning to the service; **Off** explicitly disables it. Models with a switch show **On / Off**, models with adjustable effort show their supported levels, and budget-based models show token values.
+
+Budget-based models offer common presets such as 1,024 / 2,048 / 8,192 / 16,384 tokens. Select a model in Settings, expand **Thinking budgets**, enter a value, click **Add**, then save to make that budget available in conversations. Allowed ranges vary by model; the SDK may reduce the actual budget to leave room for the answer.
+
 The plugin follows DSH's interface language and supports English and Chinese.
 
 ### View subscription usage
@@ -121,6 +125,8 @@ Add an `opencode-go` configuration block to a patch file. It can be combined wit
     modelLimits:
       deepseek-v4.1-flash:
         maxTokens: 8192
+      qwen3.7-plus:
+        thinkingBudgets: [4096, 6000]
     maxImages: 30
 ```
 
@@ -133,7 +139,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
 | `modelVisibility` | Control model picker visibility by model ID |
-| `modelLimits` | Override `contextWindow` and `maxTokens` per model; null values use catalog limits |
+| `modelLimits` | Per-model `contextWindow` and `maxTokens` overrides, plus additional `thinkingBudgets` options; null uses defaults |
 | `maxImages` | Maximum images in one request's history; unset by default, with oldest images offloaded when exceeded |
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |
 

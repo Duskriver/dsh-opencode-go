@@ -415,17 +415,8 @@ describe('OpencodeGoAdapter stream', () => {
     const resolved = await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
     expect(resolved.context?.contextWindow).toBeGreaterThan(0)
     expect(resolved.reasoning?.efforts.map(effort => effort.id)).toContain(ReasoningEffortId('high'))
-    // DSH resolves an unset effort through `defaultEffort`. Without one the
-    // request carries no effort and pi-ai's deepseek thinking format answers
-    // `thinking: { type: 'disabled' }`, so the model's reasoning lands in the
-    // normal content instead of a reasoning block.
-    expect(resolved.reasoning?.defaultEffort).toBe(ReasoningEffortId('high'))
-    expect(resolved.reasoning?.efforts.map(effort => effort.id))
-      .toContain(resolved.reasoning?.defaultEffort)
+    expect(resolved.reasoning).not.toHaveProperty('defaultEffort')
 
-    // A transport that leaves thinking to the provider needs no default: it
-    // already sends no disable, so the model keeps thinking when nothing is
-    // chosen. Only the formats that would answer with an explicit disable do.
     const providerDecides = await adapter.resolveModel(PROVIDER_ID, 'kimi-k3')
     expect(providerDecides.reasoning?.efforts.length).toBeGreaterThan(0)
     expect(providerDecides.reasoning).not.toHaveProperty('defaultEffort')

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getBuiltinModels } from 'opencode-go-pi-ai/providers/all'
 import { getSupportedThinkingLevels } from 'opencode-go-pi-ai'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { readModelMetadata } from '../src/model-metadata.ts'
 import { configOf } from './config-of.ts'
@@ -65,11 +65,11 @@ describe('runtime model metadata', () => {
   })
 
   it.each([
-    { values: ['low'], expected: 'low' },
-    { values: ['low', 'medium'], expected: 'medium' },
-    { values: ['low', 'max'], expected: 'max' },
-    { values: ['low', 'high', 'max'], expected: 'high' },
-  ])('defaults to $expected when the model offers $values', async ({ values, expected }) => {
+    { values: ['low'] },
+    { values: ['low', 'medium'] },
+    { values: ['low', 'max'] },
+    { values: ['low', 'high', 'max'] },
+  ])('preserves the service default when the model offers $values', async ({ values }) => {
     metadataReplies(() => Response.json(metadataDocument({
       'deepseek-v4-flash': modelMetadata({
         name: 'DeepSeek V4 Flash',
@@ -91,14 +91,15 @@ describe('runtime model metadata', () => {
     try {
       const resolved = await ctx.llm.resolveModelInfo('dsh-opencode-go', 'fallback-model')
       expect(resolved.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', ...values])
-      expect.soft(resolved.reasoning?.defaultEffort).toBe(expected)
+      expect(resolved.reasoning).not.toHaveProperty('defaultEffort')
       for await (const _chunk of ctx.llm.stream({
         provider: 'dsh-opencode-go', model: 'fallback-model',
         messages: [createUserMessage({
           content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' },
         })],
       })) { /* Validate the request after DSH resolves its default effort. */ }
-      expect(gateway.bodies[0]).toMatchObject({ thinking: { type: 'enabled' }, reasoning_effort: expected })
+      expect(gateway.bodies[0]).not.toHaveProperty('thinking')
+      expect(gateway.bodies[0]).not.toHaveProperty('reasoning_effort')
     } finally {
       await ctx.fiber.dispose()
     }
@@ -302,6 +303,45 @@ const responseEvents = [
 ].map(event => JSON.stringify(event))
 
 describe('new models use the declared protocol', () => {
+  it.each([
+    { npm: '@ai-sdk/anthropic', events: anthropicEvents, namedEvents: true },
+    { npm: '@ai-sdk/openai-compatible', events: textEvents, namedEvents: false },
+    { npm: '@ai-sdk/openai', events: responseEvents, namedEvents: false },
+  ])('separates service Default from explicit Off and Low for $npm', async ({ npm, events, namedEvents }) => {
+    const modelId = 'default-policy'
+    metadataReplies(() => Response.json(metadataDocument({ [modelId]: modelMetadata({ provider: { npm },
+      reasoning_options: [{ type: 'effort', values: ['none', 'low'] }],
+    }) })))
+    const gateway = await mockGateway({ status: 200, body: listingBody([modelId]) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(`${gateway.url}/v1`), resolveApiKey: async () => 'test-key' })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
+    try {
+      const info = await ctx.llm.resolveModelInfo('dsh-opencode-go', modelId)
+      expect(info.reasoning).not.toHaveProperty('defaultEffort')
+      for (const effort of [undefined, 'off', 'low']) {
+        gateway.pushCompletions({ events, namedEvents })
+        const chunks = []
+        for await (const chunk of ctx.llm.stream({ provider: 'dsh-opencode-go', model: modelId,
+          ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
+          messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
+        })) chunks.push(chunk)
+        expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+        const body = gateway.bodies.at(-1)
+        if (effort === undefined) {
+          for (const key of ['thinking', 'reasoning', 'reasoning_effort', 'output_config']) expect(body).not.toHaveProperty(key)
+        } else if (npm === '@ai-sdk/anthropic') {
+          expect(body).toMatchObject({ thinking: { type: effort === 'off' ? 'disabled' : 'enabled' } })
+        } else if (npm === '@ai-sdk/openai') {
+          expect(body).toMatchObject({ reasoning: { effort: effort === 'off' ? 'none' : effort } })
+        } else {
+          expect(body).toMatchObject({ reasoning_effort: effort === 'off' ? 'none' : effort })
+        }
+      }
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it.each([
     { npm: '@ai-sdk/anthropic', path: '/v1/messages', events: anthropicEvents, namedEvents: true },
     { npm: '@ai-sdk/openai-compatible', path: '/v1/chat/completions', events: textEvents, namedEvents: false },

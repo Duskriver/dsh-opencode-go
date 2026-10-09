@@ -638,6 +638,50 @@ describe('OpencodeGoSection', () => {
 })
 
 describe('OpencodeGoSectionController through the component', () => {
+  it('adds, saves, discards, and removes a custom budget without changing capacities', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    host.set.mockImplementation((field: string, value: unknown) => {
+      host.publish({ value: { ...host.scope.getSnapshot().value, [field]: structuredClone(value) },
+        user: { ...host.scope.getSnapshot().user as object, [field]: structuredClone(value) } })
+    })
+    const controller = new OpencodeGoSectionController(host.scope, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+    } } as never, async () => ({ ok: true, value: { stale: false, models: [
+      { id: 'budget', name: 'Budget Model', maxTokens: 32768, reasoningBudget: { min: 1024, max: 20000 } },
+      { id: 'effort', name: 'Effort Model' },
+    ] } }))
+    host.publish({ status: 'ready', writable: true, value: { modelLimits: { budget: { contextWindow: 100000 } } }, user: {} })
+    render(<OpencodeGoSection {...controller.inject()} t={t}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    try {
+      await act(async () => { await Promise.resolve() })
+      openModelLimits()
+      fireEvent.click(screen.getByText(en.thinkingBudgets))
+      const input = () => screen.getByLabelText<HTMLInputElement>(t('thinkingBudgetAddLabel', { name: 'Budget Model' }))
+      const add = () => screen.getByRole<HTMLButtonElement>('button', { name: en.thinkingBudgetAdd })
+      for (const value of ['512', '1.5', '20001']) {
+        fireEvent.change(input(), { target: { value } })
+        expect(input().getAttribute('aria-invalid')).toBe('true')
+        expect(add().disabled).toBe(true)
+      }
+      fireEvent.change(input(), { target: { value: '4096' } })
+      fireEvent.click(add())
+      expect(host.set).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })).toBeTruthy()
+      fireEvent.click(screen.getByText(en.discard))
+      expect(screen.queryByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })).toBeNull()
+      fireEvent.change(input(), { target: { value: '6000' } })
+      fireEvent.click(add())
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: [6000] } })
+      fireEvent.click(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 6000 }) }))
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: null } })
+      fireEvent.click(screen.getByRole('button', { name: 'Effort Model' }))
+      expect(screen.queryByText(en.thinkingBudgets)).toBeNull()
+    } finally { controller.dispose() }
+  })
+
   it('validates, saves, clears and resets the proxy address in advanced settings', async () => {
     const host = stubSettingsScope<OpencodeGoSettings>()
     const base = { proxyURL: 'http://localhost:7890' }
@@ -781,7 +825,7 @@ describe('OpencodeGoSectionController through the component', () => {
       expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
       fireEvent.change(input(), { target: { value: '150000' } })
       await act(async () => { screen.getByText(en.save).click() })
-      expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ m: { contextWindow: 150000, maxTokens: null } })
+      expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ m: { contextWindow: 150000, maxTokens: null, thinkingBudgets: null } })
     } finally {
       controller.dispose()
     }

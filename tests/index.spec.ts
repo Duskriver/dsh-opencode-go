@@ -168,7 +168,7 @@ describe('llm-opencode-go plugin mount', () => {
     expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
   })
 
-  it('keeps thinking on when the picker is left on the provider default', async () => {
+  it('leaves thinking to the service when the picker is left on default', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'test-key')
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     gateway.pushCompletions({ events: textEvents })
@@ -187,9 +187,8 @@ describe('llm-opencode-go plugin mount', () => {
       sessionId: 'default-effort' as never,
     })) { /* drain the stream: only the request body is asserted */ }
 
-    // Without the declared default this body carries `thinking: { type: 'disabled' }`,
-    // which lands the model's reasoning in ordinary content instead of a reasoning block.
-    expect(gateway.bodies[0]).toMatchObject({ thinking: { type: 'enabled' } })
+    expect(gateway.bodies[0]).not.toHaveProperty('thinking')
+    expect(gateway.bodies[0]).not.toHaveProperty('reasoning_effort')
   })
 
   it('refuses to call a model never confirmed by the gateway', async () => {

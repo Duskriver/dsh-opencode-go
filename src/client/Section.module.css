@@ -600,6 +600,10 @@
 .stats { display: flex; flex-direction: column; gap: 10px; }
 .stat { display: flex; flex-direction: column; gap: 4px; }
 .statLabel { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.budgetEditor { margin-top: 12px; font-size: 12px; }
+.budgetEditor summary { cursor: pointer; }
+.budgetInput { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.budgetPresets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .modelDetails .input { width: 100%; box-sizing: border-box; min-width: 0; height: 30px; padding: 0 9px; font-size: 12px; }
 .modalities { display: flex; flex-wrap: wrap; gap: 4px; }
 .modality,

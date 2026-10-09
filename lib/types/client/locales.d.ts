@@ -96,6 +96,11 @@ export declare const en: {
     limitsModel: string;
     limitsContext: string;
     limitsOutput: string;
+    thinkingBudgets: string;
+    thinkingBudgetsHint: string;
+    thinkingBudgetAddLabel: string;
+    thinkingBudgetAdd: string;
+    thinkingBudgetRemove: string;
     capacityDefault: string;
     capacityMissing: string;
     modalityLabel: string;

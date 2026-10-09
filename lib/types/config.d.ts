@@ -27,6 +27,8 @@ export interface OpencodeGoModelLimit {
     contextWindow?: number | null;
     /** Output cap per request, overriding what the catalog advertised. */
     maxTokens?: number | null;
+    /** Additional selectable thinking budgets, in tokens; null keeps the standard presets. */
+    thinkingBudgets?: number[] | null;
 }
 /** Per-model capacities; a null entry selects both original catalog values. */
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
