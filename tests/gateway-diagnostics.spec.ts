@@ -25,6 +25,7 @@ it.each([
   { body: '', presence: 'empty' },
   // OpenAI's SDK drops valid JSON without a top-level `error` field and reports `(no body)`.
   { body: '{"message":"edge rejected the request"}', presence: 'nonempty' },
+  { body: '{"model":"deepseek-v4.1-flash"}', presence: 'nonempty' },
   { body: '{"error":{"message":"Invalid max_tokens"}}', presence: 'nonempty' },
 ])('reports actual $presence HTTP body presence without retrying or changing the session', async ({ body, presence }) => {
   const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
@@ -52,6 +53,9 @@ it('saves bounded HTTP evidence only when opted in, omitting request content and
   const body = '{"message":"edge rejection", "echo":"fixture-key"}'
   gateway.pushCompletions({ status: 400, body, headers: {
     'x-request-id': 'edge-fixture-40', 'server': 'fixture-edge',
+    'x-opencode-log-id': 'go-log-fixture-40', 'x-opencode-endpoint-id': 'fixture-route',
+    'x-opencode-upstream-model-id': 'deepseek/deepseek-v4.1-flash',
+    'x-zen-model': 'deepseek-v4.1-flash', 'cf-placement': 'remote-fixture',
     'set-cookie': 'private-cookie', 'authorization': 'Bearer fixture-key',
   } })
   const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key' })
@@ -62,7 +66,10 @@ it('saves bounded HTTP evidence only when opted in, omitting request content and
   const record = JSON.parse(text)
   expect(record).toMatchObject({ provider: 'dsh-opencode-go', model,
     request: { method: 'POST', messageCount: 1, maxTokens: 512, bodyBytes: expect.any(Number) },
-    response: { status: 400, headers: { 'x-request-id': 'edge-fixture-40', server: 'fixture-edge' },
+    response: { status: 400, headers: { 'x-request-id': 'edge-fixture-40', server: 'fixture-edge',
+      'x-opencode-log-id': 'go-log-fixture-40', 'x-opencode-endpoint-id': 'fixture-route',
+      'x-opencode-upstream-model-id': 'deepseek/deepseek-v4.1-flash',
+      'x-zen-model': 'deepseek-v4.1-flash', 'cf-placement': 'remote-fixture' },
       body: { bytes: Buffer.byteLength(body), truncated: false, text: body.replace('fixture-key', '[REDACTED]') } },
   })
   expect(record.request.sessionHash).toMatch(/^[a-f0-9]{16}$/)

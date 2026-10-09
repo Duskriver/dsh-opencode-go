@@ -1,69 +1,74 @@
 # dsh-opencode-go
 
-[中文](README.md)
+[简体中文](README.md)
 
-Use OpenCode Go subscription models in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), with streaming replies, tool calls, and image input.
+Use OpenCode Go subscription models in [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), with streaming, reasoning, tool calls, and image input. The plugin synchronizes model listings and limits, and provides multiple accounts, subscription usage, and proxy settings.
 
-The plugin automatically adds the session headers required by OpenCode Go, reads the gateway model catalog, and displays subscription usage. There is no need to configure model protocols, modalities, context windows, or maximum output tokens manually.
+Requires DSH `0.1.5-rc.1` or later.
 
-## Features
+## Install
 
-- **Session headers**: Every request includes the Harness User-Agent and `x-opencode-session`. A session keeps a stable ID to support gateway routing and prompt-cache optimization; actual cache hits depend on the upstream service.
-- **Streaming and history**: Supports streaming output, tool calls, and history replay through pi-ai.
-- **Image input**: Supports models that advertise image capability in the catalog.
-- **Model capacity overrides**: Override the context window and maximum output per model, with blank values inheriting the online catalog.
-- **Per-model switches**: Control which models appear in conversations, with changes applied immediately. Ordinary models default to on and deprecated models default to off; any model can be enabled individually.
-- **Prompt and caching**: The plugin does not add hidden system prompts; the session ID is used for gateway routing.
+### From DSH
 
-## Installation and usage
-
-Supports DSH `0.1.5-rc.1` and later, including alpha, rc, and stable releases. Compatibility will be maintained as new host versions are released.
-
-Verified versions: `0.1.5-rc.1`, `0.1.5-rc.2`, `0.1.6-alpha.1`, `0.1.6-alpha.2`, `0.1.7-alpha.1`, `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.2`, and `0.2.1-alpha.1`.
-
-### Install from DSH (recommended)
-
-1. Open the **Plugins** page in DSH and click **Add plugin** in the top-right corner.
+1. Open **Plugins → Add plugin**.
 2. Enter `dsh-opencode-go` and click **Install**.
-3. If prompted after installation, click **Enable now**.
+3. Click **Enable now** after installation.
 
-![Add, install, and enable dsh-opencode-go from DSH (Chinese UI)](docs/assets/install-via-dsh.gif)
+![Install the plugin in DSH](docs/assets/install-via-dsh.gif)
 
-Then open **Settings → OpenCode Go**, enter and save your API key, and select an OpenCode Go model in a conversation.
-
-The plugin can also be installed by entering this Git repository URL:
+You can also enter the Git repository URL when adding the plugin:
 
 ```text
 https://github.com/Duskriver/dsh-opencode-go
 ```
 
-The current default branch includes the compiled plugin and the required model SDK code. The plugin no longer introduces the `@google/genai` or `protobufjs` install scripts, so first installation needs neither build approvals for them nor a local build. Older npm releases and URLs pinned to older commits retain their original dependencies and installation behavior.
-
-If retrying a failed installation reports success but the plugin is still missing, uninstall it and install it again. This retry path in DSH 0.2.0-rc.2 can omit plugin activation registration; see [issue #43](https://github.com/Duskriver/dsh-opencode-go/issues/43).
-
-If your DSH version does not have an **Add plugin** entry, use the command-line method below.
-
-### Command-line installation (alternative)
+### From the command line
 
 ```sh
 dsh plugin --profile web add dsh-opencode-go
 ```
 
-Start or restart `dsh web`, then:
+Start or restart `dsh web` after installation. Web and Headless use separate profiles; install and update each profile individually.
 
-1. Open **Settings → OpenCode Go**.
-2. Enter and save your OpenCode Go API key.
-3. Select an OpenCode Go model from the conversation model picker.
+## Get started
 
-### Headless
+1. Open **Settings → OpenCode Go**, enter your API key and save, or add an account in **Accounts**.
+2. Select a model under **DSH OpenCode Go** in the conversation model picker.
+3. Start chatting. Choose a reasoning level when offered, or attach images to a model that supports them.
 
-Install the plugin into the Headless profile:
+Refresh the model list in Settings to synchronize the catalog. The switch beside each model controls its visibility in the picker and takes effect immediately. Context windows and output limits use catalog values by default; edit and save individual model limits as needed.
+
+The plugin follows DSH's interface language and supports English and Chinese.
+
+### View subscription usage
+
+Click the usage pill beside the conversation input to see the current account's five-hour, weekly, and monthly usage and reset times. Usage refreshes every minute and can also be refreshed manually.
+
+Under **Advanced settings → Usage display**, choose:
+
+- **Auto**: show usage while using this plugin's models; the default.
+- **Always**: also show usage while using other models.
+- **Off**: hide usage and stop polling.
+
+![Subscription usage](image.png)
+
+### Manage multiple accounts
+
+Use **Accounts** to add accounts, rename them, or replace keys. Expand an account row for detailed usage. Drag its handle to reorder accounts; the first account becomes the current one.
+
+Enable **Auto switch** to try other accounts in list order when the current account runs out of quota or its key is unavailable, before output begins. To choose the account for subsequent requests directly, click **Switch** in the usage pill.
+
+## Advanced usage
+
+### Headless mode
+
+Install the plugin:
 
 ```sh
 dsh plugin --profile headless add dsh-opencode-go
 ```
 
-Save the following as `headless.patch.yml` to select a default model:
+Save this as `headless.patch.yml`:
 
 ```yaml
 - id: agent-default-model
@@ -72,7 +77,7 @@ Save the following as `headless.patch.yml` to select a default model:
     model: deepseek-v4.1-flash
 ```
 
-Read the API key in Bash or Zsh, then run a task:
+Enter your key in Bash or Zsh, then run a task:
 
 ```sh
 read -s OPENCODE_API_KEY
@@ -80,193 +85,99 @@ export OPENCODE_API_KEY
 dsh --profile headless --patch ./headless.patch.yml "Hello"
 ```
 
-The model ID must be available in the current gateway catalog. Web and Headless use separate profiles, so install the plugin in each profile you use.
+Replace `model` with an available model ID from Settings. See [examples/headless.patch.yml](examples/headless.patch.yml).
 
-To build from source and install a local package:
+### Network proxy
 
-```sh
-npm ci
-npm run compile
-npm pack
-dsh plugin --profile web add ./dsh-opencode-go-0.1.21.tgz
-```
-
-Source development builds the plugin explicitly with `npm run compile`; `--legacy-peer-deps` is not required. Multi-version DSH compatibility tests use independent environments and are not installed during ordinary installation or builds. For Headless, replace `web` with `headless`.
-
-### Development and verification
-
-```sh
-npm run compile       # Regenerate lib/ and commit it with source changes
-npm test              # Core tests, rebuilding the plugin first
-npm run check:dist    # Verify shipped artifacts match the source
-npm run test:compat   # One tarball tested in 9 independent DSH environments
-npm run test:install  # npm Git and fresh pnpm Git/tarball installs and types; no script approvals
-npm run verify        # All of the above
-```
-
-Compatibility and installation checks download dependencies, use system temporary directories, and clean up afterward. To check one host, run `npm run test:compat -- v017-rc2`. See the [development guide](docs/development.md) for maintaining host versions.
-
-## Updating the plugin
-
-Update the plugin in the Web profile to the latest npm version:
-
-```sh
-dsh plugin --profile web update dsh-opencode-go --latest
-```
-
-Restart `dsh web` and refresh the browser afterwards. For Headless, replace `web` with `headless`; if both profiles have the plugin installed, update each one separately.
-
-After updating the desktop plugin, fully quit and reopen DeepSeek Harness to load the updated plugin code.
-
-## Multiple accounts and switching
-
-Open **Settings → OpenCode Go → Accounts** to add up to 20 named API keys. Adding, renaming, replacing a key, removing, and switching the current account take effect immediately. Model capacities and advanced fields still use Save. Existing `apiKeyEnv` configuration appears as the default account without re-entering its key.
-
-Each account shows its rolling, weekly, and monthly usage, reset times, and last successful update. Usage refreshes every minute while the settings page is visible. The conversation usage panel also lets you switch accounts; it immediately clears the old account's data and rejects late responses. Temporary failures retain data only for the same account and key.
-
-The current account is shared by conversations in the current profile and affects subsequent new requests. Requests already generating retain their resolved key. Account metadata and the current account selection survive restart. Web and Headless profiles keep their own configuration. Save or discard a key draft before changing accounts; if another surface switches accounts, the draft remains addressed to the original account.
-
-Keys are stored through the host credential service and never returned to the page. Configuration contains account names, IDs, and credential references. Read-only environment keys can be selected but cannot be replaced in the UI. Removing accounts created here also removes their dedicated credential; existing external references are retained. Removing every account withdraws the provider until another account is added.
-
-**Automatic fallback** is off by default. When enabled, missing/rejected keys or exhausted quota can trigger attempts with the other accounts in list order, before any content or tool call is emitted and only when no token usage was reported. Each account is tried at most once per request. Once an account starts producing output, it becomes the current account; the Settings page and usage pill follow it, and the list order stays unchanged. A successful fallback is reported in the usage panel with its reason and time. Manually switching accounts takes precedence over automatic fallback. Partial responses, permission errors, ordinary rate limits, network errors, and server errors stay with host recovery. Cancellation stops further attempts. Quotas remain controlled by the upstream subscriptions.
-
-For Headless or manual configuration, put the following under the plugin's `config`:
-
-```yaml
-apiKeyEnv: OPENCODE_API_KEY
-accounts:
-  - id: primary
-    name: Primary
-    apiKeyEnv: OPENCODE_API_KEY
-  - id: backup
-    name: Backup
-    apiKeyEnv: OPENCODE_GO_BACKUP_KEY
-autoSwitch: false
-```
-
-Supply both keys through the credential service or environment variables. `apiKeyEnv` selects the current account. Omitting `accounts` preserves legacy single-key behavior; `accounts: []` explicitly removes every account.
-
-The Accounts card folds: collapsed, it reports the account count, the current account, how many accounts are ready, and the one refresh stamp every row shares (the clock time on the day it happened, the full date and time on hover). Expanded, each account takes one row showing its key state, a wide rolling-quota bar (12px, full row width, quarter marks at 25/50/75%, amber from 80% and red once spent), and its reset countdown; the columns are fixed (handle, name, key state, bar, reading, reset, disclosure), and a name too long for its column ellipsises with the full value in its title, so names of different lengths never move the columns after them; the row's chevron opens the weekly and monthly windows and the rename, replace-key, and remove actions. Drag a row's handle — or focus it and press ↑ / ↓ — to reorder. The list reads top to bottom: the first row becomes the current account on drop, and automatic fallback follows the same order (after a successful fallback the current account moves to that working account, while the list order itself stays unchanged).
-
-## Network proxy
-
-Open **Settings → OpenCode Go → Advanced settings → Proxy address**, enter a proxy URL and click **Save**. For example:
+Open **Settings → OpenCode Go → Advanced settings → Proxy address**, enter a URL, and save. Examples:
 
 ```text
 http://127.0.0.1:7890
 socks5://127.0.0.1:1080
 ```
 
-HTTPS proxies and authenticated URLs such as `http://username:password@host:port` or `socks5://username:password@host:port` are also supported. URL-encode special characters in the username and password.
+HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported. Subsequent conversations, catalog updates, and usage queries use the saved proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
 
-The next conversation, model listing, metadata download and usage query use the saved proxy without a restart. Save a blank address to use the default network settings; **Reset** restores the inherited configuration value. A failed proxy connection reports an error rather than falling back to a direct connection.
+### Manual configuration
 
-Connections originate from the machine running DSH. On a remote deployment, `127.0.0.1` refers to that server. Headless profiles can set `proxyURL` in the plugin configuration as well.
-
-## Subscription usage display
-
-Under **Settings → OpenCode Go → Advanced settings → Usage display**, choose a mode and save: **Auto (default)** shows the pill only for this plugin's DSH OpenCode Go models; **Always** keeps it visible with other models, including the built-in `opencode-go` provider; **Off** hides it and stops polling. Disabling OpenCode Go hides the pill in every mode. Click the pill to open the usage panel: its first row is the current account (state dot, name, Current tag, Switch), and Switch turns the card's body into the account list — the current account ticked, reachable with ↑ / ↓ or a click, Escape stepping back. That choice decides which account spends now and changes only the current account, never the order; it takes precedence over automatic fallback, and the pill follows a successful fallback to the new current account. The consumption order stays the one this page sets. The three windows take one row each (label, bar, reading) with the reset stamp beneath, and the refresh stamp sits in the card's foot.
-
-Usage refreshes every minute. Temporary network or service errors retain the last reading for the same account, with a failure notice, timestamp, and reason; the usage panel offers an immediate retry. Initial and authentication failures do not show old usage. Catalog, metadata, and usage JSON requests retry a transient connection reset once within the original timeout budget; this cannot guarantee recovery while the network is failing.
-
-![OpenCode Go usage display](image.png)
-
-## Interface language
-
-The plugin follows Harness and supplies Chinese and English copy without storing a separate language preference. With no explicit choice, the Web client matches the browser's preferred languages (usually inherited from the system); native shells with a system-language bridge supply their operating-system languages. English is used when no supported language matches.
-
-A language explicitly selected in Harness takes precedence and updates the plugin immediately without discarding form drafts. Model names and IDs stay unchanged; usage dates and capacity numbers follow the active interface language. Automatic language detection runs at startup: reload the Web page after changing browser languages, or restart desktop Harness after changing system languages.
-
-## Model switches
-
-In **Settings → OpenCode Go**, the switch beside each model controls whether it appears in conversation model pickers. Switch changes are saved immediately; capacity and API key edits still require **Save**. Ordinary models default to on and deprecated models default to off. You can enable a deprecated model individually or disable an ordinary model. Newly discovered models follow the same defaults unless configured individually.
-
-For manual configuration, add `modelVisibility` under the plugin's `config`, replacing the example placeholders with actual model IDs:
+Add an `opencode-go` configuration block to a patch file. It can be combined with the default-model configuration above:
 
 ```yaml
-modelVisibility:
-  your-model-id: false
-  your-deprecated-model-id: true
+- id: opencode-go
+  config:
+    apiKeyEnv: OPENCODE_API_KEY
+    accounts:
+      - id: primary
+        name: Primary
+        apiKeyEnv: OPENCODE_API_KEY
+      - id: backup
+        name: Backup
+        apiKeyEnv: OPENCODE_GO_BACKUP_KEY
+    autoSwitch: true
+    proxyURL: http://127.0.0.1:7890
+    refreshMinutes: 60
+    modelVisibility:
+      deepseek-v4-pro: false
+    modelLimits:
+      deepseek-v4.1-flash:
+        maxTokens: 8192
+    maxImages: 30
 ```
 
-Only the listed IDs receive explicit overrides. Switches affect model pickers only: existing conversations can still call hidden models served by the gateway, and Settings retains the complete model list.
+Keep the options you need and supply the corresponding keys through DSH credentials or environment variables. `apiKeyEnv` selects the current account; the order of `accounts` determines automatic fallback order.
 
-The older `showDeprecatedModels` and `visibleModelIds` fields no longer control visibility. Use the individual switches or `modelVisibility`; retaining old fields does not prevent the plugin from loading.
+| Option | Purpose |
+| --- | --- |
+| `baseURL` | OpenCode Go gateway URL; defaults to `https://opencode.ai/zen/go/v1` |
+| `usageDisplay` | Usage display mode: `auto`, `always`, or `off` |
+| `proxyURL` | Network proxy; an empty string uses the default network settings |
+| `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
+| `modelVisibility` | Control model picker visibility by model ID |
+| `modelLimits` | Override `contextWindow` and `maxTokens` per model; null values use catalog limits |
+| `maxImages` | Maximum images in one request's history; unset by default, with oldest images offloaded when exceeded |
+| `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |
 
-## Image count cap
+Image offloading keeps the original attachment and replaces the old image in the request with a text placeholder. Raising the limit does not automatically restore previously offloaded images.
 
-Under **Settings → OpenCode Go → Advanced settings**, set `maxImages` to a positive integer and save; no restart is needed. It is unset by default, with no image-count cap. Clearing or resetting removes the user override and inherits the base configuration; if the base has no cap either, the count is unlimited.
+### Export error diagnostics
 
-The count covers the full history sent in one request, including tool-result images. Repeated occurrences of the same attachment count separately. With a cap of `30`, 30 images pass through; 31 images cause the oldest occurrence to be offloaded before the request continues. Offloading replaces image content with a text placeholder and keeps the original attachment, but the model cannot see the offloaded image content in that request.
+To investigate a failed request, set a diagnostics directory before starting DSH:
 
-DSH 0.1.5 offloads only for the current request. DSH 0.1.6 and later record offloaded occurrences and retry through the host's image-offload mechanism; raising or clearing the cap does not automatically restore images already offloaded from history. Existing payload, pixel, and per-image byte budgets still apply independently and may require more images to be offloaded. This optional compatibility setting does not change upstream service limits.
+```sh
+export DSH_OPENCODE_GO_DEBUG_DIR=/tmp/dsh-opencode-go-debug
+dsh web
+```
 
-## FAQ
-
-### Coexistence with the host's OpenCode Go and upgrade migration
-
-Version 0.1.17 and later use the independent `dsh-opencode-go` provider, shown as **DSH OpenCode Go** in the model picker. The host pi-ai's `opencode-go` provider can run alongside it. Configure the API key in this plugin's settings, then choose a model under **DSH OpenCode Go**. Versions 0.1.16 and earlier use `opencode-go`; their headless configuration should also use that older identity.
-
-Sessions, Agent presets and headless defaults previously saved with `provider: opencode-go` need to select **DSH OpenCode Go** again, or change the provider to `dsh-opencode-go`. API keys, model settings and metadata caches are retained. Existing session content remains available; when switching providers, DSH removes the previous adapter's private replay metadata according to its ownership rules.
-
-### Model requests return 400 or `(no body)`
-
-`(no body)` is an SDK error summary, not proof that the HTTP response was empty. Valid JSON without the SDK's expected `error` field can produce the same message. The plugin adds the provider, model and observed response body state to HTTP failures, and restores error content discarded in this case. Failed requests can also retain the SDK's initial zero usage counters, so `inputTokens=0` cannot identify the layer that rejected the request.
-
-For diagnostics, set `DSH_OPENCODE_GO_DEBUG_DIR` in the terminal used to launch DSH, restart the Host, and reproduce the failure. On Windows PowerShell:
+Windows PowerShell:
 
 ```powershell
 $env:DSH_OPENCODE_GO_DEBUG_DIR = "$env:TEMP\dsh-opencode-go-debug"
+dsh web
 ```
 
-Each failed model HTTP request writes a separate JSON file, whose path appears in the error message. It includes the URL without authentication or query parameters, request byte size, message/tool counts, output cap, reasoning settings, a session hash, HTTP status and selected response headers such as request ID, server, via and cf-ray. Error body capture is limited to the first 16 KiB and one second, with truncation and incomplete reads marked. API keys and configured proxy credentials are redacted. Request prompts, tool definitions, images, authentication headers and cookies are omitted; upstream error content can still contain sensitive information, so review it before sharing. Clear the variable and restart the Host to stop writing files. Successful requests produce no diagnostic files.
+Reproduce the failure to get a JSON file path in the error message. The record contains the model, request parameter summaries, HTTP status, upstream log and route IDs, and the error response, for use in an [issue report](https://github.com/Duskriver/dsh-opencode-go/issues). Review the returned error content before sharing. Clear the environment variable and restart DSH to disable diagnostics.
 
-HTTP 400 retains its `INVALID_REQUEST` classification and is not automatically resent by the plugin. SDK retries remain disabled; DSH's retry plugin and provider policy own task recovery, and the default policy excludes `INVALID_REQUEST`. Use the captured evidence to distinguish invalid parameters from a temporary upstream failure before changing retry behavior.
+## Update and uninstall
 
-### An expected model is missing
+Update to the latest npm release:
 
-Check that the model's switch is on in **Settings → OpenCode Go**. Deprecated models default to off; turning on an individual model makes it available in conversation pickers without another global option.
+```sh
+dsh plugin --profile web update dsh-opencode-go --latest
+```
 
-Confirm that the plugin is enabled and an API key is configured, then refresh the model list in Settings. Settings reads and refreshes request the gateway's `/models` endpoint and synchronize the OpenCode Go configuration from [models.dev](https://models.dev/api.json). Conversation pickers respect the catalog cache lifetime, so model switch changes do not force another gateway request. Protocol support, context length, output limit, and image capability come from the online configuration, so new models do not require a release of this plugin or pi-ai.
+Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reopen the application. Headless users should replace `web` with `headless`.
 
-Models that are present in the gateway and have an entry using Anthropic Messages, OpenAI Chat Completions, or OpenAI Responses are discovered on the next Settings refresh or after the catalog cache expires. A Settings refresh bypasses the cache and notifies open conversation pickers to use the same updated catalog; a direct request for a previously unseen model also triggers an immediate resynchronization. The Settings page shows the complete discovery result.
-
-A gateway model ID with no usable protocol or capability configuration is marked “Configuration missing” in Settings, with its switch off and disabled, and is kept out of the conversation picker, so one unconfigured model cannot block the rest of the list. Direct requests report the reason. Refresh after the upstream configuration is corrected. A model ID alone is not enough to reliably infer its transport; new protocols or protocol-specific exceptions may still require adapter changes.
-
-If online configuration cannot be loaded, models without usable cached or built-in configuration are marked “Configuration unavailable”, with the configuration source error shown on the page. Check access to `https://models.dev/api.json` from the machine running DSH and review the error details, then refresh. When retrying a retained model list, its previous failure stays visible until a successful refresh clears it; configured models remain usable.
-
-A reasoning-capable model without adjustable reasoning levels (for example, `union-alpha`) remains selectable and usable; it simply has no reasoning-strength control.
-
-MiMo V2.6 Flash's gateway catalog does not yet list its controls. Based on direct OpenCode Go probes, the plugin offers **Off / Low / Medium / High**: Default omits `reasoning_effort` and preserves gateway-default reasoning; Off sends `none`, and the other levels send their matching values. This rule applies only to the verified model and protocol, not other MiMo models. Low / Medium / High were accepted and returned reasoning content, but are not guaranteed to produce increasing amounts of reasoning.
-
-Online effort declarations determine selectable strengths. Toggle or budget declarations produce controls only for established native switch or budget protocols; they do not imply `off` or `high` effort parameters on a generic OpenAI-compatible route. An explicit empty control list does not gain an Off choice just because the model can reason.
-
-A model that does offer adjustable levels also declares a default effort (`high` when the model offers it, otherwise the highest level it offers) whenever its transport would answer an unset effort with an explicit disable (`deepseek`, `zai`, `qwen`, `qwen-chat-template`). DSH uses that default when no level has been chosen, so leaving the control unset still sends a reasoning level instead of turning thinking off. Transports that leave the choice to the provider declare no default and are unchanged, and an explicitly chosen level always wins.
-
-If the online configuration is temporarily unavailable, the plugin prefers previously fetched configuration, including disk data from before a restart, and falls back to pi-ai's built-in metadata. If a gateway catalog refresh fails, ongoing requests and Settings retain the last successful list from the current process. A failure from either source shows a warning, its cause, and the last successful checks of the model listing and model configuration separately. An initial gateway failure never invents a model list from cached metadata.
-
-Model configuration is saved to `$DSH_HOME/cache/dsh-opencode-go/models.dev.api.json`, or `~/.dsh/cache/dsh-opencode-go/models.dev.api.json` when `DSH_HOME` is unset. This contains only public metadata, its ETag, and the last successful check time; it excludes API keys and gateway listings. After a restart, ordinary reads verify the gateway listing and use disk configuration while revalidating metadata in the background. The completed refresh updates conversation pickers. Corrupt caches fall back to the network, and write failures do not discard online results. Settings refreshes always wait for online verification, retaining old configuration with a diagnostic on failure; a disk hit is not reported as an online success. To clear the disk cache, exit DSH and delete this file.
-
-`refreshMinutes` controls the cache lifetime after a successful refresh. Failed refreshes become eligible for retry on the next read after 5, 10, 20, 40, then at most 60 seconds; there is no background polling when nothing reads the catalog. Explicit Settings refreshes and previously unknown model requests bypass this delay. Cancelling model resolution or generation immediately ends that caller's catalog wait while other callers can continue sharing the same refresh.
-
-Verified model configurations can serve generation immediately for five minutes after their cache lifetime expires, while triggering one shared background refresh. This window is measured from each source's last successful check; failed retries do not extend it. Beyond that window, requests wait for the next due refresh, retaining the existing fallback behavior if it fails. Initial loads without a disk cache, unknown models, and manual refreshes wait for online results. Listing requests have a 10-second deadline; the larger model metadata download has its own 30-second deadline and negotiates gzip to reduce transfer size on slow connections. If an HTTP/2 host compatibility issue delivers raw gzip bytes, the plugin asynchronously decompresses them within the same deadline, limiting both the delivered bytes and decoded result to 16 MiB. Model listing and usage requests continue to use uncompressed transfer.
-
-Continuation, retries, and restored sessions reuse the Host's durable session ID. Forks and subagent sessions use their own IDs, separate from the parent. Standalone requests without a session ID receive a fresh random identifier each time.
-
-## Uninstall
-
-Remove the plugin from the relevant profile and restart the application:
+Uninstall:
 
 ```sh
 dsh plugin --profile web remove dsh-opencode-go
-# or
-dsh plugin --profile headless remove dsh-opencode-go
 ```
 
-## Feedback
+When upgrading from `0.1.16` or earlier, select **DSH OpenCode Go** again in existing conversations or Agent presets. Manual configurations use `provider: dsh-opencode-go`.
 
-Please open an issue for bugs or feature requests.
+## More
 
-## License
-
-[MIT](LICENSE)
+- [Development and testing](docs/development.md)
+- [Verification notes](docs/verification.md)
+- [Issues and suggestions](https://github.com/Duskriver/dsh-opencode-go/issues)
+- [MIT license](LICENSE)

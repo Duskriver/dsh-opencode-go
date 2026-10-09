@@ -9,6 +9,9 @@ const BODY_READ_TIMEOUT_MS = 1000
 const RESPONSE_HEADERS = [
   'content-type', 'content-length', 'server', 'via', 'x-request-id', 'request-id',
   'cf-ray', 'x-amzn-requestid', 'x-vercel-id', 'traceparent', 'retry-after',
+  // Go exposes the upstream route and its log ID on some response paths.
+  'x-opencode-log-id', 'x-opencode-endpoint-id', 'x-opencode-upstream-model-id',
+  'x-zen-model', 'cf-placement',
 ]
 
 interface BodyPreview {
