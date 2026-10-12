@@ -13,6 +13,7 @@ import type {
   OpencodeGoSectionFace,
   OpencodeGoSectionState,
 } from './section-controller.ts'
+import { hostAtom } from './host-primitives.ts'
 import { ModelEditor } from './ModelEditor.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import type { GoAccountsActions } from './accounts-controller.ts'
@@ -21,12 +22,16 @@ import { USAGE_DISPLAY_MODES } from '../usage-display.ts'
 import css from './Section.module.css'
 
 // 0.1.7 names icons by stroke weight; older hosts name them by pixel size.
-const ChevronDown = (primitives as typeof primitives & {
-  IconChevronDownOutlineRegular?: typeof primitives.IconChevronDownOutline14
-}).IconChevronDownOutlineRegular ?? primitives.IconChevronDownOutline14
+const ChevronDown = hostAtom<typeof primitives.IconChevronDownOutline14>(
+  primitives, 'IconChevronDownOutlineRegular', 'IconChevronDownOutline14',
+) ?? primitives.IconChevronDownOutline14
 
 /** The hint mark a field label carries; the bubble it opens is the Host's Tooltip. */
-const QuestionMark = primitives.IconQuestionOutline14
+const QuestionMark = hostAtom<typeof primitives.IconQuestionOutline14>(
+  primitives, 'IconQuestionOutlineRegular', 'IconQuestionOutline14',
+)
+/** Absent only on a Host older than the plugin's floor; the hint then stays visible. */
+const HintTooltip = primitives.Tooltip as typeof Tooltip | undefined
 
 export type { OpencodeGoSectionState } from './section-controller.ts'
 
@@ -70,6 +75,9 @@ function ValueField(props: ValueFieldProps) {
   const labelId = props.id + '-label'
   const options = props.options
   const selected = options ? options.findIndex(option => option.value === props.field.text) : -1
+  // A Host that ships no question glyph still gets the mark, and a Host with no
+  // Tooltip keeps the sentence visible instead of opening it on hover.
+  const mark = <span className={css.info} aria-hidden="true">{QuestionMark ? <QuestionMark /> : '?'}</span>
   return (
     <div className={css.row}>
       <div className={css.rowLabel}>
@@ -78,9 +86,9 @@ function ValueField(props: ValueFieldProps) {
           : <label htmlFor={props.id} className={css.rowTitle}>{props.label}</label>}
         {/* The Host's own Tooltip opens the hint on hover and on keyboard focus; the
             same sentence stays in the document for assistive technology. */}
-        <Tooltip label={props.hint} side="bottom" maxWidth={280}>
-          <span className={css.info} aria-hidden="true"><QuestionMark /></span>
-        </Tooltip>
+        {HintTooltip
+          ? <HintTooltip label={props.hint} side="bottom" maxWidth={280}>{mark}</HintTooltip>
+          : mark}
         {props.field.overridden
           ? (
             <span className={css.badges}>
@@ -148,7 +156,7 @@ function ValueField(props: ValueFieldProps) {
           onChange={(event) => { props.onEdit(event.target.value) }}
         />}
       </div>
-      <p id={hintId} className={css.visuallyHidden}>{props.hint}</p>
+      <p id={hintId} className={HintTooltip ? css.visuallyHidden : css.rowHint}>{props.hint}</p>
       {props.field.invalid ? <p className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
     </div>
   )

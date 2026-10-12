@@ -268,7 +268,7 @@
 .groupHead::after { content: ''; flex: 1; height: 0.5px; background: var(--dsw-alias-border-l2); }
 
 /* The hint mark a label carries: the Host's own question glyph, its own bubble. */
-.info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--dsw-alias-label-tertiary); }
+.info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary); }
 .info:hover { color: var(--dsw-alias-label-primary); }
 .info svg { width: 13px; height: 13px; }
 
