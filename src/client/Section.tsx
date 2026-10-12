@@ -355,7 +355,6 @@ function Loaded(props: {
           onClick={() => { setAdvanced(!advanced) }}
         >
           <span className={css.cardTitle}>{t('advancedLabel')}</span>
-          <span className={css.cardSub}>{t('advancedSummary')}</span>
           {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
           <ChevronDown className={advanced ? css.chevronOpen : css.chevron} />
         </button>

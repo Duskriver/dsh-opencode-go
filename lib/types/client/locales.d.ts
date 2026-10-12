@@ -136,7 +136,6 @@ export declare const en: {
     limitsEmpty: string;
     limitsContextLabel: string;
     limitsOutputLabel: string;
-    advancedSummary: string;
     advancedLabel: string;
     advancedHint: string;
     usageDisplayLabel: string;

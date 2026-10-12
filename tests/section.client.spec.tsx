@@ -506,6 +506,15 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(en.keyLabel)).toBeTruthy()
   })
 
+  it('keeps the advanced header to its title, with no summary line', () => {
+    renderSection(stateOf())
+    const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
+    // The row is the title and the disclosure chevron; the tuning summary that used
+    // to sit between them said what the card already says once it is open.
+    expect(trigger.textContent).toBe(en.advancedLabel)
+    expect(trigger.querySelectorAll('span')).toHaveLength(1)
+  })
+
   it('ties the advanced disclosure to the region it controls', () => {
     renderSection(stateOf())
     const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
