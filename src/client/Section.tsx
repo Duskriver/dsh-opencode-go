@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Switch, Tag, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   OpencodeGoModels,
@@ -24,6 +24,9 @@ import css from './Section.module.css'
 const ChevronDown = (primitives as typeof primitives & {
   IconChevronDownOutlineRegular?: typeof primitives.IconChevronDownOutline14
 }).IconChevronDownOutlineRegular ?? primitives.IconChevronDownOutline14
+
+/** The hint mark a field label carries; the bubble it opens is the Host's Tooltip. */
+const QuestionMark = primitives.IconQuestionOutline14
 
 export type { OpencodeGoSectionState } from './section-controller.ts'
 
@@ -57,13 +60,27 @@ interface ValueFieldProps {
   onReset: () => void
 }
 
-/** One staged value field: label, override badge with reset, control, and hint. */
+/**
+ * One staged value field: its label with the hint mark, the override badge with
+ * reset, and one control. A small enum renders as a segmented control — every
+ * option is visible at once — and everything else as a text or number input.
+ */
 function ValueField(props: ValueFieldProps) {
   const hintId = props.id + '-hint'
+  const labelId = props.id + '-label'
+  const options = props.options
+  const selected = options ? options.findIndex(option => option.value === props.field.text) : -1
   return (
-    <div className={css.field}>
-      <div className={css.head}>
-        <label className={css.label} htmlFor={props.id}>{props.label}</label>
+    <div className={css.row}>
+      <div className={css.rowLabel}>
+        {options
+          ? <span id={labelId} className={css.rowTitle}>{props.label}</span>
+          : <label htmlFor={props.id} className={css.rowTitle}>{props.label}</label>}
+        {/* The Host's own Tooltip opens the hint on hover and on keyboard focus; the
+            same sentence stays in the document for assistive technology. */}
+        <Tooltip label={props.hint} side="bottom" maxWidth={280}>
+          <span className={css.info} aria-hidden="true"><QuestionMark /></span>
+        </Tooltip>
         {props.field.overridden
           ? (
             <span className={css.badges}>
@@ -80,34 +97,59 @@ function ValueField(props: ValueFieldProps) {
           )
           : null}
       </div>
-      {props.options ? <select
-        id={props.id}
-        name={props.id}
-        aria-describedby={hintId}
-        className={props.field.invalid ? css.inputInvalid : css.input}
-        aria-invalid={props.field.invalid || undefined}
-        value={props.field.text}
-        disabled={props.disabled}
-        onChange={event => { props.onEdit(event.target.value) }}
-      >
-        {props.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select> : <input
-        id={props.id}
-        name={props.id}
-        autoComplete="off"
-        placeholder={props.placeholder}
-        aria-describedby={hintId}
-        className={props.field.invalid ? css.inputInvalid : css.input}
-        type={props.numeric === true ? 'number' : 'text'}
-        {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
-        {...props.field.invalid ? { 'aria-invalid': true } : {}}
-        value={props.field.text}
-        disabled={props.disabled}
-        onChange={(event) => { props.onEdit(event.target.value) }}
-      />}
-      <p id={hintId} className={props.field.invalid ? css.invalid : css.hint}>
-        {props.field.invalid ? props.invalidLabel : props.hint}
-      </p>
+      <div className={css.rowControl}>
+        {options ? (
+          <div
+            className={css.seg}
+            role="radiogroup"
+            aria-labelledby={labelId}
+            aria-describedby={hintId}
+            data-count={options.length}
+            data-index={selected < 0 ? 0 : selected}
+            {...props.field.invalid ? { 'aria-invalid': true } : {}}
+            onKeyDown={event => {
+              const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+                : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+              if (step === 0) return
+              event.preventDefault()
+              const next = (Math.max(0, selected) + step + options.length) % options.length
+              props.onEdit(options[next].value)
+              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
+            }}
+          >
+            <span className={css.segThumb} aria-hidden="true" />
+            {options.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={option.value === props.field.text}
+                tabIndex={option.value === props.field.text ? 0 : -1}
+                className={css.segOption}
+                disabled={props.disabled}
+                onClick={() => { props.onEdit(option.value) }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : <input
+          id={props.id}
+          name={props.id}
+          autoComplete="off"
+          placeholder={props.placeholder}
+          aria-describedby={hintId}
+          className={props.field.invalid ? css.inputInvalid : css.input}
+          type={props.numeric === true ? 'number' : 'text'}
+          {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
+          {...props.field.invalid ? { 'aria-invalid': true } : {}}
+          value={props.field.text}
+          disabled={props.disabled}
+          onChange={(event) => { props.onEdit(event.target.value) }}
+        />}
+      </div>
+      <p id={hintId} className={css.visuallyHidden}>{props.hint}</p>
+      {props.field.invalid ? <p className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
     </div>
   )
 }
@@ -362,7 +404,8 @@ function Loaded(props: {
           ? (
             <div id="opencode-go-advanced" className={css.cardBody}>
               <p className={css.hint}>{t('advancedHint')}</p>
-              <div className={css.advancedGrid}>
+              <div className={css.rows}>
+                <div className={css.groupHead}>{t('groupUsageProtocol')}</div>
                 <ValueField
                   id="opencode-go-usage-display"
                   label={t('usageDisplayLabel')}
@@ -386,6 +429,7 @@ function Loaded(props: {
                   onEdit={text => { props.edit('protocolOverrides', text) }}
                   onReset={() => { props.resetField('protocolOverrides') }}
                 />
+                <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-api-key-env"
                   label={t('apiKeyEnvLabel')}
@@ -415,6 +459,7 @@ function Loaded(props: {
                   onEdit={(text) => { props.edit('proxyURL', text) }}
                   onReset={() => { props.resetField('proxyURL') }}
                 />
+                <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
                 <ValueField
                   id="opencode-go-refresh-minutes"
                   label={t('refreshMinutesLabel')}
@@ -435,6 +480,7 @@ function Loaded(props: {
                   onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
                   onReset={() => { props.resetField('streamIdleTimeoutMs') }}
                 />
+                <div className={css.groupHead}>{t('groupImages')}</div>
                 <ValueField
                   id="opencode-go-max-images"
                   label={t('maxImagesLabel')}

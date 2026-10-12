@@ -130,37 +130,77 @@ describe('OpencodeGoSection', () => {
     const reading = actions()
     renderSection(stateOf({ protocolOverrides: field('openai-responses', { overridden: true }) }), reading)
     openAdvanced()
-    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: en.protocolOverridesLabel })
-    expect(select.value).toBe('openai-responses')
-    expect(within(select).getAllByRole('option').map(option => option.textContent))
-      .toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
-    fireEvent.change(select, { target: { value: 'auto' } })
+    const group = screen.getByRole('radiogroup', { name: en.protocolOverridesLabel })
+    const choices = within(group).getAllByRole('radio')
+    expect(choices.map(choice => choice.textContent)).toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
+    expect(choices.map(choice => choice.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+    fireEvent.click(choices[0])
     expect(reading.edit).toHaveBeenCalledWith('protocolOverrides', 'auto')
     expect(reading.save).not.toHaveBeenCalled()
-    fireEvent.click(within(select.parentElement!).getByRole('button', { name: en.reset }))
+    fireEvent.click(screen.getByRole('button', { name: en.reset }))
     expect(reading.resetField).toHaveBeenCalledWith('protocolOverrides')
   })
 
   it('stages the three usage display modes in advanced settings and offers reset', () => {
     const reading = actions()
     renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)
-    expect(screen.queryByRole('combobox', { name: en.usageDisplayLabel })).toBeNull()
+    expect(screen.queryByRole('radiogroup', { name: en.usageDisplayLabel })).toBeNull()
     openAdvanced()
-    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: en.usageDisplayLabel })
-    expect(select.value).toBe('always')
-    expect(within(select).getAllByRole('option').map(option => option.textContent))
+    const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
+    const choices = within(group).getAllByRole('radio')
+    expect(choices.map(choice => choice.textContent))
       .toEqual([en.usageDisplay_auto, en.usageDisplay_always, en.usageDisplay_off])
-    fireEvent.change(select, { target: { value: 'off' } })
+    expect(choices[1].getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(choices[2])
     expect(reading.edit).toHaveBeenCalledWith('usageDisplay', 'off')
     expect(reading.save).not.toHaveBeenCalled()
-    fireEvent.click(within(select.parentElement!).getByRole('button', { name: en.reset }))
+    fireEvent.click(screen.getByRole('button', { name: en.reset }))
     expect(reading.resetField).toHaveBeenCalledWith('usageDisplay')
   })
 
   it('disables usage display editing in a read-only deployment', () => {
     renderSection(stateOf({ writable: false }))
     openAdvanced()
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: en.usageDisplayLabel }).disabled).toBe(true)
+    const choices = within(screen.getByRole('radiogroup', { name: en.usageDisplayLabel })).getAllByRole('radio')
+    expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
+  })
+
+  it('moves the segmented selection with the arrow keys', () => {
+    const reading = actions()
+    renderSection(stateOf({ usageDisplay: field('auto') }), reading)
+    openAdvanced()
+    const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
+    within(group).getAllByRole('radio')[0].focus()
+    fireEvent.keyDown(group, { key: 'ArrowRight' })
+    expect(reading.edit).toHaveBeenLastCalledWith('usageDisplay', 'always')
+    fireEvent.keyDown(group, { key: 'ArrowLeft' })
+    expect(reading.edit).toHaveBeenLastCalledWith('usageDisplay', 'off')
+  })
+
+  it('hangs each hint off its field description, not a visible line', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    const input = screen.getByLabelText<HTMLInputElement>(en.baseURLLabel)
+    const hint = document.getElementById(input.getAttribute('aria-describedby') ?? '')
+    expect(hint?.textContent).toBe(en.baseURLHint)
+    // The sentence lives in the description only; the row shows the hint mark.
+    expect(screen.getAllByText(en.baseURLHint)).toHaveLength(1)
+  })
+
+  it('groups the tuning rows under four headings', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
+    const order: [string, string][] = [
+      [en.groupUsageProtocol, en.usageDisplayLabel],
+      [en.groupConnection, en.apiKeyEnvLabel],
+      [en.groupCacheTimeouts, en.refreshMinutesLabel],
+      [en.groupImages, en.maxImagesLabel],
+    ]
+    for (const [heading, firstRow] of order) {
+      expect(text).toContain(heading)
+      expect(text.indexOf(heading)).toBeLessThan(text.indexOf(firstRow))
+    }
   })
 
   it('renders nothing until every injected seat is present', () => {
@@ -747,7 +787,7 @@ describe('OpencodeGoSectionController through the component', () => {
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: '' }], expect.any(Number))
       expect(input().value).toBe('')
-      fireEvent.click(within(input().parentElement!).getByRole('button', { name: en.reset }))
+      fireEvent.click(screen.getByRole('button', { name: en.reset }))
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['proxyURL'] }], expect.any(Number))
       expect(input().value).toBe(base.proxyURL)
@@ -781,7 +821,8 @@ describe('OpencodeGoSectionController through the component', () => {
       openAdvanced()
       const input = () => screen.getByLabelText<HTMLInputElement>(en.maxImagesLabel)
       expect(input().value).toBe('')
-      expect(screen.getByText(en.maxImagesHint)).toBeTruthy()
+      expect(document.getElementById(input().getAttribute('aria-describedby') ?? '')?.textContent)
+        .toBe(en.maxImagesHint)
       for (const value of ['0', '-1', '1.5', '9007199254740992']) {
         fireEvent.change(input(), { target: { value } })
         expect(input().getAttribute('aria-invalid')).toBe('true')
