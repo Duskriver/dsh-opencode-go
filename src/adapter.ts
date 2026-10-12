@@ -127,7 +127,7 @@ export interface OpencodeGoAdapterOptions {
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
-  /** Host account-state version, captured before asynchronous model discovery. */
+  /** Host account-state version for actual requests, captured before asynchronous model discovery. */
   accountGeneration?: () => number
   /** One outcome for both the displayed notice and the persisted selection. */
   onAccountSettled?: (event: GoAccountSettlement) => void
@@ -135,12 +135,16 @@ export interface OpencodeGoAdapterOptions {
   onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void
 }
 
-/** Configuration, model and provider captured together before dispatch. */
-interface OpencodeGoCallSnapshot {
-  generation: number
+/** Configuration, model and provider captured together before discovery yields. */
+interface OpencodeGoModelSnapshot {
   config: OpencodeGoConfig
   catalog: CatalogSnapshot
   model: Model<Api>
+}
+
+/** Only a request that can settle an account needs an account-state fence. */
+interface OpencodeGoCallSnapshot extends OpencodeGoModelSnapshot {
+  generation: number
 }
 
 /**
@@ -217,14 +221,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: string,
     signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    return this.modelInfo((await this.callSnapshot(model, signal)).model)
+    return this.modelInfo((await this.modelSnapshot(model, signal)).model)
   }
 
   /** Capture limits and protocol before discovery can yield to a settings update. */
-  private async callSnapshot(model: string, signal?: AbortSignal,
-    captured = { generation: this.options.accountGeneration?.() ?? 0, config: structuredClone(this.options.config()) },
-  ): Promise<OpencodeGoCallSnapshot> {
-    const { generation, config } = captured
+  private async modelSnapshot(model: string, signal?: AbortSignal,
+    config = structuredClone(this.options.config()),
+  ): Promise<OpencodeGoModelSnapshot> {
     using preparation = deadline(signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
     let catalog: CatalogSnapshot
     try { catalog = await this.catalogOf(config).forModel(model, preparation.signal) }
@@ -236,7 +239,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
     }
-    return { generation, config, catalog, model: withModelLimit(withProtocolOverride(resolved, config), config.modelLimits) }
+    return { config, catalog, model: withModelLimit(withProtocolOverride(resolved, config), config.modelLimits) }
   }
 
   /** Keep capability resolution and eventual dispatch on the same configuration. */
@@ -245,7 +248,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
     stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>
   }> {
     const seq = ++this.callSeq
-    const snapshot = await this.callSnapshot(model, signal)
+    const generation = this.options.accountGeneration?.() ?? 0
+    const snapshot = { generation, ...await this.modelSnapshot(model, signal) }
     return {
       model: this.modelInfo(snapshot.model),
       stream: options => this.streamWithSnapshot(options, snapshot, seq),
@@ -301,7 +305,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
     const trace = new CallTrace(options.model, this.options.onCallTrace)
     using whole = deadline(options.signal, captured.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, 'LLM_REQUEST_TIMEOUT')
     try {
-      const snapshot = prepared ?? await trace.measure('discovery', () => this.callSnapshot(options.model, whole.signal, captured))
+      const snapshot = prepared ?? {
+        generation: captured.generation,
+        ...await trace.measure('discovery', () => this.modelSnapshot(options.model, whole.signal, captured.config)),
+      }
       for await (const chunk of this.streamAccounts({ ...options, signal: whole.signal }, snapshot, seq, trace)) {
         if (chunk.type === 'finish') {
           trace.outcome = chunk.reason.kind === 'error' ? 'failed' : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed'

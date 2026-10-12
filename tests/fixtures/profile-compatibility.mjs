@@ -191,6 +191,22 @@ try {
     'explicitly enabling a deprecated model does not manufacture unknown gateway models')
   assert.equal(view().value.modelVisibility['compat-model'], true)
   assert.equal(entry.fiber, fiber, 'enabling a model preserves the running plugin')
+  const describe = ctx.settings.describe
+  let catalogSettingsReads = 0
+  ctx.settings.describe = function (...args) {
+    catalogSettingsReads++
+    return describe.apply(this, args)
+  }
+  try {
+    for (let poll = 0; poll < 3; poll++) {
+      const models = await ctx.llm.listModels('dsh-opencode-go')
+      assert.equal(models.length, 1)
+      for (const model of models) {
+        assert.equal((await ctx.llm.resolveModelInfo('dsh-opencode-go', model.id)).context.contextWindow, 100000)
+      }
+    }
+    assert.equal(catalogSettingsReads, 0, 'model catalog polling must not serialize profile settings')
+  } finally { ctx.settings.describe = describe }
   pickerUpdates = 0
   await ctx.settings.update('opencode-go', { modelVisibility: { 'compat-model': false, missing: true } })
   assert.ok(pickerUpdates > 0, 'disabling a model notifies already open session pickers')

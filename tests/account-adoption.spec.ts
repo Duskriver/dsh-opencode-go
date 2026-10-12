@@ -15,6 +15,7 @@ import type { OpencodeGoConfig } from '../src/config.ts'
 import { configOf } from './config-of.ts'
 import { mockGateway, listingBody, textEvents, closeMockGateways } from './mock-gateway.ts'
 import type { MockGateway } from './mock-gateway.ts'
+import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
 /**
  * A fallback that lands on a usable account has to become the current one: the
@@ -111,6 +112,38 @@ async function readUsage(ctx: Context, gateway: MockGateway) {
   gateway.pushCompletions({ status: 200, body: JSON.stringify({ usage: { rolling: window, weekly: window, monthly: window } }) })
   return ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} })
 }
+
+it('polls a 24-model catalog without describing account settings', async () => {
+  const ids = Array.from({ length: 24 }, (_, index) => `catalog-model-${index}`)
+  const gateway = await mockGateway({ status: 200, body: listingBody(ids) })
+  const metadata = metadataDocument(Object.fromEntries(ids.map(id => [id, modelMetadata({ name: id })])))
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input)
+    return url === MODELS_METADATA_URL ? Promise.resolve(Response.json(metadata)) : fetch(input, init)
+  })
+  await withFileSettings(configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async ctx => {
+    const describe = vi.spyOn(ctx.settings, 'describe')
+    const writes = vi.spyOn(ctx.settings, 'mutate')
+    try {
+      // Match the host's catalog construction, including cold discovery and warm polls.
+      for (let poll = 0; poll < 3; poll++) {
+        const models = await ctx.llm.listModels('dsh-opencode-go')
+        expect(models).toHaveLength(ids.length)
+        for (const model of models) {
+          expect(await ctx.llm.resolveModelInfo('dsh-opencode-go', model.id)).toMatchObject({
+            id: model.id, context: { contextWindow: 262144 },
+          })
+        }
+      }
+      expect(describe).not.toHaveBeenCalled()
+      expect(writes).not.toHaveBeenCalled()
+    } finally {
+      describe.mockRestore()
+      writes.mockRestore()
+    }
+  })
+})
 
 it('makes the account a fallback settled on the profile current one', async () => {
   const gateway = await quotaThenText()

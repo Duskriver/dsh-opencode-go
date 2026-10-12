@@ -66,7 +66,9 @@ it('keeps capacities captured before an in-flight fetch across a settings change
     return priorFetch(input, init)
   })
   const pending = adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')
-  config = { ...config, modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 42 } } }
+  // Keep the nested object shared: model reads still need an owned config snapshot.
+  config.modelLimits['deepseek-v4.1-flash']!.contextWindow = 42
+  config = { ...config }
   release()
   expect((await pending).context?.contextWindow).toBe(123456)
   expect((await adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow).toBe(42)

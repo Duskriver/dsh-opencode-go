@@ -53,7 +53,7 @@ afterEach(async () => {
 })
 
 describe('OpencodeGoAdapter stream', () => {
-  it.each(['resolve', 'stream'] as const)('cancels %s during discovery while another caller keeps the shared refresh', async (operation) => {
+  it.each(['resolve', 'prepare', 'stream'] as const)('cancels %s during discovery while another caller keeps the shared refresh', async (operation) => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     const original = globalThis.fetch
     let completeMetadata!: (response: Response) => void
@@ -69,7 +69,9 @@ describe('OpencodeGoAdapter stream', () => {
     const controller = new AbortController()
     const cancelled = operation === 'resolve'
       ? adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash', controller.signal)
-      : drain(adapter.stream(requestOf({ signal: controller.signal })))
+      : operation === 'prepare'
+        ? adapter.prepareCall(PROVIDER_ID, 'deepseek-v4.1-flash', controller.signal)
+        : drain(adapter.stream(requestOf({ signal: controller.signal })))
     const outcome = cancelled.then(value => ({ value }), error => ({ error }))
     const other = adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
     await started.promise
@@ -77,7 +79,7 @@ describe('OpencodeGoAdapter stream', () => {
     try {
       // Observe cancellation before releasing the unrelated shared network read.
       const result = await Promise.race([outcome, new Promise<null>(resolve => setTimeout(() => resolve(null), 100))])
-      if (operation === 'resolve') expect(result).toMatchObject({ error: { code: 'ABORTED' } })
+      if (operation !== 'stream') expect(result).toMatchObject({ error: { code: 'ABORTED' } })
       else expect(result).toMatchObject({ value: [{ type: 'finish', reason: { kind: 'aborted' } }] })
       expect(metadataSignal?.aborted).toBe(false)
       expect(gateway.paths).not.toContain('/chat/completions')
