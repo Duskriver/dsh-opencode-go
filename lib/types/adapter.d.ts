@@ -85,7 +85,7 @@ export interface OpencodeGoAdapterOptions {
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
-    /** Host account-state version, captured before asynchronous model discovery. */
+    /** Host account-state version for actual requests, captured before asynchronous model discovery. */
     accountGeneration?: () => number;
     /** One outcome for both the displayed notice and the persisted selection. */
     onAccountSettled?: (event: GoAccountSettlement) => void;
@@ -122,7 +122,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(_provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     /** Capture limits and protocol before discovery can yield to a settings update. */
-    private callSnapshot;
+    private modelSnapshot;
     /** Keep capability resolution and eventual dispatch on the same configuration. */
     prepareCall(_provider: string, model: string, signal?: AbortSignal): Promise<{
         model: LlmResolvedModelInfo;

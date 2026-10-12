@@ -3,6 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
+import { GoAccountSelection } from '../src/account-selection.ts'
 import { Config } from '../src/config.ts'
 import type { LiveConfig, OpencodeGoConfig } from '../src/config.ts'
 import { apply } from '../src/index.ts'
@@ -119,9 +120,10 @@ it.each(['stream', 'prepare'] as const)('captures account identity before asynch
   const initial = configOf(first.url, { apiKeyEnv: 'SNAPSHOT_KEY_A' })
   let config = initial
   let generation = 7
+  const accountGeneration = vi.fn(() => generation)
   const settled = vi.fn()
   const adapter = new OpencodeGoAdapter({
-    config: () => config, accountGeneration: () => generation,
+    config: () => config, accountGeneration,
     resolveApiKey: async config => config.apiKeyEnv, onAccountSettled: settled,
   })
   const started = Promise.withResolvers<void>()
@@ -140,6 +142,7 @@ it.each(['stream', 'prepare'] as const)('captures account identity before asynch
     generation = 8
     // Picker/capability reads must not advance real request sequencing.
     await adapter.resolveModel(provider, model)
+    expect(accountGeneration).toHaveBeenCalledTimes(1)
     await drain(adapter.stream(request()))
     expect(settled).toHaveBeenCalledExactlyOnceWith({
       seq: 2, generation: 8, config, ref: 'SNAPSHOT_KEY_B', notice: undefined,
@@ -151,6 +154,7 @@ it.each(['stream', 'prepare'] as const)('captures account identity before asynch
       seq: 1, generation: 7, config: initial, ref: 'SNAPSHOT_KEY_A', notice: undefined,
     })
     expect(settled).toHaveBeenCalledTimes(2)
+    expect(accountGeneration).toHaveBeenCalledTimes(2)
     expect(first.headers.at(-1)?.authorization).toBe('Bearer SNAPSHOT_KEY_A')
     expect(second.headers.at(-1)?.authorization).toBe('Bearer SNAPSHOT_KEY_B')
   } finally {
@@ -184,4 +188,58 @@ it('keeps a prepared request identity before dispatch while newer preparations a
       [{ seq: 1, generation: 13, config, ref: 'SNAPSHOT_KEY_A', notice: undefined }],
     ])
   } finally { await adapter.dispose() }
+})
+
+it.each(['stream', 'prepare'] as const)('rejects stale %s account adoption after A → C → A during discovery without change notifications', async mode => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
+  gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  const accounts = ['A', 'B', 'C'].map(id => ({ id, name: id, apiKeyEnv: `ACCOUNT_${id}` }))
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  let revision = 1
+  const mutate = vi.fn(async () => true)
+  const selection = new GoAccountSelection(() => config, { debug: vi.fn(), warn: vi.fn() })
+  const disconnect = selection.connect({
+    describe: () => [{ ns: 'opencode-go', revision, value: config }], mutate,
+  })
+  const accountGeneration = vi.fn(() => selection.capture())
+  const adapter = new OpencodeGoAdapter({
+    config: () => config, accountGeneration,
+    resolveApiKey: async captured => captured.apiKeyEnv,
+    onAccountSettled: event => selection.settle(event),
+  })
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const catalog = adapter.catalogOf(config)
+  const forModel = catalog.forModel.bind(catalog)
+  vi.spyOn(catalog, 'forModel').mockImplementationOnce(async (...args) => {
+    started.resolve()
+    await release.promise
+    return forModel(...args)
+  })
+  const pending = mode === 'stream' ? drain(adapter.stream(request())) : adapter.prepareCall(provider, model)
+  try {
+    await started.promise
+    // Simulate committed revisions before the host delivers any change watcher.
+    config.apiKeyEnv = 'ACCOUNT_C'
+    revision++
+    config.apiKeyEnv = 'ACCOUNT_A'
+    revision++
+    await adapter.resolveModel(provider, model)
+    expect(accountGeneration).toHaveBeenCalledTimes(1)
+    release.resolve()
+    const prepared = await pending
+    if (prepared) await drain(prepared.stream(request()))
+    expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization))
+      .toEqual(['Bearer ACCOUNT_A', 'Bearer ACCOUNT_B'])
+    expect(mutate).not.toHaveBeenCalled()
+    expect(selection.lastSwitch()).toBeUndefined()
+    expect(config.apiKeyEnv).toBe('ACCOUNT_A')
+    expect(accountGeneration).toHaveBeenCalledTimes(1)
+  } finally {
+    release.resolve()
+    await pending.catch(() => {})
+    disconnect()
+    await adapter.dispose()
+  }
 })
