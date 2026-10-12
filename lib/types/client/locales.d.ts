@@ -136,6 +136,7 @@ export declare const en: {
     limitsEmpty: string;
     limitsContextLabel: string;
     limitsOutputLabel: string;
+    advancedResetAll: string;
     advancedLabel: string;
     groupUsageProtocol: string;
     groupConnection: string;

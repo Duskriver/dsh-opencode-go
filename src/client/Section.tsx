@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, Switch, Tag, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   OpencodeGoModels,
@@ -14,6 +14,7 @@ import type {
   OpencodeGoSectionState,
 } from './section-controller.ts'
 import { hostAtom } from './host-primitives.ts'
+import { HintMark, HintText } from './hint-mark.tsx'
 import { ModelEditor } from './ModelEditor.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import type { GoAccountsActions } from './accounts-controller.ts'
@@ -26,12 +27,12 @@ const ChevronDown = hostAtom<typeof primitives.IconChevronDownOutline14>(
   primitives, 'IconChevronDownOutlineRegular', 'IconChevronDownOutline14',
 ) ?? primitives.IconChevronDownOutline14
 
-/** The hint mark a field label carries; the bubble it opens is the Host's Tooltip. */
-const QuestionMark = hostAtom<typeof primitives.IconQuestionOutline14>(
-  primitives, 'IconQuestionOutlineRegular', 'IconQuestionOutline14',
-)
-/** Absent only on a Host older than the plugin's floor; the hint then stays visible. */
-const HintTooltip = primitives.Tooltip as typeof Tooltip | undefined
+/** The tuning fields the advanced card owns, in the order it renders them. */
+const ADVANCED_FIELDS = [
+  'usageDisplay', 'protocolOverrides', 'apiKeyEnv', 'baseURL', 'proxyURL',
+  'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
+  'requestImagePixelBudget', 'requestImageMaxBytes',
+] as const
 
 export type { OpencodeGoSectionState } from './section-controller.ts'
 
@@ -55,14 +56,11 @@ interface ValueFieldProps {
   hint: string
   field: OpencodeGoSectionState['baseURL']
   invalidLabel: string
-  overriddenLabel: string
-  resetLabel: string
   disabled: boolean
   numeric?: boolean
   placeholder?: string
   options?: readonly { value: string; label: string }[]
   onEdit: (text: string) => void
-  onReset: () => void
 }
 
 /**
@@ -75,35 +73,13 @@ function ValueField(props: ValueFieldProps) {
   const labelId = props.id + '-label'
   const options = props.options
   const selected = options ? options.findIndex(option => option.value === props.field.text) : -1
-  // A Host that ships no question glyph still gets the mark, and a Host with no
-  // Tooltip keeps the sentence visible instead of opening it on hover.
-  const mark = <span className={css.info} aria-hidden="true">{QuestionMark ? <QuestionMark /> : '?'}</span>
   return (
     <div className={css.row}>
       <div className={css.rowLabel}>
         {options
           ? <span id={labelId} className={css.rowTitle}>{props.label}</span>
           : <label htmlFor={props.id} className={css.rowTitle}>{props.label}</label>}
-        {/* The Host's own Tooltip opens the hint on hover and on keyboard focus; the
-            same sentence stays in the document for assistive technology. */}
-        {HintTooltip
-          ? <HintTooltip label={props.hint} side="bottom" maxWidth={280}>{mark}</HintTooltip>
-          : mark}
-        {props.field.overridden
-          ? (
-            <span className={css.badges}>
-              <Tag tone="neutral">{props.overriddenLabel}</Tag>
-              <button
-                type="button"
-                className={css.reset}
-                disabled={props.disabled}
-                onClick={props.onReset}
-              >
-                {props.resetLabel}
-              </button>
-            </span>
-          )
-          : null}
+        <HintMark hint={props.hint} />
       </div>
       <div className={css.rowControl}>
         {options ? (
@@ -156,7 +132,7 @@ function ValueField(props: ValueFieldProps) {
           onChange={(event) => { props.onEdit(event.target.value) }}
         />}
       </div>
-      <p id={hintId} className={HintTooltip ? css.visuallyHidden : css.rowHint}>{props.hint}</p>
+      <HintText id={hintId} hint={props.hint} />
       {props.field.invalid ? <p className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
     </div>
   )
@@ -280,13 +256,13 @@ function Loaded(props: {
     return <p className={css.intro}>{t('unavailable')}</p>
   }
   const disabled = !state.writable
+  // The provider switch says what its state means; the mark opens the sentence.
+  const enabledHint = state.enabled ? t('enabledHint') : t('enabledOff')
   const accountCard = state.accounts && props.accountActions ? <AccountsCard
     state={state.accounts} actions={props.accountActions} writable={state.writable}
     t={t} locale={props.locale} /> : null
   const fieldProps = {
     invalidLabel: t('invalidValue'),
-    overriddenLabel: t('overridden'),
-    resetLabel: t('reset'),
     disabled,
   }
   const advancedOverridden = state.usageDisplay.overridden || state.protocolOverrides.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden || state.proxyURL.overridden
@@ -305,7 +281,7 @@ function Loaded(props: {
           standalone key control only for callers without the account actions. */}
       <section className={css.card}>
         <div className={css.cardHead}>
-          <h3 className={css.cardTitle}>{t('enabledLabel')}</h3>
+          <h3 className={css.cardTitle}>{t('enabledLabel')}<HintMark hint={enabledHint} /></h3>
           <Switch
             checked={state.enabled}
             label={t('enabledLabel')}
@@ -316,7 +292,7 @@ function Loaded(props: {
           />
         </div>
         <div className={css.cardBody}>
-          <p className={css.hint}>{state.enabled ? t('enabledHint') : t('enabledOff')}</p>
+          <HintText id="opencode-go-enabled-hint" hint={enabledHint} />
         </div>
         {accountCard ? null : <>
         <div className={css.cardDivider} />
@@ -411,7 +387,23 @@ function Loaded(props: {
         {advanced
           ? (
             <div id="opencode-go-advanced" className={css.cardBody}>
-              <p className={css.hint}>{t('advancedHint')}</p>
+              <div className={css.advancedHead}>
+                <p className={css.hint}>{t('advancedHint')}</p>
+                {/* One reset for the card: the rows carry no badges of their own, so
+                    this is the only place a value returns to its inherited default. */}
+                <button
+                  type="button"
+                  className={css.reset}
+                  disabled={disabled || !advancedOverridden}
+                  onClick={() => {
+                    for (const field of ADVANCED_FIELDS) {
+                      if (state[field].overridden) props.resetField(field)
+                    }
+                  }}
+                >
+                  {t('advancedResetAll')}
+                </button>
+              </div>
               <div className={css.rows}>
                 <div className={css.groupHead}>{t('groupUsageProtocol')}</div>
                 <ValueField
@@ -422,7 +414,6 @@ function Loaded(props: {
                   options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
                   {...fieldProps}
                   onEdit={text => { props.edit('usageDisplay', text) }}
-                  onReset={() => { props.resetField('usageDisplay') }}
                 />
                 <ValueField
                   id="opencode-go-protocol-overrides"
@@ -435,7 +426,6 @@ function Loaded(props: {
                   ]}
                   {...fieldProps}
                   onEdit={text => { props.edit('protocolOverrides', text) }}
-                  onReset={() => { props.resetField('protocolOverrides') }}
                 />
                 <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
@@ -445,7 +435,6 @@ function Loaded(props: {
                   field={state.apiKeyEnv}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('apiKeyEnv', text) }}
-                  onReset={() => { props.resetField('apiKeyEnv') }}
                 />
                 <ValueField
                   id="opencode-go-base-url"
@@ -454,7 +443,6 @@ function Loaded(props: {
                   field={state.baseURL}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('baseURL', text) }}
-                  onReset={() => { props.resetField('baseURL') }}
                 />
                 <ValueField
                   id="opencode-go-proxy-url"
@@ -465,7 +453,6 @@ function Loaded(props: {
                   {...fieldProps}
                   invalidLabel={t('proxyURLInvalid')}
                   onEdit={(text) => { props.edit('proxyURL', text) }}
-                  onReset={() => { props.resetField('proxyURL') }}
                 />
                 <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
                 <ValueField
@@ -476,7 +463,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('refreshMinutes', text) }}
-                  onReset={() => { props.resetField('refreshMinutes') }}
                 />
                 <ValueField
                   id="opencode-go-stream-idle"
@@ -486,7 +472,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
-                  onReset={() => { props.resetField('streamIdleTimeoutMs') }}
                 />
                 <div className={css.groupHead}>{t('groupImages')}</div>
                 <ValueField
@@ -497,7 +482,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('maxImages', text) }}
-                  onReset={() => { props.resetField('maxImages') }}
                 />
                 <ValueField
                   id="opencode-go-max-request-image-bytes"
@@ -507,7 +491,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('maxRequestImageBytes', text) }}
-                  onReset={() => { props.resetField('maxRequestImageBytes') }}
                 />
                 <ValueField
                   id="opencode-go-image-pixel-budget"
@@ -517,7 +500,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImagePixelBudget', text) }}
-                  onReset={() => { props.resetField('requestImagePixelBudget') }}
                 />
                 <ValueField
                   id="opencode-go-image-max-bytes"
@@ -527,7 +509,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
-                  onReset={() => { props.resetField('requestImageMaxBytes') }}
                 />
               </div>
             </div>

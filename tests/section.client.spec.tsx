@@ -137,7 +137,7 @@ describe('OpencodeGoSection', () => {
     fireEvent.click(choices[0])
     expect(reading.edit).toHaveBeenCalledWith('protocolOverrides', 'auto')
     expect(reading.save).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: en.reset }))
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
     expect(reading.resetField).toHaveBeenCalledWith('protocolOverrides')
   })
 
@@ -154,7 +154,7 @@ describe('OpencodeGoSection', () => {
     fireEvent.click(choices[2])
     expect(reading.edit).toHaveBeenCalledWith('usageDisplay', 'off')
     expect(reading.save).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: en.reset }))
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
     expect(reading.resetField).toHaveBeenCalledWith('usageDisplay')
   })
 
@@ -603,7 +603,7 @@ describe('OpencodeGoSection', () => {
     fireEvent.change(screen.getByLabelText(en.baseURLLabel), { target: { value: 'https://other.test/v1' } })
     expect(edits.edit).toHaveBeenCalledWith('baseURL', 'https://other.test/v1')
 
-    fireEvent.click(screen.getByText(en.reset))
+    fireEvent.click(screen.getByText(en.advancedResetAll))
     expect(edits.resetField).toHaveBeenCalledWith('refreshMinutes')
   })
 
@@ -662,21 +662,45 @@ describe('OpencodeGoSection', () => {
       [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget', true],
       [en.requestImageMaxBytesLabel, 'requestImageMaxBytes', true],
     ]
-    const resets = screen.getAllByText(en.reset)
-    expect(resets).toHaveLength(fields.length)
-    fields.forEach(([label, name, numeric], index) => {
+    fields.forEach(([label, name, numeric]) => {
       const input = screen.getByLabelText(label) as HTMLInputElement
       expect(input.inputMode).toBe(numeric ? 'numeric' : '')
       expect(input.type).toBe(numeric ? 'number' : 'text')
       const nextValue = numeric ? '123' : `edited-${name}`
       fireEvent.change(input, { target: { value: nextValue } })
       expect(edits.edit).toHaveBeenCalledWith(name, nextValue)
-      fireEvent.click(resets[index] as Element)
-      expect(edits.resetField).toHaveBeenCalledWith(name)
     })
+    // The card owns one reset, and it returns every customized row at once.
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+    expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(fields.map(([, name]) => name).sort())
 
     // The invalid refresh draft renders the invalid style and copy.
     expect(screen.getByText(en.invalidValue)).toBeTruthy()
+  })
+
+  it('returns only the customized rows from the card reset', () => {
+    const edits = actions()
+    renderSection(stateOf({
+      usageDisplay: field('always', { overridden: true }),
+      baseURL: field('https://other.test/v1', { overridden: true }),
+    }), edits)
+    openAdvanced()
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+    expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(['baseURL', 'usageDisplay'])
+  })
+
+  it('keeps the card reset out of reach while every row inherits its value', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    expect(screen.getByRole('button', { name: en.advancedResetAll }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('hangs the provider hint off its mark instead of a visible line', () => {
+    renderSection(stateOf())
+    const hint = document.getElementById('opencode-go-enabled-hint')
+    expect(hint?.textContent).toBe(en.enabledHint)
+    // The sentence lives in the description only; the title shows the mark.
+    expect(screen.getAllByText(en.enabledHint)).toHaveLength(1)
   })
 
   it('shows the saving state while a save crosses the wire', () => {
@@ -787,7 +811,7 @@ describe('OpencodeGoSectionController through the component', () => {
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: '' }], expect.any(Number))
       expect(input().value).toBe('')
-      fireEvent.click(screen.getByRole('button', { name: en.reset }))
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['proxyURL'] }], expect.any(Number))
       expect(input().value).toBe(base.proxyURL)
@@ -844,7 +868,7 @@ describe('OpencodeGoSectionController through the component', () => {
 
       // Reset follows the shared settings convention, including inherited caps.
       act(() => { host.publish({ value: { maxImages: 30 }, base: { maxImages: 60 }, user: { maxImages: 30 } }) })
-      fireEvent.click(screen.getByRole('button', { name: en.reset }))
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
       expect(input().value).toBe('60')
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.scope.getSnapshot().value?.maxImages).toBe(60)

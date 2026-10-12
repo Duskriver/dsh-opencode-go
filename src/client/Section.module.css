@@ -158,12 +158,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.badges {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 /* A trailing group keeps every right-hand mark — badges, the refresh action,
    and the disclosure chevron — on one centred line. */
 .trailing {
@@ -189,6 +183,7 @@
 }
 
 .reset:disabled {
+  color: var(--dsw-alias-label-tertiary);
   cursor: default;
 }
 
@@ -251,12 +246,19 @@
 /* The advanced card reads as one setting per line: the label column takes the
    slack, and every control starts on the same x in a fixed 300px column. */
 .rows { display: flex; flex-direction: column; }
-.row { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: center; gap: 6px 14px; padding: 8px 0; }
-.row + .row { border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: center; gap: 6px 14px; padding: 10px 0; }
 .rowLabel { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.rowTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-primary); }
+/* A label that outgrows its column wraps to a second line instead of losing its
+   tail to an ellipsis; two lines is the cap, so one long name cannot turn a row
+   into a paragraph. */
+.rowTitle { min-width: 0; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-primary); }
 .rowControl { display: flex; align-items: center; min-width: 0; }
 .rowControl > .input { width: 100%; box-sizing: border-box; }
+/* The card's own first line: what it holds, and the single reset that returns every
+   row to its inherited default. */
+.advancedHead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+.advancedHead .hint { flex: 1 1 auto; min-width: 0; }
+.advancedHead .reset { flex: none; }
 .rowHint, .rowInvalid { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.5; }
 .rowHint { color: var(--dsw-alias-label-tertiary); }
 .rowInvalid { color: var(--dsw-alias-label-error); }
@@ -271,6 +273,8 @@
 .info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary); }
 .info:hover { color: var(--dsw-alias-label-primary); }
 .info svg { width: 13px; height: 13px; }
+/* A mark that rides a label's own line stays right after the words. */
+.label .info, .cardTitle .info { margin-left: 6px; vertical-align: middle; }
 
 /* A segmented control for the two small enums: every option is visible at once and
    one thumb slides between equal-width segments. The switch animates transform and
