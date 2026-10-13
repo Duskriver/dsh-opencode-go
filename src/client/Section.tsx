@@ -13,6 +13,8 @@ import type {
   OpencodeGoSectionFace,
   OpencodeGoSectionState,
 } from './section-controller.ts'
+import { hostAtom } from './host-primitives.ts'
+import { HintMark, HintText } from './hint-mark.tsx'
 import { ModelEditor } from './ModelEditor.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
 import type { GoAccountsActions } from './accounts-controller.ts'
@@ -21,9 +23,16 @@ import { USAGE_DISPLAY_MODES } from '../usage-display.ts'
 import css from './Section.module.css'
 
 // 0.1.7 names icons by stroke weight; older hosts name them by pixel size.
-const ChevronDown = (primitives as typeof primitives & {
-  IconChevronDownOutlineRegular?: typeof primitives.IconChevronDownOutline14
-}).IconChevronDownOutlineRegular ?? primitives.IconChevronDownOutline14
+const ChevronDown = hostAtom<typeof primitives.IconChevronDownOutline14>(
+  primitives, 'IconChevronDownOutlineRegular', 'IconChevronDownOutline14',
+) ?? primitives.IconChevronDownOutline14
+
+/** The tuning fields the advanced card owns, in the order it renders them. */
+const ADVANCED_FIELDS = [
+  'usageDisplay', 'protocolOverrides', 'apiKeyEnv', 'baseURL', 'proxyURL',
+  'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
+  'requestImagePixelBudget', 'requestImageMaxBytes',
+] as const
 
 export type { OpencodeGoSectionState } from './section-controller.ts'
 
@@ -47,67 +56,84 @@ interface ValueFieldProps {
   hint: string
   field: OpencodeGoSectionState['baseURL']
   invalidLabel: string
-  overriddenLabel: string
-  resetLabel: string
   disabled: boolean
   numeric?: boolean
   placeholder?: string
   options?: readonly { value: string; label: string }[]
   onEdit: (text: string) => void
-  onReset: () => void
 }
 
-/** One staged value field: label, override badge with reset, control, and hint. */
+/**
+ * One staged value field: its label with the hint mark, the override badge with
+ * reset, and one control. A small enum renders as a segmented control — every
+ * option is visible at once — and everything else as a text or number input.
+ */
 function ValueField(props: ValueFieldProps) {
   const hintId = props.id + '-hint'
+  const labelId = props.id + '-label'
+  const options = props.options
+  const selected = options ? options.findIndex(option => option.value === props.field.text) : -1
   return (
-    <div className={css.field}>
-      <div className={css.head}>
-        <label className={css.label} htmlFor={props.id}>{props.label}</label>
-        {props.field.overridden
-          ? (
-            <span className={css.badges}>
-              <Tag tone="neutral">{props.overriddenLabel}</Tag>
-              <button
-                type="button"
-                className={css.reset}
-                disabled={props.disabled}
-                onClick={props.onReset}
-              >
-                {props.resetLabel}
-              </button>
-            </span>
-          )
-          : null}
+    <div className={css.row}>
+      <div className={css.rowLabel}>
+        {options
+          ? <span id={labelId} className={css.rowTitle}>{props.label}</span>
+          : <label htmlFor={props.id} className={css.rowTitle}>{props.label}</label>}
+        <HintMark hint={props.hint} />
       </div>
-      {props.options ? <select
-        id={props.id}
-        name={props.id}
-        aria-describedby={hintId}
-        className={props.field.invalid ? css.inputInvalid : css.input}
-        aria-invalid={props.field.invalid || undefined}
-        value={props.field.text}
-        disabled={props.disabled}
-        onChange={event => { props.onEdit(event.target.value) }}
-      >
-        {props.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select> : <input
-        id={props.id}
-        name={props.id}
-        autoComplete="off"
-        placeholder={props.placeholder}
-        aria-describedby={hintId}
-        className={props.field.invalid ? css.inputInvalid : css.input}
-        type={props.numeric === true ? 'number' : 'text'}
-        {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
-        {...props.field.invalid ? { 'aria-invalid': true } : {}}
-        value={props.field.text}
-        disabled={props.disabled}
-        onChange={(event) => { props.onEdit(event.target.value) }}
-      />}
-      <p id={hintId} className={props.field.invalid ? css.invalid : css.hint}>
-        {props.field.invalid ? props.invalidLabel : props.hint}
-      </p>
+      <div className={css.rowControl}>
+        {options ? (
+          <div
+            className={css.seg}
+            role="radiogroup"
+            aria-labelledby={labelId}
+            aria-describedby={hintId}
+            data-count={options.length}
+            data-index={selected < 0 ? 0 : selected}
+            {...props.field.invalid ? { 'aria-invalid': true } : {}}
+            onKeyDown={event => {
+              const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+                : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+              if (step === 0) return
+              event.preventDefault()
+              const next = (Math.max(0, selected) + step + options.length) % options.length
+              props.onEdit(options[next].value)
+              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
+            }}
+          >
+            <span className={css.segThumb} aria-hidden="true" />
+            {options.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={option.value === props.field.text}
+                tabIndex={option.value === props.field.text ? 0 : -1}
+                className={css.segOption}
+                disabled={props.disabled}
+                onClick={() => { props.onEdit(option.value) }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : <input
+          id={props.id}
+          name={props.id}
+          autoComplete="off"
+          placeholder={props.placeholder}
+          aria-describedby={hintId}
+          className={props.field.invalid ? css.inputInvalid : css.input}
+          type={props.numeric === true ? 'number' : 'text'}
+          {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
+          {...props.field.invalid ? { 'aria-invalid': true } : {}}
+          value={props.field.text}
+          disabled={props.disabled}
+          onChange={(event) => { props.onEdit(event.target.value) }}
+        />}
+      </div>
+      <HintText id={hintId} hint={props.hint} />
+      {props.field.invalid ? <p className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
     </div>
   )
 }
@@ -230,13 +256,13 @@ function Loaded(props: {
     return <p className={css.intro}>{t('unavailable')}</p>
   }
   const disabled = !state.writable
+  // The provider switch says what its state means; the mark opens the sentence.
+  const enabledHint = state.enabled ? t('enabledHint') : t('enabledOff')
   const accountCard = state.accounts && props.accountActions ? <AccountsCard
     state={state.accounts} actions={props.accountActions} writable={state.writable}
     t={t} locale={props.locale} /> : null
   const fieldProps = {
     invalidLabel: t('invalidValue'),
-    overriddenLabel: t('overridden'),
-    resetLabel: t('reset'),
     disabled,
   }
   const advancedOverridden = state.usageDisplay.overridden || state.protocolOverrides.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden || state.proxyURL.overridden
@@ -255,18 +281,19 @@ function Loaded(props: {
           standalone key control only for callers without the account actions. */}
       <section className={css.card}>
         <div className={css.cardHead}>
-          <h3 className={css.cardTitle}>{t('enabledLabel')}</h3>
+          <h3 className={css.cardTitle}>{t('enabledLabel')}<HintMark hint={enabledHint} /></h3>
           <Switch
             checked={state.enabled}
             label={t('enabledLabel')}
+            // The Switch primitive carries no aria-describedby, so its description
+            // rides the only channel it forwards; the mark opens the same sentence
+            // in the Host's bubble for a pointer.
+            title={enabledHint}
             // The settings document being read-only is what locks the switch;
             // the credential's own writability is unrelated to this field.
             disabled={disabled || state.saving || state.pickerSaving}
             onChange={props.setEnabled}
           />
-        </div>
-        <div className={css.cardBody}>
-          <p className={css.hint}>{state.enabled ? t('enabledHint') : t('enabledOff')}</p>
         </div>
         {accountCard ? null : <>
         <div className={css.cardDivider} />
@@ -355,15 +382,31 @@ function Loaded(props: {
           onClick={() => { setAdvanced(!advanced) }}
         >
           <span className={css.cardTitle}>{t('advancedLabel')}</span>
-          <span className={css.cardSub}>{t('advancedSummary')}</span>
           {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
           <ChevronDown className={advanced ? css.chevronOpen : css.chevron} />
         </button>
         {advanced
           ? (
             <div id="opencode-go-advanced" className={css.cardBody}>
-              <p className={css.hint}>{t('advancedHint')}</p>
-              <div className={css.advancedGrid}>
+              <div className={css.advancedHead}>
+                <p className={css.hint}>{t('advancedHint')}</p>
+                {/* One reset for the card: the rows carry no badges of their own, so
+                    this is the only place a value returns to its inherited default. */}
+                <button
+                  type="button"
+                  className={css.reset}
+                  disabled={disabled || !advancedOverridden}
+                  onClick={() => {
+                    for (const field of ADVANCED_FIELDS) {
+                      if (state[field].overridden) props.resetField(field)
+                    }
+                  }}
+                >
+                  {t('advancedResetAll')}
+                </button>
+              </div>
+              <div className={css.rows}>
+                <div className={css.groupHead}>{t('groupUsageProtocol')}</div>
                 <ValueField
                   id="opencode-go-usage-display"
                   label={t('usageDisplayLabel')}
@@ -372,7 +415,6 @@ function Loaded(props: {
                   options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
                   {...fieldProps}
                   onEdit={text => { props.edit('usageDisplay', text) }}
-                  onReset={() => { props.resetField('usageDisplay') }}
                 />
                 <ValueField
                   id="opencode-go-protocol-overrides"
@@ -385,8 +427,8 @@ function Loaded(props: {
                   ]}
                   {...fieldProps}
                   onEdit={text => { props.edit('protocolOverrides', text) }}
-                  onReset={() => { props.resetField('protocolOverrides') }}
                 />
+                <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-api-key-env"
                   label={t('apiKeyEnvLabel')}
@@ -394,7 +436,6 @@ function Loaded(props: {
                   field={state.apiKeyEnv}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('apiKeyEnv', text) }}
-                  onReset={() => { props.resetField('apiKeyEnv') }}
                 />
                 <ValueField
                   id="opencode-go-base-url"
@@ -403,7 +444,6 @@ function Loaded(props: {
                   field={state.baseURL}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('baseURL', text) }}
-                  onReset={() => { props.resetField('baseURL') }}
                 />
                 <ValueField
                   id="opencode-go-proxy-url"
@@ -414,8 +454,8 @@ function Loaded(props: {
                   {...fieldProps}
                   invalidLabel={t('proxyURLInvalid')}
                   onEdit={(text) => { props.edit('proxyURL', text) }}
-                  onReset={() => { props.resetField('proxyURL') }}
                 />
+                <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
                 <ValueField
                   id="opencode-go-refresh-minutes"
                   label={t('refreshMinutesLabel')}
@@ -424,7 +464,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('refreshMinutes', text) }}
-                  onReset={() => { props.resetField('refreshMinutes') }}
                 />
                 <ValueField
                   id="opencode-go-stream-idle"
@@ -434,8 +473,8 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
-                  onReset={() => { props.resetField('streamIdleTimeoutMs') }}
                 />
+                <div className={css.groupHead}>{t('groupImages')}</div>
                 <ValueField
                   id="opencode-go-max-images"
                   label={t('maxImagesLabel')}
@@ -444,7 +483,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('maxImages', text) }}
-                  onReset={() => { props.resetField('maxImages') }}
                 />
                 <ValueField
                   id="opencode-go-max-request-image-bytes"
@@ -454,7 +492,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('maxRequestImageBytes', text) }}
-                  onReset={() => { props.resetField('maxRequestImageBytes') }}
                 />
                 <ValueField
                   id="opencode-go-image-pixel-budget"
@@ -464,7 +501,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImagePixelBudget', text) }}
-                  onReset={() => { props.resetField('requestImagePixelBudget') }}
                 />
                 <ValueField
                   id="opencode-go-image-max-bytes"
@@ -474,7 +510,6 @@ function Loaded(props: {
                   numeric
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
-                  onReset={() => { props.resetField('requestImageMaxBytes') }}
                 />
               </div>
             </div>

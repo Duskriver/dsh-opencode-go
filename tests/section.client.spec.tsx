@@ -130,37 +130,77 @@ describe('OpencodeGoSection', () => {
     const reading = actions()
     renderSection(stateOf({ protocolOverrides: field('openai-responses', { overridden: true }) }), reading)
     openAdvanced()
-    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: en.protocolOverridesLabel })
-    expect(select.value).toBe('openai-responses')
-    expect(within(select).getAllByRole('option').map(option => option.textContent))
-      .toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
-    fireEvent.change(select, { target: { value: 'auto' } })
+    const group = screen.getByRole('radiogroup', { name: en.protocolOverridesLabel })
+    const choices = within(group).getAllByRole('radio')
+    expect(choices.map(choice => choice.textContent)).toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
+    expect(choices.map(choice => choice.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+    fireEvent.click(choices[0])
     expect(reading.edit).toHaveBeenCalledWith('protocolOverrides', 'auto')
     expect(reading.save).not.toHaveBeenCalled()
-    fireEvent.click(within(select.parentElement!).getByRole('button', { name: en.reset }))
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
     expect(reading.resetField).toHaveBeenCalledWith('protocolOverrides')
   })
 
   it('stages the three usage display modes in advanced settings and offers reset', () => {
     const reading = actions()
     renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)
-    expect(screen.queryByRole('combobox', { name: en.usageDisplayLabel })).toBeNull()
+    expect(screen.queryByRole('radiogroup', { name: en.usageDisplayLabel })).toBeNull()
     openAdvanced()
-    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: en.usageDisplayLabel })
-    expect(select.value).toBe('always')
-    expect(within(select).getAllByRole('option').map(option => option.textContent))
+    const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
+    const choices = within(group).getAllByRole('radio')
+    expect(choices.map(choice => choice.textContent))
       .toEqual([en.usageDisplay_auto, en.usageDisplay_always, en.usageDisplay_off])
-    fireEvent.change(select, { target: { value: 'off' } })
+    expect(choices[1].getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(choices[2])
     expect(reading.edit).toHaveBeenCalledWith('usageDisplay', 'off')
     expect(reading.save).not.toHaveBeenCalled()
-    fireEvent.click(within(select.parentElement!).getByRole('button', { name: en.reset }))
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
     expect(reading.resetField).toHaveBeenCalledWith('usageDisplay')
   })
 
   it('disables usage display editing in a read-only deployment', () => {
     renderSection(stateOf({ writable: false }))
     openAdvanced()
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: en.usageDisplayLabel }).disabled).toBe(true)
+    const choices = within(screen.getByRole('radiogroup', { name: en.usageDisplayLabel })).getAllByRole('radio')
+    expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
+  })
+
+  it('moves the segmented selection with the arrow keys', () => {
+    const reading = actions()
+    renderSection(stateOf({ usageDisplay: field('auto') }), reading)
+    openAdvanced()
+    const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
+    within(group).getAllByRole('radio')[0].focus()
+    fireEvent.keyDown(group, { key: 'ArrowRight' })
+    expect(reading.edit).toHaveBeenLastCalledWith('usageDisplay', 'always')
+    fireEvent.keyDown(group, { key: 'ArrowLeft' })
+    expect(reading.edit).toHaveBeenLastCalledWith('usageDisplay', 'off')
+  })
+
+  it('hangs each hint off its field description, not a visible line', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    const input = screen.getByLabelText<HTMLInputElement>(en.baseURLLabel)
+    const hint = document.getElementById(input.getAttribute('aria-describedby') ?? '')
+    expect(hint?.textContent).toBe(en.baseURLHint)
+    // The sentence lives in the description only; the row shows the hint mark.
+    expect(screen.getAllByText(en.baseURLHint)).toHaveLength(1)
+  })
+
+  it('groups the tuning rows under four headings', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
+    const order: [string, string][] = [
+      [en.groupUsageProtocol, en.usageDisplayLabel],
+      [en.groupConnection, en.apiKeyEnvLabel],
+      [en.groupCacheTimeouts, en.refreshMinutesLabel],
+      [en.groupImages, en.maxImagesLabel],
+    ]
+    for (const [heading, firstRow] of order) {
+      expect(text).toContain(heading)
+      expect(text.indexOf(heading)).toBeLessThan(text.indexOf(firstRow))
+    }
   })
 
   it('renders nothing until every injected seat is present', () => {
@@ -193,7 +233,8 @@ describe('OpencodeGoSection', () => {
 
     const control = screen.getByRole('switch', { name: en.enabledLabel })
     expect(control.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText(en.enabledHint)).toBeTruthy()
+    // The sentence is the switch's description, not a paragraph under it.
+    expect(control.getAttribute('title')).toBe(en.enabledHint)
 
     // The toggle writes on the click: no save gesture stands between the user
     // and the route leaving the pickers.
@@ -205,8 +246,9 @@ describe('OpencodeGoSection', () => {
   it('explains the withdrawn state while the switch is off', () => {
     renderSection(stateOf({ enabled: false }))
 
-    expect(screen.getByRole('switch', { name: en.enabledLabel }).getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByText(en.enabledOff)).toBeTruthy()
+    const control = screen.getByRole('switch', { name: en.enabledLabel })
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    expect(control.getAttribute('title')).toBe(en.enabledOff)
   })
 
   it('locks the switch with the same read-only document that locks the form', () => {
@@ -506,6 +548,15 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByText(en.keyLabel)).toBeTruthy()
   })
 
+  it('keeps the advanced header to its title, with no summary line', () => {
+    renderSection(stateOf())
+    const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
+    // The row is the title and the disclosure chevron; the tuning summary that used
+    // to sit between them said what the card already says once it is open.
+    expect(trigger.textContent).toBe(en.advancedLabel)
+    expect(trigger.querySelectorAll('span')).toHaveLength(1)
+  })
+
   it('ties the advanced disclosure to the region it controls', () => {
     renderSection(stateOf())
     const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
@@ -554,7 +605,7 @@ describe('OpencodeGoSection', () => {
     fireEvent.change(screen.getByLabelText(en.baseURLLabel), { target: { value: 'https://other.test/v1' } })
     expect(edits.edit).toHaveBeenCalledWith('baseURL', 'https://other.test/v1')
 
-    fireEvent.click(screen.getByText(en.reset))
+    fireEvent.click(screen.getByText(en.advancedResetAll))
     expect(edits.resetField).toHaveBeenCalledWith('refreshMinutes')
   })
 
@@ -613,21 +664,45 @@ describe('OpencodeGoSection', () => {
       [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget', true],
       [en.requestImageMaxBytesLabel, 'requestImageMaxBytes', true],
     ]
-    const resets = screen.getAllByText(en.reset)
-    expect(resets).toHaveLength(fields.length)
-    fields.forEach(([label, name, numeric], index) => {
+    fields.forEach(([label, name, numeric]) => {
       const input = screen.getByLabelText(label) as HTMLInputElement
       expect(input.inputMode).toBe(numeric ? 'numeric' : '')
       expect(input.type).toBe(numeric ? 'number' : 'text')
       const nextValue = numeric ? '123' : `edited-${name}`
       fireEvent.change(input, { target: { value: nextValue } })
       expect(edits.edit).toHaveBeenCalledWith(name, nextValue)
-      fireEvent.click(resets[index] as Element)
-      expect(edits.resetField).toHaveBeenCalledWith(name)
     })
+    // The card owns one reset, and it returns every customized row at once.
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+    expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(fields.map(([, name]) => name).sort())
 
     // The invalid refresh draft renders the invalid style and copy.
     expect(screen.getByText(en.invalidValue)).toBeTruthy()
+  })
+
+  it('returns only the customized rows from the card reset', () => {
+    const edits = actions()
+    renderSection(stateOf({
+      usageDisplay: field('always', { overridden: true }),
+      baseURL: field('https://other.test/v1', { overridden: true }),
+    }), edits)
+    openAdvanced()
+    fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+    expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(['baseURL', 'usageDisplay'])
+  })
+
+  it('keeps the card reset out of reach while every row inherits its value', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    expect(screen.getByRole('button', { name: en.advancedResetAll }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('carries the provider hint as the switch description, behind its mark', () => {
+    renderSection(stateOf())
+    // The Switch primitive forwards no aria-describedby, so the sentence rides the
+    // one channel it does forward while the mark opens it in the Host's bubble.
+    expect(screen.getByRole('switch', { name: en.enabledLabel }).getAttribute('title')).toBe(en.enabledHint)
+    expect(screen.queryByText(en.enabledHint)).toBeNull()
   })
 
   it('shows the saving state while a save crosses the wire', () => {
@@ -738,7 +813,7 @@ describe('OpencodeGoSectionController through the component', () => {
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: '' }], expect.any(Number))
       expect(input().value).toBe('')
-      fireEvent.click(within(input().parentElement!).getByRole('button', { name: en.reset }))
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['proxyURL'] }], expect.any(Number))
       expect(input().value).toBe(base.proxyURL)
@@ -772,7 +847,8 @@ describe('OpencodeGoSectionController through the component', () => {
       openAdvanced()
       const input = () => screen.getByLabelText<HTMLInputElement>(en.maxImagesLabel)
       expect(input().value).toBe('')
-      expect(screen.getByText(en.maxImagesHint)).toBeTruthy()
+      expect(document.getElementById(input().getAttribute('aria-describedby') ?? '')?.textContent)
+        .toBe(en.maxImagesHint)
       for (const value of ['0', '-1', '1.5', '9007199254740992']) {
         fireEvent.change(input(), { target: { value } })
         expect(input().getAttribute('aria-invalid')).toBe('true')
@@ -794,7 +870,7 @@ describe('OpencodeGoSectionController through the component', () => {
 
       // Reset follows the shared settings convention, including inherited caps.
       act(() => { host.publish({ value: { maxImages: 30 }, base: { maxImages: 60 }, user: { maxImages: 30 } }) })
-      fireEvent.click(screen.getByRole('button', { name: en.reset }))
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
       expect(input().value).toBe('60')
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.scope.getSnapshot().value?.maxImages).toBe(60)

@@ -136,8 +136,12 @@ export declare const en: {
     limitsEmpty: string;
     limitsContextLabel: string;
     limitsOutputLabel: string;
-    advancedSummary: string;
+    advancedResetAll: string;
     advancedLabel: string;
+    groupUsageProtocol: string;
+    groupConnection: string;
+    groupCacheTimeouts: string;
+    groupImages: string;
     advancedHint: string;
     usageDisplayLabel: string;
     usageDisplayHint: string;

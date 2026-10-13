@@ -70,6 +70,11 @@
 .switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 11.5px; color: var(--dsw-alias-label-tertiary, currentColor); cursor: pointer; }
 .switch:hover:not(:disabled) { background: color-mix(in srgb, currentColor 8%, transparent); }
 .switch:disabled { opacity: .55; cursor: default; }
+/* The label's ink sits half a pixel below the button's centre line — the line box is
+   strutted by the Latin font while the CJK glyphs come from the fallback one — so a
+   box-centred 14px chevron reads high beside it. Nudge the arrow down onto the label's
+   own optical centre (measured 0.5px in headless Edge for both 切换 and Switch). */
+.switch svg { display: block; transform: translateY(.5px); }
 .option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 0 12px; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
 .option:hover:not(:disabled) { background: color-mix(in srgb, currentColor 6%, transparent); }
 .option:disabled { opacity: .6; cursor: default; }

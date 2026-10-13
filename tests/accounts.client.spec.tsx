@@ -390,6 +390,17 @@ it('keeps rejected account form input and clears it only after a successful subm
   fixture.controller.dispose()
 })
 
+it('carries the automatic-fallback hint as the switch description, behind its mark', () => {
+  const fixture = setup()
+  const props = { state: fixture.controller.snapshot(), actions: fixture.actions, writable: true, t }
+  render(<AccountsCard {...props} />)
+  // The card ships folded; the fallback switch is one disclosure away.
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  expect(screen.getByRole('switch', { name: en.accountAutoSwitch }).getAttribute('title')).toBe(en.accountAutoSwitchHint)
+  expect(screen.queryByText(en.accountAutoSwitchHint)).toBeNull()
+  fixture.controller.dispose()
+})
+
 it('refreshes the pill immediately on switching and discards an old late response using the same reader', async () => {
   const fixture = setup()
   const old = Promise.withResolvers<GoUsage>()

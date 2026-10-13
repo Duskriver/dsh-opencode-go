@@ -4,6 +4,7 @@ import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GoAccountsActions, GoAccountsState, GoAccountView } from './accounts-controller.ts'
 import { MAX_ACCOUNTS } from '../accounts.ts'
 import type { en } from './locales.ts'
+import { HintMark } from './hint-mark.tsx'
 import css from './Section.module.css'
 
 type Translate = (key: keyof typeof en, params?: Record<string, unknown>) => string
@@ -334,10 +335,12 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         : <Button variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
           onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
       <div className={css.field}>
-        <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}</span>
+        <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}<HintMark hint={t('accountAutoSwitchHint')} /></span>
           <Switch checked={state.autoSwitch} disabled={disabled} label={t('accountAutoSwitch')}
+            // The Switch primitive carries no aria-describedby; title is the one
+            // channel it forwards, and the mark opens the same sentence in a bubble.
+            title={t('accountAutoSwitchHint')}
             onChange={next => { void actions.setAutoSwitch(next) }} /></div>
-        <p className={css.hint}>{t('accountAutoSwitchHint')}</p>
       </div>
     </div> : null}
   </section>

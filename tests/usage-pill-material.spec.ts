@@ -30,3 +30,14 @@ it('keeps the blur on the material child, never on the panel or its scroller', (
 it('keeps an opaque fallback for hosts without backdrop-filter', () => {
   expect(source).toMatch(/@supports not \(backdrop-filter: blur\(1px\)\)/)
 })
+
+/**
+ * The switch label's ink rides half a pixel below the button's centre line — the
+ * line box is strutted by the Latin font while the CJK glyphs come from the
+ * fallback one — so the box-centred 14px chevron reads high beside 切换 / Switch.
+ * The arrow therefore carries its own half-pixel shift onto the label.
+ */
+it('nudges the switch chevron onto the label\u2019s optical centre', () => {
+  expect(rule('.switch svg')).toContain('display: block')
+  expect(rule('.switch svg')).toContain('transform: translateY(.5px)')
+})
