@@ -1,5 +1,13 @@
 # Verification
 
+## Second review round: an invalid draft keeps its error as its description, and the blank cap says what it inherits (2026-10-13)
+
+Codex reviewed the merged revision and found two more P2s, both caused by the shortening pass.
+
+The first is a real regression: `aria-describedby` pointed at the hint node alone, while the error moved to a separate `role="alert"` paragraph with no id. The old markup had put `invalidLabel` *inside* the described node, so an invalid proxy or numeric draft used to describe itself with its error; after the rewrite the alert announced the failure once and a later focus announced only the hint. The error node now carries `<id>-error`, and the control lists both ids while invalid — error first, hint behind it — dropping back to the hint alone once the draft is valid. A regression covers both states.
+
+The second is a wording error in the shortened copy. `numberField` parses an empty draft as `{ kind: 'clear' }`, so clearing the count cap re-inherits the composition default rather than removing the cap — the sentence the shortening dropped ("Clearing inherits the base configuration") was the correct one, and its replacement claimed an empty value means no cap at all. Both locales now say that blank inherits the configured default, uncapped only when that default sets no cap.
+
 ## PR review follow-up: the two switch hints became the switches' own descriptions (2026-10-13)
 
 Codex reviewed the pull request and found one P2: moving the provider and fallback explanations into `HintText` hid them behind a mark that only a pointer can open, and neither `Switch` referenced the hidden node, so focusing a switch announced its label alone. The finding is right, and the cause is the primitive: `Switch` accepts `{ checked, onChange, label, disabled, title, className }` on 0.1.5-rc.1, 0.1.6-alpha.1 and 0.2.0-rc.2 alike, and forwards no `aria-describedby`, so a hidden node can never be that control's description. Both switches now carry the sentence as `title` — the one channel the primitive forwards, and the pattern the drag handle already uses — while the mark keeps opening the same sentence in the Host's bubble. The hidden nodes are gone, so the sentence is no longer an unassociated paragraph in the reading order. The affected regressions now assert the switch's description instead of a hidden paragraph.
