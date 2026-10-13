@@ -233,7 +233,8 @@ describe('OpencodeGoSection', () => {
 
     const control = screen.getByRole('switch', { name: en.enabledLabel })
     expect(control.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText(en.enabledHint)).toBeTruthy()
+    // The sentence is the switch's description, not a paragraph under it.
+    expect(control.getAttribute('title')).toBe(en.enabledHint)
 
     // The toggle writes on the click: no save gesture stands between the user
     // and the route leaving the pickers.
@@ -245,8 +246,9 @@ describe('OpencodeGoSection', () => {
   it('explains the withdrawn state while the switch is off', () => {
     renderSection(stateOf({ enabled: false }))
 
-    expect(screen.getByRole('switch', { name: en.enabledLabel }).getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByText(en.enabledOff)).toBeTruthy()
+    const control = screen.getByRole('switch', { name: en.enabledLabel })
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    expect(control.getAttribute('title')).toBe(en.enabledOff)
   })
 
   it('locks the switch with the same read-only document that locks the form', () => {
@@ -695,12 +697,12 @@ describe('OpencodeGoSection', () => {
     expect(screen.getByRole('button', { name: en.advancedResetAll }).hasAttribute('disabled')).toBe(true)
   })
 
-  it('hangs the provider hint off its mark instead of a visible line', () => {
+  it('carries the provider hint as the switch description, behind its mark', () => {
     renderSection(stateOf())
-    const hint = document.getElementById('opencode-go-enabled-hint')
-    expect(hint?.textContent).toBe(en.enabledHint)
-    // The sentence lives in the description only; the title shows the mark.
-    expect(screen.getAllByText(en.enabledHint)).toHaveLength(1)
+    // The Switch primitive forwards no aria-describedby, so the sentence rides the
+    // one channel it does forward while the mark opens it in the Host's bubble.
+    expect(screen.getByRole('switch', { name: en.enabledLabel }).getAttribute('title')).toBe(en.enabledHint)
+    expect(screen.queryByText(en.enabledHint)).toBeNull()
   })
 
   it('shows the saving state while a save crosses the wire', () => {

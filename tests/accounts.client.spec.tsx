@@ -390,16 +390,14 @@ it('keeps rejected account form input and clears it only after a successful subm
   fixture.controller.dispose()
 })
 
-it('hangs the automatic-fallback hint off its mark instead of a visible line', () => {
+it('carries the automatic-fallback hint as the switch description, behind its mark', () => {
   const fixture = setup()
   const props = { state: fixture.controller.snapshot(), actions: fixture.actions, writable: true, t }
   render(<AccountsCard {...props} />)
   // The card ships folded; the fallback switch is one disclosure away.
   fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-  const hint = document.getElementById('opencode-go-auto-switch-hint')
-  expect(hint?.textContent).toBe(en.accountAutoSwitchHint)
-  // The sentence lives in the description only; the label shows the mark.
-  expect(screen.getAllByText(en.accountAutoSwitchHint)).toHaveLength(1)
+  expect(screen.getByRole('switch', { name: en.accountAutoSwitch }).getAttribute('title')).toBe(en.accountAutoSwitchHint)
+  expect(screen.queryByText(en.accountAutoSwitchHint)).toBeNull()
   fixture.controller.dispose()
 })
 

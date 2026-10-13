@@ -285,14 +285,15 @@ function Loaded(props: {
           <Switch
             checked={state.enabled}
             label={t('enabledLabel')}
+            // The Switch primitive carries no aria-describedby, so its description
+            // rides the only channel it forwards; the mark opens the same sentence
+            // in the Host's bubble for a pointer.
+            title={enabledHint}
             // The settings document being read-only is what locks the switch;
             // the credential's own writability is unrelated to this field.
             disabled={disabled || state.saving || state.pickerSaving}
             onChange={props.setEnabled}
           />
-        </div>
-        <div className={css.cardBody}>
-          <HintText id="opencode-go-enabled-hint" hint={enabledHint} />
         </div>
         {accountCard ? null : <>
         <div className={css.cardDivider} />
