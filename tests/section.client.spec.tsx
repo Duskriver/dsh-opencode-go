@@ -705,6 +705,26 @@ describe('OpencodeGoSection', () => {
     expect(screen.queryByText(en.enabledHint)).toBeNull()
   })
 
+  it('describes an invalid draft with its error, and a valid one with its hint', () => {
+    renderSection(stateOf({ proxyURL: field('not-a-url', { overridden: true, invalid: true }) }))
+    openAdvanced()
+    const invalid = screen.getByLabelText<HTMLInputElement>(en.proxyURLLabel)
+    const described = (invalid.getAttribute('aria-describedby') ?? '').split(' ')
+    // The alert announces the failure once; the description keeps it available
+    // every time the control is focused again.
+    expect(described).toHaveLength(2)
+    const error = document.getElementById(described[0]!)
+    expect(error?.textContent).toBe(en.proxyURLInvalid)
+    expect(error?.getAttribute('role')).toBe('alert')
+    expect(document.getElementById(described[1]!)?.textContent).toBe(en.proxyURLHint)
+
+    cleanup()
+    renderSection(stateOf())
+    openAdvanced()
+    expect(screen.getByLabelText(en.baseURLLabel).getAttribute('aria-describedby'))
+      .toBe('opencode-go-base-url-hint')
+  })
+
   it('shows the saving state while a save crosses the wire', () => {
     renderSection(stateOf({ dirty: true, saving: true }))
     expect(screen.getByText<HTMLButtonElement>(en.saving).disabled).toBe(true)

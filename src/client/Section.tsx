@@ -70,9 +70,14 @@ interface ValueFieldProps {
  */
 function ValueField(props: ValueFieldProps) {
   const hintId = props.id + '-hint'
+  const errorId = props.id + '-error'
   const labelId = props.id + '-label'
   const options = props.options
   const selected = options ? options.findIndex(option => option.value === props.field.text) : -1
+  // The control describes itself with its hint, and with its error while the draft
+  // is invalid: the alert announces the failure once, and this keeps the specific
+  // sentence available on every later focus.
+  const describedBy = props.field.invalid ? `${errorId} ${hintId}` : hintId
   return (
     <div className={css.row}>
       <div className={css.rowLabel}>
@@ -87,7 +92,7 @@ function ValueField(props: ValueFieldProps) {
             className={css.seg}
             role="radiogroup"
             aria-labelledby={labelId}
-            aria-describedby={hintId}
+            aria-describedby={describedBy}
             data-count={options.length}
             data-index={selected < 0 ? 0 : selected}
             {...props.field.invalid ? { 'aria-invalid': true } : {}}
@@ -122,7 +127,7 @@ function ValueField(props: ValueFieldProps) {
           name={props.id}
           autoComplete="off"
           placeholder={props.placeholder}
-          aria-describedby={hintId}
+          aria-describedby={describedBy}
           className={props.field.invalid ? css.inputInvalid : css.input}
           type={props.numeric === true ? 'number' : 'text'}
           {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
@@ -133,7 +138,7 @@ function ValueField(props: ValueFieldProps) {
         />}
       </div>
       <HintText id={hintId} hint={props.hint} />
-      {props.field.invalid ? <p className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
+      {props.field.invalid ? <p id={errorId} className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
     </div>
   )
 }
