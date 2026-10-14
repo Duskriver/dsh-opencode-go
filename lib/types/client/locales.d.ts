@@ -152,8 +152,6 @@ export declare const en: {
     protocolOverridesHint: string;
     protocolOverridesAuto: string;
     protocolOverridesResponses: string;
-    apiKeyEnvLabel: string;
-    apiKeyEnvHint: string;
     baseURLLabel: string;
     baseURLHint: string;
     proxyURLLabel: string;

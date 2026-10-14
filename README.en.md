@@ -93,7 +93,7 @@ Streaming, reasoning, tool calls, and image input depend on model capabilities. 
 
 ### Grouped advanced settings
 
-Advanced settings are grouped into **Usage and protocol**, **Connection and credentials**, **Cache and timeouts**, and **Image handling**. Hover over a question mark for help. **Reset all to defaults** clears the card's custom overrides; save to apply the reset.
+Advanced settings are grouped into **Usage and protocol**, **Connection**, **Cache and timeouts**, and **Image handling**. Hover over a question mark for help. **Reset all to defaults** clears the card's custom overrides; save to apply the reset. The current account selection is preserved.
 
 ![Advanced settings: grouped controls, hints, and a shared reset action](docs/assets/advanced-settings.png)
 

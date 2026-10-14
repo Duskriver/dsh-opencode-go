@@ -28,7 +28,7 @@ function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = 
   return { text, overridden: false, invalid: false, ...rest }
 }
 
-type SectionField = 'baseURL' | 'proxyURL' | 'apiKeyEnv' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+type SectionField = 'baseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
   | 'usageDisplay' | 'protocolOverrides'
   | 'maxImages'
   | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'apiKey' | 'models'
@@ -65,7 +65,6 @@ function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSec
     ...settled,
     usageDisplay: field('auto'),
     protocolOverrides: field('auto'),
-    apiKeyEnv: field('OPENCODE_API_KEY'),
     baseURL: field('https://opencode.ai/zen/go/v1'),
     proxyURL: field(''),
     refreshMinutes: field('60'),
@@ -210,7 +209,7 @@ describe('OpencodeGoSection', () => {
     const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
     const order: [string, string][] = [
       [en.groupUsageProtocol, en.usageDisplayLabel],
-      [en.groupConnection, en.apiKeyEnvLabel],
+      [en.groupConnection, en.baseURLLabel],
       [en.groupCacheTimeouts, en.refreshMinutesLabel],
       [en.groupImages, en.maxImagesLabel],
     ]
@@ -657,7 +656,6 @@ describe('OpencodeGoSection', () => {
   it('exercises every field control: edits, resets, invalid and numeric states', () => {
     const edits = actions()
     renderSection(stateOf({
-      apiKeyEnv: field('OPENCODE_API_KEY', { overridden: true }),
       baseURL: field('https://opencode.ai/zen/go/v1', { overridden: true }),
       refreshMinutes: field('not-a-number', { overridden: true, invalid: true }),
       streamIdleTimeoutMs: field('300000', { overridden: true }),
@@ -672,7 +670,6 @@ describe('OpencodeGoSection', () => {
 
     openAdvanced()
     const fields: readonly (readonly [label: string, name: string, numeric: boolean])[] = [
-      [en.apiKeyEnvLabel, 'apiKeyEnv', false],
       [en.baseURLLabel, 'baseURL', false],
       [en.refreshMinutesLabel, 'refreshMinutes', true],
       [en.streamIdleTimeoutMsLabel, 'streamIdleTimeoutMs', true],
@@ -808,6 +805,35 @@ describe('OpencodeGoSectionController through the component', () => {
       expect(host.scope.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: null } })
       fireEvent.click(screen.getByRole('button', { name: 'Effort Model' }))
       expect(screen.queryByText(en.thinkingBudgets)).toBeNull()
+    } finally { controller.dispose() }
+  })
+
+  it('preserves the current account when resetting advanced settings', async () => {
+    const host = stubSettingsScope<OpencodeGoSettings>()
+    acceptSettingsWrites(host)
+    const accounts = [
+      { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
+      { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+    ]
+    const base = { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true, baseURL: 'https://opencode.ai/zen/go/v1' }
+    const user = { apiKeyEnv: 'ACCOUNT_B', baseURL: 'https://other.test/v1' }
+    host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
+    const controller = new OpencodeGoSectionController(host.scope, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+    } } as never)
+    render(<OpencodeGoSection {...controller.inject()} t={t}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    try {
+      await act(async () => { await Promise.resolve() })
+      openAdvanced()
+      expect(screen.queryByDisplayValue('ACCOUNT_B')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['baseURL'] }], expect.any(Number))
+      expect(host.scope.getSnapshot().value).toEqual({ ...base, apiKeyEnv: 'ACCOUNT_B' })
+      expect(host.scope.getSnapshot().user).toEqual({ apiKeyEnv: 'ACCOUNT_B' })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll }).disabled).toBe(true)
     } finally { controller.dispose() }
   })
 

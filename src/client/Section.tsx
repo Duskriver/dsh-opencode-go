@@ -29,7 +29,7 @@ const ChevronDown = hostAtom<typeof primitives.IconChevronDownOutline14>(
 
 /** The tuning fields the advanced card owns, in the order it renders them. */
 const ADVANCED_FIELDS = [
-  'usageDisplay', 'protocolOverrides', 'apiKeyEnv', 'baseURL', 'proxyURL',
+  'usageDisplay', 'protocolOverrides', 'baseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
   'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
@@ -270,7 +270,7 @@ function Loaded(props: {
     invalidLabel: t('invalidValue'),
     disabled,
   }
-  const advancedOverridden = state.usageDisplay.overridden || state.protocolOverrides.overridden || state.apiKeyEnv.overridden || state.baseURL.overridden || state.proxyURL.overridden
+  const advancedOverridden = state.usageDisplay.overridden || state.protocolOverrides.overridden || state.baseURL.overridden || state.proxyURL.overridden
     || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
     || state.maxImages.overridden
     || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
@@ -434,14 +434,6 @@ function Loaded(props: {
                   onEdit={text => { props.edit('protocolOverrides', text) }}
                 />
                 <div className={css.groupHead}>{t('groupConnection')}</div>
-                <ValueField
-                  id="opencode-go-api-key-env"
-                  label={t('apiKeyEnvLabel')}
-                  hint={t('apiKeyEnvHint')}
-                  field={state.apiKeyEnv}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('apiKeyEnv', text) }}
-                />
                 <ValueField
                   id="opencode-go-base-url"
                   label={t('baseURLLabel')}

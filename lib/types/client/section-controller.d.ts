@@ -63,8 +63,6 @@ export interface OpencodeGoSectionState extends FormShell {
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;
     pickerFailed: boolean;
-    /** Credential reference naming the environment key. */
-    apiKeyEnv: FieldState;
     /** The gateway endpoint. */
     baseURL: FieldState;
     proxyURL: FieldState;

@@ -92,8 +92,6 @@ export interface OpencodeGoSectionState extends FormShell {
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
-  /** Credential reference naming the environment key. */
-  apiKeyEnv: FieldState
   /** The gateway endpoint. */
   baseURL: FieldState
   proxyURL: FieldState
@@ -193,7 +191,6 @@ export class OpencodeGoSectionController {
           parse: text => text === 'auto' || text === 'openai-responses'
             ? { kind: 'set', value: { [RESPONSES_OVERRIDE_MODEL]: text === 'auto' ? null : text } } : undefined,
         },
-        textField('apiKeyEnv'),
         textField('baseURL'),
         {
           ...textField('proxyURL'),
@@ -258,7 +255,6 @@ export class OpencodeGoSectionController {
       modelVisibility: this.scope.getSnapshot().value?.modelVisibility ?? {},
       pickerSaving: this.pickerSaving,
       pickerFailed: this.pickerFailed,
-      apiKeyEnv: this.form.field('apiKeyEnv'),
       baseURL: this.form.field('baseURL'),
       proxyURL: this.form.field('proxyURL'),
       refreshMinutes: this.form.field('refreshMinutes'),
