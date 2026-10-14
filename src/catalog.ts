@@ -15,9 +15,10 @@ import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-respo
 import { MODEL_METADATA_MAX_BYTES, metadataCachePath, metadataETag, readMetadataCache, writeMetadataCache } from './metadata-cache.ts'
 import { DISPLAY_NAME, SDK_PROVIDER_ID } from './provider-identity.ts'
 import { reasoningBudgetRange, withGatewayReasoning } from './reasoning.ts'
+import { migrateGatewayBaseURL } from './gateway-url.ts'
 
 export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts'
-export const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1'
+export { DEFAULT_BASE_URL } from './gateway-url.ts'
 const MODELS_FETCH_TIMEOUT_MS = 10_000
 const METADATA_FETCH_TIMEOUT_MS = 30_000
 const STALE_WHILE_REVALIDATE_MS = 5 * 60_000
@@ -170,7 +171,9 @@ export class OpencodeGoCatalog {
     private readonly onRefresh: () => void = () => {},
     private readonly fetcher?: typeof globalThis.fetch,
     private readonly onWarning?: (warning: string) => void,
-  ) {}
+  ) {
+    this.baseURL = migrateGatewayBaseURL(baseURL)
+  }
 
   snapshot(force = false, signal?: AbortSignal): Promise<CatalogSnapshot> {
     if (signal?.aborted) {

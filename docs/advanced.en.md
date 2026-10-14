@@ -89,7 +89,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 
 | Option | Purpose |
 | --- | --- |
-| `baseURL` | OpenCode Go gateway URL; defaults to `https://opencode.ai/zen/go/v1` |
+| `baseURL` | Shared OpenCode Go gateway prefix for model discovery, inference and usage; defaults to `https://opencode.ai/inference/go/v1` |
 | `usageDisplay` | Usage display mode: `auto`, `always`, or `off` |
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
@@ -100,6 +100,8 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |
 | `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
 | `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
+
+Request paths are appended to `baseURL`: `GET /models` lists models, `POST /models/{model}:streamGenerateContent` sends Gemini requests, and `GET /usage` reads usage. A working listing does not verify every inference route. Reading the legacy official base `https://opencode.ai/zen/go/v1` migrates it to the new address for model discovery, every inference protocol and usage requests. Settings writes also store the new address, so operation does not depend on the legacy gateway remaining available. Custom gateways retain their configured addresses.
 
 Image offloading keeps the original attachment and replaces the old image in the request with a text placeholder. Raising the limit does not automatically restore previously offloaded images.
 

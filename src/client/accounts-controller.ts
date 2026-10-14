@@ -39,6 +39,8 @@ function operationId(): string {
 export interface GoAccountsActions {
   loadAccounts: () => void
   addAccount: (name: string, key: string) => Promise<boolean>
+  /** A newly opened addition form owns a fresh ID; retries keep its existing ID. */
+  resetAddition?: () => void
   renameAccount: (ref: string, name: string) => Promise<boolean>
   removeAccount: (ref: string) => Promise<boolean>
   selectAccount: (ref: string) => Promise<boolean>
@@ -174,10 +176,10 @@ export class GoAccountsController {
     const command = (request: AccountCommand) => this.execute(request).then(status => status === 'applied')
     return {
       loadAccounts: () => { void this.refresh() },
+      resetAddition: () => { this.addition = undefined },
       addAccount: (name, key) => this.run(async () => {
         if (!name.trim() || name.trim().length > 80 || !key.trim()) return false
-        const resumed = this.scope.getSnapshot().value?.accountOperations?.find(entry => entry.kind === 'add' && entry.account.name === name.trim())
-        if (this.addition?.name !== name.trim()) this.addition = { name: name.trim(), id: resumed?.account.id ?? operationId() }
+        if (this.addition?.name !== name.trim()) this.addition = { name: name.trim(), id: operationId() }
         const accepted = await command({ kind: 'add', id: this.addition.id, name, key })
         if (accepted) this.addition = undefined
         return accepted

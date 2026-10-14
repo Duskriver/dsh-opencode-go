@@ -17,10 +17,11 @@ export class GoCatalogManager {
   }) {}
 
   forConfig(config: OpencodeGoConfig): OpencodeGoCatalog {
-    const key = JSON.stringify([config.baseURL, config.refreshMinutes, assertProxyURL(config.proxyURL)])
+    const baseURL = assertBaseURL(config.baseURL)
+    const key = JSON.stringify([baseURL, config.refreshMinutes, assertProxyURL(config.proxyURL)])
     if (this.current?.key !== key) {
       const catalog = new OpencodeGoCatalog(
-        assertBaseURL(config.baseURL), config.refreshMinutes * 60_000,
+        baseURL, config.refreshMinutes * 60_000,
         this.options.onFallback ?? (() => {}), this.options.onOmitted ?? (() => {}),
         () => {
           if (this.current?.catalog === catalog) this.options.onRefresh?.()

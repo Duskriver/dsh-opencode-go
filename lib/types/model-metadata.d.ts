@@ -9,7 +9,7 @@ export interface ModelMetadata {
     readonly details: ReadonlyMap<string, ModelDetails>;
     readonly errors: ReadonlyMap<string, string>;
 }
-/** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */
+/** Use the current gateway for every protocol, then normalize SDK paths. */
 export declare function modelBaseURL(api: Api, baseURL: string): string;
 /** Shared Responses defaults for declared models and explicit protocol overrides. */
 export declare function responsesCompatibility(): NonNullable<Model<'openai-responses'>['compat']>;

@@ -168,6 +168,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
   private readonly rejectedKeys = new Map<string, Map<string, number>>()
+  /** Reference updates invalidate rejections from attempts using an older key. */
+  private readonly credentialVersions = new Map<string, number>()
 
   /** Monotonic sequence of the latest request this adapter started. */
   private callSeq = 0
@@ -363,6 +365,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     let switchReason: GoAccountSwitch['reason'] | undefined
     let failedRef: string | undefined
     for (let attempt = 0; attempt < refs.length; attempt++) {
+      const credentialVersion = this.credentialVersions.get(refs[attempt]!) ?? 0
       trace.startAttempt()
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
@@ -371,7 +374,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
         const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
           aborted: options.signal?.aborted === true, hasNext: attempt + 1 < refs.length })
         if (!reason || !failure) return false
-        if (isGatewayKeyRejection(failure)) this.rememberRejectedKey(refs[attempt]!, gateway)
+        if (isGatewayKeyRejection(failure)
+          && credentialVersion === (this.credentialVersions.get(refs[attempt]!) ?? 0)) this.rememberRejectedKey(refs[attempt]!, gateway)
         switchReason ??= reason
         failedRef ??= refs[attempt]!
         return true
@@ -428,6 +432,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   /** A stored change to a reference outranks the gateway's last rejection of it. */
   forgetRejectedKey(ref: string): void {
+    this.credentialVersions.set(ref, (this.credentialVersions.get(ref) ?? 0) + 1)
     this.rejectedKeys.delete(ref)
   }
 

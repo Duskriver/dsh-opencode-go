@@ -28,6 +28,8 @@ export interface GoAccountsState {
 export interface GoAccountsActions {
     loadAccounts: () => void;
     addAccount: (name: string, key: string) => Promise<boolean>;
+    /** A newly opened addition form owns a fresh ID; retries keep its existing ID. */
+    resetAddition?: () => void;
     renameAccount: (ref: string, name: string) => Promise<boolean>;
     removeAccount: (ref: string) => Promise<boolean>;
     selectAccount: (ref: string) => Promise<boolean>;

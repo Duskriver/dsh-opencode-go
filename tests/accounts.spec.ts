@@ -143,6 +143,42 @@ it('skips a gateway-rejected key on later requests until the credential changes'
   expect(gateway.bodies).toHaveLength(5)
 })
 
+it.each(['ACCOUNT_A', 'ACCOUNT_B'] as const)(
+  'fences late credential rejections only for the reference that changed (%s)', async changedRef => {
+    const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+    gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+    gateway.pushCompletions({ events: textEvents })
+    gateway.pushCompletions({ events: textEvents })
+    const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+    const fetcher = globalThis.fetch
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      if (new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)).get('Authorization') === 'Bearer old-key') {
+        started.resolve()
+        await release.promise
+      }
+      return fetcher(input, init)
+    })
+    let keyA = 'old-key', generation = 0
+    const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+    const adapter = new OpencodeGoAdapter({ config: () => config, accountGeneration: () => generation,
+      resolveApiKey: async config => config.apiKeyEnv === 'ACCOUNT_A' ? keyA : 'backup-key' })
+    const old = drain(adapter.stream(request()))
+    try {
+      await started.promise
+      if (changedRef === 'ACCOUNT_A') keyA = 'new-key'
+      generation++
+      adapter.forgetRejectedKey(changedRef)
+    } finally { release.resolve() }
+    expect((await old).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+    try {
+      expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+      expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual([
+        'Bearer old-key', 'Bearer backup-key', changedRef === 'ACCOUNT_A' ? 'Bearer new-key' : 'Bearer backup-key',
+      ])
+    } finally { await adapter.dispose() }
+  },
+)
+
 it('isolates rejected credentials by gateway while retaining each gateway rejection', async () => {
   const first = await mockGateway({ status: 200, body: listingBody([request().model]) })
   const second = await mockGateway({ status: 200, body: listingBody([request().model]) })

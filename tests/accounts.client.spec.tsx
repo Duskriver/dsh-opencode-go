@@ -172,6 +172,46 @@ it('keeps a confirmed addition recoverable after the final metadata response is 
   fixture.controller.dispose()
 })
 
+it('assigns a fresh addition ID on another surface even when a pending addition has the same label', async () => {
+  const fixture = setup()
+  fixture.host.mutate.mockImplementationOnce(fixture.host.mutate.getMockImplementation()!)
+    .mockRejectedValueOnce(new Error('final response lost'))
+  expect(await fixture.actions.addAccount('Work', 'original-key')).toBe(false)
+  const pending = fixture.host.scope.getSnapshot().value!.accountOperations![0]!
+  const other = new GoAccountsController(fixture.host.scope, { remote: { credentials: fixture.credentials } } as never,
+    fixture.read, () => {}, () => false, fixture.execute)
+  try {
+    expect(await other.actions().addAccount('Work', 'other-key')).toBe(true)
+    expect(fixture.secrets.get(pending.account.apiKeyEnv)).toBe('original-key')
+    const added = fixture.host.scope.getSnapshot().value!.accounts!.find(account => account.name === 'Work')!
+    expect(added.id).not.toBe(pending.account.id)
+    expect(fixture.secrets.get(added.apiKeyEnv)).toBe('other-key')
+    expect(await fixture.actions.addAccount('Work', 'original-key')).toBe(true)
+    expect(fixture.host.scope.getSnapshot().value!.accounts!.filter(account => account.name === 'Work')).toHaveLength(2)
+  } finally { other.dispose(); fixture.controller.dispose() }
+})
+
+it('uses a new addition ID after cancelling a failed form and starting a same-label addition', async () => {
+  const fixture = setup()
+  fixture.host.mutate.mockImplementationOnce(fixture.host.mutate.getMockImplementation()!)
+    .mockRejectedValueOnce(new Error('final response lost'))
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable={true} t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  const submit = async (key: string) => {
+    fireEvent.click(screen.getByRole('button', { name: en.accountAdd }))
+    fireEvent.change(screen.getByLabelText(en.accountName), { target: { value: 'Work' } })
+    fireEvent.change(screen.getByLabelText(en.keyLabel), { target: { value: key } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.accountConfirm })) })
+  }
+  await submit('original-key')
+  const pending = fixture.host.scope.getSnapshot().value!.accountOperations![0]!
+  fireEvent.click(screen.getByRole('button', { name: en.accountCancel }))
+  await submit('other-key')
+  expect(fixture.credentials.set.mock.calls[1]![0]).not.toBe(pending.account.apiKeyEnv)
+  expect(fixture.secrets.get(pending.account.apiKeyEnv)).toBe('original-key')
+  fixture.controller.dispose()
+})
+
 it('keeps an addition with an unwritten key visible for replacement or removal', async () => {
   const fixture = setup({ accounts: [] })
   fixture.credentials.set.mockResolvedValueOnce({ ok: false as const, error: new Error('credential store unavailable') })

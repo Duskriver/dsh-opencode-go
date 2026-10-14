@@ -3,6 +3,7 @@ import type { Api, Model, ModelCost, ModelThinkingLevel } from './sdk-types.ts'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, THINKING_LEVELS, supportsThinkingBudget, unsupportedThinkingLevels, withGatewayReasoning } from './reasoning.ts'
+import { migrateGatewayBaseURL } from './gateway-url.ts'
 
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
@@ -78,9 +79,9 @@ function reasoningControls(id: string, api: Api, metadata: Record<string, unknow
   }
 }
 
-/** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */
+/** Use the current gateway for every protocol, then normalize SDK paths. */
 export function modelBaseURL(api: Api, baseURL: string): string {
-  const base = baseURL.replace(/\/+$/, '')
+  const base = migrateGatewayBaseURL(baseURL).replace(/\/+$/, '')
   return api === 'anthropic-messages' ? base.replace(/\/v1$/, '') : base
 }
 

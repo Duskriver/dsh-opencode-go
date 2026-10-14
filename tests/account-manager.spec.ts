@@ -1,10 +1,11 @@
 import { expect, it, vi } from 'vitest'
-import { GoAccountManager } from '../src/account-manager.ts'
+import { ACCOUNT_RECOVERY_TIMEOUT_MS, GoAccountManager } from '../src/account-manager.ts'
 import { ACCOUNT_REF_PREFIX, accountsOf, type AccountSettings } from '../src/accounts.ts'
 import type { AccountCommand } from '../src/accounts-contract.ts'
 
 const add = (id = 'a'.repeat(32)): AccountCommand => ({ kind: 'add', id, name: id[0]!, key: `private-key-${id[0]}` })
 const backup = { id: 'backup', name: 'Backup', apiKeyEnv: 'BACKUP_KEY' }
+const owned = { id: 'a'.repeat(32), name: 'Work', apiKeyEnv: ACCOUNT_REF_PREFIX + 'A'.repeat(32) }
 
 function fixture(initial: AccountSettings = { accounts: [] }) {
   let value = structuredClone(initial), revision = 1
@@ -38,6 +39,137 @@ it('serializes concurrent additions and makes a repeated addition ID idempotent'
   expect(await f.manager.execute(add())).toBe('applied')
   expect(f.credentials.set).toHaveBeenCalledTimes(2)
   expect(JSON.stringify([f.value(), f.settings.mutate.mock.calls])).not.toContain('private-key')
+})
+
+it('keeps different addition IDs separate when their labels match a pending addition', async () => {
+  const f = fixture({ accounts: [backup], apiKeyEnv: backup.apiKeyEnv })
+  f.secrets.set(backup.apiKeyEnv, 'backup-secret')
+  const commit = f.settings.mutate.getMockImplementation()!
+  f.settings.mutate.mockImplementationOnce(commit).mockResolvedValueOnce(false)
+  expect(await f.manager.execute({ ...add(), name: 'Same label' })).toBe('unknown')
+  expect(f.value().accountOperations).toHaveLength(1)
+  expect(await f.manager.execute({ ...add('b'.repeat(32)), name: 'Same label' })).toBe('applied')
+  expect(f.secrets.get(owned.apiKeyEnv)).toBe('private-key-a')
+  expect(f.secrets.get(ACCOUNT_REF_PREFIX + 'B'.repeat(32))).toBe('private-key-b')
+  expect(f.value().accounts?.some(account => account.id === 'b'.repeat(32))).toBe(true)
+  expect(await f.manager.execute({ ...add(), name: 'Same label' })).toBe('applied')
+  expect(f.value().accounts?.filter(account => account.name === 'Same label')).toHaveLength(2)
+  expect(f.value().apiKeyEnv).toBe(backup.apiKeyEnv)
+  expect(f.value().accountOperations).toEqual([])
+})
+
+it.each(['reconnect', 'remount', 'new provider', 'failed write'] as const)(
+  'keeps an interrupted addition removable until its actual key write settles (%s)', async mode => {
+    const f = fixture()
+    const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+    f.credentials.set.mockImplementationOnce(async (ref, key) => {
+      started.resolve()
+      await release.promise
+      if (mode === 'failed write') throw new Error('Credential write failed')
+      f.secrets.set(ref, key)
+    })
+    const addition = f.manager.execute(add())
+    await started.promise
+    f.disconnect()
+    expect(await addition).toBe('unknown')
+    const manager = mode === 'remount' || mode === 'new provider' ? new GoAccountManager({ warn: vi.fn() }) : f.manager
+    const disconnect = manager.connect(f.settings, mode === 'new provider' ? { ...f.credentials } : f.credentials)
+    await manager.recover()
+    let removed = false
+    const removal = manager.execute({ kind: 'remove', ref: owned.apiKeyEnv }).then(status => { removed = true; return status })
+    try {
+      await vi.waitFor(() => expect(f.settings.mutate.mock.calls.some(([, ops]) =>
+        ops.some(op => op.path[0] === 'accountOperations' && (op.value as { kind?: string }[])?.some(entry => entry.kind === 'remove')))).toBe(true))
+      expect(removed).toBe(false)
+      expect(f.value().accountOperations?.[0]?.kind).toBe('remove')
+    } finally { release.resolve(); await removal; disconnect() }
+    expect(await removal).toBe('applied')
+    expect(f.secrets.has(owned.apiKeyEnv)).toBe(false)
+    expect(f.value().accounts).toEqual([])
+    expect(f.value().accountOperations).toEqual([])
+  },
+)
+
+it('retains the deletion intention through a timeout while the earlier key write is still running', async () => {
+  vi.useFakeTimers()
+  const f = fixture()
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  f.credentials.set.mockImplementationOnce(async (ref, key) => {
+    started.resolve()
+    await release.promise
+    f.secrets.set(ref, key)
+  })
+  try {
+    const addition = f.manager.execute(add())
+    await started.promise
+    await vi.advanceTimersByTimeAsync(ACCOUNT_RECOVERY_TIMEOUT_MS + 1)
+    expect(await addition).toBe('unknown')
+    const removal = f.manager.execute({ kind: 'remove', ref: owned.apiKeyEnv })
+    await vi.advanceTimersByTimeAsync(ACCOUNT_RECOVERY_TIMEOUT_MS + 1)
+    expect(await removal).toBe('unknown')
+    expect(f.value().accountOperations?.[0]?.kind).toBe('remove')
+    expect(await f.manager.execute(add())).toBe('rejected')
+    // A stuck write blocks its own reference, not another account's commands.
+    expect(await f.manager.execute(add('b'.repeat(32)))).toBe('applied')
+    release.resolve()
+    await f.manager.recover()
+    expect(f.secrets.has(owned.apiKeyEnv)).toBe(false)
+    expect(f.value().accounts?.map(account => account.id)).toEqual(['b'.repeat(32)])
+    expect(f.value().accountOperations).toEqual([])
+  } finally { release.resolve(); f.disconnect(); vi.useRealTimers() }
+})
+
+it('rejects a key replacement if another manager removed its account during describe', async () => {
+  const f = fixture({ accounts: [owned], apiKeyEnv: owned.apiKeyEnv })
+  f.secrets.set(owned.apiKeyEnv, 'original-key')
+  await f.manager.recover()
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  f.credentials.describe.mockImplementationOnce(async () => {
+    started.resolve()
+    await release.promise
+    return { configured: true, writable: true }
+  })
+  const replacement = f.manager.execute({ kind: 'replace-key', ref: owned.apiKeyEnv, key: 'replacement-key' })
+  await started.promise
+  const other = new GoAccountManager({ warn: vi.fn() })
+  const disconnect = other.connect(f.settings, f.credentials)
+  await other.recover()
+  try {
+    expect(await other.execute({ kind: 'remove', ref: owned.apiKeyEnv })).toBe('applied')
+  } finally { release.resolve(); disconnect() }
+  expect(await replacement).toBe('rejected')
+  expect(f.credentials.set).not.toHaveBeenCalled()
+  expect(f.secrets.has(owned.apiKeyEnv)).toBe(false)
+  expect(f.value().accounts).toEqual([])
+})
+
+it('orders deletion after a replacement already writing through another manager', async () => {
+  const f = fixture({ accounts: [owned], apiKeyEnv: owned.apiKeyEnv })
+  f.secrets.set(owned.apiKeyEnv, 'original-key')
+  await f.manager.recover()
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  f.credentials.set.mockImplementationOnce(async (ref, key) => {
+    started.resolve()
+    await release.promise
+    f.secrets.set(ref, key)
+  })
+  const replacement = f.manager.execute({ kind: 'replace-key', ref: owned.apiKeyEnv, key: 'replacement-key' })
+  await started.promise
+  const other = new GoAccountManager({ warn: vi.fn() })
+  const disconnect = other.connect(f.settings, f.credentials)
+  await other.recover()
+  let removed = false
+  const removal = other.execute({ kind: 'remove', ref: owned.apiKeyEnv }).then(status => { removed = true; return status })
+  try {
+    await vi.waitFor(() => expect(f.settings.mutate.mock.calls.some(([, ops]) =>
+      ops.some(op => op.path[0] === 'accountOperations' && (op.value as { kind?: string }[])?.some(entry => entry.kind === 'remove')))).toBe(true))
+    expect(removed).toBe(false)
+    expect(f.value().accountOperations?.[0]?.kind).toBe('remove')
+  } finally { release.resolve(); await Promise.all([replacement, removal]); disconnect() }
+  expect(await removal).toBe('applied')
+  expect(f.secrets.has(owned.apiKeyEnv)).toBe(false)
+  expect(f.value().accounts).toEqual([])
+  expect(f.value().accountOperations).toEqual([])
 })
 
 it('persists a legacy current account first without changing credentials, and is idempotent', async () => {

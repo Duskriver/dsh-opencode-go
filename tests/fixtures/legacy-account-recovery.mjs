@@ -1,6 +1,6 @@
 /** Installed 0.1.5/0.1.6 sections and real credential files must recover together. */
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 const { Context } = await import('@deepseek-ai/cordis')
 const { default: Llm } = await import('@deepseek-ai/dsh-llm')
@@ -13,7 +13,7 @@ const account = { id: 'a'.repeat(32), name: 'Recovered', apiKeyEnv: 'DSH_OPENCOD
 await mkdir(process.env.DSH_HOME, { recursive: true })
 const settingsPath = join(process.env.DSH_HOME, 'settings.yaml')
 const credentialPath = join(process.env.DSH_HOME, 'credentials.yaml')
-await writeFile(settingsPath, JSON.stringify({ [ns]: { accounts: [], accountOperations: [
+await writeFile(settingsPath, JSON.stringify({ [ns]: { baseURL: 'https://opencode.ai/zen/go/v1/', accounts: [], accountOperations: [
   { id: account.id, kind: 'add', account, previousRef: 'OPENCODE_API_KEY', select: true },
 ] } }))
 await writeFile(credentialPath, JSON.stringify({ version: 1, refs: { [account.apiKeyEnv]: 'recovery-fixture-key' } }), { mode: 0o600 })
@@ -31,6 +31,14 @@ try {
     assert.deepEqual(view().accountOperations, [])
   }
   await waitForRecovery()
+  const currentGateway = 'https://opencode.ai/inference/go/v1'
+  for (let attempt = 0; attempt < 100
+    && ctx.settings.describe().find(row => row.ns === ns).user?.baseURL !== currentGateway; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  assert.equal(view().baseURL, currentGateway, 'saved legacy URLs use the current gateway at startup')
+  assert.equal(ctx.settings.describe().find(row => row.ns === ns).user.baseURL, currentGateway)
+  assert.ok(!(await readFile(settingsPath, 'utf8')).includes('https://opencode.ai/zen/go/v1'), 'the saved alias is migrated alongside account recovery')
   assert.deepEqual(view().accounts, [account], 'startup finishes the stored addition')
   assert.equal(view().apiKeyEnv, account.apiKeyEnv)
   await ctx.settings.update(ns, { accountOperations: [{ id: 'b'.repeat(32), kind: 'remove', account }] })
@@ -48,5 +56,5 @@ try {
   assert.equal(await execute({ kind: 'remove', ref: account.apiKeyEnv }), 'applied')
   assert.deepEqual(view().accounts, [])
   assert.equal(await ctx.credentials.resolve(credentialRef(account.apiKeyEnv)), undefined)
-  console.log('PASS: legacy account commands and recovery with real settings and managed credential files')
+  console.log('PASS: legacy gateway migration, account commands and recovery with real settings and managed credential files')
 } finally { await ctx.fiber.dispose() }

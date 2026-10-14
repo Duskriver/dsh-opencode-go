@@ -3,7 +3,7 @@ import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm';
 import { type GoModelCatalog } from './models-contract.ts';
 import type { ModelMetadata } from './model-metadata.ts';
 export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts';
-export declare const DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
+export { DEFAULT_BASE_URL } from './gateway-url.ts';
 export interface CatalogSnapshot {
     readonly details: ModelMetadata['details'];
     readonly models: ReadonlyMap<string, Model<Api>>;

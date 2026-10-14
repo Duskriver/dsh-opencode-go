@@ -16,7 +16,7 @@ import {
   DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
 } from './conversion/index.ts'
 import z from '@deepseek-ai/schemastery'
-import { DEFAULT_BASE_URL } from './catalog.ts'
+import { DEFAULT_BASE_URL, migrateGatewayBaseURL } from './gateway-url.ts'
 import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES } from './usage-display.ts'
 import { ACCOUNT_REF_PATTERN, DEFAULT_ACCOUNT_REF, MAX_ACCOUNTS } from './accounts.ts'
 import type { OpencodeGoConfig } from './config-contract.ts'
@@ -51,7 +51,7 @@ const fields = {
   // Internal recovery state uses the same durable profile/section as its accounts.
   // Cross-field ownership and discriminants are checked before any side effect.
   accountOperations: z.array(z.any()).max(MAX_ACCOUNTS).default([]).hidden(),
-  baseURL: z.string().default(DEFAULT_BASE_URL),
+  baseURL: z.transform(z.string(), migrateGatewayBaseURL).default(DEFAULT_BASE_URL),
   proxyURL: z.string().default(''),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -93,7 +93,7 @@ export function readConfig(config: LiveConfig): OpencodeGoConfig {
  * the composition layer and as the settings section's write validator, so a
  * bad URL fails where it is written, never at first request.
  * @param raw - the configured base URL.
- * @returns the normalized base URL without trailing slashes.
+ * @returns the current gateway base URL without trailing slashes.
  */
 export function assertBaseURL(raw: string): string {
   let url: URL
@@ -108,7 +108,7 @@ export function assertBaseURL(raw: string): string {
   if (url.search.length > 0 || url.hash.length > 0) {
     throw new Error(`llm-opencode-go: baseURL "${raw}" must not carry a query or fragment`)
   }
-  return url.toString().replace(/\/+$/, '')
+  return migrateGatewayBaseURL(url.toString().replace(/\/+$/, ''))
 }
 
 /**

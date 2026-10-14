@@ -832,3 +832,52 @@ The settings hint mark was an unfocusable, accessibility-hidden span even though
 Three new core cases failed before the fixes and now pass: each cloud-backend flag preserves the Gemini route without changing other clients, and keyboard focus opens and dismisses the hint. Installed transcript fixtures enable both cloud flags, while installed browser fixtures check focus, tooltip content and actual visibility against each host's real primitives. JSDOM's missing `ResizeObserver` is supplied with one static DOM measurement so modern Tooltips can finish placement; this fixture does not verify browser resizing or layout geometry.
 
 Validation: `npm run verify` passed on macOS with Node 24.14.1. All **683 tests in 43 files** pass, both TypeScript projects compile, and all **64 shipped files** match an independent rebuild. All **ten installed hosts** pass with four workers (**40.8 seconds** including cleanup). npm Git, pnpm Git and packed npm installations, ESM loading and public consumer types pass without source builds or build approvals (**45.6 seconds** including cleanup). `git diff --check` is clean.
+
+## Account lifecycle regression fixes (2026-10-14)
+
+An addition now resumes only its exact operation/account ID. Matching labels on another browser surface cannot redirect a new key into an existing pending addition. Retrying the same form preserves its ID; cancelling and opening another addition form starts a fresh ID even when its label matches. A pending deletion cannot be replaced by an addition retry.
+
+Account credential mutations share a per-reference write queue within the Host process. Cancellation and command deadlines stop waiting without releasing the actual storage write. Removing an interrupted addition retains its durable deletion intention while earlier writes are running, then rechecks credential state and cleans up before clearing metadata and the intention. The queue survives manager reconnection, remounts and replacement credential-provider objects in the same module instance. Failed earlier writes release the queue too. Key replacement rechecks the exact account identity and deletion state immediately before its queued write, so an account removed during credential description cannot be recreated by that stale replacement. A replacement already writing finishes before credential deletion.
+
+Rejected-key caching now captures a per-reference credential version at the start of each attempt. A stored-key change or explicit retry invalidates older in-flight rejections as well as the existing cache. Updating a different reference does not suppress a valid rejection. Automatic fallback eligibility, first-output settlement, promotion of the serving account and the five-minute rejection TTL retain their existing policy.
+
+Regression coverage adds **12 cases** across account-manager, browser-controller/card and adapter tests. Ten cases failed against the original implementation before the fixes; the expanded suite covers same-label recovery, cancelled forms, interrupted and failed writes, reconnection/remount/provider replacement, command deadlines, concurrent replacement/removal, and real loopback HTTP rejections after key changes. Promise gates control race ordering; the deadline case uses fake timers. Fixture credentials and temporary homes are used throughout.
+
+Validation on macOS with Node 24.14.1:
+
+- `npm run compile` and `npm run test:ci`: **702 tests in 43 files**, both TypeScript projects clean, and all **64 shipped files** matching an independent rebuild.
+- `DSH_COMPAT_CONCURRENCY=4 npm run test:compat`: all **ten installed hosts** pass, including real legacy settings/credential-file recovery and profile account commands, adoption and recovery (**110.7 seconds** including cleanup).
+- `npm run test:install`: npm Git, pnpm Git and packed npm installations, ESM loading and public consumer types pass without source builds or dependency build approvals (**42.5 seconds** including cleanup).
+- `git diff --check` is clean. No paid inference, installed user-profile update or package publication is performed.
+
+The write queue coordinates this plugin's in-process mutations; it does not add a cross-process transaction between settings and credentials or change the existing ownership rules for references shared across profiles. Recovery intentions remain necessary, and a provider whose actual write never settles keeps the affected deletion pending until storage can finish or the process restarts.
+
+## Gemini desktop inference route correction (2026-10-14)
+
+The desktop plugin was loaded and the model was selectable, but its default legacy Go address produced an HTML 404 at the Google RPC path. Public probes with an invalid test credential reproduced HTML 404 responses for both Google methods below /zen/go/v1; the canonical /inference/go/v1 routes returned structured authentication errors instead. The canonical model listing without credentials returned HTTP 200 with 37 models.
+
+modelBaseURL now maps only Google requests using the exact public legacy alias to the canonical Go base. A regression covers live-metadata conversion, trailing slashes, canonical addresses, custom gateways and preservation of the existing OpenAI/Anthropic paths. The build and targeted Google/catalog/proxy suite pass 57 tests. The full core suite passes 703 tests in 43 files, both TypeScript projects are clean, and all 64 shipped files match an independent rebuild. git diff --check is clean.
+
+A single native-runtime smoke call used the existing desktop account and actual app peer packages, a synthetic public prompt, Low thinking, a 512-token output cap and a 45-second deadline. The corrected built artifact reached the canonical Google path, received HTTP 200 text/event-stream, and finished with OK after about 8.1 seconds. Credentials remained in memory and no settings were written by that smoke process.
+
+The desktop gateway address was then changed through its settings UI to https://opencode.ai/inference/go/v1. The saved update took effect without restarting the app; the quota indicator still refreshed successfully. A short connection-test message in the user's existing Gemini chat returned 连接成功, with the UI showing completion after six seconds. Existing account settings and conversation history were retained. This follow-up includes two real inference calls and a saved desktop configuration update; it does not publish or reinstall a package.
+
+## Canonical default gateway (2026-10-14)
+
+`DEFAULT_BASE_URL` now uses `https://opencode.ai/inference/go/v1`, so new installations, inherited defaults and settings resets use the canonical prefix for discovery, inference and usage. Saved legacy official addresses retain the Google-specific compatibility mapping above. The configuration example, declaration artifacts and both advanced guides are synchronized; the guides explain why a working `/models` listing does not establish that the Google RPC routes exist.
+
+`npm run compile` and `npm run test:ci` pass: **703 tests in 43 files**, both TypeScript projects clean, and all **64 shipped files** matching an independent rebuild. `DSH_COMPAT_CONCURRENCY=3 npm run test:compat -- v017-rc2 v020-rc2 v021-alpha1` passes all three installed hosts (**75.1 seconds** including cleanup). The existing real-profile fixture omits `baseURL` and now checks model discovery, inference with account fallback and usage requests against the canonical default. `git diff --check` is clean.
+
+## Unified migration of the official gateway (2026-10-14)
+
+This supersedes the Google-only correction above. The legacy official base is now migrated before model discovery, every inference protocol and usage requests. The plain and volatile schemas share a self-contained transform that also survives settings-schema serialization. Raw callers receive the same migration through URL validation, catalog construction and metadata conversion. Custom gateways retain their configured addresses. Legacy section providers also rewrite saved aliases on startup and document updates, using revision checks to preserve concurrent changes; model requests already use the new gateway while persistence completes.
+
+Three regressions cover old composition entries and stored settings with the legacy gateway permanently unavailable, actual loopback streams for all four protocols, usage through the real RPC codec, rewriting saved settings, custom gateways and serialized schema callbacks. Installed profile fixtures verify that submitting an old address saves the canonical value without remounting. Installed legacy fixtures start with an old address alongside account recovery and confirm that the managed settings file is migrated.
+
+Validation: `npm run compile` and `npm run test:ci` pass **706 tests in 44 files**, both TypeScript projects, and all **65 shipped files** matching an independent rebuild. `DSH_COMPAT_CONCURRENCY=3 npm run test:compat -- v015-rc1 v016-alpha1 v020-rc2` passes all three installed hosts (**13.2 seconds** including cleanup), covering both legacy persisted sections and modern profile writes. The modern profile migration also passed on v017-rc2 and v021-alpha1 before the legacy persistence addition. `git diff --check` is clean.
+
+## Release validation: 0.1.23 (2026-10-14)
+
+The package and root lockfile now both declare stable version `0.1.23`. The release includes Google protocol support, the canonical official gateway and persisted legacy-address migration, account credential-write race protection, current-account ordering, and the settings improvements since `0.1.22`.
+
+`DSH_COMPAT_CONCURRENCY=4 npm run verify` passes **706 core tests in 44 files**, both TypeScript projects, **65 matching build artifacts**, and all **ten installed DSH hosts**. The full host matrix completed before cleanup in **103.9 seconds**. npm Git, fresh pnpm 11.7.0 Git and packed-package installation, ESM loading and public consumer type checks all pass without dependency build approvals; the installation suite took **51.1 seconds**, including cleanup. `git diff --check` is clean. These release checks use isolated profiles, fixture credentials and local inference gateways.

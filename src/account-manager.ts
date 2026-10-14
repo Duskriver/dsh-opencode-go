@@ -9,6 +9,17 @@ import { waitWithSignal } from './request-control.ts'
 
 export const ACCOUNT_RECOVERY_TIMEOUT_MS = 30_000
 
+/** A stopped caller must not release a credential write that is still running. */
+const credentialWrites = new Map<string, Promise<void>>()
+
+function serializeCredentialWrite<T>(ref: string, write: () => Promise<T>): Promise<T> {
+  const pending = (credentialWrites.get(ref) ?? Promise.resolve()).then(write)
+  const settled = pending.then(() => {}, () => {})
+  credentialWrites.set(ref, settled)
+  void settled.then(() => { if (credentialWrites.get(ref) === settled) credentialWrites.delete(ref) })
+  return pending
+}
+
 /** Serialize account commands and recover the same durable operations for one profile. */
 export class GoAccountManager {
   private connection: { settings: AccountSettingsWriter; credentials: Pick<CredentialProvider, 'describe' | 'unset'> & Partial<Pick<CredentialProvider, 'set'>>; cancel: AbortController } | undefined
@@ -107,9 +118,20 @@ export class GoAccountManager {
       throw new Error('Account identity changed while recovery was pending')
     }
     if (operation.kind === 'add' && !info.configured) return 'unknown' // Value is unrecoverable; the visible row allows key replacement.
-    if (operation.kind === 'remove' && ownsAccountCredential(operation.account) && info.configured) {
-      if (!info.writable) throw new Error('Credential is read-only')
-      await wait(() => connection.credentials.unset(credentialRef(ref)))
+    if (operation.kind === 'remove' && ownsAccountCredential(operation.account)) {
+      // Drain actual writes across reconnects/manager instances before judging
+      // absence. The durable remove stays until this lane and cleanup settle.
+      await wait(() => serializeCredentialWrite(ref, async () => {
+        timeout.signal.throwIfAborted()
+        if (!get()) throw new Error('Account removal changed while waiting for credentials')
+        const latest = await wait(() => connection.credentials.describe(credentialRef(ref)))
+        timeout.signal.throwIfAborted()
+        if (!get()) throw new Error('Account removal changed while describing credentials')
+        if (latest.configured) {
+          if (!latest.writable) throw new Error('Credential is read-only')
+          await connection.credentials.unset(credentialRef(ref))
+        }
+      }))
     }
     let dropLegacyRef: string | undefined
     if (operation.kind === 'add' && state.value.accounts == null) {
@@ -169,6 +191,8 @@ export class GoAccountManager {
           const { value } = target
           const operations = value.accountOperations ?? []
           if (operations.some(entry => JSON.stringify(entry) === JSON.stringify(operation))) return 'applied'
+          if (operation.kind === 'add' && operations.some(entry => entry.kind === 'remove'
+            && entry.account.apiKeyEnv === operation.account.apiKeyEnv)) return 'rejected'
           const next = [...operations.filter(entry => entry.account.apiKeyEnv !== operation.account.apiKeyEnv), operation]
           assertAccountOperations(next)
           try {
@@ -183,9 +207,10 @@ export class GoAccountManager {
         let target = read()
         let { value } = target
         if (command.kind === 'add') {
-          const resumed = value.accountOperations?.find(entry => entry.kind === 'add' && entry.account.name === command.name.trim())
-          const id = resumed?.account.id ?? command.id
+          const id = command.id
           const ref = ACCOUNT_REF_PREFIX + id.toUpperCase()
+          const resumed = value.accountOperations?.find(entry => entry.id === id || entry.account.apiKeyEnv === ref)
+          if (resumed && (resumed.kind !== 'add' || resumed.id !== id || resumed.account.id !== id)) return 'rejected'
           // A retried RPC with the same ID is idempotent after its journal has cleared.
           if (value.accounts?.some(account => account.id === id) && !value.accountOperations?.some(entry => entry.id === id)) return 'applied'
           const visible = visibleAccountsOf(value).filter(account => account.apiKeyEnv !== ref)
@@ -199,7 +224,15 @@ export class GoAccountManager {
           const started = await begin(operation)
           if (started !== 'applied') return started
           if (!connection.credentials.set) return 'rejected'
-          await wait(() => connection.credentials.set!(credentialRef(ref), command.key.trim()))
+          const stored = await wait(() => serializeCredentialWrite(ref, async () => {
+            const value = read().value
+            if (!value.accountOperations?.some(entry => JSON.stringify(entry) === JSON.stringify(operation))) return false
+            const occupied = accountsOf(value).find(account => account.id === id || account.apiKeyEnv === ref)
+            if (occupied && (occupied.id !== id || occupied.apiKeyEnv !== ref)) return false
+            await connection.credentials.set!(credentialRef(ref), command.key.trim())
+            return true
+          }))
+          if (!stored) return 'rejected'
           read()
           for (let attempt = 0; attempt < 3; attempt++) {
             try { return await this.complete(connection, operation, true, timeout.signal) }
@@ -216,8 +249,18 @@ export class GoAccountManager {
           if (!connection.credentials.set || value.accountOperations?.some(entry => entry.kind === 'remove' && entry.account.apiKeyEnv === command.ref)) return 'rejected'
           const info = await describe(command.ref)
           if (info?.writable === false) return 'rejected'
-          await wait(() => connection.credentials.set!(credentialRef(command.ref), command.key.trim()))
-          read()
+          const canReplace = () => {
+            const value = read().value
+            return visibleAccountsOf(value).some(entry => entry.id === account.id && entry.apiKeyEnv === command.ref)
+              && !value.accountOperations?.some(entry => entry.kind === 'remove' && entry.account.apiKeyEnv === command.ref)
+          }
+          const stored = await wait(() => serializeCredentialWrite(command.ref, async () => {
+            // describe() and a preceding write can both outlive the account.
+            if (!canReplace()) return false
+            await connection.credentials.set!(credentialRef(command.ref), command.key.trim())
+            return true
+          }))
+          if (!stored || !canReplace()) return 'rejected'
           this.trigger()
           return 'applied'
         }

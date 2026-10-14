@@ -35,7 +35,7 @@ export declare function readConfig(config: LiveConfig): OpencodeGoConfig;
  * the composition layer and as the settings section's write validator, so a
  * bad URL fails where it is written, never at first request.
  * @param raw - the configured base URL.
- * @returns the normalized base URL without trailing slashes.
+ * @returns the current gateway base URL without trailing slashes.
  */
 export declare function assertBaseURL(raw: string): string;
 /**

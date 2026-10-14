@@ -20,11 +20,11 @@ globalThis.fetch = async (input, init) => {
     } },
   })
   const authorization = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined)).get('authorization')
-  if (url === 'https://opencode.ai/zen/go/v1/usage') {
+  if (url === 'https://opencode.ai/inference/go/v1/usage') {
     assert.equal(authorization, 'Bearer backup-fixture-key', 'usage follows the adopted account')
     return Response.json({ usage })
   }
-  if (url === 'https://opencode.ai/zen/go/v1/chat/completions') {
+  if (url === 'https://opencode.ai/inference/go/v1/chat/completions') {
     inferenceKeys.push(authorization)
     if (authorization === 'Bearer fixture-key') {
       return Response.json({ error: { message: 'Monthly usage limit exceeded' } }, { status: 429 })
@@ -37,7 +37,7 @@ globalThis.fetch = async (input, init) => {
     return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n',
       { headers: { 'content-type': 'text/event-stream' } })
   }
-  assert.equal(url, 'https://opencode.ai/zen/go/v1/models')
+  assert.equal(url, 'https://opencode.ai/inference/go/v1/models')
   return Response.json({ data: [{ id: 'compat-model' }] })
 }
 try {
@@ -70,6 +70,11 @@ try {
   const view = () => ctx.settings.describe().find(row => row.ns === 'opencode-go')
   assert.ok(view(), 'OpenCode Go must be exposed in the new profile settings')
   assert.equal(view().autoGenerate, false, 'the custom page owns these settings')
+  assert.equal(view().value.baseURL, 'https://opencode.ai/inference/go/v1')
+  await ctx.settings.update('opencode-go', { baseURL: 'https://opencode.ai/zen/go/v1/' })
+  assert.equal(view().value.baseURL, 'https://opencode.ai/inference/go/v1', 'old official settings migrate for every request')
+  assert.equal(entry.options.config.baseURL, 'https://opencode.ai/inference/go/v1', 'profile writes persist the current gateway')
+  assert.equal(entry.fiber, fiber, 'gateway migration preserves the running plugin')
   assert.equal(view().value.usageDisplay, 'auto', 'usage display keeps the previous default')
   assert.equal(view().value.proxyURL, '', 'proxy defaults to the host network path')
   for (const proxyURL of ['http://127.0.0.1:7890', 'https://127.0.0.1:7890', 'socks5://user:pass@127.0.0.1:1080']) {

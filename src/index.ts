@@ -17,7 +17,7 @@
  *   config:
  *     enabled: true                     # false withdraws the route; the plugin stays mounted
  *     apiKeyEnv: OPENCODE_API_KEY       # default
- *     baseURL: https://opencode.ai/zen/go/v1   # default
+ *     baseURL: https://opencode.ai/inference/go/v1   # default
  *     refreshMinutes: 60                # live catalog re-resolution interval
  * ```
  *

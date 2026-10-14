@@ -103,6 +103,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly transport;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
+    /** Reference updates invalidate rejections from attempts using an older key. */
+    private readonly credentialVersions;
     /** Monotonic sequence of the latest request this adapter started. */
     private callSeq;
     constructor(options: OpencodeGoAdapterOptions);

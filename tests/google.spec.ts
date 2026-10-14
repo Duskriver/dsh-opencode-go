@@ -4,7 +4,7 @@ import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { discoverSettingsModels } from '../src/catalog.ts'
-import { readModelMetadata } from '../src/model-metadata.ts'
+import { modelBaseURL, readModelMetadata } from '../src/model-metadata.ts'
 import { streamSimple } from '../src/google-generative-ai.ts'
 import type { Model } from '../src/sdk-types.ts'
 import { configOf } from './config-of.ts'
@@ -21,6 +21,19 @@ const adapters: OpencodeGoAdapter[] = []
 afterEach(async () => {
   await Promise.all(adapters.splice(0).map(adapter => adapter.dispose()))
   await closeMockGateways()
+})
+
+it('uses the canonical gateway for every protocol when reading the public legacy alias', () => {
+  const legacy = 'https://opencode.ai/zen/go/v1'
+  const current = 'https://opencode.ai/inference/go/v1'
+  expect(modelBaseURL('google-generative-ai', legacy + '/')).toBe(current)
+  expect(readModelMetadata(metadata, legacy, new Map()).models.get(id)?.baseUrl).toBe(current)
+  expect(modelBaseURL('google-generative-ai', current)).toBe(current)
+  expect(modelBaseURL('google-generative-ai', 'https://gateway.example/zen/go/v1')).toBe('https://gateway.example/zen/go/v1')
+  expect(modelBaseURL('google-generative-ai', 'http://127.0.0.1:1234/v1')).toBe('http://127.0.0.1:1234/v1')
+  expect(modelBaseURL('openai-completions', legacy)).toBe(current)
+  expect(modelBaseURL('openai-responses', legacy)).toBe(current)
+  expect(modelBaseURL('anthropic-messages', legacy)).toBe('https://opencode.ai/inference/go')
 })
 
 async function setup(overrides: Parameters<typeof configOf>[1] = {}) {

@@ -132,8 +132,14 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
     const timer = setInterval(() => { if (document.visibilityState !== 'hidden') actions.loadAccounts() }, 60_000)
     return () => { clearInterval(timer) }
   }, [actions.loadAccounts])
-  const start = (next: Editor, label = '') => { setEditor(next); setName(label); setKey('') }
-  const cancel = () => { setEditor(null); setName(''); setKey('') }
+  const start = (next: Editor, label = '') => {
+    if (next.kind === 'add') actions.resetAddition?.()
+    setEditor(next); setName(label); setKey('')
+  }
+  const cancel = () => {
+    if (editor?.kind === 'add') actions.resetAddition?.()
+    setEditor(null); setName(''); setKey('')
+  }
   // A row editor renders inside its row; when the row leaves the list — a
   // remove whose entry went but whose key cleanup did not — the editor would
   // strand itself with no visible Cancel and no Add button. Drop it instead.

@@ -87,7 +87,7 @@ socks5://127.0.0.1:1080
 
 | 配置项 | 用途 |
 | --- | --- |
-| `baseURL` | OpenCode Go 网关地址，默认 `https://opencode.ai/zen/go/v1` |
+| `baseURL` | 模型列表、对话发送和额度查询共用的 OpenCode Go 网关前缀，默认 `https://opencode.ai/inference/go/v1` |
 | `usageDisplay` | 额度显示模式：`auto`、`always` 或 `off` |
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
@@ -98,6 +98,8 @@ socks5://127.0.0.1:1080
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |
 | `requestPreparationTimeoutMs` | 目录查询及每次尝试的凭据、图片准备时限，默认 60000 毫秒 |
 | `requestTimeoutMs` | 一次发送的完整时限，包含目录查询、账号切换和流式输出，默认 1800000 毫秒；预先准备的调用从发送时计时 |
+
+`baseURL` 后会按用途拼接路径：模型列表使用 `GET /models`，Gemini 发送使用 `POST /models/{model}:streamGenerateContent`，额度查询使用 `GET /usage`。列表可访问不代表所有推理接口都可用。读取旧官方地址 `https://opencode.ai/zen/go/v1` 时，插件会统一迁移为新地址，模型列表、所有协议的发送和额度查询都使用新网关；保存设置时也会写入新地址。因此运行不依赖旧网关继续服务。自定义网关仍按配置发送。
 
 图片卸载会保留原始附件，并将请求中的旧图片替换为文字占位；调高上限不会自动恢复已卸载的历史图片。
 
