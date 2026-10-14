@@ -83,7 +83,8 @@ try {
     } else {
       await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'install-test-pnpm', private: true,
         devDependencies: consumerDevDependencies }))
-      // No allowBuilds, cached side effects, or global trust configuration.
+      await writePnpmBuildPolicy(consumer)
+      // No plugin allowBuilds entry, cached side effects, or global trust configuration.
       // Pin the same pnpm generation used by the issue #43 reporter.
       await measure('pnpm Git installation', () => npm([
         'exec', '--yes', '--package=pnpm@11.7.0', '--', 'pnpm', 'add',
@@ -99,6 +100,7 @@ try {
       await mkdir(packedConsumer)
       await writeFile(join(packedConsumer, 'package.json'), JSON.stringify({ name: 'install-test-packed', private: true,
         devDependencies: consumerDevDependencies }))
+      await writePnpmBuildPolicy(packedConsumer)
       await measure('pnpm packed npm installation', () => npm([
         'exec', '--yes', '--package=pnpm@11.7.0', '--', 'pnpm', 'add',
         '--config.strict-dep-builds=true', '--store-dir', join(scratch, 'packed-store'), tarball,
@@ -125,6 +127,16 @@ try {
       ].join('\n'))
     }
   }
+}
+
+// The Google transport SDK and protobufjs ship no-op install hooks (an echo
+// preinstall and a version-scheme notice that returns early). Deny both so the
+// strict build gate stays armed for every other dependency: nothing is approved.
+async function writePnpmBuildPolicy(consumer) {
+  await writeFile(join(consumer, 'pnpm-workspace.yaml'), [
+    'allowBuilds:',
+    '  "@google/genai": false', '  protobufjs: false', '',
+  ].join('\n'))
 }
 
 async function checkConsumerTypes(consumer, label) {

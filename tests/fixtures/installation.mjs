@@ -37,13 +37,13 @@ if (process.argv[2] === 'legacy-peer') {
   assert.equal(typeof (await import('pi-ai-peer-probe')).createProvider, 'function')
   assert.equal((await import('pi-ai-peer-probe')).normalizeContext, undefined)
 } else {
-  for (const name of ['@earendil-works/pi-ai', '@google/genai', 'protobufjs']) {
-    assert.throws(() => findPackageJSON(name, import.meta.resolve('dsh-opencode-go')), { code: 'ERR_MODULE_NOT_FOUND' })
-  }
-  // pnpm may create a workspace file, but it must not add script approvals.
-  try {
-    const workspace = await readFile(new URL('./pnpm-workspace.yaml', import.meta.url), 'utf8')
-    assert.ok(!/allowBuilds|onlyBuiltDependencies|ignoredBuiltDependencies/.test(workspace))
-  } catch (error) { if (error.code !== 'ENOENT') throw error }
+  assert.throws(() => findPackageJSON('@earendil-works/pi-ai', import.meta.resolve('dsh-opencode-go')), { code: 'ERR_MODULE_NOT_FOUND' })
+  const googleSdk = JSON.parse(await readFile(findPackageJSON('@google/genai', import.meta.resolve('dsh-opencode-go')), 'utf8'))
+  assert.equal(googleSdk.version, '2.21.0', 'the plugin must resolve its Google transport SDK')
+  // The workspace file may deny the Google SDK's no-op install hooks, but it
+  // must never approve a dependency's build scripts.
+  const workspace = await readFile(new URL('./pnpm-workspace.yaml', import.meta.url), 'utf8')
+  assert.ok(!/^onlyBuiltDependencies:/m.test(workspace) && !/:\s*true\b/.test(workspace),
+    'the workspace file must deny, never approve, dependency build scripts')
 }
 console.log('PASS: installed artifacts, ESM loading and bundled SDK without dependency build approvals')
