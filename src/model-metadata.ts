@@ -1,5 +1,6 @@
 /** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
 import type { Api, Model, ModelCost, ModelThinkingLevel } from './sdk-types.ts'
+import { usesGoogleThinkingLevel } from 'opencode-go-pi-ai/api/google-shared'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, THINKING_LEVELS, supportsThinkingBudget, unsupportedThinkingLevels, withGatewayReasoning } from './reasoning.ts'
@@ -81,6 +82,10 @@ function reasoningControls(id: string, api: Api, metadata: Record<string, unknow
 /** Common two-part public suffixes; the exhaustive public-suffix list is deliberately out of scope. */
 const MULTI_LABEL_SUFFIXES = new Set(['com', 'co', 'org', 'net', 'gov', 'edu', 'ac'])
 
+/** Suffixes whose subdomains are unrelated tenants, not one site: hosts on them only match exactly. */
+const SHARED_HOSTING_SUFFIXES = new Set(['github.io', 'gitlab.io', 'pages.dev', 'vercel.app', 'netlify.app',
+  'web.app', 'firebaseapp.com', 'appspot.com', 'workers.dev', 'deno.dev', 'herokuapp.com', 'azurewebsites.net'])
+
 function registrableDomain(hostname: string): string {
   const labels = hostname.toLowerCase().split('.')
   if (labels.length <= 2) return labels.join('.')
@@ -101,7 +106,12 @@ function sameRegistrableDomain(candidate: string, gateway: string): boolean {
     if (a === '' || b === '') return false
     // IP literals have no registrable domain: only the same address matches.
     if (isIpLiteral(a) || isIpLiteral(b)) return a === b
-    return registrableDomain(a) === registrableDomain(b)
+    const candidateDomain = registrableDomain(a)
+    const gatewayDomain = registrableDomain(b)
+    // Shared-hosting suffixes host unrelated tenants under the suffix itself,
+    // so their registrable domain names no single site: only exact hosts match.
+    if (SHARED_HOSTING_SUFFIXES.has(candidateDomain) || SHARED_HOSTING_SUFFIXES.has(gatewayDomain)) return a === b
+    return candidateDomain === gatewayDomain
   } catch {
     return false
   }
@@ -119,6 +129,12 @@ function googleSurface(recorded: string | undefined, gateway: string): string {
   if (url.search !== '' || url.hash !== '') throw new Error('the recorded provider endpoint must not carry a query or fragment')
   if (!sameRegistrableDomain(recorded, gateway)) {
     throw new Error("the recorded Google endpoint " + recorded + " is outside the configured gateway's domain")
+  }
+  // The domain check above proved the gateway URL parses. A cleartext surface
+  // must not downgrade a TLS-configured gateway; http stays available for the
+  // http local gateways the tests and self-hosters use.
+  if (url.protocol !== 'https:' && new URL(gateway).protocol === 'https:') {
+    throw new Error('the recorded Google endpoint must be https while the configured gateway uses https')
   }
   // Rebuild from the parsed URL so catalog metadata cannot smuggle credentials
   // into the baseUrl the transport sends requests to.
@@ -201,7 +217,7 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
             ? [{ ...rates(item), inputTokensAbove: tier.size }] : []
         }).sort((a, b) => a.inputTokensAbove - b.inputTokensAbove)
       }
-      models.set(id, withGatewayReasoning({
+      const entry = withGatewayReasoning({
         id,
         name: typeof metadata.name === 'string' && metadata.name.length > 0 ? metadata.name : id,
         provider: 'opencode-go', api,
@@ -215,7 +231,16 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
         contextWindow: positiveInteger(limit.context, 'context limit'),
         maxTokens: positiveInteger(limit.output, 'output limit'),
         cost, compat,
-      }))
+      })
+      // pi-ai encodes Google efforts as native thinking levels only for IDs it
+      // recognizes (`usesGoogleThinkingLevel`); every other ID serializes all
+      // efforts to the same budget fallback. Those models expose no effort
+      // choices rather than controls that cannot take effect; Default keeps
+      // the provider's own thinking behavior either way.
+      // The api check narrows to the Google wire before the SDK type cast.
+      models.set(id, entry.api === 'google-generative-ai' && !usesGoogleThinkingLevel(entry as Model<'google-generative-ai'>)
+        ? { ...entry, thinkingLevelMap: unsupportedThinkingLevels() }
+        : entry)
     } catch (error) {
       errors.set(id, error instanceof Error ? error.message : String(error))
     }

@@ -48,6 +48,7 @@ import { assertBaseURL, DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, DEFAULT_REQUEST_
 import { GoCatalogManager } from './catalog-manager.ts'
 import { withProtocolOverride } from './protocol-policy.ts'
 import { accountFallback, isGatewayKeyRejection } from './account-policy.ts'
+import { googleFailureCode, modelForReasoningIntent } from './google-protocol.ts'
 import { ProxyTransport } from './proxy.ts'
 import { GatewayDiagnostics } from './gateway-diagnostics.ts'
 import { withConsentGuidance } from './gateway-error.ts'
@@ -501,13 +502,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
         callId: trace.callId, attempt: trace.attempts,
         onResponse: (status, requestId) => trace.response(status, requestId),
       })
-      const events = catalog.provider.streamSimple(model, normalizeContext(context), {
+      const intent = reasoningIntent(model, reasoning)
+      const events = catalog.provider.streamSimple(modelForReasoningIntent(model, intent), normalizeContext(context), {
         apiKey,
         // The Google adapter rejects custom fetch (the official Google SDK has no
         // injection point): those calls run on the ambient transport, so proxyURL
         // and call tracing do not apply to them.
         ...model.api === 'google-generative-ai' ? {} : { fetch: diagnostics.fetch },
-        ...reasoningRequest(reasoningIntent(model, reasoning)),
+        ...reasoningRequest(intent),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
@@ -542,7 +544,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
           if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
             const failure = chunk.reason.failure
             const message = withConsentGuidance(await waitWithSignal(() => diagnostics.failureMessage(failure.message), watchdog.signal))
-            const code = await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal)
+            const code = googleFailureCode(model.api,
+              await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal), failure.message)
             yield { ...chunk, reason: options.signal?.aborted
               ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }
               : { ...chunk.reason, failure: { ...chunk.reason.failure, message, code } } }
