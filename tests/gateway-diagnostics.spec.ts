@@ -46,6 +46,22 @@ it.each([
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
 })
 
+it('quotes the request reservation with an opaque 400 and points at compaction', async () => {
+  const reserve = { maxTokens: 62_500, contextWindow: 1_000_000 }
+  const diagnostics = new GatewayDiagnostics({ provider: 'dsh-opencode-go', model, apiKey: 'fixture-key',
+    request: reserve, fetch: async () => Response.json({ model }, { status: 400 }) })
+  await diagnostics.fetch('https://gateway.example/chat/completions')
+  const message = await diagnostics.failureMessage('400 status code (no body)')
+  expect(message).toContain('max_tokens=62500')
+  expect(message).toContain('1000000-token window')
+  expect(message).toContain('/compact')
+  // Without a reservation to quote, the message stays factual.
+  const bare = new GatewayDiagnostics({ provider: 'dsh-opencode-go', model, apiKey: 'fixture-key',
+    fetch: async () => Response.json({ model }, { status: 400 }) })
+  await bare.fetch('https://gateway.example/chat/completions')
+  expect(await bare.failureMessage('400 status code (no body)')).not.toContain('max_tokens=')
+})
+
 it('saves bounded HTTP evidence only when opted in, omitting request content and secrets', async () => {
   const directory = join(process.env.DSH_HOME!, 'diagnostics')
   vi.stubEnv('DSH_OPENCODE_GO_DEBUG_DIR', directory)

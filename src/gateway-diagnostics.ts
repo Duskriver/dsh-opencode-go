@@ -110,6 +110,8 @@ export class GatewayDiagnostics {
     directory?: string
     callId?: string
     attempt?: number
+    /** Reservation this attempt sent, quoted when the gateway rejects opaquely. */
+    request?: { maxTokens: number; contextWindow: number }
     onResponse?: (status: number, requestId?: string) => void
   }) {
     this.secrets = [options.apiKey]
@@ -189,6 +191,16 @@ export class GatewayDiagnostics {
     }
     const presence = body.bytes > 0 ? 'nonempty' : body.readFailed ? 'unavailable' : 'empty'
     message += ` [HTTP ${status}; response body: ${presence}${body.truncated ? ', truncated' : ''}${body.readFailed ? ', incomplete read' : ''}]`
+    // A rejected request that leaves no message is opaque to whoever reads it.
+    // Quote the reservation this attempt sent: a gateway that accounts
+    // `prompt + max_tokens` against its own window rejects exactly there, and
+    // only the user can decide between compacting and a smaller answer budget.
+    if (this.options.request !== undefined && (status === 400 || status === 413 || status === 422)) {
+      const { maxTokens, contextWindow } = this.options.request
+      message += ` [request reserved max_tokens=${maxTokens} of a ${contextWindow}-token window;`
+        + ' a gateway that accounts prompt + max_tokens against its own window may reject without a reason here.'
+        + ' Compact the context (/compact) or lower this model\'s "max output" in the plugin settings, then retry]'
+    }
     if (this.options.directory?.trim()) {
       try {
         const directory = resolve(this.options.directory)

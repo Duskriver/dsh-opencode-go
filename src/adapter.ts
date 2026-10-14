@@ -54,6 +54,7 @@ import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { reasoningChoices, reasoningIntent, reasoningRequest } from './reasoning.ts'
 import { accountsOf, accountRefOf, type GoAccountSwitch } from './accounts.ts'
+import { requestMaxTokens } from './request-budget.ts'
 import { waitWithSignal } from './request-control.ts'
 import { CallTrace, type GoCallTrace } from './call-trace.ts'
 import { ImagePayloadLease } from './conversion/image-pool.ts'
@@ -221,7 +222,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: string,
     signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    return this.modelInfo((await this.modelSnapshot(model, signal)).model)
+    const snapshot = await this.modelSnapshot(model, signal)
+    return this.modelInfo(snapshot.model, snapshot.config.modelLimits)
   }
 
   /** Capture limits and protocol before discovery can yield to a settings update. */
@@ -251,13 +253,24 @@ export class OpencodeGoAdapter extends LlmAdapter {
     const generation = this.options.accountGeneration?.() ?? 0
     const snapshot = { generation, ...await this.modelSnapshot(model, signal) }
     return {
-      model: this.modelInfo(snapshot.model),
+      model: this.modelInfo(snapshot.model, snapshot.config.modelLimits),
       stream: options => this.streamWithSnapshot(options, snapshot, seq),
     }
   }
 
-  /** Describe one model: capacities plus the reasoning levels it actually offers. */
-  private modelInfo(model: Model<Api>): LlmResolvedModelInfo {
+  /**
+   * Describe one model: capacities, the answer reservation a request makes, and
+   * the reasoning levels it actually offers.
+   *
+   * `defaultMaxTokens` must be the same value `streamAttempt` reserves when the
+   * caller omits one: the host derives its compaction budget from
+   * `defaultMaxTokens`, so a smaller number here than the request actually
+   * reserves would let the host wait for a pressure the gateway rejects first.
+   * @param model - resolved model, with settings overrides already applied.
+   * @param limits - per-model settings overrides for this configuration.
+   * @returns the host-facing model description.
+   */
+  private modelInfo(model: Model<Api>, limits: OpencodeGoModelLimits): LlmResolvedModelInfo {
     const reasoning: Pick<LlmResolvedModelInfo, 'reasoning'> = {}
     const choices = reasoningChoices(model)
     if (choices.length > 0) {
@@ -271,6 +284,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       name: model.name,
       inputModalities: [...model.input],
       context: { contextWindow: model.contextWindow },
+      defaultMaxTokens: requestMaxTokens(model, limits),
       ...reasoning,
     }
   }
@@ -437,8 +451,12 @@ export class OpencodeGoAdapter extends LlmAdapter {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
     const { config, catalog, model } = snapshot
-    const outputLimit = config.modelLimits[model.id]?.maxTokens
-    const maxTokens = outputLimit == null ? options.maxTokens : Math.min(options.maxTokens ?? outputLimit, outputLimit)
+    const provider = String(options.provider)
+    const sessionId = options.sessionId === undefined ? undefined : String(options.sessionId)
+    // The gateway accounts `prompt + max_tokens` against its own window, so the
+    // reservation is a bounded share of that window, never the model's output
+    // ceiling.
+    const maxTokens = requestMaxTokens(model, config.modelLimits, options.maxTokens)
     const reasoning = this.resolveReasoningLevel(model, options.reasoningEffort)
 
     const consumer = new AbortController()
@@ -494,10 +512,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
       const diagnostics = new GatewayDiagnostics({
-        provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
+        provider, model: model.id, apiKey, proxyURL: config.proxyURL,
         fetch: this.transport.forProxy(config.proxyURL),
         directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
         callId: trace.callId, attempt: trace.attempts,
+        request: { maxTokens, contextWindow: model.contextWindow },
         onResponse: (status, requestId) => trace.response(status, requestId),
       })
       const events = catalog.provider.streamSimple(model, normalizeContext(context), {
@@ -506,13 +525,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
         ...reasoningRequest(reasoningIntent(model, reasoning)),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
-        ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+        ...sessionId === undefined ? {} : { sessionId },
         signal: watchdog.signal,
         // Harness-owned request identity: the gateway refuses requests without
         // `x-opencode-session` and profiles clients by User-Agent, and
         // attribution merges last in pi-ai's client.
         headers: {
-          'x-opencode-session': opencodeSessionValue(options.sessionId === undefined ? undefined : String(options.sessionId)),
+          'x-opencode-session': opencodeSessionValue(sessionId),
           ...attributionHeaders(),
         },
         // The agent recovery layer owns visible attempts; one adapter call is

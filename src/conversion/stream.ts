@@ -106,7 +106,25 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
         }
       }
       return { kind: 'stop' }
-    case 'length': return { kind: 'max-tokens' }
+    case 'length':
+      // Stopping on the output cap with nothing produced means this request had
+      // no room for an answer at all: pi-ai floors its reservation at one token
+      // once its estimate fills the window, and a one-token answer comes back
+      // empty. Reporting it as a failure with the remedy beats letting the
+      // harness treat an empty turn as a completed one.
+      if (message.content.length === 0) {
+        return {
+          kind: 'error',
+          failure: {
+            message: `model "${message.model}" produced no content at the output cap`
+              + `${contextWindow === undefined ? '' : ` in a ${contextWindow}-token window`}`
+              + ': the prompt leaves no room for an answer. Compact the context (/compact) or lower'
+              + ' this model\'s "max output" in the plugin settings, then retry',
+            code: 'INVALID_REQUEST',
+          },
+        }
+      }
+      return { kind: 'max-tokens' }
     case 'toolUse': return { kind: 'tool-calls' }
     case 'pending': return {
       kind: 'error',

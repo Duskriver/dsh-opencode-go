@@ -128,7 +128,18 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
         model: LlmResolvedModelInfo;
         stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>;
     }>;
-    /** Describe one model: capacities plus the reasoning levels it actually offers. */
+    /**
+     * Describe one model: capacities, the answer reservation a request makes, and
+     * the reasoning levels it actually offers.
+     *
+     * `defaultMaxTokens` must be the same value `streamAttempt` reserves when the
+     * caller omits one: the host derives its compaction budget from
+     * `defaultMaxTokens`, so a smaller number here than the request actually
+     * reserves would let the host wait for a pressure the gateway rejects first.
+     * @param model - resolved model, with settings overrides already applied.
+     * @param limits - per-model settings overrides for this configuration.
+     * @returns the host-facing model description.
+     */
     private modelInfo;
     /** Validate an explicit effort against the model's own levels, without clamping. */
     private resolveReasoningLevel;

@@ -13,6 +13,11 @@ export declare class GatewayDiagnostics {
         directory?: string;
         callId?: string;
         attempt?: number;
+        /** Reservation this attempt sent, quoted when the gateway rejects opaquely. */
+        request?: {
+            maxTokens: number;
+            contextWindow: number;
+        };
         onResponse?: (status: number, requestId?: string) => void;
     });
     private redact;

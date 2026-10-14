@@ -87,6 +87,7 @@ Search **Available models** by name or ID, or filter by **New in 7 days**, **Cus
 
 - Each model's switch controls its visibility in the conversation picker and takes effect immediately.
 - Select a model to inspect its catalog context window, maximum output, and input modalities. Save limit overrides to apply them; empty values use defaults.
+- Every request reserves output tokens of its own: the gateway accounts `prompt + reserved output`, so a larger reservation leaves a smaller prompt. The default is the **lower of 32,768 and a sixteenth of the context window** (never above the model's declared maximum output), which keeps both long conversations and ordinary answers usable. A **maximum output** override raises that reservation and makes automatic compaction earlier; leaving it empty uses the default above.
 - Reasoning models offer the applicable switch, effort, or token budget options. Budget-based models also accept custom budgets that become available after saving.
 
 Streaming, reasoning, tool calls, and image input depend on model capabilities. Input modalities shown in Settings come from online model metadata; this plugin currently converts and forwards only image attachments.
@@ -118,6 +119,8 @@ Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reope
 **What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. An added account whose key was not saved can be repaired with a key or removed. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving) for recovery behavior.
 
 **Why does an old conversation need its model selected again?** When upgrading from `0.1.16` or earlier, select **DSH OpenCode Go** again in existing conversations or Agent presets. Manual configurations use `provider: dsh-opencode-go`.
+
+**Why does a long conversation fail every time with `400 status code (no body)`?** The gateway may reject a request without a reason. When the failure mentions `request reserved max_tokens=… of a …-token window`, that prompt has grown close to the model window: the gateway accounts `prompt + reserved output` and rejects there, and the plugin cannot recalculate the gateway's own limit. Compact the context (`/compact`) or lower that model's **maximum output** in Settings, then retry; the conversation itself is intact. A "produced no content at the output cap" failure means the same thing, confirmed by the model: that request had no room left for an answer.
 
 **Which hosts are verified?** Installed compatibility covers ten host versions from `0.1.5-rc.1` through `0.2.1-alpha.1`. Later versions need verification. Developer messages, dynamic tool additions/removals, and deferred tool loading are explicitly rejected; see [development and compatibility](docs/development.md).
 

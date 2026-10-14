@@ -35,6 +35,34 @@ it.each([undefined, 8192, 512])('caps explicit and default request output (%s)',
   expect(body.max_tokens ?? body.max_completion_tokens).toBe(Math.min(requested ?? 1024, 1024))
 })
 
+it('reserves a share of the window instead of the model\'s full output limit', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  gateway.pushCompletions({ events: textEvents })
+  const config = configOf(gateway.url)
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+  for await (const chunk of adapter.stream({
+    provider: 'dsh-opencode-go', model: 'deepseek-v4.1-flash', messages: [],
+  })) void chunk
+  // The catalog advertises 262,144 tokens of context and 131,072 of output; a
+  // request that reserved the latter would leave the prompt only half a window.
+  const body = gateway.bodies[0] as Record<string, number>
+  expect(body.max_tokens ?? body.max_completion_tokens).toBe(Math.floor(262_144 / 16))
+})
+
+it('reports the same reservation the request sends, so host pressure math stays aligned', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  gateway.pushCompletions({ events: textEvents })
+  const config = configOf(gateway.url)
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+  const info = await adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')
+  expect(info.defaultMaxTokens).toBe(Math.floor(262_144 / 16))
+  for await (const chunk of adapter.stream({
+    provider: 'dsh-opencode-go', model: 'deepseek-v4.1-flash', messages: [],
+  })) void chunk
+  const body = gateway.bodies[0] as Record<string, number>
+  expect(body.max_tokens ?? body.max_completion_tokens).toBe(info.defaultMaxTokens)
+})
+
 it('retains last known online metadata when limits change during an outage', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody(['union-alpha']) })
   let config = configOf(gateway.url)
