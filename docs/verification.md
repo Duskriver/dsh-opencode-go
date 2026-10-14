@@ -881,3 +881,9 @@ Validation: `npm run compile` and `npm run test:ci` pass **706 tests in 44 files
 The package and root lockfile now both declare stable version `0.1.23`. The release includes Google protocol support, the canonical official gateway and persisted legacy-address migration, account credential-write race protection, current-account ordering, and the settings improvements since `0.1.22`.
 
 `DSH_COMPAT_CONCURRENCY=4 npm run verify` passes **706 core tests in 44 files**, both TypeScript projects, **65 matching build artifacts**, and all **ten installed DSH hosts**. The full host matrix completed before cleanup in **103.9 seconds**. npm Git, fresh pnpm 11.7.0 Git and packed-package installation, ESM loading and public consumer type checks all pass without dependency build approvals; the installation suite took **51.1 seconds**, including cleanup. `git diff --check` is clean. These release checks use isolated profiles, fixture credentials and local inference gateways.
+
+## Windows Google bridge loader follow-up (2026-10-14)
+
+The first release CI run failed ten Google/proxy source tests on both Windows Node versions. Vite passes normalized forward-slash module IDs, whereas Node's `fileURLToPath` returns native Windows separators, so the exact-path comparison missed both Google substitutions in the test loader. Artifact freshness, installation checks and the installed-host matrix passed on that candidate.
+
+The shared bridge now normalizes separators, optional drive-prefix slashes and query suffixes before comparing module identities. Eight regressions cover Windows SDK/adapter paths, UNC and Unix IDs, and exclusion of other directories, drives and SDK entries. `npm run test:ci` now passes **714 tests in 45 files**, and the **65 built artifacts remain byte-identical**. The ten-host and npm/pnpm checks above exercised those same runtime artifacts.

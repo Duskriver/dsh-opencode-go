@@ -8,6 +8,12 @@ const sdk = fileURLToPath(import.meta.resolve('@google/genai'))
 const adapter = fileURLToPath(import.meta.resolve('opencode-go-pi-ai/api/google-generative-ai'))
 const bridge = fileURLToPath(new URL('../src/google-fetch.ts', import.meta.url))
 
+/** Vite IDs use forward slashes on Windows, while Node returns native paths. */
+export function matchesGoogleModuleId(id, filename) {
+  const normalize = value => value.split('?')[0].replace(/\\/g, '/').replace(/^\/(?=[a-z]:\/)/i, '')
+  return normalize(id) === normalize(filename)
+}
+
 function sdkSource() {
   const manifest = JSON.parse(readFileSync(findPackageJSON('@google/genai', import.meta.url), 'utf8'))
   if (manifest.version !== '2.21.0') throw new Error('Review the Google fetch bridge before upgrading @google/genai')
@@ -34,9 +40,9 @@ export function googleFetchEsbuildPlugin() {
     name: 'opencode-google-fetch',
     setup(build) {
       build.onLoad({ filter: /[/\\]@google[/\\]genai[/\\]dist[/\\]node[/\\]index\.mjs$/ }, args =>
-        args.path === sdk ? { contents: sdkSource(), loader: 'js', resolveDir: dirname(sdk) } : undefined)
+        matchesGoogleModuleId(args.path, sdk) ? { contents: sdkSource(), loader: 'js', resolveDir: dirname(sdk) } : undefined)
       build.onLoad({ filter: /[/\\]api[/\\]google-generative-ai\.js$/ }, args =>
-        args.path === adapter ? { contents: adapterSource(), loader: 'js', resolveDir: dirname(adapter) } : undefined)
+        matchesGoogleModuleId(args.path, adapter) ? { contents: adapterSource(), loader: 'js', resolveDir: dirname(adapter) } : undefined)
     },
   }
 }
@@ -45,9 +51,8 @@ export function googleFetchVitePlugin() {
   return {
     name: 'opencode-google-fetch', enforce: 'pre',
     load(id) {
-      const path = id.split('?')[0]
-      if (path === sdk) return sdkSource()
-      if (path === adapter) return adapterSource()
+      if (matchesGoogleModuleId(id, sdk)) return sdkSource()
+      if (matchesGoogleModuleId(id, adapter)) return adapterSource()
     },
   }
 }
