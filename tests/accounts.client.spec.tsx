@@ -109,8 +109,9 @@ it.each([
   expect(await fixture.actions.addAccount('Work', 'new-secret')).toBe(true)
   const added = fixture.controller.snapshot().entries.find(entry => entry.name === 'Work')!
   expect(await fixture.actions.selectAccount(added.apiKeyEnv)).toBe(true)
-  expect(fixture.controller.snapshot().entries.map(entry => entry.apiKeyEnv)).toEqual([ref, added.apiKeyEnv])
+  expect(fixture.controller.snapshot().entries.map(entry => entry.apiKeyEnv)).toEqual([added.apiKeyEnv, ref])
   expect(await fixture.actions.selectAccount(ref)).toBe(true)
+  expect(fixture.controller.snapshot().entries.map(entry => entry.apiKeyEnv)).toEqual([ref, added.apiKeyEnv])
   expect(fixture.secrets.get(ref)).toBe('legacy-secret')
   fixture.controller.dispose()
 })
@@ -465,6 +466,24 @@ it('ships folded, and keeps every account row detail closed until its disclosure
   fireEvent.click(screen.getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
   expect(screen.getByText(new RegExp(en.usage_weekly))).toBeTruthy()
   expect(screen.getByRole('button', { name: t('accountsDetailsHide', { name: 'Primary' }) })).toBeTruthy()
+  fixture.controller.dispose()
+})
+
+it('moves a manually selected account first in one write without refreshing existing quotas', async () => {
+  const third = { id: 'c', name: 'Third', apiKeyEnv: 'ACCOUNT_C' }
+  const fixture = setup({ accounts: [...accounts, third], apiKeyEnv: 'ACCOUNT_A' })
+  fixture.secrets.set('ACCOUNT_C', 'secret-c')
+  await fixture.controller.refresh()
+  const reads = fixture.read.mock.calls.length
+  expect(await fixture.actions.selectAccount('ACCOUNT_C')).toBe(true)
+  expect(fixture.host.mutate.mock.calls.at(-1)![0]).toEqual([
+    { op: 'set', path: ['accounts'], value: [third, ...accounts] },
+    { op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_C' },
+  ])
+  expect(fixture.host.scope.getSnapshot().value?.accounts).toEqual([third, ...accounts])
+  expect(fixture.controller.snapshot().entries.map(entry => entry.apiKeyEnv)).toEqual(['ACCOUNT_C', 'ACCOUNT_A', 'ACCOUNT_B'])
+  expect(fixture.controller.snapshot().activeRef).toBe('ACCOUNT_C')
+  expect(fixture.read).toHaveBeenCalledTimes(reads)
   fixture.controller.dispose()
 })
 

@@ -50,10 +50,9 @@
 
 .body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 
-/* The panel speaks the model selector's card language: 42px rows on a raised tile,
-   and the account choice here is the user's own — a drill-down inside the popup —
-   while the fallback order stays on the Settings page. The picker is a plain list
-   of buttons marked as options, so arrow keys and Enter work without a menu host. */
+/* The account picker uses the model selector's 42px card rows. Choosing an
+   account moves it first in Settings. Plain option buttons support arrow keys
+   and Enter without a menu host. */
 .panelTitle, .panelHead { flex: none; padding: 2px 6px 0; font-size: 11.5px; line-height: 1.6; color: var(--dsw-alias-label-tertiary, currentColor); }
 .panelHead { display: flex; align-items: center; gap: 6px; }
 .panelHead strong { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary, CanvasText); }

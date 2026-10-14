@@ -109,17 +109,20 @@ try {
     { id: 'backup', name: 'Backup', apiKeyEnv: 'OPENCODE_GO_BACKUP_COMPAT_KEY' },
   ]
   await ctx.settings.mutate('opencode-go', [
-    { op: 'set', path: ['accounts'], value: accounts },
+    { op: 'set', path: ['accounts'], value: [accounts[1], accounts[0]] },
     { op: 'set', path: ['apiKeyEnv'], value: 'OPENCODE_GO_BACKUP_COMPAT_KEY' },
   ])
-  assert.deepEqual(view().value.accounts, accounts, 'account metadata persists through real profile forms')
+  assert.deepEqual(view().value.accounts, [accounts[1], accounts[0]], 'the selected account persists first through real profile forms')
   assert.equal(view().value.apiKeyEnv, 'OPENCODE_GO_BACKUP_COMPAT_KEY')
   assert.equal(entry.fiber, fiber, 'account switching preserves the running plugin')
   await ctx.settings.update('opencode-go', { autoSwitch: true })
   assert.equal(view().value.autoSwitch, true)
   await assert.rejects(ctx.settings.update('opencode-go', { accounts: [accounts[0], accounts[0]] }))
-  assert.deepEqual(view().value.accounts, accounts, 'duplicate account writes are refused')
-  await ctx.settings.update('opencode-go', { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY' })
+  assert.deepEqual(view().value.accounts, [accounts[1], accounts[0]], 'duplicate account writes are refused')
+  await ctx.settings.mutate('opencode-go', [
+    { op: 'set', path: ['accounts'], value: accounts },
+    { op: 'set', path: ['apiKeyEnv'], value: 'OPENCODE_GO_COMPAT_KEY' },
+  ])
   const beforeAdoption = view().revision
   // Observe the real write promise so assertions wait for persistence without
   // sleeping or replacing the SettingsForms implementation.
@@ -142,7 +145,7 @@ try {
     assert.equal(adoptionWrites.length, 1, 'fallback performs one real profile mutation')
     await Promise.all(adoptionWrites)
     assert.equal(view().value.apiKeyEnv, 'OPENCODE_GO_BACKUP_COMPAT_KEY', 'fallback adopts the serving account')
-    assert.deepEqual(view().value.accounts, accounts, 'adoption preserves the account order')
+    assert.deepEqual(view().value.accounts, [accounts[1], accounts[0]], 'adoption moves the serving account first')
     assert.equal(entry.fiber, fiber, 'adoption preserves the running plugin')
     const revision = view().revision
     assert.equal(revision, beforeAdoption + 1, 'adoption changes exactly one profile revision')
@@ -262,7 +265,9 @@ try {
   assert.equal(await execute({ kind: 'rename', ref: recovered.apiKeyEnv, name: 'RPC renamed' }), 'applied')
   assert.equal(await execute({ kind: 'move', ref: recovered.apiKeyEnv, toIndex: 0 }), 'applied')
   assert.equal(view().value.accounts[0].name, 'RPC renamed')
-  assert.equal(await execute({ kind: 'select', ref: recovered.apiKeyEnv }), 'applied')
+  assert.equal(await execute({ kind: 'select', ref: 'OPENCODE_GO_COMPAT_KEY' }), 'applied')
+  assert.equal(view().value.accounts[0].apiKeyEnv, 'OPENCODE_GO_COMPAT_KEY', 'manual switching moves the selected account first')
+  assert.equal(view().value.apiKeyEnv, view().value.accounts[0].apiKeyEnv)
   assert.equal(await execute({ kind: 'auto-switch', value: false }), 'applied')
   assert.equal(view().value.autoSwitch, false)
   assert.equal(await execute({ kind: 'replace-key', ref: recovered.apiKeyEnv, key: 'rpc-replaced-key' }), 'applied')

@@ -80,6 +80,13 @@ it('does not overwrite a selection made after an addition started', async () => 
   expect(f.value().accounts).toEqual([backup, account])
 })
 
+it('moves a recovered addition first when that operation still owns the selection', async () => {
+  const operation = { ...add, previousRef: backup.apiKeyEnv }
+  const f = fixture({ accounts: [backup], apiKeyEnv: backup.apiKeyEnv, accountOperations: [operation] })
+  await f.recovery.recover()
+  expect(f.value()).toEqual({ accounts: [account, backup], apiKeyEnv: account.apiKeyEnv, accountOperations: [] })
+})
+
 it('leaves shared or externally named credentials intact', async () => {
   const operation: GoAccountOperation = { ...remove, account: backup }
   const f = fixture({ accounts: [backup], apiKeyEnv: backup.apiKeyEnv, accountOperations: [operation] })

@@ -1,5 +1,5 @@
 import type { GoAccountSettlement } from './adapter.ts'
-import { accountRefOf, accountsOf, type GoAccountSwitch } from './accounts.ts'
+import { accountRefOf, accountsOf, moveAccountFirst, type GoAccountSwitch } from './accounts.ts'
 import type { OpencodeGoConfig } from './config.ts'
 
 import { accountSettingsRow, type AccountSettingsWriter } from './settings-bridge.ts'
@@ -91,8 +91,12 @@ export class GoAccountSelection {
       // before the revision-guarded write, including the stored selection.
       if (event.generation !== this.capture() || event.seq !== this.latestSeq
         || selected !== accountRefOf(event.config)) return
-      const expected = identity({ ...event.config, apiKeyEnv: event.ref })
-      const result = await settings.mutate(row.ns, [{ op: 'set', path: ['apiKeyEnv'], value: event.ref }], row.revision)
+      const accounts = [...moveAccountFirst(accountsOf(event.config), event.ref)]
+      const expected = identity({ ...event.config, accounts, apiKeyEnv: event.ref })
+      const result = await settings.mutate(row.ns, [
+        { op: 'set', path: ['accounts'], value: accounts },
+        { op: 'set', path: ['apiKeyEnv'], value: event.ref },
+      ], row.revision)
       // A committed selection invalidates in-flight requests like any settings
       // edit. Restore its notice only after confirming this exact write. No
       // pending reference can leak from a refused write into a later user edit.

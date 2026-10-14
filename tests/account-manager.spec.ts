@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { GoAccountManager } from '../src/account-manager.ts'
-import { ACCOUNT_REF_PREFIX, type AccountSettings } from '../src/accounts.ts'
+import { ACCOUNT_REF_PREFIX, accountsOf, type AccountSettings } from '../src/accounts.ts'
 import type { AccountCommand } from '../src/accounts-contract.ts'
 
 const add = (id = 'a'.repeat(32)): AccountCommand => ({ kind: 'add', id, name: id[0]!, key: `private-key-${id[0]}` })
@@ -38,6 +38,60 @@ it('serializes concurrent additions and makes a repeated addition ID idempotent'
   expect(await f.manager.execute(add())).toBe('applied')
   expect(f.credentials.set).toHaveBeenCalledTimes(2)
   expect(JSON.stringify([f.value(), f.settings.mutate.mock.calls])).not.toContain('private-key')
+})
+
+it('persists a legacy current account first without changing credentials, and is idempotent', async () => {
+  const primary = { id: 'primary', name: 'Primary', apiKeyEnv: 'PRIMARY_KEY' }
+  const third = { id: 'third', name: 'Third', apiKeyEnv: 'THIRD_KEY' }
+  const f = fixture({ accounts: [primary, backup, third], apiKeyEnv: third.apiKeyEnv })
+  await f.manager.recover()
+  expect(f.value()).toEqual({ accounts: [third, primary, backup], apiKeyEnv: third.apiKeyEnv })
+  expect(f.settings.mutate).toHaveBeenCalledTimes(1)
+  expect(f.settings.mutate).toHaveBeenCalledWith('opencode-go', [
+    { op: 'set', path: ['accounts'], value: [third, primary, backup] },
+    { op: 'set', path: ['apiKeyEnv'], value: third.apiKeyEnv },
+  ], 1)
+  await f.manager.recover()
+  expect(f.settings.mutate).toHaveBeenCalledTimes(1)
+  expect(f.credentials.describe).not.toHaveBeenCalled()
+  expect(f.credentials.set).not.toHaveBeenCalled()
+  expect(f.credentials.unset).not.toHaveBeenCalled()
+})
+
+it('keeps a competing selection when legacy order normalization loses its revision', async () => {
+  const primary = { id: 'primary', name: 'Primary', apiKeyEnv: 'PRIMARY_KEY' }
+  const f = fixture({ accounts: [primary, backup], apiKeyEnv: backup.apiKeyEnv })
+  f.settings.mutate.mockImplementationOnce(async () => {
+    f.externalEdit({ accounts: [primary, backup], apiKeyEnv: primary.apiKeyEnv })
+    return false
+  })
+  await f.manager.recover()
+  expect(f.value()).toEqual({ accounts: [primary, backup], apiKeyEnv: primary.apiKeyEnv })
+  await f.manager.recover()
+  expect(f.settings.mutate).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the selected account first in the view when legacy order cannot yet be persisted', async () => {
+  const primary = { id: 'primary', name: 'Primary', apiKeyEnv: 'PRIMARY_KEY' }
+  const f = fixture({ accounts: [primary, backup], apiKeyEnv: backup.apiKeyEnv })
+  const commit = f.settings.mutate.getMockImplementation()!
+  f.settings.mutate.mockResolvedValueOnce(false)
+  await f.manager.recover()
+  expect(f.value()).toEqual({ accounts: [primary, backup], apiKeyEnv: backup.apiKeyEnv })
+  expect(accountsOf(f.value())).toEqual([backup, primary])
+  f.settings.mutate.mockImplementation(commit)
+  await f.manager.recover()
+  expect(f.value()).toEqual({ accounts: [backup, primary], apiKeyEnv: backup.apiKeyEnv })
+  expect(f.settings.mutate).toHaveBeenCalledTimes(2)
+})
+
+it('moves a new account first when it replaces the selection of unconfigured accounts', async () => {
+  const f = fixture({ accounts: [backup], apiKeyEnv: backup.apiKeyEnv })
+  expect(await f.manager.execute(add())).toBe('applied')
+  expect(f.value().accounts).toEqual([
+    expect.objectContaining({ id: 'a'.repeat(32) }), backup,
+  ])
+  expect(f.value().apiKeyEnv).toBe(f.value().accounts?.[0]?.apiKeyEnv)
 })
 
 it('recovers the same foreground intention when metadata fails after the key is saved', async () => {

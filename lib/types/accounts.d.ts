@@ -19,7 +19,9 @@ export interface AccountSettings {
     accountOperations?: readonly GoAccountOperation[];
 }
 export declare function accountRefOf(settings: AccountSettings): string;
-/** Include an externally selected reference without rewriting existing configuration. */
+/** Promote one account while preserving every other account's relative order. */
+export declare function moveAccountFirst(accounts: readonly GoAccount[], ref: string): readonly GoAccount[];
+/** Read legacy selections as the first account until the host persists their order. */
 export declare function accountsOf(settings: AccountSettings): readonly GoAccount[];
 export declare function assertAccounts(accounts: readonly GoAccount[] | null | undefined, selectedRef?: string): void;
 /** Safe UI notice for a successful request using a fallback account. */

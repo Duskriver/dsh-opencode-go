@@ -37,9 +37,9 @@ Open **Settings → OpenCode Go → Accounts** to manage accounts:
 - Add, rename, replace keys, or remove accounts; up to 20 accounts are supported.
 - See key status, five-hour usage, and a reset countdown in each row; expand it for full usage and account actions.
 - Drag a row's handle to reorder accounts. The first row becomes current, and the order determines automatic fallback priority.
-- Click **Switch** in the conversation usage panel to select the account for subsequent requests in this profile. Fallback priority remains controlled in Settings.
+- Click **Switch** in the conversation usage panel to move the selected account first for subsequent requests in this profile. The other accounts keep their relative order.
 
-With **Automatic fallback** enabled, an exhausted quota or unusable key causes the plugin to try other accounts in order before output begins. A fallback account that starts producing output becomes current, and the usage panel shows a switch notice. Requests that have already produced output, recorded token usage, or been canceled are not automatically resent through another account.
+With **Automatic fallback** enabled, an exhausted quota or unusable key causes the plugin to try other accounts in order before output begins. A fallback account that starts producing output moves first and becomes current, and the usage panel shows a switch notice. Requests that have already produced output, recorded token usage, or been canceled are not automatically resent through another account.
 
 Keys are saved through DSH's credential service. Settings never displays an already saved key.
 

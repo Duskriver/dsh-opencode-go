@@ -36,8 +36,9 @@ export interface OpencodeGoConfig {
     modelVisibility?: Record<string, boolean>;
     /** Experimental opt-in routing; omitted/null entries follow the catalog. */
     protocolOverrides?: GoProtocolOverrides;
-    /** Credential reference: the environment variable the key resolves from. */
+    /** Legacy credential reference, kept in sync with the first/current account. */
     apiKeyEnv: string;
+    /** The first account is current; subsequent accounts are tried in order. */
     accounts?: GoAccount[] | null;
     accountOperations?: GoAccountOperation[];
     /** Try other saved accounts on quota/credential rejection before any content is emitted. */

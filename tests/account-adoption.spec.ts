@@ -37,7 +37,7 @@ const drain = async (stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]>
 }
 afterEach(closeMockGateways)
 
-/** The Host settings face an adoption writes through: editable rows, one path edit. */
+/** The Host settings face an adoption writes through: editable rows, one atomic batch. */
 function stubSettings(rows: { ns: string; revision: number; value: unknown } | { ns: string; revision: number; value: unknown }[],
   mutate = vi.fn(async () => {})) {
   return { describe: () => Array.isArray(rows) ? rows : [rows], mutate, configure: () => () => {} }
@@ -153,7 +153,10 @@ it('makes the account a fallback settled on the profile current one', async () =
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     await vi.waitFor(() => { expect(settings.mutate).toHaveBeenCalledTimes(1) })
     expect(settings.mutate).toHaveBeenCalledWith(
-      'opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' }], 7,
+      'opencode-go', [
+        { op: 'set', path: ['accounts'], value: [accounts[1], accounts[0]] },
+        { op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' },
+      ], 7,
     )
   } finally { await ctx.fiber.dispose() }
 })
@@ -166,7 +169,10 @@ it('writes through the settings namespace a legacy Host serves', async () => {
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     await vi.waitFor(() => { expect(settings.mutate).toHaveBeenCalledTimes(1) })
     expect(settings.mutate).toHaveBeenCalledWith(
-      'llm-opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' }], 4,
+      'llm-opencode-go', [
+        { op: 'set', path: ['accounts'], value: [accounts[1], accounts[0]] },
+        { op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' },
+      ], 4,
     )
   } finally { await ctx.fiber.dispose() }
 })
@@ -214,14 +220,25 @@ it('never adopts when automatic fallback is off', async () => {
   } finally { await ctx.fiber.dispose() }
 })
 
-it('writes the adopted account into the settings document a legacy Host serves', async () => {
-  const gateway = await quotaThenText()
-  await withFileSettings(configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx, path) => {
+it('persists the successful third account first and starts the next request with it', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  const third = { id: 'c', name: 'Third', apiKeyEnv: 'ACCOUNT_C' }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { message: 'Monthly usage limit exceeded' } }) })
+  }
+  gateway.pushCompletions({ events: textEvents })
+  await withFileSettings(configOf(gateway.url, { accounts: [...accounts, third], apiKeyEnv: 'ACCOUNT_A', autoSwitch: true }), async (ctx, path) => {
+    const writes = vi.spyOn(ctx.settings, 'mutate')
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     await vi.waitFor(() => {
-      expect((ctx.settings.get('llm-opencode-go') as { apiKeyEnv?: string } | undefined)?.apiKeyEnv).toBe('ACCOUNT_B')
+      expect(ctx.settings.get('llm-opencode-go')).toMatchObject({ accounts: [third, ...accounts], apiKeyEnv: 'ACCOUNT_C' })
     })
-    expect(await readFile(path, 'utf8')).toContain('apiKeyEnv: ACCOUNT_B')
+    expect(writes).toHaveBeenCalledTimes(1)
+    expect(await readFile(path, 'utf8')).toContain('apiKeyEnv: ACCOUNT_C')
+    gateway.pushCompletions({ events: textEvents })
+    expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+    expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization))
+      .toEqual(['Bearer ACCOUNT_A-secret', 'Bearer ACCOUNT_B-secret', 'Bearer ACCOUNT_C-secret', 'Bearer ACCOUNT_C-secret'])
   })
 })
 
@@ -248,7 +265,10 @@ it('follows the second hop when the stored preference still names the account th
     expect((await drain(ctx.llm.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
     await vi.waitFor(() => { expect(settings.mutate).toHaveBeenCalledTimes(2) })
     expect(settings.mutate).toHaveBeenNthCalledWith(
-      2, 'opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_C' }], 11,
+      2, 'opencode-go', [
+        { op: 'set', path: ['accounts'], value: [three[2], ...accounts] },
+        { op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_C' },
+      ], 11,
     )
     // The second request never reached the remembered key: it went B then C.
     expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization))
@@ -268,7 +288,10 @@ it('prefers the profile entry over a legacy row that coexists with it', async ()
     await vi.waitFor(() => { expect(settings.mutate).toHaveBeenCalledTimes(1) })
     // Only the profile entry is what the Web page and the pill read.
     expect(settings.mutate).toHaveBeenCalledWith(
-      'opencode-go', [{ op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' }], 6,
+      'opencode-go', [
+        { op: 'set', path: ['accounts'], value: [accounts[1], accounts[0]] },
+        { op: 'set', path: ['apiKeyEnv'], value: 'ACCOUNT_B' },
+      ], 6,
     )
   } finally { await ctx.fiber.dispose() }
 })

@@ -1,5 +1,5 @@
 import { credentialRef, type CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import { ACCOUNT_REF_PREFIX, accountRefOf, accountsOf, MAX_ACCOUNTS, type AccountSettings } from './accounts.ts'
+import { ACCOUNT_REF_PREFIX, accountRefOf, accountsOf, MAX_ACCOUNTS, moveAccountFirst, type AccountSettings } from './accounts.ts'
 import { accountOperationPatch, assertAccountOperations, ownsAccountCredential, visibleAccountsOf, type GoAccountOperation } from './account-operations.ts'
 import { accountSettingsRow, isSettingsConflict, settingsWriteResult, type AccountSettingsWriter, type SettingsWriteResult } from './settings-bridge.ts'
 import { parseAccountCommand, type AccountCommand } from './accounts-contract.ts'
@@ -53,6 +53,8 @@ export class GoAccountManager {
       this.again = false
       const connection = this.connection
       if (!connection) return
+      await this.normalizeOrder(connection)
+      if (this.connection !== connection) return
       const row = this.row(connection)
       const value = row?.value as AccountSettings | undefined
       assertAccountOperations(value?.accountOperations)
@@ -63,6 +65,22 @@ export class GoAccountManager {
       }
     }
     this.again = false
+  }
+
+  /** Preserve an old selection by moving it first in the same revision-guarded write. */
+  private async normalizeOrder(connection: NonNullable<GoAccountManager['connection']>): Promise<void> {
+    const row = this.row(connection)
+    const value = row?.value as AccountSettings | undefined
+    assertAccountOperations(value?.accountOperations)
+    if (!row || !value?.accounts?.length) return
+    const accounts = accountsOf(value)
+    if (accounts.length === value.accounts.length
+      && accounts.every((account, index) => account.apiKeyEnv === value.accounts![index]!.apiKeyEnv)) return
+    using timeout = deadline(connection.cancel.signal, ACCOUNT_RECOVERY_TIMEOUT_MS, 'OPENCODE_ACCOUNT_RECOVERY_TIMEOUT')
+    await waitWithSignal(() => connection.settings.mutate(row.ns, [
+      { op: 'set', path: ['accounts'], value: accounts },
+      { op: 'set', path: ['apiKeyEnv'], value: accountRefOf(value) },
+    ], row.revision), timeout.signal)
   }
 
   private async complete(connection: NonNullable<GoAccountManager['connection']>, operation: GoAccountOperation, keyConfirmed = false, signal?: AbortSignal): Promise<SettingsWriteResult> {
@@ -223,7 +241,10 @@ export class GoAccountManager {
         const accounts = [...accountsOf(value)]
         if (command.kind === 'select') {
           if (!accounts.some(account => account.apiKeyEnv === command.ref)) return 'rejected'
-          return await write([{ op: 'set', path: ['apiKeyEnv'], value: command.ref }], value => accountRefOf(value) === command.ref, target)
+          return await write([
+            { op: 'set', path: ['accounts'], value: moveAccountFirst(accounts, command.ref) },
+            { op: 'set', path: ['apiKeyEnv'], value: command.ref },
+          ], value => value.accounts?.[0]?.apiKeyEnv === command.ref && accountRefOf(value) === command.ref, target)
         }
         if (command.kind === 'rename') {
           if (!accounts.some(account => account.apiKeyEnv === command.ref)) return 'rejected'

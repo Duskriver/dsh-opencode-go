@@ -17,6 +17,8 @@ export declare class GoAccountManager {
     recover(): Promise<void>;
     private row;
     private run;
+    /** Preserve an old selection by moving it first in the same revision-guarded write. */
+    private normalizeOrder;
     private complete;
     private enqueue;
     execute(raw: AccountCommand): Promise<SettingsWriteResult>;

@@ -1,5 +1,5 @@
 /** Durable, client-safe intentions. Never put a credential value in this document. */
-import { ACCOUNT_REF_PATTERN, ACCOUNT_REF_PREFIX, MAX_ACCOUNTS, accountRefOf, accountsOf, assertAccounts, type AccountSettings, type GoAccount } from './accounts.ts'
+import { ACCOUNT_REF_PATTERN, ACCOUNT_REF_PREFIX, MAX_ACCOUNTS, accountRefOf, accountsOf, assertAccounts, moveAccountFirst, type AccountSettings, type GoAccount } from './accounts.ts'
 
 export type GoAccountOperation =
   | { id: string; kind: 'add'; account: GoAccount; previousRef: string; select: boolean }
@@ -59,6 +59,7 @@ export function accountOperationPatch(settings: AccountSettings, operation: GoAc
     accounts = accounts.filter(account => account.apiKeyEnv !== ref)
     if (accountRefOf(settings) === ref && accounts.length) selected = accounts[0]!.apiKeyEnv
   }
+  accounts = [...moveAccountFirst(accounts, selected ?? accountRefOf(settings))]
   assertAccounts(accounts, selected ?? accountRefOf(settings))
   return [
     { op: 'set' as const, path: ['accounts'], value: accounts },

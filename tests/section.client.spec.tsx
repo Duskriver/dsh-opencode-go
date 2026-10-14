@@ -816,7 +816,7 @@ describe('OpencodeGoSectionController through the component', () => {
       { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
     ]
     const base = { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true, baseURL: 'https://opencode.ai/zen/go/v1' }
-    const user = { apiKeyEnv: 'ACCOUNT_B', baseURL: 'https://other.test/v1' }
+    const user = { accounts: [accounts[1]!, accounts[0]!], apiKeyEnv: 'ACCOUNT_B', baseURL: 'https://other.test/v1' }
     host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
     const controller = new OpencodeGoSectionController(host.scope, { remote: {
       credentials: { describe: async () => ({ ok: true, value: {} }) },
@@ -831,8 +831,8 @@ describe('OpencodeGoSectionController through the component', () => {
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['baseURL'] }], expect.any(Number))
-      expect(host.scope.getSnapshot().value).toEqual({ ...base, apiKeyEnv: 'ACCOUNT_B' })
-      expect(host.scope.getSnapshot().user).toEqual({ apiKeyEnv: 'ACCOUNT_B' })
+      expect(host.scope.getSnapshot().value).toEqual({ ...base, accounts: user.accounts, apiKeyEnv: 'ACCOUNT_B' })
+      expect(host.scope.getSnapshot().user).toEqual({ accounts: user.accounts, apiKeyEnv: 'ACCOUNT_B' })
       expect(screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll }).disabled).toBe(true)
     } finally { controller.dispose() }
   })

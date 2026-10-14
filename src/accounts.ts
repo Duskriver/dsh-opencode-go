@@ -25,12 +25,18 @@ export function accountRefOf(settings: AccountSettings): string {
   return settings.apiKeyEnv || DEFAULT_ACCOUNT_REF
 }
 
-/** Include an externally selected reference without rewriting existing configuration. */
+/** Promote one account while preserving every other account's relative order. */
+export function moveAccountFirst(accounts: readonly GoAccount[], ref: string): readonly GoAccount[] {
+  const index = accounts.findIndex(account => account.apiKeyEnv === ref)
+  return index <= 0 ? accounts : [accounts[index]!, ...accounts.slice(0, index), ...accounts.slice(index + 1)]
+}
+
+/** Read legacy selections as the first account until the host persists their order. */
 export function accountsOf(settings: AccountSettings): readonly GoAccount[] {
   const ref = accountRefOf(settings)
   if (settings.accounts?.length === 0) return []
   const accounts = settings.accounts ?? []
-  return accounts.some(account => account.apiKeyEnv === ref) ? accounts : [
+  return accounts.some(account => account.apiKeyEnv === ref) ? moveAccountFirst(accounts, ref) : [
     { id: `legacy:${ref}`, name: '', apiKeyEnv: ref }, ...accounts,
   ]
 }

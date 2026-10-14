@@ -85,7 +85,7 @@ Add an `opencode-go` configuration block to a patch file. It can be combined wit
     maxImages: 30
 ```
 
-Keep the options you need and supply the corresponding keys through DSH credentials or environment variables. `apiKeyEnv` selects the current account; the order of `accounts` determines automatic fallback order.
+Keep the options you need and supply the corresponding keys through DSH credentials or environment variables. The first entry in `accounts` is current; the remaining entries are tried in order. The legacy `apiKeyEnv` reference must match the first entry. Manual and automatic switches move the target account first while preserving the other accounts' relative order. Existing configurations retain their selected account by moving it first.
 
 | Option | Purpose |
 | --- | --- |
