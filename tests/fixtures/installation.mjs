@@ -15,7 +15,7 @@ const plugin = await import('dsh-opencode-go')
 assert.equal(typeof plugin.apply, 'function')
 assert.equal(typeof plugin.Config, 'function')
 const build = JSON.parse(await readFile(new URL('./node_modules/dsh-opencode-go/lib/build-info.json', import.meta.url), 'utf8'))
-assert.equal(build.sdkVersion, '1.1.0', 'the plugin bundles its normalized-transcript SDK')
+assert.equal(build.sdkVersion, '1.2.0', 'the plugin bundles its normalized-transcript SDK')
 for (const [name, expected] of [['openai', '7.19.0'], ['@anthropic-ai/sdk', '0.129.0']]) {
   const sdk = JSON.parse(await readFile(findPackageJSON(name, import.meta.resolve('dsh-opencode-go')), 'utf8'))
   assert.equal(sdk.version, expected, `the plugin must resolve its own ${name} transport version`)

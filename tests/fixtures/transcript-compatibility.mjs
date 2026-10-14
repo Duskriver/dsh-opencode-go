@@ -17,6 +17,7 @@ const protocols = [
   { id: 'compat-completions', npm: '@ai-sdk/openai-compatible', path: '/v1/chat/completions' },
   { id: 'compat-responses', npm: '@ai-sdk/openai', path: '/v1/responses' },
   { id: 'compat-anthropic', npm: '@ai-sdk/anthropic', path: '/v1/messages' },
+  { id: 'gemini-4-argon-contributor', npm: '@ai-sdk/google', path: '/v1/models/gemini-4-argon-contributor:streamGenerateContent' },
   { id: 'deepseek-v4.1-flash', npm: '@ai-sdk/openai', declaredNpm: '@ai-sdk/openai-compatible', path: '/v1/responses', override: true },
 ]
 const requests = new Map(protocols.map(protocol => [protocol.id, []]))
@@ -25,9 +26,10 @@ globalThis.fetch = (input, init) => {
   const url = input instanceof Request ? input.url : String(input)
   if (url === 'https://models.dev/api.json') return Promise.resolve(Response.json({
     'opencode-go': { npm: '@ai-sdk/openai-compatible', models: Object.fromEntries(protocols.map(protocol => [protocol.id, {
-      name: protocol.id, provider: { npm: protocol.declaredNpm ?? protocol.npm }, reasoning: protocol.npm === '@ai-sdk/anthropic' || protocol.override === true,
+      name: protocol.id, provider: { npm: protocol.declaredNpm ?? protocol.npm }, reasoning: protocol.npm === '@ai-sdk/anthropic' || protocol.npm === '@ai-sdk/google' || protocol.override === true,
       ...protocol.npm === '@ai-sdk/anthropic' ? { reasoning_options: [{ type: 'toggle' }] } : {},
       ...protocol.override ? { reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] } : {},
+      ...protocol.npm === '@ai-sdk/google' ? { reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'high'] }] } : {},
       modalities: { input: ['text'] }, limit: { context: 100000, output: 4096 },
     }])) },
   }))
@@ -58,6 +60,13 @@ function events(protocol, callingTool) {
         usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 } } },
     ]
   }
+  if (protocol.npm === '@ai-sdk/google') return [
+    { candidates: [{ content: { role: 'model', parts: [{ text: 'signed thought', thought: true }] } }] },
+    { candidates: [{ content: { role: 'model', parts: [callingTool
+      ? { functionCall: { id: 'call_probe', name: tool.name, args: JSON.parse(argumentsText) }, thoughtSignature: 'Zml4dHVyZS1zaWduYXR1cmU=' }
+      : { text: 'compat-ok' }] }, finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 1, totalTokenCount: 4 } },
+  ]
   return [
     { type: 'message_start', message: { id: 'msg_probe', type: 'message', role: 'assistant', model: `${protocol.id}-reported-alias`,
       content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
@@ -85,6 +94,11 @@ function assertPromptAndTools(protocol, body) {
     assert.ok(body.input.some(message => ['system', 'developer'].includes(message.role) && message.content === prompt))
     assert.equal(body.tools[0].name, tool.name)
     assert.deepEqual(body.tools[0].parameters, parameters)
+  } else if (protocol.npm === '@ai-sdk/google') {
+    assert.equal(body.systemInstruction.parts[0].text, prompt)
+    assert.equal(body.tools[0].functionDeclarations[0].name, tool.name)
+    assert.deepEqual(body.tools[0].functionDeclarations[0].parametersJsonSchema, parameters)
+    assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'HIGH')
   } else {
     assert.ok(body.messages.some(message => message.role === 'system' && message.content === prompt))
     assert.equal(body.tools[0].function.name, tool.name)
@@ -104,6 +118,7 @@ const server = createServer((request, response) => {
     }
     const parsed = JSON.parse(body)
     const protocol = protocols.find(protocol => protocol.id === parsed.model)
+      ?? protocols.find(protocol => protocol.npm === '@ai-sdk/google' && protocol.path === path)
     assert.ok(protocol, `Unexpected path: ${request.url}`)
     assert.equal(path, protocol.path, 'the configured wire protocol must select the endpoint')
     assert.equal(request.headers['x-opencode-session'], 'transcript-session')
@@ -123,7 +138,12 @@ const server = createServer((request, response) => {
   })
 })
 const ctx = new Context()
+const cloudFlags = ['GOOGLE_GENAI_USE_VERTEXAI', 'GOOGLE_GENAI_USE_ENTERPRISE']
+const savedCloudFlags = cloudFlags.map(flag => [flag, process.env[flag]])
 try {
+  // An installed host may also use Vertex through another provider. This
+  // plugin's bundled Google client must still select the gateway Gemini API.
+  for (const flag of cloudFlags) process.env[flag] = 'true'
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const config = plugin.PlainConfig({ baseURL: `http://127.0.0.1:${server.address().port}/v1`, protocolOverrides: { 'deepseek-v4.1-flash': 'openai-responses' } })
@@ -135,11 +155,11 @@ try {
     const leading = { id: 'system-header', role: 'system', content: [{ type: 'text', text: prompt }],
       source: { kind: 'plugin', plugin: 'transcript-compat' } }
     const initial = { provider: 'dsh-opencode-go', model: protocol.id, sessionId: 'transcript-session', tools: [tool],
-      ...protocol.npm === '@ai-sdk/anthropic' || protocol.override ? { reasoningEffort: 'high' } : {},
+      ...protocol.npm === '@ai-sdk/anthropic' || protocol.npm === '@ai-sdk/google' || protocol.override ? { reasoningEffort: 'high' } : {},
       messages: [leading, user([{ type: 'text', text: 'hello' }])] }
     const chunks = await drain(initial)
     const finish = chunks.find(chunk => chunk.type === 'finish')
-    assert.equal(finish?.reason.kind, 'tool-calls')
+    assert.equal(finish?.reason.kind, 'tool-calls', `${host} ${protocol.id}: first response must call the tool`)
     assert.equal(finish.replayState.response.provider, 'dsh-opencode-go')
     assert.equal(finish.replayState.response.sdkProvider, 'opencode-go')
     const blocks = chunks.filter(chunk => chunk.type === 'block-end').map(chunk => chunk.block)
@@ -167,6 +187,11 @@ try {
       assert.ok(replayed.messages.find(message => message.role === 'assistant').content.some(block =>
         block.type === 'thinking' && block.thinking === 'signed thought' && block.signature === 'fixture-signature'),
       'a reported model alias must preserve signed thinking during tool-result continuation')
+    } else if (protocol.npm === '@ai-sdk/google') {
+      const call = replayed.contents.find(message => message.role === 'model').parts.find(part => part.functionCall)
+      assert.equal(call.thoughtSignature, 'Zml4dHVyZS1zaWduYXR1cmU=', 'Google tool continuation must retain its thought signature')
+      assert.equal(call.functionCall.id, 'call_probe')
+      assert.equal(requests.get(protocol.id).length, 2)
     }
 
     await drain({ ...initial, system: prompt, tools: [], messages: [user([{ type: 'text', text: 'one-shot' }])] })
@@ -174,8 +199,12 @@ try {
     assert.equal(JSON.stringify(oneShot).split(prompt).length - 1, 1)
     assert.ok(!oneShot.tools || oneShot.tools.length === 0, 'empty declarations must not leak tools from another request')
   }
-  console.log(`PASS: transcript compatibility (${host}): 3 protocols + DeepSeek Responses override, prompts, declarations, tool calls, restored replay and one-shot requests`)
+  console.log(`PASS: transcript compatibility (${host}): 4 protocols + DeepSeek Responses override, prompts, declarations, tool calls, restored replay and one-shot requests`)
 } finally {
+  for (const [flag, value] of savedCloudFlags) {
+    if (value === undefined) delete process.env[flag]
+    else process.env[flag] = value
+  }
   await ctx.fiber.dispose()
   server.closeAllConnections()
   await new Promise(resolve => server.close(resolve))

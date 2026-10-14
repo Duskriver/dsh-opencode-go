@@ -1,4 +1,4 @@
-/** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
+/** Convert OpenCode's online models.dev metadata into the supported SDK wire protocols. */
 import type { Api, Model, ModelCost, ModelThinkingLevel } from './sdk-types.ts'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
@@ -114,7 +114,8 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
       const npm = record(metadata.provider).npm ?? provider.npm
       const api = npm === '@ai-sdk/anthropic' ? 'anthropic-messages'
         : npm === '@ai-sdk/openai' ? 'openai-responses'
-          : npm === '@ai-sdk/openai-compatible' ? 'openai-completions' : undefined
+          : npm === '@ai-sdk/openai-compatible' ? 'openai-completions'
+            : npm === '@ai-sdk/google' ? 'google-generative-ai' : undefined
       if (api === undefined) throw new Error(`unsupported model protocol ${String(npm)}`)
       const limit = record(metadata.limit)
       const input = record(metadata.modalities).input

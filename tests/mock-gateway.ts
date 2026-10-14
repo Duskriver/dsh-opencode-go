@@ -42,6 +42,13 @@ export const textEvents = [
   '[DONE]',
 ]
 
+/** A Google stream includes thinking, visible text, a finish reason and usage. */
+export const googleTextEvents = [
+  { candidates: [{ content: { role: 'model', parts: [{ text: 'thought', thought: true }] } }] },
+  { candidates: [{ content: { role: 'model', parts: [{ text: 'hello' }] }, finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 1, thoughtsTokenCount: 1, totalTokenCount: 5 } },
+].map(event => JSON.stringify(event))
+
 /**
  * OpenCode Go gateway stand-in: `GET /models` answers the configured listing,
  * `POST /chat/completions` replays scripted SSE behaviors in order.

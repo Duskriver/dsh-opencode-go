@@ -131,8 +131,10 @@ export function reasoningRequest(intent: ReasoningIntent): {
         delete body.thinking
         delete body.enable_thinking
         body.chat_template_kwargs = withoutKeys(body.chat_template_kwargs, ['enable_thinking'])
+        // Google's SDK payload nests its policy under config before REST serialization.
+        body.config = withoutKeys(body.config, ['thinkingConfig'])
       }
-      for (const key of ['reasoning', 'output_config', 'chat_template_kwargs']) {
+      for (const key of ['reasoning', 'output_config', 'chat_template_kwargs', 'config']) {
         if (body[key] === undefined) delete body[key]
       }
       return body

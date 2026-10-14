@@ -1,4 +1,4 @@
-/** Convert OpenCode's online models.dev metadata into the SDK's three wire protocols. */
+/** Convert OpenCode's online models.dev metadata into the supported SDK wire protocols. */
 import type { Api, Model } from './sdk-types.ts';
 import { type GoModel } from './models-contract.ts';
 export declare const MODEL_METADATA_URL = "https://models.dev/api.json";

@@ -187,6 +187,23 @@ describe('OpencodeGoSection', () => {
     expect(screen.getAllByText(en.baseURLHint)).toHaveLength(1)
   })
 
+  it('opens hints with keyboard focus and closes them when focus moves to the field', () => {
+    renderSection(stateOf())
+    openAdvanced()
+    const input = screen.getByLabelText<HTMLInputElement>(en.baseURLLabel)
+    const trigger = screen.getByRole<HTMLButtonElement>('button', { name: en.baseURLHint })
+    expect(trigger.type).toBe('button')
+    expect(trigger.tabIndex).toBe(0)
+    expect(trigger.getAttribute('aria-hidden')).not.toBe('true')
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    act(() => { trigger.focus() })
+    expect(document.activeElement).toBe(trigger)
+    expect(screen.getByRole('tooltip').textContent).toBe(en.baseURLHint)
+    act(() => { input.focus() })
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(document.getElementById(input.getAttribute('aria-describedby') ?? '')?.textContent).toBe(en.baseURLHint)
+  })
+
   it('groups the tuning rows under four headings', () => {
     renderSection(stateOf())
     openAdvanced()

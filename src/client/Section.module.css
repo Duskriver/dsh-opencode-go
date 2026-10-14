@@ -270,8 +270,9 @@
 .groupHead::after { content: ''; flex: 1; height: 0.5px; background: var(--dsw-alias-border-l2); }
 
 /* The hint mark a label carries: the Host's own question glyph, its own bubble. */
-.info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary); }
-.info:hover { color: var(--dsw-alias-label-primary); }
+.info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary); cursor: help; }
+.info:hover, .info:focus-visible { color: var(--dsw-alias-label-primary); }
+.info:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 3px; }
 .info svg { width: 13px; height: 13px; }
 /* A mark that rides a label's own line stays right after the words. */
 .label .info, .cardTitle .info { margin-left: 6px; vertical-align: middle; }

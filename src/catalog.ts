@@ -5,6 +5,7 @@ import { OPENCODE_GO_MODELS } from 'opencode-go-pi-ai/providers/opencode-go.mode
 import * as anthropicMessagesApi from 'opencode-go-pi-ai/api/anthropic-messages'
 import * as openAICompletionsApi from 'opencode-go-pi-ai/api/openai-completions'
 import * as openAIResponsesApi from 'opencode-go-pi-ai/api/openai-responses'
+import * as googleGenerativeAI from './google-generative-ai.ts'
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm'
 import { MODEL_METADATA_URL, modelBaseURL, readModelMetadata } from './model-metadata.ts'
@@ -139,6 +140,7 @@ function buildProvider(baseURL: string, models: readonly Model<Api>[]): Provider
       'anthropic-messages': anthropicMessagesApi,
       'openai-completions': openAICompletionsApi,
       'openai-responses': openAIResponsesApi,
+      'google-generative-ai': googleGenerativeAI,
     },
   })
 }

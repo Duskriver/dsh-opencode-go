@@ -2,7 +2,7 @@
 export type {
   Api, Provider, ModelThinkingLevel, ThinkingLevelMap, ThinkingBudgets, ModelCost,
   AssistantMessage, AssistantMessageEvent, Usage, ToolCall,
-  Context, ImageContent, Message, TextContent, Tool,
+  Context, ImageContent, Message, TextContent, Tool, SimpleStreamOptions, StreamFunction,
 } from 'opencode-go-pi-ai'
 
 import type { Api as SdkApi, Model as SdkModel } from 'opencode-go-pi-ai'

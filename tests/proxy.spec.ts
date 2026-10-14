@@ -11,7 +11,7 @@ import { ProxyTransport } from '../src/proxy.ts'
 import { GoUsageService } from '../src/usage.ts'
 import { configOf } from './config-of.ts'
 import { mockProxy } from './support/proxy.ts'
-import { closeMockGateways, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
+import { closeMockGateways, googleTextEvents, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
 const cleanups: Array<() => Promise<unknown>> = []
@@ -85,6 +85,7 @@ describe.each(['http', 'socks5'] as const)('%s proxy', protocol => {
     { npm: '@ai-sdk/openai-compatible', path: '/v1/chat/completions', events: textEvents, namedEvents: false },
     { npm: '@ai-sdk/anthropic', path: '/v1/messages', events: anthropicEvents, namedEvents: true },
     { npm: '@ai-sdk/openai', path: '/v1/responses', events: responseEvents, namedEvents: false },
+    { npm: '@ai-sdk/google', path: '/v1/models/future:streamGenerateContent', events: googleTextEvents, namedEvents: false },
   ])('streams $path and discovers models through an authenticated proxy', async ({ npm, path, events, namedEvents }) => {
     const original = globalThis.fetch
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL

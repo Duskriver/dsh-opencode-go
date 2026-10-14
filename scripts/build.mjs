@@ -1,8 +1,10 @@
 /** Build Node ESM and the DSH browser module factory using installed dependencies. */
 import { build } from 'esbuild'
+import { googleFetchEsbuildPlugin } from './google-fetch-bridge.mjs'
 import { transform } from 'lightningcss'
 import { rollup } from 'rollup'
 import { dts } from 'rollup-plugin-dts'
+import ts from 'typescript'
 import { readFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -59,14 +61,30 @@ async function compile(output) {
   for (const face of ['host', 'client']) {
     execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', `tsconfig.${face}.json`, '--outDir', join(output, 'types')], { stdio: 'inherit' })
   }
-  // Keep host service identities and the two wire SDKs external. Bundle our
+  // Keep host service identities and the OpenAI/Anthropic SDKs external. Bundle our
   // private pi-ai implementation without its unrelated providers/dependencies.
   const hostExternals = ['@deepseek-ai/*', 'undici', 'openai', '@anthropic-ai/sdk']
   const host = await build({
     entryPoints: ['src/index.ts'], outfile: join(output, 'index.js'), bundle: true,
     external: hostExternals, format: 'esm', platform: 'node', target: 'node22', metafile: true,
+    plugins: [googleFetchEsbuildPlugin()],
     banner: { js: "import { createRequire as __createRequire } from 'node:module'; var require = __createRequire(import.meta.url);" },
   })
+  // esbuild retains generated Google JSDoc with indented blank lines. Normalize
+  // only parsed documentation comments, preserving all runtime strings verbatim.
+  const hostPath = join(output, 'index.js')
+  let code = await readFile(hostPath, 'utf8')
+  const parsed = ts.createSourceFile(hostPath, code, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS)
+  const comments = new Map()
+  function visit(node) {
+    for (const comment of node.jsDoc ?? []) comments.set(comment.pos, comment.end)
+    ts.forEachChild(node, visit)
+  }
+  visit(parsed)
+  for (const [start, end] of [...comments].sort(([a], [b]) => b - a)) {
+    code = code.slice(0, start) + code.slice(start, end).replace(/[ \t]+$/gm, '') + code.slice(end)
+  }
+  await writeFile(hostPath, code)
   // Consumers must also resolve exported types without installing pi-ai.
   const bundledTypes = ['opencode-go-pi-ai', '@earendil-works/pi-telemetry', 'typebox']
   const sdkDirectory = resolve('node_modules/opencode-go-pi-ai')
@@ -109,8 +127,12 @@ async function compile(output) {
     const licensePath = filename ? join(directory, filename)
       : ['@earendil-works/pi-ai', '@earendil-works/pi-telemetry'].includes(manifest.name)
         ? new URL(`./licenses/pi-${manifest.version}-LICENSE`, import.meta.url) : undefined
-    if (!licensePath) throw new Error(`Missing license for bundled package ${manifest.name}`)
-    const license = (await readFile(licensePath, 'utf8')).replace(/\r\n?/g, '\n').trim()
+    // data-uri-to-buffer 4.0.1 publishes its complete license only in README.md.
+    const embedded = !licensePath && manifest.name === 'data-uri-to-buffer' && manifest.version === '4.0.1'
+      ? (await readFile(join(directory, 'README.md'), 'utf8')).match(/License\n-+\n\n([\s\S]*?)\n\n\[rfc\]:/)?.[1] : undefined
+    if (!licensePath && !embedded) throw new Error(`Missing license for bundled package ${manifest.name}`)
+    const license = (licensePath ? await readFile(licensePath, 'utf8') : embedded)
+      .replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
     licenses.push(`${manifest.name}@${manifest.version}\n\n${license}\n`)
   }
   await writeFile(join(output, 'vendor-licenses.txt'), licenses.join('\n---\n\n'))

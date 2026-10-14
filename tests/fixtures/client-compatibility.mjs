@@ -13,8 +13,22 @@ const host = process.argv[2]
 const modern = host.startsWith('v017') || host.startsWith('v02')
 const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>')
 const { window } = dom
+// JSDOM has no layout observer. Report the static DOM measurement once so the
+// real Host Tooltip can complete placement; this fixture does not test resizing.
+class StaticResizeObserver {
+  constructor(callback) { this.callback = callback }
+  observe(target) {
+    const rect = target.getBoundingClientRect()
+    this.callback([{ target, contentRect: rect,
+      borderBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }],
+    }], this)
+  }
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = StaticResizeObserver
 Object.assign(globalThis, { window, document: window.document, getComputedStyle: window.getComputedStyle,
-  IS_REACT_ACT_ENVIRONMENT: true })
+  ResizeObserver: window.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })
 // Node has no CSS loader. Transform host styles as the browser toolchain does;
 // all JavaScript packages still resolve normally within this isolated consumer.
 registerHooks({ load(url, context, next) {
@@ -200,8 +214,21 @@ try {
     assert.equal(sectionContainer.querySelector('input[type="password"]'), null)
     const advancedTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-advanced"]')
     await React.act(async () => { advancedTrigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
-    assert.ok(sectionContainer.querySelector('input[placeholder="http://127.0.0.1:7890"]'),
+    const proxyInput = sectionContainer.querySelector('input[placeholder="http://127.0.0.1:7890"]')
+    assert.ok(proxyInput,
       'expanding advanced settings exposes the installed proxy input')
+    const hintTrigger = sectionContainer.querySelector('button[aria-label="proxyURLHint"]')
+    assert.ok(hintTrigger, 'the installed hint trigger is an accessible button')
+    assert.equal(hintTrigger.tabIndex, 0)
+    document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    await React.act(async () => { hintTrigger.focus() })
+    assert.equal(document.activeElement, hintTrigger)
+    const hintBubble = document.querySelector('[role="tooltip"]')
+    assert.equal(hintBubble?.textContent, 'proxyURLHint',
+      'keyboard focus opens the hint through the installed host Tooltip')
+    assert.equal(getComputedStyle(hintBubble).visibility, 'visible', 'the hint finishes placement and is visible')
+    await React.act(async () => { proxyInput.focus() })
+    assert.equal(document.querySelector('[role="tooltip"]'), null, 'moving focus dismisses the hint')
     const accountsTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-accounts"]')
     assert.ok(accountsTrigger)
     await React.act(async () => { accountsTrigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })

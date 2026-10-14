@@ -6,7 +6,7 @@
  * opening anything. A Host that ships no question glyph still gets a mark, and a
  * Host with no Tooltip keeps the sentence visible instead of hiding it.
  */
-/** The mark beside a label. Decorative: the sentence is {@link HintText}. */
+/** A focusable help trigger; fields also retain their {@link HintText} description. */
 export declare function HintMark(props: {
     hint: string;
 }): import("react").JSX.Element;
