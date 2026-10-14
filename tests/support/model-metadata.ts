@@ -13,7 +13,7 @@ export function modelMetadata(overrides: Record<string, unknown> = {}): Record<s
   }
 }
 
-export function metadataDocument(models?: Record<string, unknown>): Record<string, unknown> {
+export function metadataDocument(models?: Record<string, unknown>, provider: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     'opencode-go': {
       npm: '@ai-sdk/openai-compatible',
@@ -24,6 +24,7 @@ export function metadataDocument(models?: Record<string, unknown>): Record<strin
         'minimax-m3': modelMetadata({ name: 'MiniMax-M3', provider: { npm: '@ai-sdk/anthropic' } }),
         'union-alpha': modelMetadata({ name: 'Union Alpha Free', provider: { npm: '@ai-sdk/anthropic' }, reasoning_options: [] }),
       },
+      ...provider,
     },
   }
 }

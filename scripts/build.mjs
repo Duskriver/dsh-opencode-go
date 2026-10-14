@@ -59,9 +59,9 @@ async function compile(output) {
   for (const face of ['host', 'client']) {
     execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', `tsconfig.${face}.json`, '--outDir', join(output, 'types')], { stdio: 'inherit' })
   }
-  // Keep host service identities and the two wire SDKs external. Bundle our
+  // Keep host service identities and the wire SDKs external. Bundle our
   // private pi-ai implementation without its unrelated providers/dependencies.
-  const hostExternals = ['@deepseek-ai/*', 'undici', 'openai', '@anthropic-ai/sdk']
+  const hostExternals = ['@deepseek-ai/*', 'undici', 'openai', '@anthropic-ai/sdk', '@google/genai']
   const host = await build({
     entryPoints: ['src/index.ts'], outfile: join(output, 'index.js'), bundle: true,
     external: hostExternals, format: 'esm', platform: 'node', target: 'node22', metafile: true,

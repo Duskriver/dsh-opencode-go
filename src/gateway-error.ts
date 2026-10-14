@@ -32,3 +32,13 @@ export function classifyGatewayError(status: number, body: string, fallback: str
   }
   return fallback
 }
+
+// Phrases from the gateway's contributor refusal; deliberately no bare
+// "consent", which unrelated upstream errors can carry.
+const TRAINING_CONSENT = /trains on request data|paid endpoints|privacy settings/i
+
+/** Contributor refusals name the switch but not where it lives; append the path. */
+export function withConsentGuidance(message: string): string {
+  if (!TRAINING_CONSENT.test(message)) return message
+  return message + ' Enable "Allow paid endpoints that train on request data" in your OpenCode workspace Privacy settings (opencode.ai); the change takes effect without restarting.'
+}

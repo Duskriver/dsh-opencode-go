@@ -50,6 +50,7 @@ import { withProtocolOverride } from './protocol-policy.ts'
 import { accountFallback, isGatewayKeyRejection } from './account-policy.ts'
 import { ProxyTransport } from './proxy.ts'
 import { GatewayDiagnostics } from './gateway-diagnostics.ts'
+import { withConsentGuidance } from './gateway-error.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
 import { reasoningChoices, reasoningIntent, reasoningRequest } from './reasoning.ts'
@@ -502,7 +503,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
       })
       const events = catalog.provider.streamSimple(model, normalizeContext(context), {
         apiKey,
-        fetch: diagnostics.fetch,
+        // The Google adapter rejects custom fetch (the official Google SDK has no
+        // injection point): those calls run on the ambient transport, so proxyURL
+        // and call tracing do not apply to them.
+        ...model.api === 'google-generative-ai' ? {} : { fetch: diagnostics.fetch },
         ...reasoningRequest(reasoningIntent(model, reasoning)),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
@@ -537,7 +541,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
             || chunk.type === 'tool-call-delta' && chunk.argumentsDelta.length > 0) trace.firstOutput()
           if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
             const failure = chunk.reason.failure
-            const message = await waitWithSignal(() => diagnostics.failureMessage(failure.message), watchdog.signal)
+            const message = withConsentGuidance(await waitWithSignal(() => diagnostics.failureMessage(failure.message), watchdog.signal))
             const code = await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal)
             yield { ...chunk, reason: options.signal?.aborted
               ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }

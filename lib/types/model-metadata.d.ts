@@ -9,13 +9,20 @@ export interface ModelMetadata {
     readonly details: ReadonlyMap<string, ModelDetails>;
     readonly errors: ReadonlyMap<string, string>;
 }
-/** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */
+/**
+ * Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1.
+ * Google's adapter clears apiVersion and expects the baseUrl to carry the
+ * version path itself, so /v1 stays in place.
+ */
 export declare function modelBaseURL(api: Api, baseURL: string): string;
 /** Shared Responses defaults for declared models and explicit protocol overrides. */
 export declare function responsesCompatibility(): NonNullable<Model<'openai-responses'>['compat']>;
 /**
  * Only read the opencode-go record. Online endpoints, headers and credentials
  * are deliberately ignored: model traffic always stays on the configured gateway.
+ * The sole exception is Google's protocol, whose adapter cannot reach the
+ * gateway's OpenAI-shaped paths: models.dev's recorded provider endpoint is
+ * followed, but only within the configured gateway's registrable domain.
  * A bad entry is isolated instead of discarding every other model.
  */
 export declare function readModelMetadata(body: unknown, baseURL: string, builtin: ReadonlyMap<string, Model<Api>>): ModelMetadata;

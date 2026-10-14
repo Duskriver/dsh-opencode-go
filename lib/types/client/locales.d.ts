@@ -118,6 +118,8 @@ export declare const en: {
     configurationMissingHint: string;
     configurationUnavailable: string;
     configurationUnavailableHint: string;
+    contributorBadge: string;
+    contributorHint: string;
     pickerFailed: string;
     deprecatedBadge: string;
     deprecatedHint: string;

@@ -81,6 +81,11 @@ export function isNewModel(model: GoModel, now = Date.now()): boolean {
   return days >= 0 && days < 7
 }
 
+/** Contributor-tier ids end in -contributor: requests may train vendor models until the workspace opts in. */
+export function isContributorModel(id: string): boolean {
+  return id.endsWith('-contributor')
+}
+
 export function sortModels(models: readonly GoModel[], now = Date.now()): GoModel[] {
   const rank = (model: GoModel): number => model.deprecated ? 2 : isNewModel(model, now) ? 0 : 1
   return [...models].sort((a, b) => rank(a) - rank(b)

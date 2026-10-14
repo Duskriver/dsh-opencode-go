@@ -53,6 +53,8 @@ export declare function isModelEnabled(model: Pick<GoModel, 'id' | 'deprecated' 
 export declare function validReleaseDate(value: unknown): value is string;
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export declare function isNewModel(model: GoModel, now?: number): boolean;
+/** Contributor-tier ids end in -contributor: requests may train vendor models until the workspace opts in. */
+export declare function isContributorModel(id: string): boolean;
 export declare function sortModels(models: readonly GoModel[], now?: number): GoModel[];
 export declare function parseGoModels(value: unknown): GoModel[];
 export declare function parseGoModelCatalog(value: unknown): GoModelCatalog;

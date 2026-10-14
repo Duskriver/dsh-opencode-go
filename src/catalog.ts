@@ -3,6 +3,7 @@ import { createProvider } from 'opencode-go-pi-ai'
 import type { Api, Model, Provider } from './sdk-types.ts'
 import { OPENCODE_GO_MODELS } from 'opencode-go-pi-ai/providers/opencode-go.models'
 import * as anthropicMessagesApi from 'opencode-go-pi-ai/api/anthropic-messages'
+import * as googleGenerativeAiApi from 'opencode-go-pi-ai/api/google-generative-ai'
 import * as openAICompletionsApi from 'opencode-go-pi-ai/api/openai-completions'
 import * as openAIResponsesApi from 'opencode-go-pi-ai/api/openai-responses'
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
@@ -137,6 +138,7 @@ function buildProvider(baseURL: string, models: readonly Model<Api>[]): Provider
     auth: harnessApiKeyAuth(), models: [...models],
     api: {
       'anthropic-messages': anthropicMessagesApi,
+      'google-generative-ai': googleGenerativeAiApi,
       'openai-completions': openAICompletionsApi,
       'openai-responses': openAIResponsesApi,
     },

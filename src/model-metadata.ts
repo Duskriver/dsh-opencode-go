@@ -78,7 +78,60 @@ function reasoningControls(id: string, api: Api, metadata: Record<string, unknow
   }
 }
 
-/** Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1. */
+/** Common two-part public suffixes; the exhaustive public-suffix list is deliberately out of scope. */
+const MULTI_LABEL_SUFFIXES = new Set(['com', 'co', 'org', 'net', 'gov', 'edu', 'ac'])
+
+function registrableDomain(hostname: string): string {
+  const labels = hostname.toLowerCase().split('.')
+  if (labels.length <= 2) return labels.join('.')
+  const secondLevel = labels[labels.length - 2]
+  return (MULTI_LABEL_SUFFIXES.has(secondLevel) ? labels.slice(-3) : labels.slice(-2)).join('.')
+}
+
+/** Dot-separated numeric hostnames are IPv4 literals and bracketed ones IPv6: registrable domains do not apply. */
+function isIpLiteral(hostname: string): boolean {
+  return hostname.startsWith('[') || (hostname.includes('.') && hostname.split('.').every(label => /^\d+$/.test(label)))
+}
+
+function sameRegistrableDomain(candidate: string, gateway: string): boolean {
+  // Unparsable either side counts as a different domain: deny by default.
+  try {
+    const a = new URL(candidate).hostname
+    const b = new URL(gateway).hostname
+    if (a === '' || b === '') return false
+    // IP literals have no registrable domain: only the same address matches.
+    if (isIpLiteral(a) || isIpLiteral(b)) return a === b
+    return registrableDomain(a) === registrableDomain(b)
+  } catch {
+    return false
+  }
+}
+
+function googleSurface(recorded: string | undefined, gateway: string): string {
+  if (recorded === undefined) throw new Error('models.dev records no provider endpoint for the Google protocol')
+  let url: URL
+  try {
+    url = new URL(recorded)
+  } catch {
+    throw new Error('the recorded provider endpoint is not a valid URL')
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('the recorded provider endpoint must be http or https')
+  if (url.search !== '' || url.hash !== '') throw new Error('the recorded provider endpoint must not carry a query or fragment')
+  if (!sameRegistrableDomain(recorded, gateway)) {
+    throw new Error("the recorded Google endpoint " + recorded + " is outside the configured gateway's domain")
+  }
+  // Rebuild from the parsed URL so catalog metadata cannot smuggle credentials
+  // into the baseUrl the transport sends requests to.
+  url.username = ''
+  url.password = ''
+  return url.href.replace(/\/+$/, '')
+}
+
+/**
+ * Anthropic's SDK appends /v1/messages; the OpenAI SDKs append paths below /v1.
+ * Google's adapter clears apiVersion and expects the baseUrl to carry the
+ * version path itself, so /v1 stays in place.
+ */
 export function modelBaseURL(api: Api, baseURL: string): string {
   const base = baseURL.replace(/\/+$/, '')
   return api === 'anthropic-messages' ? base.replace(/\/v1$/, '') : base
@@ -92,10 +145,14 @@ export function responsesCompatibility(): NonNullable<Model<'openai-responses'>[
 /**
  * Only read the opencode-go record. Online endpoints, headers and credentials
  * are deliberately ignored: model traffic always stays on the configured gateway.
+ * The sole exception is Google's protocol, whose adapter cannot reach the
+ * gateway's OpenAI-shaped paths: models.dev's recorded provider endpoint is
+ * followed, but only within the configured gateway's registrable domain.
  * A bad entry is isolated instead of discarding every other model.
  */
 export function readModelMetadata(body: unknown, baseURL: string, builtin: ReadonlyMap<string, Model<Api>>): ModelMetadata {
   const provider = record(record(body)['opencode-go'])
+  const recorded = typeof provider.api === 'string' && provider.api.trim() !== '' ? provider.api.trim() : undefined
   if (provider.models === null || typeof provider.models !== 'object' || Array.isArray(provider.models)) {
     throw new Error('models.dev has no opencode-go models object')
   }
@@ -114,7 +171,8 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
       const npm = record(metadata.provider).npm ?? provider.npm
       const api = npm === '@ai-sdk/anthropic' ? 'anthropic-messages'
         : npm === '@ai-sdk/openai' ? 'openai-responses'
-          : npm === '@ai-sdk/openai-compatible' ? 'openai-completions' : undefined
+          : npm === '@ai-sdk/openai-compatible' ? 'openai-completions'
+            : npm === '@ai-sdk/google' ? 'google-generative-ai' : undefined
       if (api === undefined) throw new Error(`unsupported model protocol ${String(npm)}`)
       const limit = record(metadata.limit)
       const input = record(metadata.modalities).input
@@ -146,7 +204,11 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
       models.set(id, withGatewayReasoning({
         id,
         name: typeof metadata.name === 'string' && metadata.name.length > 0 ? metadata.name : id,
-        provider: 'opencode-go', api, baseUrl: modelBaseURL(api, baseURL),
+        provider: 'opencode-go', api,
+        // models.dev records the provider surface that serves Google's native path,
+        // which the configured gateway may not expose; traffic may only follow that
+        // record within the gateway's own domain.
+        baseUrl: modelBaseURL(api, api === 'google-generative-ai' ? googleSurface(recorded, baseURL) : baseURL),
         reasoning: metadata.reasoning,
         ...reasoningControls(id, api, metadata, known),
         input: input.includes('image') ? ['text', 'image'] : ['text'],

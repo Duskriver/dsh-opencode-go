@@ -11,7 +11,8 @@
     "@deepseek-ai/*",
     "undici",
     "openai",
-    "@anthropic-ai/sdk"
+    "@anthropic-ai/sdk",
+    "@google/genai"
   ],
   "sdkVersion": "1.1.0"
 }

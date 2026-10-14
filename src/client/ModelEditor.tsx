@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import { INPUT_MODALITIES, isModelEnabled, isNewModel, sortModels, type GoModel, type InputModality } from '../models-contract.ts'
+import { INPUT_MODALITIES, isContributorModel, isModelEnabled, isNewModel, sortModels, type GoModel, type InputModality } from '../models-contract.ts'
 import type { OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels } from './section-controller.ts'
 import type { en } from './locales.ts'
 import css from './Section.module.css'
@@ -63,6 +63,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
     {entry.configurationMissing ? <Tag tone="warning">{t(metadataUnavailable ? 'configurationUnavailable' : 'configurationMissing')}</Tag> : null}
     {isNewModel(entry, now) ? <span className={css.newBadge} title={t('newHint')}>{t('newBadge')}</span> : null}
     {entry.deprecated ? <Tag tone="warning">{t('deprecatedBadge')}</Tag> : null}
+    {isContributorModel(entry.id) ? <Tag tone="warning">{t('contributorBadge')}</Tag> : null}
   </>
   return (
     <div className={css.limitsEditor}>
@@ -109,6 +110,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
             </div>
             {model.configurationMissing ? <p className={css.hint}>{t(metadataUnavailable ? 'configurationUnavailableHint' : 'configurationMissingHint')}</p> : <>
               {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
+              {isContributorModel(model.id) ? <p className={css.hint}>{t('contributorHint')}</p> : null}
               <div className={css.stats}>
                 <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
                 <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />

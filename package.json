@@ -91,6 +91,7 @@
     "@anthropic-ai/sdk": "0.129.0",
     "@deepseek-ai/dsh-brand": "0.1.6-alpha.1",
     "@deepseek-ai/schemastery": "3.18.3",
+    "@google/genai": "2.21.0",
     "openai": "7.19.0",
     "undici": "7.30.0"
   },
