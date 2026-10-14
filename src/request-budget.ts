@@ -20,6 +20,12 @@
  * host reserves this same value first. Feeding an estimated prompt back to
  * pi-ai therefore cannot change any reservation the host would actually make.
  *
+ * One exception is worth knowing: on the Anthropic protocol the SDK adds the
+ * selected thinking budget to `max_tokens`, so a model declaring a very large
+ * output ceiling together with a large custom thinking budget reserves more on
+ * the wire than this function reports. Every other protocol the gateway serves
+ * carves that budget out of the serialized ceiling instead.
+ *
  * @module dsh-opencode-go/request-budget
  */
 

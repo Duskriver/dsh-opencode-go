@@ -60,6 +60,16 @@ it('quotes the request reservation with an opaque 400 and points at compaction',
     fetch: async () => Response.json({ model }, { status: 400 }) })
   await bare.fetch('https://gateway.example/chat/completions')
   expect(await bare.failureMessage('400 status code (no body)')).not.toContain('max_tokens=')
+  // The SDK adjusts the cap it was handed, so the serialized body is the number
+  // the gateway accounted for; the pre-SDK value would mislead here.
+  const adjusted = new GatewayDiagnostics({ provider: 'dsh-opencode-go', model, apiKey: 'fixture-key',
+    request: { maxTokens: 32_768, contextWindow: 1_000_000 },
+    fetch: async () => Response.json({ model }, { status: 400 }) })
+  await adjusted.fetch('https://gateway.example/chat/completions',
+    { method: 'POST', body: JSON.stringify({ model, max_tokens: 1, messages: [] }) })
+  const quoted = await adjusted.failureMessage('400 status code (no body)')
+  expect(quoted).toContain('max_tokens=1 of a')
+  expect(quoted).not.toContain('max_tokens=32768')
 })
 
 it('saves bounded HTTP evidence only when opted in, omitting request content and secrets', async () => {

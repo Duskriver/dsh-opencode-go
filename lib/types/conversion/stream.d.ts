@@ -20,13 +20,16 @@ export declare function mapUsage(usage: PiUsage): TokenUsage;
  * Map a terminal pi-ai event to the harness finish reason.
  * @param message - the assistant message carried by the `done` or `error` event.
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
+ * @param reservedMaxTokens - the output allowance this attempt was configured
+ *   with, before the SDK adjusted it. Distinguishes an allowance that could not
+ *   hold an answer from a prompt that left no room.
  * @returns the mapped harness reason. Recognized error text, `stop` usage above
  *   `contextWindow`, and zero-output `length` usage that fills the window map
  *   to `CONTEXT_WINDOW_EXCEEDED`; a `stop` with no content blocks maps to an
  *   `EMPTY_RESPONSE` error, while terminal `pending` and `deferred` states map
  *   to non-retryable `PI_AI_ERROR` failures.
  */
-export declare function mapStopReason(message: AssistantMessage, contextWindow?: number): FinishReason;
+export declare function mapStopReason(message: AssistantMessage, contextWindow?: number, reservedMaxTokens?: number): FinishReason;
 /**
  * Translate the pi-ai event stream into StreamChunks. pi-ai never throws
  * mid-stream — failures arrive as `error` events, which become error/aborted
@@ -37,7 +40,8 @@ export declare function mapStopReason(message: AssistantMessage, contextWindow?:
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
+ * @param reservedMaxTokens - the output allowance this attempt was configured with.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
-export declare function toStreamChunks(events: AsyncIterable<AssistantMessageEvent>, contextWindow?: number, callerSignal?: AbortSignal, requestedModel?: string, requestedProvider?: string): AsyncGenerator<StreamChunk>;
+export declare function toStreamChunks(events: AsyncIterable<AssistantMessageEvent>, contextWindow?: number, callerSignal?: AbortSignal, requestedModel?: string, requestedProvider?: string, reservedMaxTokens?: number): AsyncGenerator<StreamChunk>;

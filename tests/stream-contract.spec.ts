@@ -19,3 +19,21 @@ it('reports an empty answer at the output cap instead of a silent truncation', (
   expect(mapStopReason({ ...truncated, content: [{ type: 'text', text: 'partial' }] } as AssistantMessage, 950_000))
     .toEqual({ kind: 'max-tokens' })
 })
+
+it('blames the output allowance when the allowance was the limit, and the prompt otherwise', () => {
+  const usage = { input: 900_000, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 900_000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+  const empty = { model: 'deepseek-v4.1-flash', content: [], stopReason: 'length', usage } as unknown as AssistantMessage
+  const message = (reason: ReturnType<typeof mapStopReason>): string =>
+    reason.kind === 'error' ? reason.failure.message : ''
+  // A "max output" of 1 cannot answer, whatever the prompt looked like.
+  const tiny = message(mapStopReason(empty, 1_000_000, 1))
+  expect(tiny).toContain('1-token output allowance')
+  expect(tiny).toContain('Raise')
+  expect(tiny).not.toContain('/compact')
+  // An allowance the model spent entirely is the same setting, not the prompt.
+  expect(message(mapStopReason({ ...empty, usage: { ...usage, output: 32_768 } } as AssistantMessage, 1_000_000, 32_768)))
+    .toContain('32768-token output allowance')
+  // A healthy allowance with an empty answer still points at the prompt.
+  expect(message(mapStopReason(empty, 1_000_000, 32_768))).toContain('/compact')
+})

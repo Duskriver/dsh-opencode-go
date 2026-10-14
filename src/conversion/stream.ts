@@ -67,17 +67,23 @@ function classifyPiAiError(message: string): string {
   return 'PI_AI_ERROR'
 }
 
+/** An output allowance this small cannot hold an answer, whatever the prompt. */
+const MIN_ANSWER_ALLOWANCE = 1_024
+
 /**
  * Map a terminal pi-ai event to the harness finish reason.
  * @param message - the assistant message carried by the `done` or `error` event.
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
+ * @param reservedMaxTokens - the output allowance this attempt was configured
+ *   with, before the SDK adjusted it. Distinguishes an allowance that could not
+ *   hold an answer from a prompt that left no room.
  * @returns the mapped harness reason. Recognized error text, `stop` usage above
  *   `contextWindow`, and zero-output `length` usage that fills the window map
  *   to `CONTEXT_WINDOW_EXCEEDED`; a `stop` with no content blocks maps to an
  *   `EMPTY_RESPONSE` error, while terminal `pending` and `deferred` states map
  *   to non-retryable `PI_AI_ERROR` failures.
  */
-export function mapStopReason(message: AssistantMessage, contextWindow?: number): FinishReason {
+export function mapStopReason(message: AssistantMessage, contextWindow?: number, reservedMaxTokens?: number): FinishReason {
   const piAiOverflow = isContextOverflow(message, contextWindow)
   const harnessOverflow = message.stopReason === 'error'
     && message.errorMessage !== undefined
@@ -107,19 +113,26 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
       }
       return { kind: 'stop' }
     case 'length':
-      // Stopping on the output cap with nothing produced means this request had
-      // no room for an answer at all: pi-ai floors its reservation at one token
-      // once its estimate fills the window, and a one-token answer comes back
-      // empty. Reporting it as a failure with the remedy beats letting the
-      // harness treat an empty turn as a completed one.
+      // An empty length stop has two different remedies, and the configured
+      // allowance tells them apart. An allowance that could not hold an answer
+      // (or one the model spent entirely) is the setting to raise — pi-ai floors
+      // its reservation at one token, and a deliberately tiny "max output" does
+      // the same. Otherwise the prompt is what ran out of room. Either way an
+      // empty turn is a failure, not a completed response.
       if (message.content.length === 0) {
+        const cappedBySetting = reservedMaxTokens !== undefined
+          && (reservedMaxTokens <= MIN_ANSWER_ALLOWANCE || message.usage.output >= reservedMaxTokens)
         return {
           kind: 'error',
           failure: {
-            message: `model "${message.model}" produced no content at the output cap`
-              + `${contextWindow === undefined ? '' : ` in a ${contextWindow}-token window`}`
-              + ': the prompt leaves no room for an answer. Compact the context (/compact) or lower'
-              + ' this model\'s "max output" in the plugin settings, then retry',
+            message: cappedBySetting
+              ? `model "${message.model}" produced no content: its ${reservedMaxTokens}-token output`
+                + ' allowance cannot hold an answer. Raise this model\'s "max output" in the plugin'
+                + ' settings, then retry'
+              : `model "${message.model}" produced no content at the output cap`
+                + `${contextWindow === undefined ? '' : ` in a ${contextWindow}-token window`}`
+                + ': the prompt leaves no room for an answer. Compact the context (/compact) or lower'
+                + ' this model\'s "max output" in the plugin settings, then retry',
             code: 'INVALID_REQUEST',
           },
         }
@@ -155,6 +168,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
+ * @param reservedMaxTokens - the output allowance this attempt was configured with.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
@@ -164,6 +178,7 @@ export async function* toStreamChunks(
   callerSignal?: AbortSignal,
   requestedModel?: string,
   requestedProvider?: string,
+  reservedMaxTokens?: number,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
@@ -229,7 +244,7 @@ export async function* toStreamChunks(
         yield { type: 'usage', usage: mapUsage(event.message.usage) }
         yield {
           type: 'finish',
-          reason: mapStopReason(event.message, contextWindow),
+          reason: mapStopReason(event.message, contextWindow, reservedMaxTokens),
           replayState: toPiReplayState(event.message, requestedModel, requestedProvider),
         }
         return
@@ -242,6 +257,7 @@ export async function* toStreamChunks(
           reason: mapStopReason(
             callerSignal?.aborted ? { ...event.error, stopReason: 'aborted' } : event.error,
             contextWindow,
+            reservedMaxTokens,
           ),
         }
         return

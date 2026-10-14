@@ -196,8 +196,13 @@ export class GatewayDiagnostics {
     // `prompt + max_tokens` against its own window rejects exactly there, and
     // only the user can decide between compacting and a smaller answer budget.
     if (this.options.request !== undefined && (status === 400 || status === 413 || status === 422)) {
-      const { maxTokens, contextWindow } = this.options.request
-      message += ` [request reserved max_tokens=${maxTokens} of a ${contextWindow}-token window;`
+      const { contextWindow } = this.options.request
+      // The SDK adjusts the cap it was handed — its context clamp lowers it and a
+      // thinking budget raises it — so the serialized body is what the gateway
+      // actually accounted for.
+      const serialized = typeof evidence.request.maxTokens === 'number'
+        ? evidence.request.maxTokens : this.options.request.maxTokens
+      message += ` [request reserved max_tokens=${serialized} of a ${contextWindow}-token window;`
         + ' a gateway that accounts prompt + max_tokens against its own window may reject without a reason here.'
         + ' Compact the context (/compact) or lower this model\'s "max output" in the plugin settings, then retry]'
     }

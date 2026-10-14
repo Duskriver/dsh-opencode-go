@@ -538,7 +538,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         // one SDK attempt.
         maxRetries: 0,
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, options.provider)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, options.provider, maxTokens)[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {
