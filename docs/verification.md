@@ -8,6 +8,42 @@ Regression coverage validates the forwarded schema, migrates a saved legacy prof
 
 Validation of the isolated change: `npm run test:ci` passes **714 tests in 45 files**, both TypeScript projects and all **65 shipped build artifacts**. All **ten installed host generations** pass, including DSH 0.2.0-rc.2 (**40.4 seconds** including cleanup).
 
+## Live direct-gateway versus installed-plugin latency (2026-10-15)
+
+The user's recorded DeepSeek V4.1 Flash request reached its first reasoning delta at **19,449 ms**, first text at **19,627 ms**, and completion at **20,634 ms**. The Host recorded request context after **9 ms**. A same-model title request started after **10 ms** and completed **20,465 ms** later; that coincidence alone does not establish a dependency.
+
+With explicit authorization for live measurements, `scripts/benchmark-latency.mjs` used the selected desktop credential, the installed v0.1.23 adapter and Desktop 0.2.0-rc.2's actual Host packages under Electron's Node 24.18.1. Each paired comparison asserted byte-identical serialized bodies and all SDK-visible headers, including the session header. The recorded text messages and 33 tool definitions were reconstructed in memory, with a shared **1,024-token output cap** and the original default reasoning policy. Sequential AB/BA ordering reduced order bias. Neither prompts nor raw credential-bearing headers were saved.
+
+Median first-text times from arm entry:
+
+| Scenario | Pairs | Direct gateway | Installed plugin |
+| --- | ---: | ---: | ---: |
+| Recorded request replay | 4 | 3.063 s | 2.895 s |
+| New inert context prefix per pair | 4 | 4.180 s | 4.167 s |
+| Recorded automatic title concurrently | 2 | 4.915 s | 4.509 s |
+
+All **20 main paired requests** produced text successfully. The fresh-prefix run observed two zero-cache main requests and two cache-hit main requests in each arm. Gateway headers identified both `luminal-dsv4.1flash` and `orcarouter-dsv4.1flash` under the same public model id; pairs stayed on the same reported endpoint. The combined plugin median before HTTP dispatch was **3.233 ms** (range **1.802–5.172 ms**); first wire text reached the plugin consumer after a median **0.203 ms** (range **0.099–0.291 ms**). Credential resolution through the actual local credential provider had median **0.413 ms**. Observed new socket connection setup took **1.214–2.838 s**; upload completion to response headers took **1.394–5.171 s**. These intervals overlap differently across samples and their medians must not be summed.
+
+The additional minimal-prompt control had three HTTP-successful requests and one direct-fetch transport failure before headers. One successful minimal request exhausted its output cap entirely on reasoning and produced no text; these controls are excluded from the main paired table. Three of four concurrent title calls similarly exhausted their recorded 64-token cap on reasoning. In total there were **28 inference attempts**, with **27 successful HTTP responses**. No tool calls were executed. All profile, credential, manifest and dependency-build-trust hashes stayed unchanged. The offline incremental SSE/CRLF observer check and distribution verification passed.
+
+The historical 19.449-second outlier was **not reproduced**, including with title concurrency and observed cache misses. The measured plugin overhead is milliseconds; observed seconds were spent establishing connections and waiting for gateway/upstream data. Historical socket/header timestamps are unavailable, so these results cannot distinguish the old request's network wait from gateway queueing or provider prefill. They also do not measure desktop UI/IPC. JSON samples, gateway request IDs, joined statistics and a readable report are retained in the local ignored `opencode-protocol-benchmark-latency-*` directories.
+
+## Desktop installation: forwarded settings schema (2026-10-15)
+
+Installing the local v0.1.23 fixes into DeepSeek Harness Desktop 0.2.0-rc.2 exposed another regression: the Host rebuilds volatile fields as plain schemas and serializes the assembled form a second time. Schemastery drops the rehydrated base-URL transform callback during that second serialization, so the client rejects the namespace and shows the unavailable message. A regression reproduced `TypeError: callback is not a function` before the fix. Configuration schemas now keep `baseURL` as a plain string; Host reads, profile writes and revision-fenced saved migrations retain the legacy-gateway migration. The installed profile fixture also validates the actual Host's forwarded schema envelope.
+
+Validation: **728 tests across 46 files**, both TypeScript projects, and all **65 shipped build artifacts** passed. The updated fixtures passed all **ten installed Host generations** in **131.2 seconds**, including cleanup. npm/pnpm Git and tarball installs and public types passed in **37.2 seconds**. Separate loopback profile and transcript fixtures passed with the installed plugin and the desktop application's actual Host packages under Electron's Node 24.18.1.
+
+The package was installed through Desktop's plugin manager and loaded after a normal application restart. The real OpenCode Go settings page rendered the configured account, usage and **37 gateway entries**. An invalid proxy draft was cleared by **Reset All**, then the staged reset was discarded; Save and Discard returned to disabled. Existing profile configuration, credentials and dependency-build trust were unchanged by hash comparison. All installed `lib` files matched the tested archive, and a backup of the prior plugin/profile was retained outside the repository. No completion request was submitted during this installation check.
+
+## v0.1.23 review fixes: invalid-draft reset and Google signed Part replay (2026-10-15)
+
+The advanced card now enables Reset for invalid drafts and resets them alongside saved overrides. An invalid proxy address or image count can return to its inherited value even when every other row inherits. Saving the reset clears existing advanced overrides through the same staged settings batch; the action remains scoped to `ADVANCED_FIELDS`.
+
+The guarded pi-ai 1.2.0 Google stream patch keeps separate Parts within a chunk and starts a new block when a later chunk supplies a different signature. Text, thinking and signature-only empty text retain their own signatures through Host block assembly, JSON restoration and the next request. Ordinary text deltas still accumulate, including signatures supplied on the first or final delta. esbuild and Vitest use the same version-checked, single-match substitutions.
+
+Validation on macOS / Node 24.14.1: both TypeScript projects compiled, **728 tests in 46 files** passed, and all **65 shipped artifacts** matched an independent rebuild. Four new client regressions and ten Google replay cases cover the fixes and continuing-delta behavior. The original seven audit probes also pass against source and the rebuilt bundle. The updated installed client and transcript fixtures passed across **all ten host generations** in **101.4 seconds**, including cleanup; npm Git installation and fresh pnpm 11.7.0 Git/tarball installation plus public type checks passed in **54.6 seconds**. Model requests used loopback fixtures, and installed user profiles were untouched.
+
 ## Second review round: an invalid draft keeps its error as its description, and the blank cap says what it inherits (2026-10-13)
 
 Codex reviewed the merged revision and found two more P2s, both caused by the shortening pass.
