@@ -1,6 +1,6 @@
 {
   "name": "dsh-opencode-go",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "OpenCode Go model provider and settings UI for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
