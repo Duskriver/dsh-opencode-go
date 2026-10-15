@@ -60,6 +60,7 @@ it.each(['during discovery', 'after preparation'])('keeps a prepared call on its
     release.resolve()
     const captured = prepared ?? await pending
     expect(captured.context?.contextWindow).toBe(50000)
+    expect(captured.config.maxTokens).toBe(128)
     await drain(captured.stream({ ...request(), ...captured.config }))
     expect(first.bodies).toHaveLength(1)
     expect(first.headers.at(-1)?.authorization).toBe('Bearer fixture-key-A')

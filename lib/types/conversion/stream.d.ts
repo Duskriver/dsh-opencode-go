@@ -37,7 +37,8 @@ export declare function mapStopReason(message: AssistantMessage, contextWindow?:
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
- * @returns the harness chunks, ending with `usage` then `finish`; throws
+ * @returns the harness chunks, ending with measured `usage` then `finish`;
+ *   failures with no measured tokens omit usage to preserve context pressure. Throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
 export declare function toStreamChunks(events: AsyncIterable<AssistantMessageEvent>, contextWindow?: number, callerSignal?: AbortSignal, requestedModel?: string, requestedProvider?: string): AsyncGenerator<StreamChunk>;

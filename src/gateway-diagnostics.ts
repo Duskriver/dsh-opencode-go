@@ -110,6 +110,7 @@ export class GatewayDiagnostics {
     directory?: string
     callId?: string
     attempt?: number
+    contextWindow?: number
     onResponse?: (status: number, requestId?: string) => void
   }) {
     this.secrets = [options.apiKey]
@@ -156,6 +157,7 @@ export class GatewayDiagnostics {
         if (value !== null) headers[name] = this.redact(value).slice(0, 512)
       }
       const request = requestSummary(input, init)
+      if (this.options.contextWindow !== undefined) request.contextWindow = this.options.contextWindow
       const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined)
       const time = new Date().toISOString()
       const preview = previewBody(response, signal)
@@ -189,6 +191,12 @@ export class GatewayDiagnostics {
     }
     const presence = body.bytes > 0 ? 'nonempty' : body.readFailed ? 'unavailable' : 'empty'
     message += ` [HTTP ${status}; response body: ${presence}${body.truncated ? ', truncated' : ''}${body.readFailed ? ', incomplete read' : ''}]`
+    if ([400, 413, 422].includes(status)) {
+      const { maxTokens, contextWindow } = evidence.request
+      const allowance = typeof maxTokens === 'number' ? `max_tokens=${maxTokens}` : 'output allowance unavailable'
+      const window = typeof contextWindow === 'number' ? `; context window=${contextWindow}` : ''
+      message += ` [${allowance}${window}. For context capacity failures, compact the conversation (/compact) or lower this model's Max output in OpenCode Go settings, then retry.]`
+    }
     if (this.options.directory?.trim()) {
       try {
         const directory = resolve(this.options.directory)

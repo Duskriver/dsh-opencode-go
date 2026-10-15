@@ -130,7 +130,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
         model: LlmResolvedModelInfo;
         stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>;
     }>;
-    /** Describe one model: capacities plus the reasoning levels it actually offers. */
+    /** Report the same default allowance used by dispatch so the host can budget compaction. */
     private modelInfo;
     /** Validate an explicit effort against the model's own levels, without clamping. */
     private resolveReasoningLevel;

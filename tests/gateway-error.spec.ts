@@ -16,6 +16,12 @@ it.each([
   [401, {}, 'AUTH', 'AUTH'],
   [429, { error: { type: 'RateLimitError' } }, 'PI_AI_ERROR', 'RATE_LIMIT'],
   [400, {}, 'CONTEXT_WINDOW_EXCEEDED', 'CONTEXT_WINDOW_EXCEEDED'],
+  [400, { error: { code: 'context_length_exceeded', message: 'Limit reached' } }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
+  [422, { error: { type: 'context_window_exceeded', message: 'Limit reached' } }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
+  [400, { message: 'Prompt exceeds the model context window' }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
+  [413, 'request body too large', 'INVALID_REQUEST', 'INVALID_REQUEST'],
+  [400, { model: 'deepseek-v4.1-flash' }, 'INVALID_REQUEST', 'INVALID_REQUEST'],
+  [502, { error: { message: 'previous request: context_length_exceeded' } }, 'CONTEXT_WINDOW_EXCEEDED', 'SERVER'],
   [504, {}, 'SERVER', 'TIMEOUT'],
 ] as const)('classifies HTTP %s from captured response evidence', async (status, body, fallback, expected) => {
   const diagnostics = new GatewayDiagnostics({ provider: 'test', model: 'test', apiKey: 'fixture-key',

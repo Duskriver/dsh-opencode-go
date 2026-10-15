@@ -1,5 +1,15 @@
 # Verification
 
+## Issue #54: 64k output default and failed-request occupancy (2026-10-15)
+
+Only requests to the exact model ID `deepseek-v4.1-flash` default to 65,536 output tokens, bounded by that model's capacity. Both model-resolution paths report the default as `defaultMaxTokens` for host compaction budgeting. Other models keep their SDK output defaults and existing explicit caller/setting behavior. Regression tests compare the Host's prepared configuration with the serialized Chat Completions allowance, cover smaller DeepSeek capacities and settings changes during preparation, and verify that other model IDs (including similarly named DeepSeek variants) receive no injected default. SDK context clamping can reduce the wire value; Anthropic token-budget reasoning retains its existing behavior.
+
+HTTP 400/413/422 diagnostics include the serialized output allowance, configured window and `/compact`/Max output guidance. Explicit context-overflow codes or text map to `CONTEXT_WINDOW_EXCEEDED`, while opaque 400 and request-body limits remain `INVALID_REQUEST`. Failed attempts without measured tokens omit usage; positive input, output, cache or total counts remain available for accounting.
+
+A pure projection probe using the published `dsh-token-meter@0.2.0-rc.2` confirmed that an attempt with the old zero usage changes a 670,387-token pressure sample to zero, while the new stream preserves 670,387. This exercised the projection and compact attempt stream, not a real desktop conversation or live gateway.
+
+Validation: both TypeScript projects pass; `npm run test:ci` passes **755 tests in 46 files** and freshness checks for **66 shipped artifacts**. All **ten installed host generations** pass (**116.3 seconds** including cleanup), with assertions for failure usage omission, capacity diagnostics, prepared defaults and preserving other models' SDK defaults. npm and fresh pnpm Git/tarball installation checks pass (**33.4 seconds**), including public declarations and loading without dependency build approvals. Checks used isolated consumers and local fixtures; no installed user profile, credential, live inference request or publication was changed.
+
 ## Issue #59: forwarded settings schema (2026-10-15)
 
 DSH rebuilds volatile settings fields and serializes the assembled form again before sending it to the desktop client. The second serialization drops the rehydrated `baseURL` transform callback, causing validation to fail and leaving the form in `loading`. The field now uses a plain string schema. Host reads, profile writes and revision-checked saved migrations retain the legacy official gateway migration.

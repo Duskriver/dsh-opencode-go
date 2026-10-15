@@ -31,6 +31,12 @@ export function mapUsage(usage: PiUsage): TokenUsage {
   }
 }
 
+/** A failed request with no measured tokens is unknown usage, not an empty context. */
+function hasUsage(usage: PiUsage): boolean {
+  return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0
+    || usage.cacheWrite > 0 || usage.totalTokens > 0
+}
+
 // XXX(pi-ai upstream): pi-ai flattens the caught error to `error.message`
 // (api/anthropic-messages.js: `errorMessage = error instanceof Error ?
 // error.message : JSON.stringify(error)`), discarding the original Error and its
@@ -137,7 +143,8 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
- * @returns the harness chunks, ending with `usage` then `finish`; throws
+ * @returns the harness chunks, ending with measured `usage` then `finish`;
+ *   failures with no measured tokens omit usage to preserve context pressure. Throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
 export async function* toStreamChunks(
@@ -207,18 +214,22 @@ export async function* toStreamChunks(
           },
         }
         break
-      case 'done':
-        yield { type: 'usage', usage: mapUsage(event.message.usage) }
+      case 'done': {
+        const reason = mapStopReason(event.message, contextWindow)
+        if (reason.kind !== 'error' || hasUsage(event.message.usage)) {
+          yield { type: 'usage', usage: mapUsage(event.message.usage) }
+        }
         yield {
           type: 'finish',
-          reason: mapStopReason(event.message, contextWindow),
+          reason,
           replayState: toPiReplayState(event.message, requestedModel, requestedProvider),
         }
         return
+      }
       case 'error':
         // In-stream error delivery (pi-ai's style) → error finish chunk
         // (the harness's other sanctioned error path besides throwing).
-        yield { type: 'usage', usage: mapUsage(event.error.usage) }
+        if (hasUsage(event.error.usage)) yield { type: 'usage', usage: mapUsage(event.error.usage) }
         yield {
           type: 'finish',
           reason: mapStopReason(

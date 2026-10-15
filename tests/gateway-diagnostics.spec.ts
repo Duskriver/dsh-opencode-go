@@ -33,17 +33,32 @@ it.each([
   gateway.pushCompletions({ events: textEvents })
   const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key' })
   const chunks = await drain(adapter.stream(request()))
-  expect(chunks).toHaveLength(2)
-  expect(chunks[0]).toMatchObject({ type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } })
-  expect(chunks[1]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
+  expect(chunks).toHaveLength(1)
+  expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
     code: 'INVALID_REQUEST', message: expect.stringContaining(`response body: ${presence}`),
   } } })
-  const message = (chunks[1] as Extract<StreamChunk, { type: 'finish' }>).reason
+  const message = (chunks[0] as Extract<StreamChunk, { type: 'finish' }>).reason
   expect(JSON.stringify(message)).toContain(`dsh-opencode-go/${model}`)
+  expect(JSON.stringify(message)).toContain('max_tokens=512; context window=262144')
+  expect(JSON.stringify(message)).toContain('/compact')
   if (presence === 'nonempty') expect(JSON.stringify(message)).not.toContain('(no body)')
   expect(gateway.bodies).toHaveLength(1)
   expect(gateway.headers[1]?.['x-opencode-session']).toBe('diagnostic-session')
   expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+})
+
+it('reports the serialized allowance after SDK context clamping', async () => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
+  gateway.pushCompletions({ status: 400, body: '{}' })
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, {
+    modelLimits: { [model]: { contextWindow: 4500 } },
+  }), resolveApiKey: async () => 'fixture-key' })
+  const chunks = await drain(adapter.stream(request()))
+  const sent = (gateway.bodies[0] as { max_tokens: number }).max_tokens
+  expect(sent).toBeLessThan(512)
+  expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'error', failure: {
+    message: expect.stringContaining(`max_tokens=${sent}; context window=4500`),
+  } } })
 })
 
 it('saves bounded HTTP evidence only when opted in, omitting request content and secrets', async () => {

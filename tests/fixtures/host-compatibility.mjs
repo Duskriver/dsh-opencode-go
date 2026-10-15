@@ -126,6 +126,9 @@ try {
   assert.ok(failure.message.includes('dsh-opencode-go/compat-model'))
   assert.ok(failure.message.includes('response body: nonempty'))
   assert.ok(failure.message.includes('fixture edge rejection'))
+  assert.ok(failure.message.includes('max_tokens=1024; context window=50000'))
+  assert.ok(failure.message.includes('/compact'))
+  assert.ok(!failed.some(chunk => chunk.type === 'usage'), 'an unmeasured failure must not reset context pressure')
   const debugFiles = await readdir(process.env.DSH_OPENCODE_GO_DEBUG_DIR)
   assert.equal(debugFiles.length, 1)
   const debugText = await readFile(join(process.env.DSH_OPENCODE_GO_DEBUG_DIR, debugFiles[0]), 'utf8')
@@ -148,7 +151,9 @@ try {
   await drain(limitsAdapter.stream({ ...request([]), maxTokens: 8192 }))
   assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 512)
   limitsConfig = { ...limitsConfig, modelLimits: { 'compat-model': null } }
-  assert.equal((await limitsAdapter.resolveModel('dsh-opencode-go', 'compat-model')).context.contextWindow, 100000)
+  const inheritedModel = await limitsAdapter.resolveModel('dsh-opencode-go', 'compat-model')
+  assert.equal(inheritedModel.context.contextWindow, 100000)
+  assert.ok(!Object.hasOwn(inheritedModel, 'defaultMaxTokens'), 'other models retain SDK output defaults')
   await drain(limitsAdapter.stream(request([])))
   assert.equal(bodies.at(-1).max_tokens ?? bodies.at(-1).max_completion_tokens, 4096)
   // Prepared dispatch must keep the old endpoint, credential reference and nested limits.
@@ -157,6 +162,7 @@ try {
     resolveApiKey: async captured => captured.apiKeyEnv === 'OPENCODE_GO_COMPAT_KEY' ? 'fixture-key' : 'wrong-fixture-key' })
   const preparedCall = await preparedAdapter.prepareCall('dsh-opencode-go', 'compat-model')
   assert.equal(preparedCall.model.context.contextWindow, 50000)
+  assert.equal(preparedCall.model.defaultMaxTokens, 1024)
   preparedConfig.modelLimits['compat-model'].maxTokens = 2048
   preparedConfig.modelLimits['compat-model'].contextWindow = 60000
   preparedConfig = { ...preparedConfig, baseURL: 'http://127.0.0.1:1', apiKeyEnv: 'CHANGED_COMPAT_KEY' }

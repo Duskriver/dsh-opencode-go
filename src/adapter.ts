@@ -57,6 +57,7 @@ import { accountsOf, accountRefOf, type GoAccountSwitch } from './accounts.ts'
 import { waitWithSignal } from './request-control.ts'
 import { CallTrace, type GoCallTrace } from './call-trace.ts'
 import { ImagePayloadLease } from './conversion/image-pool.ts'
+import { requestMaxTokens } from './request-budget.ts'
 export type { GoCallTrace } from './call-trace.ts'
 
 /** Recheck a gateway-rejected key after a bounded window. */
@@ -223,7 +224,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: string,
     signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    return this.modelInfo((await this.modelSnapshot(model, signal)).model)
+    const snapshot = await this.modelSnapshot(model, signal)
+    return this.modelInfo(snapshot.model, snapshot.config.modelLimits)
   }
 
   /** Capture limits and protocol before discovery can yield to a settings update. */
@@ -253,13 +255,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
     const generation = this.options.accountGeneration?.() ?? 0
     const snapshot = { generation, ...await this.modelSnapshot(model, signal) }
     return {
-      model: this.modelInfo(snapshot.model),
+      model: this.modelInfo(snapshot.model, snapshot.config.modelLimits),
       stream: options => this.streamWithSnapshot(options, snapshot, seq),
     }
   }
 
-  /** Describe one model: capacities plus the reasoning levels it actually offers. */
-  private modelInfo(model: Model<Api>): LlmResolvedModelInfo {
+  /** Report the same default allowance used by dispatch so the host can budget compaction. */
+  private modelInfo(model: Model<Api>, limits: OpencodeGoModelLimits): LlmResolvedModelInfo {
+    const defaultMaxTokens = requestMaxTokens(model, limits)
     const reasoning: Pick<LlmResolvedModelInfo, 'reasoning'> = {}
     const choices = reasoningChoices(model)
     if (choices.length > 0) {
@@ -273,6 +276,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       name: model.name,
       inputModalities: [...model.input],
       context: { contextWindow: model.contextWindow },
+      ...defaultMaxTokens === undefined ? {} : { defaultMaxTokens },
       ...reasoning,
     }
   }
@@ -442,8 +446,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
     const { config, catalog, model } = snapshot
-    const outputLimit = config.modelLimits[model.id]?.maxTokens
-    const maxTokens = outputLimit == null ? options.maxTokens : Math.min(options.maxTokens ?? outputLimit, outputLimit)
+    const maxTokens = requestMaxTokens(model, config.modelLimits, options.maxTokens)
     const reasoning = this.resolveReasoningLevel(model, options.reasoningEffort)
 
     const consumer = new AbortController()
@@ -503,6 +506,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         fetch: this.transport.forProxy(config.proxyURL),
         directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
         callId: trace.callId, attempt: trace.attempts,
+        contextWindow: model.contextWindow,
         onResponse: (status, requestId) => trace.response(status, requestId),
       })
       const events = catalog.provider.streamSimple(model, normalizeContext(context), {

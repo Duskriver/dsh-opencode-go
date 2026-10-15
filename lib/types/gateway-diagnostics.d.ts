@@ -13,6 +13,7 @@ export declare class GatewayDiagnostics {
         directory?: string;
         callId?: string;
         attempt?: number;
+        contextWindow?: number;
         onResponse?: (status: number, requestId?: string) => void;
     });
     private redact;

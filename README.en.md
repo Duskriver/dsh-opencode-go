@@ -89,6 +89,8 @@ Search **Available models** by name or ID, or filter by **New in 7 days**, **Cus
 - Select a model to inspect its catalog context window, maximum output, and input modalities. Save limit overrides to apply them; empty values use defaults.
 - Reasoning models offer the applicable switch, effort, or token budget options. Budget-based models also accept custom budgets that become available after saving.
 
+Requests to `deepseek-v4.1-flash` default to a **64k (65,536-token)** output allowance, bounded by the model's output capacity. The same default is reported to DSH for compaction budgeting. This rule applies only to that model; other models retain their SDK output defaults. Set a model's **Max output** override when a longer answer is needed.
+
 Streaming, reasoning, tool calls, and image input depend on model capabilities. Input modalities shown in Settings come from online model metadata; this plugin currently converts and forwards only image attachments.
 
 ### Grouped advanced settings
@@ -116,6 +118,8 @@ Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reope
 **Why is usage hidden?** Auto mode shows it only for **DSH OpenCode Go** models. Check that the plugin is enabled, a key is configured, and the display mode is appropriate. Choose Always to show usage with other providers.
 
 **What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. An added account whose key was not saved can be repaired with a key or removed. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving) for recovery behavior.
+
+**What if a long conversation keeps returning 400?** Check the output allowance and context window in the error, then run `/compact` or lower that model's **Max output** before retrying. Explicit context overflow is passed to DSH's recovery mechanism; an unexplained 400 keeps its classification and includes troubleshooting guidance. Failed attempts without measured tokens omit zero usage so they do not report an empty context.
 
 **Why does an old conversation need its model selected again?** When upgrading from `0.1.16` or earlier, select **DSH OpenCode Go** again in existing conversations or Agent presets. Manual configurations use `provider: dsh-opencode-go`.
 

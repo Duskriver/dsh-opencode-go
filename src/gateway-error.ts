@@ -1,4 +1,4 @@
-import { isQuotaExceededError } from '@deepseek-ai/dsh-llm'
+import { isContextWindowExceededError, isQuotaExceededError } from '@deepseek-ai/dsh-llm'
 
 /** Gateway status codes cover several domains; a 401 alone cannot reject a key. */
 export function classifyGatewayError(status: number, body: string, fallback: string): string {
@@ -28,6 +28,9 @@ export function classifyGatewayError(status: number, body: string, fallback: str
   if (status === 408 || status === 504) return 'TIMEOUT'
   if (status >= 500) return 'SERVER'
   if (status === 400 || status === 413 || status === 422) {
+    // Read explicit codes too: the SDK can discard an error envelope's code
+    // while flattening it into a message. An opaque 400 proves no overflow.
+    if (isContextWindowExceededError([error?.type, error?.code, message].join(' '))) return 'CONTEXT_WINDOW_EXCEEDED'
     return fallback === 'CONTEXT_WINDOW_EXCEEDED' ? fallback : 'INVALID_REQUEST'
   }
   return fallback
