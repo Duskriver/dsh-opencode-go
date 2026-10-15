@@ -1,5 +1,13 @@
 # Verification
 
+## Issue #59: forwarded settings schema (2026-10-15)
+
+DSH rebuilds volatile settings fields and serializes the assembled form again before sending it to the desktop client. The second serialization drops the rehydrated `baseURL` transform callback, causing validation to fail and leaving the form in `loading`. The field now uses a plain string schema. Host reads, profile writes and revision-checked saved migrations retain the legacy official gateway migration.
+
+Regression coverage validates the forwarded schema, migrates a saved legacy profile address at startup without remounting, resets to the default gateway and preserves custom addresses. Existing gateway tests cover discovery, all four inference protocols and usage while the legacy gateway is unavailable.
+
+Validation of the isolated change: `npm run test:ci` passes **714 tests in 45 files**, both TypeScript projects and all **65 shipped build artifacts**. All **ten installed host generations** pass, including DSH 0.2.0-rc.2 (**40.4 seconds** including cleanup).
+
 ## Second review round: an invalid draft keeps its error as its description, and the blank cap says what it inherits (2026-10-13)
 
 Codex reviewed the merged revision and found two more P2s, both caused by the shortening pass.

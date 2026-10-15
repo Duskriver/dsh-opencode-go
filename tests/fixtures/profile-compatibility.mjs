@@ -48,6 +48,7 @@ try {
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const id = await ctx.loader.create({ id: 'opencode-go', name: 'dsh-opencode-go',
     config: { apiKeyEnv: 'OPENCODE_GO_COMPAT_KEY', legacyOption: true,
+      baseURL: 'https://opencode.ai/zen/go/v1/',
       showDeprecatedModels: true, visibleModelIds: ['compat-model'] } })
   await ctx.loader.await()
   const entry = ctx.loader.resolve(id)
@@ -69,8 +70,25 @@ try {
   await ctx.loader.await()
   const view = () => ctx.settings.describe().find(row => row.ns === 'opencode-go')
   assert.ok(view(), 'OpenCode Go must be exposed in the new profile settings')
+  const currentGateway = 'https://opencode.ai/inference/go/v1'
+  for (let attempt = 0; attempt < 100 && entry.options.config.baseURL !== currentGateway; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  assert.equal(view().value.baseURL, currentGateway, 'saved legacy profile URLs migrate at startup')
+  assert.equal(view().user.baseURL, currentGateway, 'startup migration persists the current gateway')
+  assert.equal(entry.options.config.baseURL, currentGateway)
+  assert.equal(entry.fiber, fiber, 'startup gateway migration preserves the running plugin')
+  const { default: Schema } = await import('@deepseek-ai/schemastery')
+  assert.doesNotThrow(() => Schema(JSON.parse(JSON.stringify(view().schema)))(view().value),
+    'the actual Host settings envelope must validate in the desktop client after forwarding')
   assert.equal(view().autoGenerate, false, 'the custom page owns these settings')
+  await ctx.settings.mutate('opencode-go', [{ op: 'unset', path: ['baseURL'] }])
   assert.equal(view().value.baseURL, 'https://opencode.ai/inference/go/v1')
+  assert.equal(entry.options.config.baseURL, undefined, 'reset inherits the current default gateway')
+  const customGateway = 'https://custom.example/zen/go/v1'
+  await ctx.settings.update('opencode-go', { baseURL: customGateway })
+  assert.equal(view().value.baseURL, customGateway, 'custom gateways keep their configured address')
+  assert.equal(entry.options.config.baseURL, customGateway)
   await ctx.settings.update('opencode-go', { baseURL: 'https://opencode.ai/zen/go/v1/' })
   assert.equal(view().value.baseURL, 'https://opencode.ai/inference/go/v1', 'old official settings migrate for every request')
   assert.equal(entry.options.config.baseURL, 'https://opencode.ai/inference/go/v1', 'profile writes persist the current gateway')

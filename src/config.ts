@@ -51,7 +51,9 @@ const fields = {
   // Internal recovery state uses the same durable profile/section as its accounts.
   // Cross-field ownership and discriminants are checked before any side effect.
   accountOperations: z.array(z.any()).max(MAX_ACCOUNTS).default([]).hidden(),
-  baseURL: z.transform(z.string(), migrateGatewayBaseURL).default(DEFAULT_BASE_URL),
+  // Settings rebuild and serialize this schema before sending it to clients.
+  // Keep it data-only: a rehydrated transform loses its callback on forwarding.
+  baseURL: z.string().default(DEFAULT_BASE_URL),
   proxyURL: z.string().default(''),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -84,8 +86,9 @@ export const Config = z.object(Object.fromEntries(
 export function readConfig(config: LiveConfig): OpencodeGoConfig {
   // Schemastery preserves unknown profile fields as plain values. Only the
   // fields declared above are volatile references owned by this plugin.
-  return Object.fromEntries((Object.keys(fields) as Array<keyof OpencodeGoConfig>)
+  const value = Object.fromEntries((Object.keys(fields) as Array<keyof OpencodeGoConfig>)
     .map(key => [key, config[key].get()])) as unknown as OpencodeGoConfig
+  return { ...value, baseURL: migrateGatewayBaseURL(value.baseURL) }
 }
 
 /**

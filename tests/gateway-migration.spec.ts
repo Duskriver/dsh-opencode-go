@@ -10,7 +10,7 @@ import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import { LocalCredentialProvider } from '@deepseek-ai/dsh-credentials-local'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apply, NS } from '../src/index.ts'
-import { PlainConfig } from '../src/config.ts'
+import { Config, PlainConfig, readConfig } from '../src/config.ts'
 import { configOf } from './config-of.ts'
 import { closeMockGateways, googleTextEvents, listingBody, mockGateway, textEvents } from './mock-gateway.ts'
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
@@ -75,7 +75,7 @@ it.each(['profile entry', 'settings document'])('keeps discovery, all protocols 
     apply(scope, configOf(source === 'profile entry' ? legacy : 'https://configured.example/v1'))
   } })
   const value = () => ctx.settings.describe().find(row => row.ns === NS)!.value
-  expect(value().baseURL).toBe(current)
+  await expect.poll(() => value().baseURL).toBe(current)
   await expect.poll(() => ctx.llm.listProviders()).toContainEqual({ id: 'dsh-opencode-go', name: 'DSH OpenCode Go' })
   await ctx.plugin(Registry)
   await ctx.plugin(Gateway)
@@ -97,7 +97,7 @@ it.each(['profile entry', 'settings document'])('keeps discovery, all protocols 
   expect(requests.map(url => new URL(url).pathname))
     .toEqual(['/models', ...protocols.map(protocol => protocol.path), '/usage'].map(path => '/inference/go/v1' + path))
   await ctx.settings.update(NS, { baseURL: legacy + '/' })
-  expect(value().baseURL).toBe(current)
+  await expect.poll(() => value().baseURL).toBe(current)
   await expect.poll(() => readFile(settingsPath, 'utf8')).toContain(current)
   expect(await readFile(settingsPath, 'utf8')).not.toContain(legacy)
   const custom = 'https://custom.example/zen/go/v1'
@@ -105,8 +105,18 @@ it.each(['profile entry', 'settings document'])('keeps discovery, all protocols 
   expect(value().baseURL).toBe(custom)
 })
 
-it('migrates URLs through serialized settings schemas without capturing Host-only bindings', () => {
-  const schema = Schema(JSON.parse(JSON.stringify(PlainConfig)))
-  expect(schema({ baseURL: legacy + '/' }).baseURL).toBe(current)
+it('keeps settings schemas valid after the Host rebuilds and forwards them to the desktop client', () => {
+  // Modern settings first rebuild each volatile field as a plain schema, then
+  // serialize the assembled form again for the client. Transform callbacks can
+  // survive the first serialization and disappear during the second one.
+  const fields = Object.fromEntries(Object.entries(Config.dict!).map(([key, field]) => {
+    const plain = Schema(JSON.parse(JSON.stringify(field)))
+    delete plain.meta.volatile
+    return [key, plain]
+  }))
+  const schema = Schema(JSON.parse(JSON.stringify(Schema.object(fields))))
+  expect(schema({ baseURL: current }).baseURL).toBe(current)
   expect(schema({ baseURL: 'https://custom.example/zen/go/v1' }).baseURL).toBe('https://custom.example/zen/go/v1')
+  expect(readConfig(Config({ baseURL: legacy + '/' })).baseURL).toBe(current)
+  expect(PlainConfig({ baseURL: legacy + '/' }).baseURL).toBe(legacy + '/')
 })
