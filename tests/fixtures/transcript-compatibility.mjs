@@ -13,6 +13,11 @@ const resultText = 'TOOL_RESULT_SENTINEL'
 const parameters = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
 const tool = { name: 'probe_tool', description: 'Probe tool', parameters }
 const argumentsText = '{"query":"hello"}'
+const googleTextParts = [
+  { text: 'compat-', thoughtSignature: 'dGV4dC1zaWduYXR1cmUtMQ==' },
+  { text: 'ok', thoughtSignature: 'dGV4dC1zaWduYXR1cmUtMg==' },
+  { text: '', thoughtSignature: 'ZW1wdHktc2lnbmF0dXJl' },
+]
 const protocols = [
   { id: 'compat-completions', npm: '@ai-sdk/openai-compatible', path: '/v1/chat/completions' },
   { id: 'compat-responses', npm: '@ai-sdk/openai', path: '/v1/responses' },
@@ -62,9 +67,9 @@ function events(protocol, callingTool) {
   }
   if (protocol.npm === '@ai-sdk/google') return [
     { candidates: [{ content: { role: 'model', parts: [{ text: 'signed thought', thought: true }] } }] },
-    { candidates: [{ content: { role: 'model', parts: [callingTool
-      ? { functionCall: { id: 'call_probe', name: tool.name, args: JSON.parse(argumentsText) }, thoughtSignature: 'Zml4dHVyZS1zaWduYXR1cmU=' }
-      : { text: 'compat-ok' }] }, finishReason: 'STOP' }],
+    { candidates: [{ content: { role: 'model', parts: callingTool
+      ? [{ functionCall: { id: 'call_probe', name: tool.name, args: JSON.parse(argumentsText) }, thoughtSignature: 'Zml4dHVyZS1zaWduYXR1cmU=' }]
+      : googleTextParts }, finishReason: 'STOP' }],
     usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 1, totalTokenCount: 4 } },
   ]
   return [
@@ -176,7 +181,7 @@ try {
       : user([{ type: 'tool-result', toolCallId: call.id, content, isError: false }])
     const continued = await drain({ ...initial, messages: [...initial.messages, assistant, result] })
     assert.equal(continued.find(chunk => chunk.type === 'finish')?.reason.kind, 'stop')
-    assert.ok(continued.some(chunk => chunk.type === 'text-delta' && chunk.text === 'compat-ok'))
+    assert.equal(continued.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join(''), 'compat-ok')
     const replayed = requests.get(protocol.id)[1]
     assertPromptAndTools(protocol, replayed)
     assert.ok(JSON.stringify(replayed).includes(resultText), 'the tool result must reach the resumed request')
@@ -198,6 +203,19 @@ try {
     const oneShot = requests.get(protocol.id)[2]
     assert.equal(JSON.stringify(oneShot).split(prompt).length - 1, 1)
     assert.ok(!oneShot.tools || oneShot.tools.length === 0, 'empty declarations must not leak tools from another request')
+    if (protocol.npm === '@ai-sdk/google') {
+      const textFinish = continued.find(chunk => chunk.type === 'finish')
+      const textAssistant = JSON.parse(JSON.stringify({ id: 'assistant-text-turn', role: 'assistant',
+        content: continued.filter(chunk => chunk.type === 'block-end').map(chunk => chunk.block),
+        source: { kind: 'model', provider: 'dsh-opencode-go', model: protocol.id, replayState: textFinish.replayState },
+      }))
+      await drain({ ...initial, messages: [...initial.messages, assistant, result, textAssistant,
+        user([{ type: 'text', text: 'continue after signed text' }])],
+      })
+      const restoredText = requests.get(protocol.id)[3].contents.filter(message => message.role === 'model').at(-1)
+      assert.deepEqual(restoredText.parts.filter(part => !part.thought), googleTextParts,
+        'signed Google text Parts, including empty text, must retain their own signatures through restored replay')
+    }
   }
   console.log(`PASS: transcript compatibility (${host}): 4 protocols + DeepSeek Responses override, prompts, declarations, tool calls, restored replay and one-shot requests`)
 } finally {

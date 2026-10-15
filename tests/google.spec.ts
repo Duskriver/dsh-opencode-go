@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { GoogleGenAI } from '@google/genai'
-import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
 import { discoverSettingsModels } from '../src/catalog.ts'
@@ -143,4 +143,52 @@ it('keeps simultaneous Google requests on their own fetch binding without replac
   expect(first).toHaveBeenCalledTimes(1)
   expect(second).toHaveBeenCalledTimes(1)
   expect(globalThis.fetch).toBe(globalFetch)
+})
+
+const signatureA = Buffer.from('first-signature').toString('base64')
+const signatureB = Buffer.from('second-signature').toString('base64')
+const signedA = { text: 'first text part', thoughtSignature: signatureA }
+const signedB = { text: 'second text part', thoughtSignature: signatureB }
+const unsigned = { text: 'unsigned text' }
+const emptySigned = { text: '', thoughtSignature: signatureB }
+
+it.each([
+  { label: 'two signed text parts in one chunk', chunks: [[signedA, signedB]], expected: [signedA, signedB] },
+  { label: 'signed then unsigned parts', chunks: [[signedA, unsigned]], expected: [signedA, unsigned] },
+  { label: 'unsigned then signed parts', chunks: [[unsigned, signedB]], expected: [unsigned, signedB] },
+  { label: 'two signed thinking parts',
+    chunks: [[{ ...signedA, thought: true }, { ...signedB, thought: true }]],
+    expected: [{ ...signedA, thought: true }, { ...signedB, thought: true }] },
+  { label: 'a separate signature-only text part', chunks: [[signedA, emptySigned]], expected: [signedA, emptySigned] },
+  { label: 'a signature-only part before text', chunks: [[emptySigned, unsigned]], expected: [emptySigned, unsigned] },
+  { label: 'different signatures in successive chunks', chunks: [[signedA], [signedB]], expected: [signedA, signedB] },
+  { label: 'a signature sent before continuing text deltas', chunks: [[signedA], [unsigned]],
+    expected: [{ text: signedA.text + unsigned.text, thoughtSignature: signatureA }] },
+  { label: 'a signature repeated on continuing text deltas', chunks: [[signedA], [{ ...unsigned, thoughtSignature: signatureA }]],
+    expected: [{ text: signedA.text + unsigned.text, thoughtSignature: signatureA }] },
+  { label: 'a final empty delta carrying the current part signature', chunks: [[unsigned], [emptySigned]],
+    expected: [{ text: unsigned.text, thoughtSignature: signatureB }] },
+])('preserves Google part signatures through assembled, JSON-restored history: $label', async ({ chunks: partsByChunk, expected }) => {
+  const { adapter, gateway, options } = await setup()
+  gateway.pushCompletions({ events: partsByChunk.map((parts, index) => JSON.stringify({
+    candidates: [{ content: { role: 'model', parts },
+      ...index === partsByChunk.length - 1 ? { finishReason: 'STOP' } : {},
+    }],
+    ...index === partsByChunk.length - 1 ? { usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 } } : {},
+  })) })
+  const assembler = new BlockAssembler()
+  for await (const chunk of adapter.stream(options)) assembler.push(chunk)
+  expect(assembler.finish.kind).toBe('stop')
+  const assistant = JSON.parse(JSON.stringify(assembler.message({
+    kind: 'model', provider: options.provider as never, model: id,
+    replayState: assembler.replayState,
+  })))
+  gateway.pushCompletions({ events: googleTextEvents })
+  const resumed = await Array.fromAsync(adapter.stream({ ...options, messages: [
+    ...options.messages, assistant,
+    createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'plugin', plugin: 'test' } }),
+  ] }))
+  expect(resumed.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+  const replayed = gateway.bodies[1]?.contents.find((message: { role: string }) => message.role === 'model')
+  expect(replayed?.parts).toEqual(expected)
 })

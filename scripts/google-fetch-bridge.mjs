@@ -1,4 +1,4 @@
-/** Guarded Google transport binding and explicit Gemini backend selection. */
+/** Guarded Google transport, Gemini backend selection and signed Part boundaries. */
 import { readFileSync } from 'node:fs'
 import { findPackageJSON } from 'node:module'
 import { dirname } from 'node:path'
@@ -26,13 +26,28 @@ function sdkSource() {
 
 function adapterSource() {
   const manifest = JSON.parse(readFileSync(findPackageJSON('opencode-go-pi-ai', import.meta.url), 'utf8'))
-  if (manifest.version !== '1.2.0') throw new Error('Review the Google backend pin before upgrading pi-ai')
-  const original = readFileSync(adapter, 'utf8')
+  if (manifest.version !== '1.2.0') throw new Error('Review the Google adapter patches before upgrading pi-ai')
+  let source = readFileSync(adapter, 'utf8')
   const constructor = 'return new GoogleGenAI({'
-  if (original.split(constructor).length !== 2) throw new Error('The pi-ai Google client changed; review the backend pin')
+  const parts = 'for (const part of candidate.content.parts) {'
+  const thinking = 'const isThinking = isThinkingPart(part);'
+  const boundary = 'if (!currentBlock ||'
   // Only this adapter targets the gateway's Gemini API. Other Google clients
   // retain their own Vertex/Enterprise flags and environment selection.
-  return original.replace(constructor, `${constructor}\n        vertexai: false,`)
+  // Parts within one chunk are distinct, even when their content types match.
+  // Across chunks, retain continuing deltas and signatures sent on the first
+  // or final delta; a different signature starts another signed Part.
+  const patches = [
+    [constructor, `${constructor}\n        vertexai: false,`],
+    [parts, 'for (const [partIndex, part] of candidate.content.parts.entries()) {'],
+    [thinking, `${thinking}\n                            const currentSignature = currentBlock?.type === "thinking"\n                                ? currentBlock.thinkingSignature : currentBlock?.textSignature;`],
+    [boundary, `${boundary} partIndex > 0 ||\n                                (part.thoughtSignature && currentSignature && part.thoughtSignature !== currentSignature) ||`],
+  ]
+  for (const [before, after] of patches) {
+    if (source.split(before).length !== 2) throw new Error('The pi-ai Google stream changed; review the backend and Part boundary patches')
+    source = source.replace(before, after)
+  }
+  return source
 }
 
 export function googleFetchEsbuildPlugin() {

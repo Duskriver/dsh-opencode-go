@@ -207,9 +207,12 @@ try {
   const sectionContainer = document.createElement('div')
   document.body.replaceChildren(sectionContainer)
   const sectionRoot = createRoot(sectionContainer)
+  const useOpencodeGo = select => select(React.useSyncExternalStore(
+    face.hooks.opencodeGo.subscribe, face.hooks.opencodeGo.getSnapshot, face.hooks.opencodeGo.getSnapshot,
+  ))
   try {
     await React.act(async () => { sectionRoot.render(React.createElement(Component, {
-      ...face, useOpencodeGo: () => face.hooks.opencodeGo.getSnapshot(),
+      ...face, useOpencodeGo,
     })) })
     assert.equal(sectionContainer.querySelector('input[type="password"]'), null)
     const advancedTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-advanced"]')
@@ -229,6 +232,16 @@ try {
     assert.equal(getComputedStyle(hintBubble).visibility, 'visible', 'the hint finishes placement and is visible')
     await React.act(async () => { proxyInput.focus() })
     assert.equal(document.querySelector('[role="tooltip"]'), null, 'moving focus dismisses the hint')
+    await React.act(async () => { face.edit('proxyURL', 'not-a-proxy-url') })
+    assert.equal(proxyInput.value, 'not-a-proxy-url')
+    assert.equal(proxyInput.getAttribute('aria-invalid'), 'true')
+    const resetAdvanced = [...sectionContainer.querySelectorAll('button')].find(button => button.textContent === 'advancedResetAll')
+    assert.ok(resetAdvanced)
+    assert.equal(resetAdvanced.disabled, false, 'an invalid draft enables the installed advanced reset')
+    await React.act(async () => { resetAdvanced.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+    assert.equal(proxyInput.value, '')
+    assert.equal(proxyInput.hasAttribute('aria-invalid'), false, 'the installed reset clears the invalid draft')
+    assert.equal(resetAdvanced.disabled, true, 'reset becomes disabled once every advanced row inherits')
     const accountsTrigger = sectionContainer.querySelector('[aria-controls="opencode-go-accounts"]')
     assert.ok(accountsTrigger)
     await React.act(async () => { accountsTrigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })

@@ -271,11 +271,9 @@ function Loaded(props: {
     invalidLabel: t('invalidValue'),
     disabled,
   }
-  const advancedOverridden = state.usageDisplay.overridden || state.protocolOverrides.overridden || state.baseURL.overridden || state.proxyURL.overridden
-    || state.refreshMinutes.overridden || state.streamIdleTimeoutMs.overridden
-    || state.maxImages.overridden
-    || state.maxRequestImageBytes.overridden || state.requestImagePixelBudget.overridden
-    || state.requestImageMaxBytes.overridden
+  const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
+  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
+  const canResetAdvanced = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
   return (
     <div className={css.page}>
       <div className={css.pageBody}>
@@ -401,10 +399,10 @@ function Loaded(props: {
                 <button
                   type="button"
                   className={css.reset}
-                  disabled={disabled || !advancedOverridden}
+                  disabled={disabled || !canResetAdvanced}
                   onClick={() => {
                     for (const field of ADVANCED_FIELDS) {
-                      if (state[field].overridden) props.resetField(field)
+                      if (state[field].overridden || state[field].invalid) props.resetField(field)
                     }
                   }}
                 >
