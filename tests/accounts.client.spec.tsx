@@ -666,11 +666,16 @@ it('reorders with the arrow keys on a row handle', async () => {
 
 it('reports the reason a row could not read its quota, without any credential value', async () => {
   const fixture = setup()
-  fixture.read.mockRejectedValue(Object.assign(new Error('OpenCode Go usage unavailable (HTTP 401)'), { code: 'opencode-go/usage-unavailable' }))
+  const message = 'OpenCode Go usage unavailable (HTTP 403). Check your API key and Go subscription permissions. '
+    + 'Upstream: This workspace does not have permission to read Go usage; check that the Go subscription is active for the workspace that owns this API key.'
+  fixture.read.mockRejectedValue(Object.assign(new Error(message), { code: 'opencode-go/usage-unavailable' }))
   await fixture.controller.refresh()
   expect(fixture.controller.snapshot().entries[0]).toMatchObject({
-    failed: true, problem: 'OpenCode Go usage unavailable (HTTP 401)',
+    failed: true, problem: message,
   })
+  render(<AccountsCard state={fixture.controller.snapshot()} actions={fixture.actions} writable t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+  expect(screen.getAllByText(message)).toHaveLength(2)
   expect(JSON.stringify(fixture.controller.snapshot())).not.toContain('secret-a')
   fixture.controller.dispose()
 })

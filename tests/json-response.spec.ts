@@ -196,6 +196,18 @@ describe('fetchJsonResponse', () => {
     expect(cancel).toHaveBeenCalledTimes(status === 304 ? 0 : 1)
   })
 
+  it.each(['throw', 'reject'])('keeps the HTTP status and cancels the body when an error reader fails by %s', async mode => {
+    const cancel = vi.fn()
+    const response = new Response(new ReadableStream({ cancel }), { status: 403 })
+    const fetcher = vi.fn().mockResolvedValue(response)
+    const failure = Object.assign(new Error('private diagnostic failure'), { code: 'ECONNRESET' })
+    const readError = () => { if (mode === 'throw') throw failure; return Promise.reject(failure) }
+    expect(await fetchJsonResponse('https://fixture.invalid/usage', {}, 1024, 'identity', fetcher, readError))
+      .toEqual({ response, body: undefined })
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
   it.each([
     { body: '{"private":invalid}', maxBytes: 1024, error: SyntaxError },
     { body: '{"data":"oversized"}', maxBytes: 2, error: RangeError },

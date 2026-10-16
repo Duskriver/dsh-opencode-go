@@ -19,7 +19,8 @@ it('queries authenticated account usage through the actual Host RPC gateway and 
   const server = createServer((req, res) => {
     requests.push({ url: req.url, auth: req.headers.authorization, encoding: req.headers['accept-encoding'] })
     res.writeHead(status, { 'Content-Type': 'application/json' })
-    const body = Buffer.from(JSON.stringify(status === 200 ? { usage } : { error: 'secret response must not enter UI' }))
+    const body = Buffer.from(JSON.stringify(status === 200 ? { usage }
+      : { error: { message: 'Invalid API key', credential: req.headers.authorization } }))
     // Simulate a host that loses Content-Encoding, with an upstream honoring identity.
     res.end(req.headers['accept-encoding'] === 'identity' ? body : brotliCompressSync(body))
   })
@@ -157,7 +158,8 @@ it('keeps safe network diagnostics and account identity through Host RPC without
       return
     }
     res.writeHead(mode === 'unauthorized' ? 401 : 200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify(mode === 'unauthorized' ? { error: 'private account response' } : { usage }))
+    res.end(JSON.stringify(mode === 'unauthorized'
+      ? { error: { message: 'Account access denied', credential: req.headers.authorization } } : { usage }))
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
@@ -198,7 +200,7 @@ it('keeps safe network diagnostics and account identity through Host RPC without
   mode = 'unauthorized'
   const count = requests
   await expect(read()).rejects.toMatchObject({ code: 'opencode-go/usage-unavailable',
-    message: 'OpenCode Go usage unavailable (HTTP 401)',
+    message: 'OpenCode Go usage unavailable (HTTP 401) Upstream: Account access denied',
     details: { retainPrevious: false, retryable: false, source: other.source } })
   expect(requests - count).toBe(1)
   key = undefined
@@ -208,4 +210,66 @@ it('keeps safe network diagnostics and account identity through Host RPC without
   await expect(read()).rejects.toMatchObject({ code: 'opencode-go/usage-unavailable',
     message: 'OpenCode Go API key is not configured', details: { retainPrevious: false, retryable: false } })
   expect(JSON.stringify([first, second, other, failed, changed])).not.toMatch(/private-account|private account/)
+})
+
+it.each([
+  { status: 403, body: { error: { type: 'PermissionError', message: 'Go subscription is inactive', apiKey: 'private-usage-key' } },
+    reason: 'Go subscription is inactive', temporary: false },
+  { status: 401, body: { error: { data: { message: 'Invalid API key: private-usage-key' } } },
+    reason: 'Invalid API key: [REDACTED]', temporary: false },
+  { status: 429, body: { error: 'Rate limit reached', token: 'unrelated-private-token' },
+    reason: 'Rate limit reached', temporary: true },
+  { status: 503, body: { message: 'Gateway temporarily unavailable', headers: { authorization: 'private-usage-key' } },
+    reason: 'Gateway temporarily unavailable', temporary: true },
+])('preserves a safe upstream reason for HTTP $status through both usage RPCs without retrying', async ({ status, body, reason, temporary }) => {
+  let requests = 0
+  const server = createServer((_req, res) => {
+    requests++
+    res.writeHead(status, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(body))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('missing address')
+  const ctx = new Context()
+  cleanups.push(() => ctx.fiber.dispose())
+  await ctx.plugin(Registry)
+  await ctx.plugin(Gateway)
+  registerGoRemotes(ctx)
+  await ctx.plugin(GoUsageService, {
+    baseURL: () => `http://127.0.0.1:${address.port}/v1`, resolveApiKey: async () => 'private-usage-key',
+    activeRef: () => 'ACCOUNT_A', accountRefs: () => ['ACCOUNT_A'],
+  })
+  for (const method of ['read', 'readAccount']) {
+    const error = await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method,
+      args: method === 'read' ? {} : { ref: 'ACCOUNT_A' } }).catch((error: unknown) => error)
+    expect(error).toMatchObject({ code: 'opencode-go/usage-unavailable',
+      message: expect.stringContaining(`Upstream: ${reason}`),
+      details: { retryable: temporary, retainPrevious: temporary, source: expect.any(String) } })
+    const serialized = JSON.stringify({ ...error as object, message: (error as Error).message })
+    expect(serialized).toContain(`HTTP ${status}`)
+    expect(serialized.includes('Check your API key and Go subscription permissions.')).toBe(status === 403)
+    expect(serialized).not.toMatch(/private-usage-key|unrelated-private-token|credential|authorization/)
+  }
+  expect(requests).toBe(2)
+})
+
+it('keeps HTTP 403 and its guidance when the upstream provides no usable reason', async () => {
+  const server = createServer((_req, res) => { res.writeHead(403); res.end('{"error":broken}') })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('missing address')
+  const ctx = new Context()
+  cleanups.push(() => ctx.fiber.dispose())
+  await ctx.plugin(Registry)
+  await ctx.plugin(Gateway)
+  registerGoRemotes(ctx)
+  await ctx.plugin(GoUsageService, {
+    baseURL: () => `http://127.0.0.1:${address.port}/v1`, resolveApiKey: async () => 'private-usage-key',
+  })
+  await expect(ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }))
+    .rejects.toMatchObject({ message: 'OpenCode Go usage unavailable (HTTP 403). Check your API key and Go subscription permissions.',
+      details: { retryable: false, retainPrevious: false } })
 })

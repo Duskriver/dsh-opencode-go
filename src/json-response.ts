@@ -52,6 +52,7 @@ export function diagnosticURL(raw: string): string {
 export async function fetchJsonResponse(
   url: string, init: RequestInit, maxBytes: number, encoding: 'identity' | 'gzip' = 'identity',
   fetcher: typeof globalThis.fetch = globalThis.fetch,
+  readError?: (response: Response) => Promise<unknown>,
 ): Promise<{ response: Response; body: unknown }> {
   if ((init.method ?? 'GET').toUpperCase() !== 'GET') throw new TypeError('JSON requests must use GET')
   const headers = new Headers(init.headers)
@@ -63,6 +64,14 @@ export async function fetchJsonResponse(
     try {
       const response = await fetcher(url, options)
       if (!response.ok) {
+        // An opt-in reader owns consuming/cancelling its bounded error body.
+        // Diagnostics must never replace the HTTP failure or cause another GET.
+        if (readError) {
+          let body: unknown
+          try { body = await readError(response) } catch { /* Keep the HTTP status if diagnostics fail. */ }
+          finally { void response.body?.cancel().catch(() => {}) }
+          return { response, body }
+        }
         await response.body?.cancel().catch(() => {})
         return { response, body: undefined }
       }

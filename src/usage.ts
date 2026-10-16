@@ -8,6 +8,7 @@ import { diagnosticURL, fetchJsonResponse, transportFailure } from './json-respo
 import type { GoAccountSwitch } from './accounts.ts'
 import { assertProxyURL } from './proxy-url.ts'
 import { ProxyTransport } from './proxy.ts'
+import { readUsageError } from './usage-error.ts'
 
 const USAGE_MAX_BYTES = 1024 * 1024
 
@@ -88,20 +89,22 @@ export class GoUsageService extends TypertRemoteService {
     const { source } = identity
     const shared = this.pending.get(source)
     if (shared) return shared
-    const pending = this.fetchUsage(baseURL, key, source, this.transport.forProxy(proxyURL))
+    const pending = this.fetchUsage(baseURL, key, source, proxyURL, this.transport.forProxy(proxyURL))
     this.pending.set(source, pending)
     try { return await pending } finally { this.pending.delete(source) }
   }
 
-  private async fetchUsage(baseURL: string, key: string, source: string, fetcher?: typeof globalThis.fetch): Promise<GoUsage> {
+  private async fetchUsage(baseURL: string, key: string, source: string, proxyURL: string, fetcher?: typeof globalThis.fetch): Promise<GoUsage> {
     const endpoint = diagnosticURL(`${baseURL}/usage`)
+    const signal = AbortSignal.timeout(10_000)
     let result: Awaited<ReturnType<typeof fetchJsonResponse>>
     try {
       result = await fetchJsonResponse(`${baseURL}/usage`, {
         headers: { ...attributionHeaders(), Authorization: `Bearer ${key}`, Accept: 'application/json' },
-        signal: AbortSignal.timeout(10_000),
+        signal,
         redirect: 'error',
-      }, USAGE_MAX_BYTES, 'identity', fetcher)
+      }, USAGE_MAX_BYTES, 'identity', fetcher,
+      response => readUsageError(response, { apiKey: key, baseURL, proxyURL, signal }))
     } catch (error: unknown) {
       const invalid = error instanceof SyntaxError || error instanceof RangeError
       const detail = error instanceof SyntaxError ? 'invalid JSON response'
@@ -114,7 +117,9 @@ export class GoUsageService extends TypertRemoteService {
     const { response, body } = result
     if (!response.ok) {
       const temporary = response.status === 408 || response.status === 429 || response.status >= 500
-      throw new RemoteError('opencode-go/usage-unavailable', `OpenCode Go usage unavailable (HTTP ${response.status})`, {
+      const hint = response.status === 403 ? '. Check your API key and Go subscription permissions.' : ''
+      const reason = typeof body === 'string' && body ? ` Upstream: ${body}` : ''
+      throw new RemoteError('opencode-go/usage-unavailable', `OpenCode Go usage unavailable (HTTP ${response.status})${hint}${reason}`, {
         retryable: temporary, retainPrevious: temporary, source,
       })
     }

@@ -103,6 +103,8 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 
 Request paths are appended to `baseURL`: `GET /models` lists models, `POST /models/{model}:streamGenerateContent` sends Gemini requests, and `GET /usage` reads usage. A working listing does not verify every inference route. Reading the legacy official base `https://opencode.ai/zen/go/v1` migrates it to the new address for model discovery, every inference protocol and usage requests. Settings writes also store the new address, so operation does not depend on the legacy gateway remaining available. Custom gateways retain their configured addresses.
 
+Usage failures retain the HTTP status and show a redacted summary when the upstream provides a readable reason. HTTP 403 includes a reminder to check the API key and Go subscription permissions. “Key saved” only confirms local credential storage; check the subscription for the account or workspace that owns the key, along with the gateway and proxy settings.
+
 Image offloading keeps the original attachment and replaces the old image in the request with a text placeholder. Raising the limit does not automatically restore previously offloaded images.
 
 Image count overflow is detected before attachment reads. Preparation shares four execution slots and at most 32 queued tasks within the plugin module, and stops scheduling images when known encoded bytes exceed the payload cap. Active image attempts share a 128 MiB budget for prepared raw data plus base64 payloads; this is not a process memory limit. Queue or shared-budget overflow returns `IMAGE_RESOURCE_BUSY`; retry after another request completes. Count and byte limits may require successive host offload retries.
