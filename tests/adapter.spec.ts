@@ -128,6 +128,43 @@ describe('OpencodeGoAdapter stream', () => {
     })
   })
 
+  it.each([
+    { maxTokens: undefined, expected: 65_536, guidance: 'Compact the context (/compact)' },
+    { maxTokens: 512, expected: 512, guidance: 'Increase this model\'s "max output"' },
+  ])('reports empty length completions with guidance for the $expected-token allowance', async ({ maxTokens, expected, guidance }) => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    gateway.pushCompletions({ events: [
+      JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: 'length' }],
+        usage: { prompt_tokens: 3, completion_tokens: 0 } }),
+      '[DONE]',
+    ] })
+    const adapter = await adapterFor(gateway.url)
+    const chunks = await drain(adapter.stream(requestOf({ ...maxTokens === undefined ? {} : { maxTokens } })))
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
+      code: 'INVALID_REQUEST', message: expect.stringContaining(guidance),
+    } } })
+    expect(chunks.find(chunk => chunk.type === 'usage')).toMatchObject({ usage: { inputTokens: 3, outputTokens: 0 } })
+    expect(gateway.bodies).toHaveLength(1)
+    expect(gateway.bodies[0]).toMatchObject({ model: 'deepseek-v4.1-flash', max_tokens: expected })
+  })
+
+  it('suggests compaction when the SDK clamps a large allowance to one token', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    gateway.pushCompletions({ events: [
+      JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: 'length' }] }), '[DONE]',
+    ] })
+    const adapter = new OpencodeGoAdapter({
+      config: () => configOf(gateway.url, { modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 4_096 } } }),
+      resolveApiKey: async () => 'test-key',
+    })
+    const chunks = await drain(adapter.stream(requestOf()))
+    expect(gateway.bodies[0]).toMatchObject({ max_tokens: 1 })
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
+      code: 'INVALID_REQUEST', message: expect.stringContaining('Compact the context (/compact)'),
+    } } })
+  })
+
   it('sends a fresh random session value per request when none arrived', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     gateway.pushCompletions({ events: textEvents })

@@ -73,17 +73,22 @@ function classifyPiAiError(message: string): string {
   return 'PI_AI_ERROR'
 }
 
+/** Prefer raising a clearly small output allowance over compaction advice. */
+const MIN_ANSWER_ALLOWANCE = 1_024
+
 /**
  * Map a terminal pi-ai event to the harness finish reason.
  * @param message - the assistant message carried by the `done` or `error` event.
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
+ * @param reservedMaxTokens - requested output allowance before SDK context clamping.
  * @returns the mapped harness reason. Recognized error text, `stop` usage above
  *   `contextWindow`, and zero-output `length` usage that fills the window map
  *   to `CONTEXT_WINDOW_EXCEEDED`; a `stop` with no content blocks maps to an
- *   `EMPTY_RESPONSE` error, while terminal `pending` and `deferred` states map
- *   to non-retryable `PI_AI_ERROR` failures.
+ *   `EMPTY_RESPONSE` error. Other empty `length` responses map to `INVALID_REQUEST`
+ *   with output-limit or compaction guidance. Terminal `pending` and `deferred`
+ *   states map to non-retryable `PI_AI_ERROR` failures.
  */
-export function mapStopReason(message: AssistantMessage, contextWindow?: number): FinishReason {
+export function mapStopReason(message: AssistantMessage, contextWindow?: number, reservedMaxTokens?: number): FinishReason {
   const piAiOverflow = isContextOverflow(message, contextWindow)
   const harnessOverflow = message.stopReason === 'error'
     && message.errorMessage !== undefined
@@ -112,7 +117,25 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
         }
       }
       return { kind: 'stop' }
-    case 'length': return { kind: 'max-tokens' }
+    case 'length':
+      if (message.content.length === 0) {
+        const raiseOutputLimit = reservedMaxTokens !== undefined
+          && (reservedMaxTokens <= MIN_ANSWER_ALLOWANCE || message.usage.output >= reservedMaxTokens)
+        return {
+          kind: 'error',
+          failure: {
+            message: raiseOutputLimit
+              ? `model "${message.model}" produced no content at its ${reservedMaxTokens}-token output`
+                + ' allowance. Increase this model\'s "max output" in the plugin settings, then retry'
+              : `model "${message.model}" produced no content at the output cap`
+                + `${contextWindow === undefined ? '' : ` in a ${contextWindow}-token window`}`
+                + '. The prompt may leave too little room for an answer. Compact the context (/compact)'
+                + ' or lower this model\'s "max output" in the plugin settings, then retry',
+            code: 'INVALID_REQUEST',
+          },
+        }
+      }
+      return { kind: 'max-tokens' }
     case 'toolUse': return { kind: 'tool-calls' }
     case 'pending': return {
       kind: 'error',
@@ -143,6 +166,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
+ * @param reservedMaxTokens - requested output allowance before SDK context clamping.
  * @returns the harness chunks, ending with measured `usage` then `finish`;
  *   failures with no measured tokens omit usage to preserve context pressure. Throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
@@ -153,6 +177,7 @@ export async function* toStreamChunks(
   callerSignal?: AbortSignal,
   requestedModel?: string,
   requestedProvider?: string,
+  reservedMaxTokens?: number,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
@@ -215,7 +240,7 @@ export async function* toStreamChunks(
         }
         break
       case 'done': {
-        const reason = mapStopReason(event.message, contextWindow)
+        const reason = mapStopReason(event.message, contextWindow, reservedMaxTokens)
         if (reason.kind !== 'error' || hasUsage(event.message.usage)) {
           yield { type: 'usage', usage: mapUsage(event.message.usage) }
         }
@@ -235,6 +260,7 @@ export async function* toStreamChunks(
           reason: mapStopReason(
             callerSignal?.aborted ? { ...event.error, stopReason: 'aborted' } : event.error,
             contextWindow,
+            reservedMaxTokens,
           ),
         }
         return
