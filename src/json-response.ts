@@ -3,6 +3,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { Readable, Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createGunzip } from 'node:zlib'
+import { waitWithSignal } from './request-control.ts'
+import { measureTiming, type TimingObserver } from './diagnostic-timing.ts'
 
 const RETRYABLE_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET', 'EAI_AGAIN'])
 
@@ -53,55 +55,83 @@ export async function fetchJsonResponse(
   url: string, init: RequestInit, maxBytes: number, encoding: 'identity' | 'gzip' = 'identity',
   fetcher: typeof globalThis.fetch = globalThis.fetch,
   readError?: (response: Response) => Promise<unknown>,
+  onTiming?: TimingObserver,
 ): Promise<{ response: Response; body: unknown }> {
   if ((init.method ?? 'GET').toUpperCase() !== 'GET') throw new TypeError('JSON requests must use GET')
   const headers = new Headers(init.headers)
   // Small responses retain the #7 workaround; metadata opts into recoverable gzip.
   headers.set('accept-encoding', encoding)
   const options = { ...init, method: 'GET', headers }
+  const signal = init.signal ?? undefined
   for (let attempt = 0; ; attempt += 1) {
-    init.signal?.throwIfAborted()
+    signal?.throwIfAborted()
+    const observer: TimingObserver | undefined = onTiming === undefined ? undefined
+      : event => onTiming({ ...event, attempt: attempt + 1 })
     try {
-      const response = await fetcher(url, options)
+      const response = await measureTiming(observer, 'headers', () => waitWithSignal(async () => {
+        const response = await fetcher(url, options)
+        // An uncooperative fetcher may deliver a response after its waiter timed out.
+        if (signal?.aborted) {
+          cancelResponse(response, signal.reason)
+          signal.throwIfAborted()
+        }
+        return response
+      }, signal), response => ({ status: response.status }))
       if (!response.ok) {
         // An opt-in reader owns consuming/cancelling its bounded error body.
         // Diagnostics must never replace the HTTP failure or cause another GET.
         if (readError) {
           let body: unknown
-          try { body = await readError(response) } catch { /* Keep the HTTP status if diagnostics fail. */ }
-          finally { void response.body?.cancel().catch(() => {}) }
+          try { body = await measureTiming(observer, 'error-body', () => waitWithSignal(() => readError(response), signal)) }
+          catch {
+            // A failed diagnostic preserves HTTP status; caller cancellation still wins.
+            signal?.throwIfAborted()
+          }
+          finally { cancelResponse(response) }
+          signal?.throwIfAborted()
           return { response, body }
         }
-        await response.body?.cancel().catch(() => {})
+        cancelResponse(response)
+        signal?.throwIfAborted()
         return { response, body: undefined }
       }
-      return { response, body: await readJsonResponse(response, maxBytes, { gzip: encoding === 'gzip', signal: init.signal }) }
+      const body = await readJsonResponse(response, maxBytes, { gzip: encoding === 'gzip', signal, onTiming: observer })
+      signal?.throwIfAborted()
+      return { response, body }
     } catch (error) {
-      init.signal?.throwIfAborted()
+      signal?.throwIfAborted()
       if (attempt > 0 || !retryableTransportFailure(error)) throw error
-      await delay(150, undefined, { signal: init.signal ?? undefined })
+      await measureTiming(observer, 'retry-delay', () => delay(150, undefined, { signal }))
     }
   }
 }
 
-async function readBoundedBody(response: Response, maxBytes: number): Promise<Buffer> {
+function cancelResponse(response: Response, reason?: unknown): void {
+  // Cancellation can wait forever (for example on a tee's other branch).
+  void response.body?.cancel(reason).catch(() => {})
+}
+
+async function readBoundedBody(response: Response, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
+  if (signal?.aborted) { cancelResponse(response, signal.reason); signal.throwIfAborted() }
   if (response.body === null) return Buffer.alloc(0)
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   let size = 0
   try {
     while (true) {
-      const { done, value } = await reader.read()
+      const { done, value } = await waitWithSignal(() => reader.read(), signal)
+      signal?.throwIfAborted()
       if (done) return Buffer.concat(chunks, size)
       // Count actual bytes: Content-Length may be missing, wrong, or refer to compressed bytes.
       if (value.byteLength > maxBytes - size) {
-        const error = new RangeError(`Response body exceeds ${maxBytes} byte limit`)
-        await reader.cancel(error).catch(() => {})
-        throw error
+        throw new RangeError(`Response body exceeds ${maxBytes} byte limit`)
       }
       size += value.byteLength
       chunks.push(value)
     }
+  } catch (error) {
+    void reader.cancel(error).catch(() => {})
+    throw error
   } finally {
     reader.releaseLock()
   }
@@ -127,22 +157,28 @@ async function readGzipBody(bytes: Buffer, maxBytes: number, signal?: AbortSigna
 
 /** Fetch normally decodes HTTP; only negotiated gzip may recover a raw gzip body (#7). */
 export async function readJsonResponse(
-  response: Response, maxBytes: number, options: { gzip?: boolean; signal?: AbortSignal | null } = {},
+  response: Response, maxBytes: number, options: { gzip?: boolean; signal?: AbortSignal | null; onTiming?: TimingObserver } = {},
 ): Promise<unknown> {
-  let bytes = await readBoundedBody(response, maxBytes)
+  const signal = options.signal ?? undefined
+  let bytes = await measureTiming(options.onTiming, 'body', () => readBoundedBody(response, maxBytes, signal), bytes => ({ bytes: bytes.length }))
   if (options.gzip && bytes[0] === 0x1f && bytes[1] === 0x8b) {
     try {
-      bytes = await readGzipBody(bytes, maxBytes, options.signal)
+      bytes = await measureTiming(options.onTiming, 'decompress', () => readGzipBody(bytes, maxBytes, signal), bytes => ({ bytes: bytes.length }))
     } catch (error) {
       options.signal?.throwIfAborted()
       if (error instanceof RangeError) throw error
       throw new SyntaxError('Response is not valid gzip', { cause: error })
     }
   }
-  try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
-  } catch (error) {
-    // Native JSON errors may echo response text. Keep it in the cause, outside the public message.
-    throw new SyntaxError('Response is not valid JSON', { cause: error })
-  }
+  const body = await measureTiming(options.onTiming, 'parse', () => {
+    signal?.throwIfAborted()
+    try {
+      return JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    } catch (error) {
+      // Native JSON errors may echo response text. Keep it in the cause, outside the public message.
+      throw new SyntaxError('Response is not valid JSON', { cause: error })
+    }
+  })
+  signal?.throwIfAborted()
+  return body
 }

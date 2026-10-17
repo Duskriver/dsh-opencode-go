@@ -1,4 +1,5 @@
 /** Runtime discovery: gateway availability plus online protocol and capability metadata. */
+import { randomUUID } from 'node:crypto'
 import { createProvider } from 'opencode-go-pi-ai'
 import type { Api, Model, Provider } from './sdk-types.ts'
 import { OPENCODE_GO_MODELS } from 'opencode-go-pi-ai/providers/opencode-go.models'
@@ -16,6 +17,7 @@ import { MODEL_METADATA_MAX_BYTES, metadataCachePath, metadataETag, readMetadata
 import { DISPLAY_NAME, SDK_PROVIDER_ID } from './provider-identity.ts'
 import { reasoningBudgetRange, withGatewayReasoning } from './reasoning.ts'
 import { migrateGatewayBaseURL } from './gateway-url.ts'
+import { measureTiming, type DiagnosticTiming, type TimingObserver } from './diagnostic-timing.ts'
 
 export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts'
 export { DEFAULT_BASE_URL } from './gateway-url.ts'
@@ -50,6 +52,13 @@ export interface CatalogSnapshot {
   readonly listingUpdatedAtMs?: number
   readonly metadataUpdatedAtMs?: number
   readonly fetchedAtMs: number
+}
+
+/** One catalog instance; refresh 0 restores disk state, then online refreshes count from 1. */
+export interface CatalogDiagnostic extends DiagnosticTiming {
+  readonly catalogId: string
+  readonly refresh: number
+  readonly url?: string
 }
 
 /** Cancelling one waiter must not cancel a catalog refresh shared with other calls. */
@@ -96,7 +105,7 @@ export function readLiveModelIds(body: unknown, onInvalidRows?: (warning: string
   return [...new Set(ids)]
 }
 
-async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fetch): Promise<{ ids: readonly string[]; warning?: string }> {
+async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fetch, onTiming?: TimingObserver): Promise<{ ids: readonly string[]; warning?: string }> {
   const url = `${baseURL.replace(/\/+$/, '')}/models`
   const endpoint = diagnosticURL(url)
   let result: Awaited<ReturnType<typeof fetchJsonResponse>>
@@ -105,7 +114,7 @@ async function fetchLiveModelIds(baseURL: string, fetcher?: typeof globalThis.fe
       method: 'GET', cache: 'no-cache',
       headers: { ...attributionHeaders(), accept: 'application/json' },
       signal: AbortSignal.timeout(MODELS_FETCH_TIMEOUT_MS),
-    }, MODEL_LISTING_MAX_BYTES, 'identity', fetcher)
+    }, MODEL_LISTING_MAX_BYTES, 'identity', fetcher, undefined, onTiming)
   } catch (error: unknown) {
     const detail = error instanceof SyntaxError
       ? 'invalid JSON response'
@@ -148,6 +157,8 @@ function buildProvider(baseURL: string, models: readonly Model<Api>[]): Provider
 
 /** Runtime requests reuse a snapshot; discovery revalidates it. Concurrent reads coalesce. */
 export class OpencodeGoCatalog {
+  private readonly diagnosticId = randomUUID()
+  private refreshSequence = 0
   private served: CatalogSnapshot | undefined
   private pending: Promise<CatalogSnapshot> | undefined
   /** A cold runtime read can use disk metadata while the shared online refresh runs. */
@@ -171,8 +182,17 @@ export class OpencodeGoCatalog {
     private readonly onRefresh: () => void = () => {},
     private readonly fetcher?: typeof globalThis.fetch,
     private readonly onWarning?: (warning: string) => void,
+    private readonly onDiagnostic?: (event: CatalogDiagnostic) => void,
   ) {
     this.baseURL = migrateGatewayBaseURL(baseURL)
+  }
+
+  private observer(refresh: number, prefix = '', url?: string): TimingObserver | undefined {
+    const onDiagnostic = this.onDiagnostic
+    if (onDiagnostic === undefined) return undefined
+    const endpoint = url === undefined ? undefined : diagnosticURL(url)
+    return event => onDiagnostic({ ...event, stage: `${prefix}${event.stage}`,
+      catalogId: this.diagnosticId, refresh, ...(endpoint === undefined ? {} : { url: endpoint }) })
   }
 
   snapshot(force = false, signal?: AbortSignal): Promise<CatalogSnapshot> {
@@ -183,17 +203,22 @@ export class OpencodeGoCatalog {
   }
 
   private async restoreMetadata(): Promise<void> {
-    const saved = await readMetadataCache(this.cachePath)
-    if (saved === undefined) return
-    try {
-      // Re-convert raw public metadata for this gateway and the currently installed SDK.
-      this.metadata = readModelMetadata(saved.body, this.baseURL, builtinModels(this.baseURL))
-      this.metadataBody = saved.body
-      this.metadataETag = saved.etag
-      this.metadataUpdatedAtMs = saved.savedAtMs
-    } catch {
-      // A document from an incompatible or corrupt cache must not send its validator.
-    }
+    const observer = this.observer(0)
+    await measureTiming(observer, 'cache.restore', async () => {
+      const saved = await measureTiming(observer, 'cache.read', () => readMetadataCache(this.cachePath))
+      if (saved === undefined) return false
+      try {
+        // Re-convert raw public metadata for this gateway and the currently installed SDK.
+        this.metadata = await measureTiming(observer, 'cache.convert', () => readModelMetadata(saved.body, this.baseURL, builtinModels(this.baseURL)))
+        this.metadataBody = saved.body
+        this.metadataETag = saved.etag
+        this.metadataUpdatedAtMs = saved.savedAtMs
+        return true
+      } catch {
+        // A document from an incompatible or corrupt cache must not send its validator.
+        return false
+      }
+    }, cacheHit => ({ cacheHit }))
   }
 
   private async readSnapshot(force: boolean): Promise<CatalogSnapshot> {
@@ -208,60 +233,68 @@ export class OpencodeGoCatalog {
   }
 
   private startRefresh(force: boolean): void {
-    const builtin = builtinModels(this.baseURL)
-    const listing = settled(fetchLiveModelIds(this.baseURL, this.fetcher).then(result => ({ ...result, updatedAtMs: Date.now() })))
-    const restored = this.metadata
-    if (!force && this.served === undefined && restored !== undefined) {
-      const status: MetadataStatus = { metadataLive: false, metadataUpdatedAtMs: this.metadataUpdatedAtMs }
-      this.cachedPending = listing.then(result => {
-        const snapshot = this.build(builtin, result, restored, status)
-        this.served = snapshot
-        return snapshot
-      })
-    }
-    const notify = this.cachedPending !== undefined || (!force && this.served !== undefined)
-    // Wait for the early snapshot before committing, even if the metadata response is faster.
-    this.pending = Promise.all([listing, settled(this.refreshMetadata(builtin)), this.cachedPending])
-      .then(([listing, result]) => this.build(builtin, listing,
+    const refresh = ++this.refreshSequence
+    const observer = this.observer(refresh)
+    this.pending = measureTiming(observer, 'refresh', async () => {
+      const builtin = builtinModels(this.baseURL)
+      const listing = settled(measureTiming(observer, 'listing', async () => ({
+        ...await fetchLiveModelIds(this.baseURL, this.fetcher, this.observer(refresh, 'listing.', `${this.baseURL.replace(/\/+$/, '')}/models`)),
+        updatedAtMs: Date.now(),
+      })))
+      const restored = this.metadata
+      if (!force && this.served === undefined && restored !== undefined) {
+        const status: MetadataStatus = { metadataLive: false, metadataUpdatedAtMs: this.metadataUpdatedAtMs }
+        this.cachedPending = measureTiming(observer, 'cache.snapshot', async () => {
+          const snapshot = this.build(builtin, await listing, restored, status)
+          this.served = snapshot
+          return snapshot
+        })
+      }
+      const notify = this.cachedPending !== undefined || (!force && this.served !== undefined)
+      // Wait for the early snapshot before committing, even if the metadata response is faster.
+      const [listingResult, result] = await Promise.all([
+        listing,
+        settled(measureTiming(observer, 'metadata', () => this.refreshMetadata(builtin, this.observer(refresh, 'metadata.', MODEL_METADATA_URL)))),
+        this.cachedPending,
+      ])
+      const snapshot = await measureTiming(observer, 'build', () => this.build(builtin, listingResult,
         result.status === 'fulfilled' ? result.value : this.metadata, {
           metadataLive: result.status === 'fulfilled',
           ...this.metadataUpdatedAtMs === undefined ? {} : { metadataUpdatedAtMs: this.metadataUpdatedAtMs },
           ...result.status === 'rejected' ? { metadataFailure: result.reason } : {},
         }))
-      .then((snapshot) => {
-        this.served = snapshot
-        this.failures = snapshot.live && snapshot.metadataLive ? 0 : Math.min(this.failures + 1, 5)
-        if (snapshot.listingWarning && snapshot.live) {
-          try { this.onWarning?.(snapshot.listingWarning) } catch { /* Diagnostics cannot reject a refresh. */ }
-        }
-        const lifetime = this.failures === 0 ? this.refreshMs
-          : Math.min(this.refreshMs, RETRY_MIN_MS * 2 ** (this.failures - 1), RETRY_MAX_MS)
-        this.refreshAtMs = snapshot.fetchedAtMs + lifetime
-        if (notify) this.onRefresh()
-        return snapshot
-      })
-      .finally(() => { this.pending = undefined; this.cachedPending = undefined })
+      this.served = snapshot
+      this.failures = snapshot.live && snapshot.metadataLive ? 0 : Math.min(this.failures + 1, 5)
+      if (snapshot.listingWarning && snapshot.live) {
+        try { this.onWarning?.(snapshot.listingWarning) } catch { /* Diagnostics cannot reject a refresh. */ }
+      }
+      const lifetime = this.failures === 0 ? this.refreshMs
+        : Math.min(this.refreshMs, RETRY_MIN_MS * 2 ** (this.failures - 1), RETRY_MAX_MS)
+      this.refreshAtMs = snapshot.fetchedAtMs + lifetime
+      if (notify) this.onRefresh()
+      return snapshot
+    }).finally(() => { this.pending = undefined; this.cachedPending = undefined })
     // Runtime callers may already have received cached data; manual callers still observe errors.
     void this.pending.catch(() => {})
   }
 
   /** Conditional HTTP requests save bandwidth while still checking for updated metadata. */
-  private async refreshMetadata(builtin: ReadonlyMap<string, Model<Api>>): Promise<ModelMetadata> {
+  private async refreshMetadata(builtin: ReadonlyMap<string, Model<Api>>, observer?: TimingObserver): Promise<ModelMetadata> {
     const { response, body } = await fetchJsonResponse(MODEL_METADATA_URL, {
       headers: { ...attributionHeaders(), accept: 'application/json',
         ...(this.metadataETag === undefined ? {} : { 'if-none-match': this.metadataETag }) },
       cache: 'no-cache', signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS),
-    }, MODEL_METADATA_MAX_BYTES, 'gzip', this.fetcher)
+    }, MODEL_METADATA_MAX_BYTES, 'gzip', this.fetcher, undefined, observer)
     if (response.status === 304 && this.metadata !== undefined) {
       this.metadataUpdatedAtMs = Date.now()
       this.metadataETag = metadataETag(response.headers.get('etag')) ?? this.metadataETag
-      await this.persistMetadata()
+      await this.persistMetadata(observer)
       return this.metadata
     }
     if (!response.ok) throw new LlmError(`${MODEL_METADATA_URL} answered HTTP ${response.status}`, 'DISCOVERY_FAILED')
     let metadata: ModelMetadata
     try {
-      metadata = readModelMetadata(body, this.baseURL, builtin)
+      metadata = await measureTiming(observer, 'configure', () => readModelMetadata(body, this.baseURL, builtin))
     } catch (error) {
       throw new LlmError(`${MODEL_METADATA_URL} returned invalid model configuration`, 'DISCOVERY_FAILED', { cause: error })
     }
@@ -269,14 +302,14 @@ export class OpencodeGoCatalog {
     this.metadataBody = body
     this.metadataETag = metadataETag(response.headers.get('etag'))
     this.metadataUpdatedAtMs = Date.now()
-    await this.persistMetadata()
+    await this.persistMetadata(observer)
     return metadata
   }
 
-  private async persistMetadata(): Promise<void> {
-    await writeMetadataCache(this.cachePath, {
+  private async persistMetadata(observer?: TimingObserver): Promise<void> {
+    await measureTiming(observer, 'cache-write', () => writeMetadataCache(this.cachePath, {
       body: this.metadataBody, etag: this.metadataETag, savedAtMs: this.metadataUpdatedAtMs!,
-    })
+    }), persisted => ({ persisted }))
   }
 
   /** Gateway ids decide membership; online metadata decides how to call each model. */

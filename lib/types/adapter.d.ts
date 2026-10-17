@@ -24,7 +24,7 @@
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, ImageAttachmentAccess, LlmModelInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
-import { OpencodeGoCatalog } from './catalog.ts';
+import { OpencodeGoCatalog, type CatalogDiagnostic } from './catalog.ts';
 import { ProxyTransport } from './proxy.ts';
 import type { OpencodeGoConfig } from './config.ts';
 import { type GoAccountSwitch } from './accounts.ts';
@@ -81,6 +81,8 @@ export interface OpencodeGoAdapterOptions {
     /** Observe live ids the curated table cannot route. */
     onOmitted?: (ids: readonly string[]) => void;
     onCatalogWarning?: (warning: string) => void;
+    /** Content-free timings for cache restoration and each shared online refresh. */
+    onCatalogDiagnostic?: (event: CatalogDiagnostic) => void;
     /** Observe assistant history degrading to provider-neutral conversion. */
     onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */

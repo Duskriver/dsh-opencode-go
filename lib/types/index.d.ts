@@ -43,6 +43,7 @@ export { DEFAULT_BASE_URL, DISPLAY_NAME, PROVIDER_ID, OpencodeGoCatalog, discove
 export { Config, PlainConfig, assertBaseURL } from './config.ts';
 export { assertProxyURL } from './proxy-url.ts';
 export type { OpencodeGoConfig } from './config.ts';
+export type { CatalogDiagnostic } from './catalog.ts';
 export declare const name = "llm-opencode-go";
 export declare const inject: string[];
 /** Settings namespace this plugin installs and the Web page edits. */

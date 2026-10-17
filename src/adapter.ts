@@ -43,7 +43,7 @@ import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attac
 import { toPiContext, toStreamChunks } from './conversion/index.ts'
 import type { PiImageRequestContext } from './conversion/index.ts'
 import { deadline, idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot } from './catalog.ts'
+import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot, type CatalogDiagnostic } from './catalog.ts'
 import { assertBaseURL, DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from './config.ts'
 import { GoCatalogManager } from './catalog-manager.ts'
 import { withProtocolOverride } from './protocol-policy.ts'
@@ -124,6 +124,8 @@ export interface OpencodeGoAdapterOptions {
   /** Observe live ids the curated table cannot route. */
   onOmitted?: (ids: readonly string[]) => void
   onCatalogWarning?: (warning: string) => void
+  /** Content-free timings for cache restoration and each shared online refresh. */
+  onCatalogDiagnostic?: (event: CatalogDiagnostic) => void
   /** Observe assistant history degrading to provider-neutral conversion. */
   onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
@@ -191,7 +193,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     this.transport = options.transport ?? new ProxyTransport()
     const catalogs = options.catalog ? undefined : new GoCatalogManager({
       transport: this.transport, onFallback: options.onFallback, onOmitted: options.onOmitted,
-      onRefresh: options.onCatalogRefresh, onWarning: options.onCatalogWarning,
+      onRefresh: options.onCatalogRefresh, onWarning: options.onCatalogWarning, onDiagnostic: options.onCatalogDiagnostic,
     })
     this.resolveCatalog = options.catalog ?? (config => catalogs!.forConfig(config))
   }

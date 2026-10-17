@@ -1,4 +1,4 @@
-import { OpencodeGoCatalog } from './catalog.ts'
+import { OpencodeGoCatalog, type CatalogDiagnostic } from './catalog.ts'
 import { assertBaseURL } from './config.ts'
 import type { OpencodeGoConfig } from './config-contract.ts'
 import { assertProxyURL } from './proxy-url.ts'
@@ -14,6 +14,7 @@ export class GoCatalogManager {
     onOmitted?: (ids: readonly string[]) => void
     onRefresh?: () => void
     onWarning?: (warning: string) => void
+    onDiagnostic?: (event: CatalogDiagnostic) => void
   }) {}
 
   forConfig(config: OpencodeGoConfig): OpencodeGoCatalog {
@@ -26,7 +27,7 @@ export class GoCatalogManager {
         () => {
           if (this.current?.catalog === catalog) this.options.onRefresh?.()
         },
-        this.options.transport.forProxy(config.proxyURL), this.options.onWarning,
+        this.options.transport.forProxy(config.proxyURL), this.options.onWarning, this.options.onDiagnostic,
       )
       this.current = { key, catalog }
     }

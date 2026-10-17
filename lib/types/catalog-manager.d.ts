@@ -1,4 +1,4 @@
-import { OpencodeGoCatalog } from './catalog.ts';
+import { OpencodeGoCatalog, type CatalogDiagnostic } from './catalog.ts';
 import type { OpencodeGoConfig } from './config-contract.ts';
 import type { ProxyTransport } from './proxy.ts';
 /** One mount owns discovery; inference, settings and pickers share its snapshots. */
@@ -15,6 +15,7 @@ export declare class GoCatalogManager {
         onOmitted?: (ids: readonly string[]) => void;
         onRefresh?: () => void;
         onWarning?: (warning: string) => void;
+        onDiagnostic?: (event: CatalogDiagnostic) => void;
     });
     forConfig(config: OpencodeGoConfig): OpencodeGoCatalog;
 }

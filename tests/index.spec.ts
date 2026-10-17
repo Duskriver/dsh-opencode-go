@@ -48,6 +48,29 @@ class StubAdapter extends LlmAdapter {
 }
 
 describe('llm-opencode-go plugin mount', () => {
+  it('logs catalog stages at info level with timings and a shared refresh identity', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    const info = vi.spyOn(ctx.logger, 'info').mockImplementation(() => {})
+    try {
+      apply(ctx, configOf(gateway.url))
+      await ctx.llm.listModels('dsh-opencode-go')
+      const prefix = 'llm-opencode-go: catalog '
+      const events = info.mock.calls.map(([message]) => String(message))
+        .filter(message => message.startsWith(prefix)).map(message => JSON.parse(message.slice(prefix.length)))
+      expect(events).toContainEqual(expect.objectContaining({ stage: 'cache.restore', phase: 'success', cacheHit: false }))
+      expect(events).toContainEqual(expect.objectContaining({ stage: 'metadata.headers', phase: 'success', status: 200, attempt: 1 }))
+      expect(events).toContainEqual(expect.objectContaining({ stage: 'metadata.cache-write', phase: 'success', persisted: true }))
+      expect(events).toContainEqual(expect.objectContaining({ stage: 'refresh', phase: 'success', elapsedMs: expect.any(Number), refresh: 1 }))
+      expect(new Set(events.map(event => event.catalogId)).size).toBe(1)
+    } finally {
+      info.mockRestore()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('notifies the host picker when a disk-backed startup finishes refreshing metadata', async () => {
     const id = 'persisted-model'
     const gateway = await mockGateway({ status: 200, body: listingBody([id, 'new-model']) })

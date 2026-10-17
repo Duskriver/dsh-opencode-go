@@ -77,6 +77,7 @@ export {
 export { Config, PlainConfig, assertBaseURL } from './config.ts'
 export { assertProxyURL } from './proxy-url.ts'
 export type { OpencodeGoConfig } from './config.ts'
+export type { CatalogDiagnostic } from './catalog.ts'
 
 export const name = 'llm-opencode-go'
 export const inject = ['llm']
@@ -147,6 +148,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const catalogs = new GoCatalogManager({
     transport, onFallback: logger.fallback, onOmitted: logger.omitted,
     onWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
+    onDiagnostic: event => { ctx.logger.info(`llm-opencode-go: catalog ${JSON.stringify(event)}`) },
     onRefresh: () => { registration?.replace([PROVIDER_ID]) },
   })
   const adapter = new OpencodeGoAdapter({

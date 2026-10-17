@@ -73,9 +73,107 @@ describe('readJsonResponse', () => {
     expect((error as Error).message).toBe('Response is not valid JSON')
     expect((error as Error).cause).toBeInstanceOf(SyntaxError)
   })
+
+  it('rejects an oversized body without waiting for stream cancellation', async () => {
+    const cancelled = Promise.withResolvers<void>()
+    const response = new Response(new ReadableStream({
+      start(stream) { stream.enqueue(new TextEncoder().encode('{"ok":true}')) },
+      cancel() { return cancelled.promise },
+    }))
+    const pending = readJsonResponse(response, 1).catch(error => error)
+    try {
+      expect(await Promise.race([pending, delay(200, 'still waiting')])).toBeInstanceOf(RangeError)
+      expect(response.body!.locked).toBe(false)
+    } finally { cancelled.resolve(); await pending }
+  })
 })
 
 describe('fetchJsonResponse', () => {
+  it('bounds a fetcher that ignores cancellation and cancels its late response', async () => {
+    const headers = Promise.withResolvers<Response>()
+    const started = Promise.withResolvers<void>()
+    const cancel = vi.fn()
+    const fetcher = vi.fn(() => { started.resolve(); return headers.promise })
+    const controller = new AbortController()
+    const reason = new DOMException('fixture deadline', 'TimeoutError')
+    const pending = fetchJsonResponse('https://fixture.invalid/models', { signal: controller.signal }, 1024, 'identity', fetcher)
+    const outcome = pending.catch(error => error)
+    await started.promise
+    controller.abort(reason)
+    try {
+      expect(await Promise.race([outcome, delay(200, 'still waiting')])).toBe(reason)
+    } finally {
+      let stream!: ReadableStreamDefaultController<Uint8Array>
+      headers.resolve(new Response(new ReadableStream({
+        start(controller) { stream = controller; controller.enqueue(new TextEncoder().encode('{"ok":true}')) }, cancel,
+      })))
+      await Promise.race([outcome, delay(50)])
+      if (cancel.mock.calls.length === 0) stream.close()
+      await outcome
+    }
+    await expect.poll(() => cancel.mock.calls.length).toBe(1)
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('bounds a stalled body even when stream cancellation never settles', async () => {
+    const reading = Promise.withResolvers<void>()
+    const cancelled = Promise.withResolvers<void>()
+    let stream!: ReadableStreamDefaultController<Uint8Array>
+    const cancel = vi.fn(() => cancelled.promise)
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { stream = controller; controller.enqueue(new TextEncoder().encode('{"ok":true}')) },
+      pull() { reading.resolve() }, cancel,
+    }, { highWaterMark: 0 }))
+    const controller = new AbortController()
+    const reason = new DOMException('fixture deadline', 'TimeoutError')
+    const fetcher = vi.fn().mockResolvedValue(response)
+    const pending = fetchJsonResponse('https://fixture.invalid/models', { signal: controller.signal }, 1024, 'identity', fetcher)
+    const outcome = pending.catch(error => error)
+    await reading.promise
+    controller.abort(reason)
+    try {
+      expect(await Promise.race([outcome, delay(200, 'still waiting')])).toBe(reason)
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(response.body!.locked).toBe(false)
+      expect(fetcher).toHaveBeenCalledOnce()
+    } finally {
+      if (cancel.mock.calls.length === 0) stream.close()
+      cancelled.resolve()
+      await outcome
+    }
+  })
+
+  it('does not wait for a failed HTTP response to finish cancellation', async () => {
+    const cancelled = Promise.withResolvers<void>()
+    const cancel = vi.fn(() => cancelled.promise)
+    const response = new Response(new ReadableStream({ cancel }), { status: 503 })
+    const fetcher = vi.fn().mockResolvedValue(response)
+    const pending = fetchJsonResponse('https://fixture.invalid/models', {}, 1024, 'identity', fetcher)
+    try {
+      expect(await Promise.race([pending, delay(200, 'still waiting')])).toEqual({ response, body: undefined })
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(fetcher).toHaveBeenCalledOnce()
+    } finally { cancelled.resolve(); await pending }
+  })
+
+  it('bounds an error-body reader that ignores the request signal', async () => {
+    const reading = Promise.withResolvers<void>()
+    const body = Promise.withResolvers<unknown>()
+    const response = new Response(new ReadableStream(), { status: 403 })
+    const controller = new AbortController()
+    const reason = new DOMException('fixture deadline', 'TimeoutError')
+    const fetcher = vi.fn().mockResolvedValue(response)
+    const pending = fetchJsonResponse('https://fixture.invalid/usage', { signal: controller.signal }, 1024, 'identity', fetcher,
+      () => { reading.resolve(); return body.promise })
+    const outcome = pending.catch(error => error)
+    await reading.promise
+    controller.abort(reason)
+    try {
+      expect(await Promise.race([outcome, delay(200, 'still waiting')])).toBe(reason)
+      expect(fetcher).toHaveBeenCalledOnce()
+    } finally { body.resolve(undefined); await outcome }
+  })
+
   it('accepts gzip already decoded by Fetch without decompressing it twice', async () => {
     const document = { data: [{ id: 'compressed-model' }] }
     const endpoint = await localEndpoint((request, response) => {

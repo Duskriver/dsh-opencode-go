@@ -53,16 +53,18 @@ export async function readMetadataCache(path: string): Promise<CachedMetadata | 
   }
 }
 
-export async function writeMetadataCache(path: string, value: CachedMetadata): Promise<void> {
+export async function writeMetadataCache(path: string, value: CachedMetadata): Promise<boolean> {
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`
   try {
     const content = JSON.stringify({ version: 1, sourceURL: MODEL_METADATA_URL, ...value })
-    if (Buffer.byteLength(content) > CACHE_MAX_BYTES) return
+    if (Buffer.byteLength(content) > CACHE_MAX_BYTES) return false
     await mkdir(dirname(path), { recursive: true })
     await writeFile(temporary, content, { flag: 'wx', mode: 0o600 })
     await rename(temporary, path)
+    return true
   } catch {
     // Persistence cannot turn a successful online refresh into a catalog failure.
+    return false
   } finally {
     await rm(temporary, { force: true }).catch(() => {})
   }

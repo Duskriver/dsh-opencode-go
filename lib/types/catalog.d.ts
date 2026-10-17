@@ -2,6 +2,7 @@ import type { Api, Model, Provider } from './sdk-types.ts';
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-llm';
 import { type GoModelCatalog } from './models-contract.ts';
 import type { ModelMetadata } from './model-metadata.ts';
+import { type DiagnosticTiming } from './diagnostic-timing.ts';
 export { PROVIDER_ID, DISPLAY_NAME } from './provider-identity.ts';
 export { DEFAULT_BASE_URL } from './gateway-url.ts';
 export interface CatalogSnapshot {
@@ -21,6 +22,12 @@ export interface CatalogSnapshot {
     readonly metadataUpdatedAtMs?: number;
     readonly fetchedAtMs: number;
 }
+/** One catalog instance; refresh 0 restores disk state, then online refreshes count from 1. */
+export interface CatalogDiagnostic extends DiagnosticTiming {
+    readonly catalogId: string;
+    readonly refresh: number;
+    readonly url?: string;
+}
 /** A valid empty listing means the gateway serves nothing; malformed replies are failures. */
 export declare function readLiveModelIds(body: unknown, onInvalidRows?: (warning: string) => void): readonly string[];
 /** Runtime requests reuse a snapshot; discovery revalidates it. Concurrent reads coalesce. */
@@ -33,6 +40,9 @@ export declare class OpencodeGoCatalog {
     private readonly onRefresh;
     private readonly fetcher?;
     private readonly onWarning?;
+    private readonly onDiagnostic?;
+    private readonly diagnosticId;
+    private refreshSequence;
     private served;
     private pending;
     /** A cold runtime read can use disk metadata while the shared online refresh runs. */
@@ -51,7 +61,8 @@ export declare class OpencodeGoCatalog {
         kept: number;
     }) => void, 
     /** Kept for API compatibility; now reports unconfigured ids rather than hiding them. */
-    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void, fetcher?: typeof globalThis.fetch | undefined, onWarning?: ((warning: string) => void) | undefined);
+    onOmitted: (ids: readonly string[]) => void, onRefresh?: () => void, fetcher?: typeof globalThis.fetch | undefined, onWarning?: ((warning: string) => void) | undefined, onDiagnostic?: ((event: CatalogDiagnostic) => void) | undefined);
+    private observer;
     snapshot(force?: boolean, signal?: AbortSignal): Promise<CatalogSnapshot>;
     private restoreMetadata;
     private readSnapshot;
