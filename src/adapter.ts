@@ -5,10 +5,10 @@
  * attribution User-Agent (`deepseek-harness/<version>`), which pi-ai's client
  * lets request headers override, and `x-opencode-session`, which the gateway
  * requires and uses to route a conversation and share its prompt cache. The
- * header value is the request's session id, stable across continuation and
- * restore. Actual cache reads remain an upstream usage fact. A request with no
- * session id gets a fresh random value rather than a shared constant, because
- * a constant would merge unrelated traffic into one cache bucket.
+ * header value follows the request's session id, with special strings mapped
+ * to stable ASCII values across continuation and restore. Actual cache reads
+ * remain an upstream usage fact. A request with no session id gets one fresh
+ * random value shared by every account attempt in that logical call.
  *
  * Multi-turn correctness rides on the shared pi-ai conversion machinery
  * (`toPiContext` reconstructs provider-native replay state from the session
@@ -22,7 +22,7 @@
  * @module dsh-llm-opencode-go/adapter
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import type { Api, Model } from './sdk-types.ts'
 import {
@@ -148,14 +148,25 @@ interface OpencodeGoCallSnapshot extends OpencodeGoModelSnapshot {
   generation: number
 }
 
+/** One logical call's wire identity, shared by all account attempts and SDK cache keys. */
+interface OpencodeGoDispatchSnapshot extends OpencodeGoCallSnapshot {
+  sessionId: string
+}
+
+/** Reserved output namespace; literal IDs in this namespace must be mapped too. */
+const SESSION_HEADER_PREFIX = 'dsh-go-session-v1-'
+
 /**
- * The `x-opencode-session` value for one request. The gateway accepts any
- * non-empty value but routes and caches by it, so the conversation's stable
- * session id is the value whenever one exists; otherwise a random id keeps
- * unrelated header-only requests out of each other's cache bucket.
+ * Keep visible ASCII IDs unless they occupy the mapped namespace. Hash every
+ * other non-empty string without trimming or Unicode normalization, so special
+ * IDs survive HTTP serialization without merging distinct conversations.
+ * UTF-16LE preserves lone surrogates too; base64url keeps the result under the
+ * SDK's 64-character prompt-cache-key limit. Missing IDs get a per-call UUID.
  */
 function opencodeSessionValue(sessionId: string | undefined): string {
-  return sessionId !== undefined && sessionId.length > 0 ? sessionId : randomUUID()
+  if (sessionId === undefined || sessionId.length === 0) return randomUUID()
+  if (!/[^\x21-\x7e]/.test(sessionId) && !sessionId.startsWith(SESSION_HEADER_PREFIX)) return sessionId
+  return SESSION_HEADER_PREFIX + createHash('sha256').update(sessionId, 'utf16le').digest('base64url')
 }
 
 /**
@@ -308,6 +319,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   private async *dispatch(options: GenerateOptions, seq: number, prepared?: OpencodeGoCallSnapshot): AsyncIterable<StreamChunk> {
     const captured = prepared ?? { generation: this.options.accountGeneration?.() ?? 0, config: structuredClone(this.options.config()) }
+    const sessionId = opencodeSessionValue(options.sessionId === undefined ? undefined : String(options.sessionId))
     const trace = new CallTrace(options.model, this.options.onCallTrace)
     using whole = deadline(options.signal, captured.config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, 'LLM_REQUEST_TIMEOUT')
     try {
@@ -315,7 +327,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         generation: captured.generation,
         ...await trace.measure('discovery', () => this.modelSnapshot(options.model, whole.signal, captured.config)),
       }
-      for await (const chunk of this.streamAccounts({ ...options, signal: whole.signal }, snapshot, seq, trace)) {
+      for await (const chunk of this.streamAccounts({ ...options, signal: whole.signal }, { ...snapshot, sessionId }, seq, trace)) {
         if (chunk.type === 'finish') {
           trace.outcome = chunk.reason.kind === 'error' ? 'failed' : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed'
           if (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted') trace.code = chunk.reason.failure?.code
@@ -338,7 +350,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     } finally { trace.finish() }
   }
 
-  private async *streamAccounts(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, seq: number, trace: CallTrace): AsyncIterable<StreamChunk> {
+  private async *streamAccounts(options: GenerateOptions, snapshot: OpencodeGoDispatchSnapshot, seq: number, trace: CallTrace): AsyncIterable<StreamChunk> {
     const accounts = accountsOf(snapshot.config)
     if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
     // The preferred reference resolves through accountRefOf: an empty string
@@ -441,11 +453,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   /** One account, one SDK attempt; host recovery still owns failures after output. */
-  private async *streamAttempt(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, trace: CallTrace): AsyncIterable<StreamChunk> {
+  private async *streamAttempt(options: GenerateOptions, snapshot: OpencodeGoDispatchSnapshot, trace: CallTrace): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
-    const { config, catalog, model } = snapshot
+    const { config, catalog, model, sessionId } = snapshot
     const maxTokens = requestMaxTokens(model, config.modelLimits, options.maxTokens)
     const reasoning = this.resolveReasoningLevel(model, options.reasoningEffort)
 
@@ -515,13 +527,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
         ...reasoningRequest(reasoningIntent(model, reasoning)),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
-        ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+        sessionId,
         signal: watchdog.signal,
         // Harness-owned request identity: the gateway refuses requests without
         // `x-opencode-session` and profiles clients by User-Agent, and
         // attribution merges last in pi-ai's client.
         headers: {
-          'x-opencode-session': opencodeSessionValue(options.sessionId === undefined ? undefined : String(options.sessionId)),
+          'x-opencode-session': sessionId,
           ...attributionHeaders(),
         },
         // The agent recovery layer owns visible attempts; one adapter call is

@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Gateway from '@deepseek-ai/dsh-api-gateway'
 import Registry from '@deepseek-ai/dsh-typert-registry'
 import LlmRuntime, { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { accountsOf, assertAccounts } from '../src/accounts.ts'
 import { Config, PlainConfig, type LiveConfig, type OpencodeGoConfig } from '../src/config.ts'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
@@ -50,6 +50,37 @@ it.each([
   expect(config.apiKeyEnv).toBe('ACCOUNT_A')
   expect(switched).toHaveBeenCalledWith({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: failure.reason, at: expect.any(Number) }, expect.any(Object), expect.any(Number))
   expect(JSON.stringify(switched.mock.calls)).not.toContain('secret')
+})
+
+it.each([
+  { mode: 'direct', sessionId: undefined },
+  { mode: 'direct', sessionId: '' },
+  { mode: 'prepared', sessionId: undefined },
+  { mode: 'prepared', sessionId: '' },
+])('keeps one fallback session across account attempts for $mode calls with sessionId=$sessionId', async ({ mode, sessionId }) => {
+  const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+  gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+  gateway.pushCompletions({ events: textEvents })
+  const config = configOf(gateway.url, { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true })
+  const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => `${config.apiKeyEnv}-secret` })
+  const input = Object.freeze({ ...request(), sessionId: sessionId as GenerateOptions['sessionId'] })
+  try {
+    const stream = mode === 'prepared'
+      ? (await adapter.prepareCall(input.provider, input.model)).stream
+      : adapter.stream.bind(adapter)
+    expect((await drain(stream(input))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+    const attempts = gateway.headers.filter(header => header.authorization)
+    expect(attempts.map(header => header.authorization)).toEqual(['Bearer ACCOUNT_A-secret', 'Bearer ACCOUNT_B-secret'])
+    const identity = attempts[0]?.['x-opencode-session']
+    expect(identity).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(attempts[1]?.['x-opencode-session']).toBe(identity)
+
+    // Reusing the caller envelope or prepared stream is a new logical call.
+    gateway.pushCompletions({ events: textEvents })
+    expect((await drain(stream(input))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+    expect(gateway.headers.at(-1)?.['x-opencode-session']).not.toBe(identity)
+    expect(input.sessionId).toBe(sessionId)
+  } finally { await adapter.dispose() }
 })
 
 it.each([

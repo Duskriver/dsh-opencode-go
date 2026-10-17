@@ -1,5 +1,15 @@
 # Verification
 
+## Session routing across account retries and special IDs (2026-10-17)
+
+Dispatch now captures one wire session identity before discovery and retains it across account attempts. Missing or empty IDs receive a fresh UUID for each logical invocation, including repeated use of a prepared stream. Both the SDK session option and `x-opencode-session` receive that value, preserving Responses prompt-cache keys during fallback.
+
+Special non-empty IDs map to versioned ASCII SHA-256 values without trimming, Unicode normalization or persistent in-memory mappings. The regression vector fixes the UTF-16LE/base64url wire format. Tests exercise Chinese and Latin-1 strings, CRLF, a trailing newline, whitespace, tabs, NUL and lone surrogates through real SDK requests to a loopback gateway. Serialized Session restoration, adapter recreation and direct/prepared title/compaction envelopes preserve the mapped value and the original Host ID. Distinct special strings, different lone surrogates and a literal string equal to a mapped header retain separate identities.
+
+The regression-first run failed 16 newly added cases against the original implementation. Account tests cover direct and prepared dispatch, omitted and empty IDs, reuse of the caller envelope and independent subsequent calls. Responses regressions check both account attempts' headers and serialized `prompt_cache_key` values. The upstream Auto review caller's missing `sessionId` is recorded in [the development follow-up](development.md#pending-upstream-auto-review-omits-session-identity); the plugin does not infer its owning session.
+
+Validation: **18 new regression cases**, **805 passing tests across 47 files**, both TypeScript projects and freshness checks for **67 shipped artifacts**. The packed plugin passes installed-package compatibility on DSH **0.1.5-rc.1**, **0.2.0-rc.2** and **0.2.1-alpha.1**, including all four protocols and the Responses override (**68.1 seconds** including cleanup). Checks use loopback fixtures and isolated consumers; they do not measure live gateway cache-hit rates or exercise the actual Auto review caller.
+
 ## Issue #54: 64k output default and failed-request occupancy (2026-10-15)
 
 Only requests to the exact model ID `deepseek-v4.1-flash` default to 65,536 output tokens, bounded by that model's capacity. Both model-resolution paths report the default as `defaultMaxTokens` for host compaction budgeting. Other models keep their SDK output defaults and existing explicit caller/setting behavior. Regression tests compare the Host's prepared configuration with the serialized Chat Completions allowance, cover smaller DeepSeek capacities and settings changes during preparation, and verify that other model IDs (including similarly named DeepSeek variants) receive no injected default. SDK context clamping can reduce the wire value; Anthropic token-budget reasoning retains its existing behavior.

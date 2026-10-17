@@ -5,10 +5,10 @@
  * attribution User-Agent (`deepseek-harness/<version>`), which pi-ai's client
  * lets request headers override, and `x-opencode-session`, which the gateway
  * requires and uses to route a conversation and share its prompt cache. The
- * header value is the request's session id, stable across continuation and
- * restore. Actual cache reads remain an upstream usage fact. A request with no
- * session id gets a fresh random value rather than a shared constant, because
- * a constant would merge unrelated traffic into one cache bucket.
+ * header value follows the request's session id, with special strings mapped
+ * to stable ASCII values across continuation and restore. Actual cache reads
+ * remain an upstream usage fact. A request with no session id gets one fresh
+ * random value shared by every account attempt in that logical call.
  *
  * Multi-turn correctness rides on the shared pi-ai conversion machinery
  * (`toPiContext` reconstructs provider-native replay state from the session

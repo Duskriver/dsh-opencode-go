@@ -83,6 +83,26 @@ describe('experimental protocol override', () => {
     expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'stop' }, replayState: { response: { api: 'openai-responses' } } })
   })
 
+  it.each([undefined, '', '会话\r\n-a', '   '])('shares a safe Responses cache key and header across account retry with sessionId=%s', async sessionId => {
+    const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
+    gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
+    gateway.pushCompletions({ events: responsesEvents() })
+    const config = configOf(gateway.url, { protocolOverrides: override, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true,
+      accounts: [{ id: 'a', name: 'A', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'B', apiKeyEnv: 'ACCOUNT_B' }] })
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => `${config.apiKeyEnv}-fixture` })
+    const input = Object.freeze(request({ sessionId: sessionId as GenerateOptions['sessionId'] }))
+    try {
+      expect((await drain(adapter.stream(input))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+      expect(gateway.paths).toEqual(['/models', '/responses', '/responses'])
+      const attempts = gateway.headers.filter(header => header.authorization)
+      const identity = attempts[0]?.['x-opencode-session']
+      expect(identity).toMatch(/^[\x21-\x7e]+$/)
+      expect(attempts[1]?.['x-opencode-session']).toBe(identity)
+      for (const body of gateway.bodies) expect(body).toMatchObject({ prompt_cache_key: identity })
+      expect(input.sessionId).toBe(sessionId)
+    } finally { await adapter.dispose() }
+  })
+
   it('captures prepared routing and switches new calls without refetching or mutating the catalog', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
     const config = configOf(gateway.url)
