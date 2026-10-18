@@ -47,7 +47,7 @@ export interface OpencodeGoConfig {
   accountOperations?: GoAccountOperation[]
   /** Try other saved accounts on quota/credential rejection before any content is emitted. */
   autoSwitch?: boolean
-  /** Shared gateway base for model discovery, inference and usage requests. */
+  /** Discovery/usage base; the official Go gateway selects inference endpoints by protocol. */
   baseURL: string
   /** Optional HTTP(S) or SOCKS5 proxy; blank uses the default network transport. */
   proxyURL: string

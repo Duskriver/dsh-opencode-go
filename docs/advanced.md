@@ -87,7 +87,7 @@ socks5://127.0.0.1:1080
 
 | 配置项 | 用途 |
 | --- | --- |
-| `baseURL` | 模型列表、对话发送和额度查询共用的 OpenCode Go 网关前缀，默认 `https://opencode.ai/inference/go/v1` |
+| `baseURL` | OpenCode Go 网关地址，默认 `https://opencode.ai/inference/go/v1`；官方网关自动按模型协议选择推理端点 |
 | `usageDisplay` | 额度显示模式：`auto`、`always` 或 `off` |
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
@@ -99,7 +99,16 @@ socks5://127.0.0.1:1080
 | `requestPreparationTimeoutMs` | 目录查询及每次尝试的凭据、图片准备时限，默认 60000 毫秒 |
 | `requestTimeoutMs` | 一次发送的完整时限，包含目录查询、账号切换和流式输出，默认 1800000 毫秒；预先准备的调用从发送时计时 |
 
-`baseURL` 后会按用途拼接路径：模型列表使用 `GET /models`，Gemini 发送使用 `POST /models/{model}:streamGenerateContent`，额度查询使用 `GET /usage`。列表可访问不代表所有推理接口都可用。读取旧官方地址 `https://opencode.ai/zen/go/v1` 时，插件会统一迁移为新地址，模型列表、所有协议的发送和额度查询都使用新网关；保存设置时也会写入新地址。因此运行不依赖旧网关继续服务。自定义网关仍按配置发送。
+默认官方网关使用 `GET https://opencode.ai/inference/go/v1/models` 读取模型列表，使用 `GET https://opencode.ai/inference/go/v1/usage` 查询额度。推理端点按模型目录声明的协议选择，与[官方文档](https://opencode.ai/v2/docs/console/go/#endpoints)一致，以下路径均以 `https://opencode.ai/inference/go` 为前缀：
+
+| 模型协议 | 推理路径 |
+| --- | --- |
+| OpenAI Chat Completions（如 GLM-5.3-Flash） | `/openai/v1/chat/completions` |
+| OpenAI Responses（如 Grok 4.7、GPT 6 Luna） | `/openai/v1/responses` |
+| Anthropic Messages（如 Claude Haiku 5.5） | `/anthropic/v1/messages` |
+| Google（如 Gemini 4 Argon Contributor） | `/google/v1beta/models/{model}:streamGenerateContent` |
+
+读取旧官方地址 `https://opencode.ai/zen/go/v1` 时，插件会自动迁移，保存设置时也会写入新地址。无需为每个模型手动修改网关。自定义网关继续使用填写的 `baseURL` 作为请求前缀，由各协议 SDK 拼接资源路径；不会自动添加官方网关的协议分段。列表可访问不代表所有推理接口都可用。
 
 额度查询失败时，面板会保留 HTTP 状态码，并在上游提供可读原因时显示脱敏后的摘要。HTTP 403 会提示检查 API Key 和 Go 订阅权限；账号显示“已配置 key”仅代表本地保存了凭据。可同时核对 Key 所属账号或 workspace 的订阅状态，以及网关与代理配置。
 

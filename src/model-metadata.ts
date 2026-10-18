@@ -3,7 +3,7 @@ import type { Api, Model, ModelCost, ModelThinkingLevel } from './sdk-types.ts'
 
 import { normalizeInputModalities, validReleaseDate, type GoModel } from './models-contract.ts'
 import { NATIVE_THINKING_FLAGS, THINKING_LEVELS, supportsThinkingBudget, unsupportedThinkingLevels, withGatewayReasoning } from './reasoning.ts'
-import { migrateGatewayBaseURL } from './gateway-url.ts'
+import { DEFAULT_BASE_URL, migrateGatewayBaseURL } from './gateway-url.ts'
 
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
@@ -79,9 +79,19 @@ function reasoningControls(id: string, api: Api, metadata: Record<string, unknow
   }
 }
 
-/** Use the current gateway for every protocol, then normalize SDK paths. */
+/** Select documented official protocol endpoints while preserving custom gateway prefixes. */
 export function modelBaseURL(api: Api, baseURL: string): string {
   const base = migrateGatewayBaseURL(baseURL).replace(/\/+$/, '')
+  if (base === DEFAULT_BASE_URL) {
+    const gateway = base.replace(/\/v1$/, '')
+    switch (api) {
+      case 'openai-completions':
+      case 'openai-responses': return `${gateway}/openai/v1`
+      // The Anthropic SDK adds /v1/messages; the other SDKs append only their resource path.
+      case 'anthropic-messages': return `${gateway}/anthropic`
+      case 'google-generative-ai': return `${gateway}/google/v1beta`
+    }
+  }
   return api === 'anthropic-messages' ? base.replace(/\/v1$/, '') : base
 }
 
@@ -92,7 +102,7 @@ export function responsesCompatibility(): NonNullable<Model<'openai-responses'>[
 
 /**
  * Only read the opencode-go record. Online endpoints, headers and credentials
- * are deliberately ignored: model traffic always stays on the configured gateway.
+ * are deliberately ignored: protocol endpoints are selected on the configured gateway.
  * A bad entry is isolated instead of discarding every other model.
  */
 export function readModelMetadata(body: unknown, baseURL: string, builtin: ReadonlyMap<string, Model<Api>>): ModelMetadata {

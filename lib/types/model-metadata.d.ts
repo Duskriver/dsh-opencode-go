@@ -9,13 +9,13 @@ export interface ModelMetadata {
     readonly details: ReadonlyMap<string, ModelDetails>;
     readonly errors: ReadonlyMap<string, string>;
 }
-/** Use the current gateway for every protocol, then normalize SDK paths. */
+/** Select documented official protocol endpoints while preserving custom gateway prefixes. */
 export declare function modelBaseURL(api: Api, baseURL: string): string;
 /** Shared Responses defaults for declared models and explicit protocol overrides. */
 export declare function responsesCompatibility(): NonNullable<Model<'openai-responses'>['compat']>;
 /**
  * Only read the opencode-go record. Online endpoints, headers and credentials
- * are deliberately ignored: model traffic always stays on the configured gateway.
+ * are deliberately ignored: protocol endpoints are selected on the configured gateway.
  * A bad entry is isolated instead of discarding every other model.
  */
 export declare function readModelMetadata(body: unknown, baseURL: string, builtin: ReadonlyMap<string, Model<Api>>): ModelMetadata;

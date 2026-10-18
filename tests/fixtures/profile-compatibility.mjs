@@ -24,7 +24,7 @@ globalThis.fetch = async (input, init) => {
     assert.equal(authorization, 'Bearer backup-fixture-key', 'usage follows the adopted account')
     return Response.json({ usage })
   }
-  if (url === 'https://opencode.ai/inference/go/v1/chat/completions') {
+  if (url === 'https://opencode.ai/inference/go/openai/v1/chat/completions') {
     inferenceKeys.push(authorization)
     if (authorization === 'Bearer fixture-key') {
       return Response.json({ error: { message: 'Monthly usage limit exceeded' } }, { status: 429 })
