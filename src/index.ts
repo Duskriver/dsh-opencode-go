@@ -48,6 +48,7 @@ import { Config, readConfig } from './config.ts'
 import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
+import { GoAnalyticsService, type AnalyticsSessionQuery } from './analytics.ts'
 import { registerGoRemotes } from './remotes.ts'
 import { accountsOf, accountRefOf } from './accounts.ts'
 import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
@@ -175,6 +176,18 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   ctx.plugin(GoModelsService, {
     catalog: () => catalogs.forConfig(current()),
     onRefresh: () => { registration?.replace([PROVIDER_ID]) },
+  })
+  const sessionQueryOf = (): AnalyticsSessionQuery | undefined =>
+    (ctx as unknown as { get(name: string): unknown }).get('sessionQuery') as AnalyticsSessionQuery | undefined
+  ctx.plugin(GoAnalyticsService, {
+    query: sessionQueryOf,
+    pricing: async () => {
+      const snapshot = await catalogs.forConfig(current()).snapshot()
+      return {
+        models: snapshot.models,
+        ...(snapshot.metadataUpdatedAtMs === undefined ? {} : { updatedAt: snapshot.metadataUpdatedAtMs }),
+      }
+    },
   })
   const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().protocolOverrides ?? {}])
   let pickerVisibility = pickerVisibilityOf()

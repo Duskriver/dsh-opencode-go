@@ -6,6 +6,7 @@ import type { GoUsage } from '../src/usage-contract.ts'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { UsagePill } from '../src/client/UsagePill.tsx'
 import { en } from '../src/client/locales.ts'
+import { setGoTheme } from '../src/client/theme.ts'
 import { stubSettingsScope } from './support/settings-scope.ts'
 import type { OpencodeGoSettings } from '../src/client/section-controller.ts'
 import type { SettingsScope } from '../src/client/settings.ts'
@@ -17,7 +18,7 @@ const usageSettings = (value: OpencodeGoSettings = {}) => {
   return host
 }
 let settings: SettingsScope<OpencodeGoSettings>
-beforeEach(() => { vi.useFakeTimers(); settings = usageSettings().scope })
+beforeEach(() => { vi.useFakeTimers(); settings = usageSettings().scope; localStorage.clear(); setGoTheme('graphite') })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 const t = (key: string) => en[key as keyof typeof en]
 const usageWindow = { status: 'ok' as const, percent: 10, resetsAt: '2026-09-21T00:00:00Z' }
@@ -39,11 +40,16 @@ const usageError = (options: { retainPrevious?: boolean; retryable?: boolean; so
   })
 const trigger = () => screen.getByRole<HTMLButtonElement>('button', { name: new RegExp(en.usageTitle) })
 const percentageLabel = (value: GoUsage) => `Go · ${en.usageRollingShort} ${value.rolling.percent}% · ${en.usageWeekShort} ${value.weekly.percent}%`
-/** The multi-account label suffix the pill appends whenever more than one account is configured. */
-const accountSuffix = (name: string) => ` · ${name}`
+/** The multi-account chip's initial, preceded by the label separator. */
+const accountInitial = (name: string) => Array.from(name.trim())[0]!.toUpperCase()
+const accountSuffix = (name: string) => ` · ${accountInitial(name)}`
 const twoAccounts = [
   { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
   { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+]
+const threeAccounts = [
+  ...twoAccounts,
+  { id: 'c', name: 'Travel', apiKeyEnv: 'ACCOUNT_C' },
 ]
 const tick = async (milliseconds = 60_000) => { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) }) }
 const showDetails = () => { fireEvent.click(trigger()) }
@@ -313,11 +319,11 @@ it('marks windows near or at their limit so the bars are not all shown as health
   const levels = { ...usage, rolling: { ...usageWindow, percent: 20 }, weekly: { ...usageWindow, percent: 85 }, monthly: { ...usageWindow, status: 'rate-limited' as const, percent: 60 } }
   await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(levels)} t={t} />) })
   showDetails()
-  const bar = (name: string) => screen.getByRole('progressbar', { name }).className
-  expect(bar(en.usage_rolling)).toBe('')
-  expect(bar(en.usage_weekly)).not.toBe('')
-  expect(bar(en.usage_monthly)).not.toBe('')
-  expect(bar(en.usage_monthly)).not.toBe(bar(en.usage_weekly))
+  const bar = (name: string) => screen.getByRole('progressbar', { name })
+  expect(bar(en.usage_rolling).classList.contains(css.high)).toBe(false)
+  expect(bar(en.usage_weekly).classList.contains(css.high)).toBe(true)
+  expect(bar(en.usage_monthly).classList.contains(css.limited)).toBe(true)
+  expect(bar(en.usage_weekly).classList.contains(css.limited)).toBe(false)
   expect(screen.getByText(en.usageLimited)).toBeTruthy()
 })
 
@@ -326,8 +332,8 @@ it('renders the account segment as a hideable span and keeps the label string un
   const read = vi.fn().mockResolvedValue(usage)
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   expect(trigger().textContent).toBe(`${percentageLabel(usage)}${accountSuffix('Backup')}`)
-  expect(trigger().title).toBe(trigger().textContent)
-  expect(trigger().querySelector(`.${css.account}`)?.textContent).toBe(accountSuffix('Backup'))
+  expect(trigger().title).toContain('Backup')
+  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(accountInitial('Backup'))
   expect(trigger().querySelectorAll(`.${css.unit}`)).toHaveLength(2)
 })
 
@@ -336,8 +342,8 @@ it('keeps the account segment in the non-usage state with more than one account'
   const read = vi.fn().mockRejectedValue(usageError())
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   expect(trigger().textContent).toBe(`Go · ${en.usageUnavailable}${accountSuffix('Backup')}`)
-  expect(trigger().title).toBe(trigger().textContent)
-  expect(trigger().querySelector(`.${css.account}`)?.textContent).toBe(accountSuffix('Backup'))
+  expect(trigger().title).toContain('Backup')
+  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(accountInitial('Backup'))
   expect(trigger().querySelector(`.${css.reading}`)).toBeNull()
   expect(trigger().querySelector(`.${css.unit}`)).toBeNull()
 })
@@ -427,4 +433,50 @@ it('walks the account list with the arrow keys and leaves it with Escape before 
   expect(screen.queryByRole('listbox')).toBeNull()
   expect(openPanel()).toBeTruthy()
   expect(within(openPanel()).getAllByRole('progressbar')).toHaveLength(3)
+})
+
+it('opens the shared analytics dialog from the expanded panel', async () => {
+  const host = usageSettings({ usageDisplay: 'always' })
+  const analytics = vi.fn().mockResolvedValue({
+    generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
+    totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
+      cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
+    byModel: [], byDay: [],
+    coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
+      summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
+    pricing: { source: 'models.dev', unpricedModels: [] },
+  })
+  await act(async () => {
+    render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
+      readAnalytics={analytics} t={t} />)
+  })
+  showDetails()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+  expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+  expect(analytics).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the account chip compact and countable with three accounts', async () => {
+  const host = usageSettings({ usageDisplay: 'always', accounts: threeAccounts, apiKeyEnv: 'ACCOUNT_B' })
+  await act(async () => {
+    render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')}
+      readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
+  })
+  const chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
+  expect(chip.textContent).toBe('B+2')
+  expect(chip.title).toContain('Backup')
+  expect(trigger().textContent).toContain('B+2')
+})
+
+it('switches the pill palette from the popover', async () => {
+  const host = usageSettings({ usageDisplay: 'always' })
+  await act(async () => {
+    render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')}
+      readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
+  })
+  const root = trigger().parentElement as HTMLElement
+  expect(['#111214', '#f6f7f9']).toContain(root.style.getPropertyValue('--go-bg'))
+  showDetails()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.themeSilentBlack })) })
+  expect(['#101010', '#f8f8f8']).toContain(root.style.getPropertyValue('--go-bg'))
 })

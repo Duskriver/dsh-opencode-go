@@ -7,12 +7,18 @@ import { DEFAULT_USAGE_DISPLAY } from '../usage-display.ts'
 import type { SettingsScope } from './settings.ts'
 import type { OpencodeGoSettings } from './section-controller.ts'
 import { accountsOf, accountRefOf, type GoAccount, type GoAccountSwitch } from '../accounts.ts'
+import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts'
+import { AnalyticsDialog } from './AnalyticsDialog.tsx'
+import { ThemeDots } from './ThemeDots.tsx'
+import { themeStyle, useGoThemeTokens } from './theme.ts'
 import css from './UsagePill.module.css'
 
 export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
   settings: SettingsScope<OpencodeGoSettings>
   readUsage: () => Promise<GoUsage>
+  /** Optional so an embedded/test render can omit the dashboard. */
+  readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>
   t: (key: string) => string
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>
@@ -61,6 +67,15 @@ function ChevronLeft() {
   return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>
 }
 
+function accountInitial(name: string): string {
+  const first = Array.from(name.trim())[0]
+  return first === undefined ? '•' : first.toUpperCase()
+}
+
+function ChartIcon() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M2.5 13.5h11M4.5 11V8M8 11V4M11.5 11V6" /></svg>
+}
+
 function Tick() {
   return <svg className={css.tick} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" /></svg>
 }
@@ -86,7 +101,7 @@ export function UsagePill({ directory, settings, credentialChanges, ...props }: 
     {...props} accounts={accounts} activeRef={activeRef} writable={config.writable} /> : null
 }
 
-function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, selectAccount }: Omit<UsagePillProps, 'directory' | 'settings'> & {
+function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount }: Omit<UsagePillProps, 'directory' | 'settings'> & {
   accounts: readonly GoAccount[]; activeRef: string; writable: boolean
 }) {
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
@@ -96,6 +111,8 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
   const [switching, setSwitching] = useState(false)
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
+  const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  const tokens = useGoThemeTokens()
   const root = useRef<HTMLSpanElement>(null)
   const retry = useRef<() => void>(() => {})
   useEffect(() => {
@@ -182,15 +199,23 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
       </span>
       {failure ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
-      {accounts.length > 1 ? <span className={css.account}> · {accountName}</span> : null}
+      {accounts.length > 1 ? <>{' · '}<span className={css.accountChip} title={accountName + ' · ' + accounts.length}
+        aria-label={accountName + ' · ' + accounts.length}>
+        <span className={css.accountInitial}>{accountInitial(accountName)}</span>
+        {accounts.length > 2 ? <span className={css.accountCount}>{'+' + Math.min(9, accounts.length - 1)}</span> : null}
+      </span></> : null}
     </>
     : <>
       <span className={css.brand}>Go · </span>
       {failure ? t('usageUnavailable') : '…'}
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
-      {accounts.length > 1 ? <span className={css.account}> · {accountName}</span> : null}
+      {accounts.length > 1 ? <>{' · '}<span className={css.accountChip} title={accountName + ' · ' + accounts.length}
+        aria-label={accountName + ' · ' + accounts.length}>
+        <span className={css.accountInitial}>{accountInitial(accountName)}</span>
+        {accounts.length > 2 ? <span className={css.accountCount}>{'+' + Math.min(9, accounts.length - 1)}</span> : null}
+      </span></> : null}
     </>
-  return <span className={css.root} ref={root}>
+  return <span className={css.root} ref={root} style={themeStyle(tokens)}>
     <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}
       aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open); setView('usage') }}>{segments}</button>
     {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
@@ -238,7 +263,7 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
             {accounts.length > 1 ? <span className={css.tag}>{t('accountPreferredTag')}</span> : null}
             {accounts.length > 1 ? <button type="button" className={css.switch} disabled={!switchable || switching}
               aria-haspopup="listbox" onClick={() => { setView('accounts') }}>
-              {t('accountSwitchAction')}<ChevronRight />
+              {t('accountSwitchAction')}{accounts.length > 1 ? ' · ' + accounts.length : ''}<ChevronRight />
             </button> : null}
           </div>
         </div> : null}
@@ -261,7 +286,8 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
             <div className={css.window}>
               <div className={css.windowRow}>
                 <span className={css.windowLabel}>{t(`usage_${key}`)}</span>
-                <progress className={usageLevel(usage[key])} aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
+                <progress className={[usageLevel(usage[key]), key === 'rolling' ? css.progressRolling : key === 'weekly' ? css.progressWeekly : css.progressMonthly].filter(Boolean).join(' ')}
+                  aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
                 <strong className={css.windowPercent}>{usage[key].percent}%</strong>
               </div>
               <div className={css.windowReset}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
@@ -269,11 +295,20 @@ function ActiveUsage({ readUsage, t, getLocale, accounts, activeRef, writable, s
             </div>
           </Fragment>)}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
+        <div className={css.themeRow}><ThemeDots t={t} /></div>
+        {readAnalytics ? <button type="button" className={css.analyticsEntry} aria-haspopup="dialog"
+          onClick={() => { setOpen(false); setAnalyticsOpen(true) }}>
+          <ChartIcon />
+          <span>{t('analyticsOpen')}</span>
+          <ChevronRight />
+        </button> : null}
         {current ? <div className={css.foot}>
           <span>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</span>
         </div> : null}
       </>}
       </div>
     </div>}
+    {readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
+      readAnalytics={readAnalytics} readQuota={readUsage} t={t} getLocale={getLocale} /> : null}
   </span>
 }

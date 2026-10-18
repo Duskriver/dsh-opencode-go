@@ -17,9 +17,12 @@ import { hostAtom } from './host-primitives.ts'
 import { HintMark, HintText } from './hint-mark.tsx'
 import { ModelEditor } from './ModelEditor.tsx'
 import { AccountsCard } from './AccountsCard.tsx'
+import { AnalyticsDialog } from './AnalyticsDialog.tsx'
 import type { GoAccountsActions } from './accounts-controller.ts'
 import type { en } from './locales.ts'
 import { USAGE_DISPLAY_MODES } from '../usage-display.ts'
+import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts'
+import type { GoUsage } from '../usage-contract.ts'
 import css from './Section.module.css'
 
 // 0.1.7 names icons by stroke weight; older hosts name them by pixel size.
@@ -212,6 +215,9 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       loadModels={loadModels}
       setEnabled={setEnabled}
       setModelEnabled={setModelEnabled}
+      readAnalytics={props.readAnalytics}
+      readQuota={props.readQuota}
+      getLocale={props.getLocale}
       accountActions={props.loadAccounts && props.addAccount && props.renameAccount && props.removeAccount
         && props.selectAccount && props.setAutoSwitch && props.replaceAccountKey && props.moveAccount ? {
           loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
@@ -236,6 +242,9 @@ function Loaded(props: {
   loadModels: () => void
   setEnabled: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
+  readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>
+  readQuota?: (ref: string) => Promise<GoUsage>
+  getLocale?: () => string
   accountActions?: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
@@ -243,6 +252,7 @@ function Loaded(props: {
   // The list is the page's largest block and the tuning fields sit under it, so
   // it ships folded: a reader opens it when they came to change models.
   const [modelsOpen, setModelsOpen] = useState(false)
+  const [analyticsOpen, setAnalyticsOpen] = useState(false)
   // What the card has to report — the listing's own diagnostics and a refused
   // switch write — is not part of the fold. A failure the reader cannot see is
   // worse than a folded list, and the connection switch that can fail lives in
@@ -336,6 +346,17 @@ function Loaded(props: {
         </>}
       </section>
       {accountCard}
+      {props.readAnalytics ? <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('analyticsCardTitle')}</h3>
+        </div>
+        <div className={css.cardBody}>
+          <p className={css.hint}>{t('analyticsCardHint')}</p>
+          <Button variant="outline" size="md" onClick={() => { setAnalyticsOpen(true) }}>
+            {t('analyticsOpen')}
+          </Button>
+        </div>
+      </section> : null}
       {/* The model card takes whatever height the page has left: its list and its
           parameter card are the reason the page is open. It folds away exactly
           like the tuning card does, and the listing's own refresh sits with the
@@ -531,6 +552,16 @@ function Loaded(props: {
         </a>
         {state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
       </div>
+      {props.readAnalytics ? <AnalyticsDialog
+        open={analyticsOpen}
+        onClose={() => { setAnalyticsOpen(false) }}
+        readAnalytics={props.readAnalytics}
+        readQuota={props.readQuota && state.accounts
+          ? () => props.readQuota!(state.accounts!.activeRef)
+          : undefined}
+        t={t}
+        getLocale={props.getLocale}
+      /> : null}
     </div>
   )
 }

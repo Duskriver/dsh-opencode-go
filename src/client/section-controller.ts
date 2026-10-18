@@ -14,6 +14,8 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { GoModel, GoModelCatalog } from '../models-contract.ts'
+import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts'
+import type { GoUsage } from '../usage-contract.ts'
 import { PROVIDER_ID } from '../provider-identity.ts'
 import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES, type UsageDisplayMode } from '../usage-display.ts'
 import type {} from '@deepseek-ai/dsh-api-settings-controller/remote'
@@ -129,6 +131,10 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   }
   /** Read the gateway's model listing, now or again after a failure. */
   loadModels: () => void
+  /** Read one aggregate usage report over local session history. */
+  readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport>
+  /** Read one account's official quota; the dashboard shows it beside the estimate. */
+  readQuota: (ref: string) => Promise<GoUsage>
   /**
    * Turn the adapter's route on or off, writing immediately.
    * @param next - the state the switch asks for.
@@ -164,7 +170,7 @@ export class OpencodeGoSectionController {
       const result = await ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: PROVIDER_ID })
       return result.ok ? { ok: true, value: { models: result.value, stale: false } } : result
     },
-    readUsage: (ref: string) => Promise<import('../usage-contract.ts').GoUsage> = async ref => {
+    private readonly readUsage: (ref: string) => Promise<GoUsage> = async ref => {
       const result = await ctx.remote.opencodeGoUsage.readAccount(ref)
       if (!result.ok) throw result.error
       return result.value
@@ -172,6 +178,11 @@ export class OpencodeGoSectionController {
     private readonly executeAccountCommand: ExecuteAccountCommand = async command => {
       const result = await ctx.remote.opencodeGoAccounts.execute(command)
       return result.ok ? result.value : 'unknown'
+    },
+    private readonly readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport> = async () => {
+      throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
+        code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
+      })
     },
   ) {
     this.form = new StagedForm(
@@ -445,6 +456,8 @@ export class OpencodeGoSectionController {
     this.face ??= {
       hooks: { opencodeGo: this.store },
       loadModels: () => { this.loadModels() },
+      readAnalytics: (query) => this.readAnalytics(query),
+      readQuota: (ref) => this.readUsage(ref),
       setEnabled: (next) => { void this.setEnabled(next) },
       setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
       ...this.form.actions(),
