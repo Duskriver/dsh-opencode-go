@@ -27,19 +27,21 @@ export function registerUsagePill(ctx: Context, settings: SettingsScope<Opencode
       }
       // The dashboard namespace is optional so a Host that predates it still
       // renders the quota pill; the entry only appears once it is available.
-      let analytics: ((query: AnalyticsQuery) => Promise<AnalyticsReport>) | undefined
+      // The signal rides the mounted descriptor's cancellation parameter and
+      // never enters the wire args (review M4).
+      let analytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
       scope.inject(['remote.opencodeGoAnalytics'], withAnalytics => {
-        analytics = async query => {
-          const result = await withAnalytics.remote.opencodeGoAnalytics.read(query)
+        analytics = async (query, signal) => {
+          const result = await withAnalytics.remote.opencodeGoAnalytics.read(query, signal)
           if (!result.ok) throw result.error
           return result.value
         }
       })
-      const readAnalytics = async (query: AnalyticsQuery): Promise<AnalyticsReport> => {
+      const readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> => {
         if (analytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
           code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
         })
-        return analytics(query)
+        return analytics(query, signal)
       }
       const translate = ready.locale.bind('settings.opencode-go')
       ready.slots.inject('conversation.input.right', () => ready.slots.register({

@@ -25,6 +25,15 @@ const usageWindow = { status: 'ok' as const, percent: 10, resetsAt: '2026-09-21T
 const usage = { source: 'account-a', rolling: { ...usageWindow, percent: 0 }, weekly: usageWindow, monthly: { ...usageWindow, percent: 7 } }
 const updated = { ...usage, rolling: { ...usageWindow, percent: 25 }, weekly: { ...usageWindow, percent: 30 } }
 const transientMessage = 'usage request failed: network error (ECONNRESET)'
+const analyticsReport = {
+  generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
+  totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
+    cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
+  byModel: [], byDay: [],
+  coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
+    summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
+  pricing: { source: 'models.dev', unpricedModels: [] },
+}
 const directory = (provider = 'deepseek') => createSnapshotStore<ModelDirectoryState>({
   current: { provider, model: provider === 'dsh-opencode-go' ? 'deepseek-v4-flash' : 'deepseek-chat' }, routable: true,
   groups: [], failures: [], status: 'ready', error: null,
@@ -200,7 +209,9 @@ it('retains same-account percentages after a temporary failure and recovers thro
   const retry = screen.getByRole<HTMLButtonElement>('button', { name: en.usageRefreshing })
   expect(retry.disabled).toBe(true)
   fireEvent.click(retry)
-  await tick(120_000)
+  // The hung retry holds the refresh latch: while it is in flight, visibility changes
+  // cannot stack another read onto it (asserted inside the ~30s latch window).
+  await tick(29_000)
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
   expect(read).toHaveBeenCalledTimes(3)
 
@@ -276,7 +287,7 @@ it('clears cached usage for an unclassified error and does not display its raw m
   expect(screen.queryByRole('progressbar')).toBeNull()
 })
 
-it('resumes polling when visible and avoids concurrent timer and visibility reads', async () => {
+it('resumes polling when visible and avoids concurrent reads while one is in flight', async () => {
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   let finish!: (value: GoUsage) => void
   const read = vi.fn().mockImplementationOnce(() => new Promise<GoUsage>(resolve => { finish = resolve })).mockResolvedValue(usage)
@@ -285,12 +296,60 @@ it('resumes polling when visible and avoids concurrent timer and visibility read
   expect(read).not.toHaveBeenCalled()
   visibility.mockReturnValue('visible')
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
-  await tick()
+  // While that read is in flight, a second visibility change cannot stack another read.
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
   expect(read).toHaveBeenCalledTimes(1)
   await act(async () => { finish(usage) })
+  expect(trigger().textContent).toContain(percentageLabel(usage))
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
   expect(read).toHaveBeenCalledTimes(2)
+  await tick()
+  expect(read).toHaveBeenCalledTimes(3)
+})
+
+// Latch-timeout semantics (migrated from the former "a hung read blocks the minute
+// timer forever" expectation): a read that never settles may only hold the refresh
+// latch for ~30s, after which timer and visibility refreshes regain their turn.
+it('releases the busy latch when a usage read never settles and resumes timer refreshes without a fabricated failure', async () => {
+  const read = vi.fn().mockImplementation(() => new Promise<GoUsage>(() => {}))
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(trigger().textContent).toBe('Go · …')
+  // Just before the sentinel, the minute timer stays latched out behind the hung read.
+  await tick(29_000)
+  expect(read).toHaveBeenCalledTimes(1)
+  // The ~30s sentinel frees the latch without reporting a failure, and the next
+  // minute cycle regains its turn.
+  await tick(31_000)
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(trigger().textContent).toBe('Go · …')
+  expect(screen.queryByText(en.usageUnavailable)).toBeNull()
+})
+
+it('frees the busy latch when a hung retry never settles so a later manual refresh can fire', async () => {
+  const read = vi.fn().mockRejectedValueOnce(usageError())
+    .mockImplementationOnce(() => new Promise<GoUsage>(() => {}))
+    .mockResolvedValue(updated)
+  await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+  expect(trigger().textContent).toContain(en.usageUnavailable)
+  showDetails()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.usageRetry })) })
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(screen.getByRole('button', { name: en.usageRefreshing }).disabled).toBe(true)
+  // While the hung retry holds the latch, visibility refreshes cannot stack another read.
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+  expect(read).toHaveBeenCalledTimes(2)
+  // At ~30s the sentinel frees the latch; the retry control revives and the next
+  // manual refresh can be issued and lands.
+  await tick(30_000)
+  expect(read).toHaveBeenCalledTimes(2)
+  const retryButton = screen.getByRole<HTMLButtonElement>('button', { name: en.usageRetry })
+  expect(retryButton.disabled).toBe(false)
+  await act(async () => { fireEvent.click(retryButton) })
+  expect(read).toHaveBeenCalledTimes(3)
+  await act(async () => { await Promise.resolve() })
+  expect(trigger().textContent).toContain(percentageLabel(updated))
+  expect(trigger().textContent).not.toContain(en.usageStaleShort)
 })
 
 it('clears usage when its source reader changes and ignores the previous reader’s late response', async () => {
@@ -331,9 +390,11 @@ it('renders the account segment as a hideable span and keeps the label string un
   const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
   const read = vi.fn().mockResolvedValue(usage)
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
-  expect(trigger().textContent).toBe(`${percentageLabel(usage)}${accountSuffix('Backup')}`)
+  // The badge is extra on-chip information the label string does not repeat: two accounts read '+1'.
+  expect(trigger().textContent).toBe(`${percentageLabel(usage)}${accountSuffix('Backup')}+1`)
   expect(trigger().title).toContain('Backup')
-  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(accountInitial('Backup'))
+  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(`${accountInitial('Backup')}+1`)
+  expect(trigger().querySelector(`.${css.accountCount}`)?.textContent).toBe('+1')
   expect(trigger().querySelectorAll(`.${css.unit}`)).toHaveLength(2)
 })
 
@@ -341,9 +402,9 @@ it('keeps the account segment in the non-usage state with more than one account'
   const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
   const read = vi.fn().mockRejectedValue(usageError())
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
-  expect(trigger().textContent).toBe(`Go · ${en.usageUnavailable}${accountSuffix('Backup')}`)
+  expect(trigger().textContent).toBe(`Go · ${en.usageUnavailable}${accountSuffix('Backup')}+1`)
   expect(trigger().title).toContain('Backup')
-  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(accountInitial('Backup'))
+  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(`${accountInitial('Backup')}+1`)
   expect(trigger().querySelector(`.${css.reading}`)).toBeNull()
   expect(trigger().querySelector(`.${css.unit}`)).toBeNull()
 })
@@ -437,21 +498,32 @@ it('walks the account list with the arrow keys and leaves it with Escape before 
 
 it('opens the shared analytics dialog from the expanded panel', async () => {
   const host = usageSettings({ usageDisplay: 'always' })
-  const analytics = vi.fn().mockResolvedValue({
-    generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
-    totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
-      cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
-    byModel: [], byDay: [],
-    coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
-      summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
-    pricing: { source: 'models.dev', unpricedModels: [] },
-  })
+  const analytics = vi.fn().mockResolvedValue(analyticsReport)
   await act(async () => {
     render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
       readAnalytics={analytics} t={t} />)
   })
   showDetails()
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+  expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+  expect(analytics).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the analytics dialog open when a credential revision bump remounts the pill', async () => {
+  const host = usageSettings({ usageDisplay: 'always' })
+  const credentials = createSnapshotStore<number>(0)
+  const analytics = vi.fn().mockResolvedValue(analyticsReport)
+  await act(async () => {
+    render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
+      readAnalytics={analytics} t={t} credentialChanges={credentials} />)
+  })
+  showDetails()
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+  expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+  expect(analytics).toHaveBeenCalledTimes(1)
+  // A credential change is part of the pill's remount key; the dashboard lives above
+  // that key, so it must stay open with its already-fetched report (no second read).
+  await act(async () => { credentials.set(1) })
   expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
   expect(analytics).toHaveBeenCalledTimes(1)
 })
@@ -465,7 +537,37 @@ it('keeps the account chip compact and countable with three accounts', async () 
   const chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
   expect(chip.textContent).toBe('B+2')
   expect(chip.title).toContain('Backup')
+  expect(trigger().querySelector(`.${css.accountCount}`)?.textContent).toBe('+2')
   expect(trigger().textContent).toContain('B+2')
+})
+
+const manyAccounts = (count: number) => Array.from({ length: count }, (_, index) => ({
+  id: `account-${index + 1}`, name: `Account ${index + 1}`, apiKeyEnv: `ACCOUNT_${index + 1}`,
+}))
+
+it('shows the true extra count up to nine further accounts and collapses beyond that to 9+', async () => {
+  // Ten accounts: nine further ones still read out in full.
+  const ten = usageSettings({ usageDisplay: 'always', accounts: manyAccounts(10), apiKeyEnv: 'ACCOUNT_2' })
+  await act(async () => {
+    render(<UsagePill settings={ten.scope} directory={directory('dsh-opencode-go')}
+      readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
+  })
+  let chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
+  expect(chip.textContent).toBe('A+9')
+  expect(chip.title).toContain('Account 2 · 10')
+  // Eleven accounts: the twelfth would be the first to overflow, so the badge collapses.
+  cleanup()
+  const eleven = usageSettings({ usageDisplay: 'always', accounts: manyAccounts(11), apiKeyEnv: 'ACCOUNT_2' })
+  await act(async () => {
+    render(<UsagePill settings={eleven.scope} directory={directory('dsh-opencode-go')}
+      readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
+  })
+  chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
+  expect(chip.textContent).toBe('A9+')
+  // The full count stays reachable through the chip's title/aria-label.
+  expect(chip.title).toContain('Account 2 · 11')
+  expect(chip.getAttribute('aria-label')).toContain('· 11')
+  expect(trigger().textContent).toContain('A9+')
 })
 
 it('keeps the styling choice out of the popover', async () => {

@@ -18,13 +18,25 @@ const RANGES: readonly { key: RangeKey; label: AnalyticsKey; days: number }[] = 
   { key: '90d', label: 'analyticsRange90d', days: 90 },
 ]
 
-export interface AnalyticsDialogProps {
-  open: boolean
-  onClose: () => void
-  readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport>
-  readQuota?: () => Promise<GoUsage>
-  t: (key: AnalyticsKey) => string
-  getLocale?: () => string
+/** The scan cap persists under the plugin's own namespace (review P16/S9). */
+const MAX_SESSIONS_STORAGE_KEY = 'opencode-go:analytics:maxSessions'
+const DEFAULT_MAX_SESSIONS = 500
+const MAX_SESSIONS_CEILING = 2000
+
+function loadMaxSessions(): number {
+  try {
+    const raw = globalThis.localStorage?.getItem(MAX_SESSIONS_STORAGE_KEY)
+    if (raw === null || raw === undefined) return DEFAULT_MAX_SESSIONS
+    const value = Number(raw)
+    if (!Number.isSafeInteger(value)) return DEFAULT_MAX_SESSIONS
+    return Math.min(MAX_SESSIONS_CEILING, Math.max(1, value))
+  } catch {
+    return DEFAULT_MAX_SESSIONS
+  }
+}
+
+function saveMaxSessions(value: number): void {
+  try { globalThis.localStorage?.setItem(MAX_SESSIONS_STORAGE_KEY, String(value)) } catch { /* private mode */ }
 }
 
 function startOfLocalDay(now: Date): number {
@@ -37,9 +49,9 @@ function resolvedTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
-function queryFor(range: RangeKey, maxSessions: number): AnalyticsQuery {
-  const now = new Date()
-  const to = now.getTime()
+/** The window end is frozen once per open (review P5/S5) and passed in here. */
+function queryFor(range: RangeKey, maxSessions: number, to: number): AnalyticsQuery {
+  const now = new Date(to)
   if (range === 'today') return { from: startOfLocalDay(now), to, timeZone: resolvedTimeZone(), maxSessions }
   const days = RANGES.find(item => item.key === range)?.days ?? 30
   const from = new Date(startOfLocalDay(now))
@@ -73,6 +85,13 @@ function isUnsupported(error: unknown): boolean {
     && details.reason === 'no-session-query'
 }
 
+/** An abort-caused rejection must never render as an error banner (review M4). */
+function isCancellation(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false
+  if ((error as { name?: unknown }).name === 'AbortError') return true
+  return (error as { code?: unknown }).code === 'gateway/cancelled'
+}
+
 function limitLabel(row: AnalyticsModelRow, t: (key: AnalyticsKey) => string, locale?: string): string {
   if (row.limitNote === 'unlimited') return t('analyticsLimitUnlimited')
   if (row.limitGoUsd === null && row.limitGoPlusUsd === null) return t('analyticsLimitUnknown')
@@ -95,15 +114,30 @@ function CloseIcon() {
   </svg>
 }
 
+export interface AnalyticsDialogProps {
+  open: boolean
+  onClose: () => void
+  /** The signal reaches the Host's cancellation parameter (review M4). */
+  readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
+  readQuota?: () => Promise<GoUsage>
+  t: (key: AnalyticsKey) => string
+  getLocale?: () => string
+}
+
 /**
  * Shared usage dashboard, opened from the composer pill and the settings card.
  * It scans only when opened or when the range asks for it; closing the modal
- * stops the request. Every number shown here comes from the same Host report
- * as before; only the presentation and the palette are new.
+ * aborts the request. The window end is frozen once per open, so repeated
+ * requests inside one open share the Host's dedup key (review P5/S5), a range
+ * already seen in this open renders instantly and revalidates in the
+ * background (review P17), and while a scan runs the previous results stay
+ * visible under the newly selected range with an explicit annotation
+ * (review P19). Every number shown here comes from the same Host report as
+ * before; only the presentation and the palette are new.
  */
 export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, getLocale }: AnalyticsDialogProps) {
   const [range, setRange] = useState<RangeKey>('30d')
-  const [maxSessions, setMaxSessions] = useState(500)
+  const [maxSessions, setMaxSessions] = useState(loadMaxSessions)
   const [revision, setRevision] = useState(0)
   const [chartMode, setChartMode] = useState<ChartMode>('spend')
   const [report, setReport] = useState<AnalyticsReport | null>(null)
@@ -112,12 +146,26 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const generation = useRef(0)
+  // The window end is frozen once per open and only moves on refresh (P5/S5);
+  // refs so the effects read the freshest value without re-render loops.
+  const toRef = useRef(0)
+  const forceRef = useRef(false)
+  // Reports this open already fetched, keyed by the exact query (P17).
+  const reportsRef = useRef(new Map<string, AnalyticsReport>())
   const analyticsRef = useRef(readAnalytics)
   const quotaRef = useRef(readQuota)
   analyticsRef.current = readAnalytics
   quotaRef.current = readQuota
   const tokens = useGoThemeTokens()
   const locale = getLocale?.()
+
+  // Declared before the scan effect so the same-commit open transition freezes
+  // the window end and clears the per-open cache before the scan reads them.
+  useEffect(() => {
+    if (!open) return
+    toRef.current = Date.now()
+    reportsRef.current.clear()
+  }, [open])
 
   useEffect(() => {
     if (!open || quotaRef.current === undefined) return
@@ -134,23 +182,39 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
   useEffect(() => {
     if (!open) return
     let stopped = false
+    const controller = new AbortController()
     const id = ++generation.current
-    setLoading(true)
+    const force = forceRef.current
+    forceRef.current = false
+    const query = queryFor(range, maxSessions, toRef.current)
+    const key = JSON.stringify(query)
+    const cached = reportsRef.current.get(key)
+    // P17: a range this open already fetched renders immediately, then the RPC
+    // below revalidates it; the refresh button skips the cached copy.
+    if (cached !== undefined && !force) setReport(cached)
     setError(null)
-    void analyticsRef.current(queryFor(range, maxSessions))
+    setLoading(true)
+    void analyticsRef.current(query, controller.signal)
       .then(next => {
         if (stopped || id !== generation.current) return
+        reportsRef.current.set(key, next)
         setReport(next)
       })
       .catch((reason: unknown) => {
         if (stopped || id !== generation.current) return
+        if (controller.signal.aborted || isCancellation(reason)) return
         setError(reason)
       })
       .finally(() => {
         if (!stopped && id === generation.current) setLoading(false)
       })
-    return () => { stopped = true }
+    return () => { stopped = true; controller.abort() }
   }, [open, range, maxSessions, revision])
+
+  const applyMaxSessions = (value: number): void => {
+    setMaxSessions(value)
+    saveMaxSessions(value)
+  }
 
   const counts = report?.totals
   const tokenTotal = counts === undefined ? 0
@@ -160,8 +224,11 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
     chartMode === 'spend' ? row.estimatedMicroUsd : row.tokens))
   const unsupported = error !== null && isUnsupported(error)
   const empty = report !== null && report.totals.requests === 0
-  const rangeText = report === null ? ''
-    : new Date(report.range.from).toLocaleDateString(locale) + ' – ' + new Date(report.range.to - 1).toLocaleDateString(locale)
+  // P19: the range note follows the current selection, also while a scan for
+  // it is still running, so the old report never relabels itself as new.
+  const selected = queryFor(range, maxSessions, toRef.current)
+  const rangeText = new Date(selected.from).toLocaleDateString(locale) + ' – '
+    + new Date(selected.to - 1).toLocaleDateString(locale)
   const labelStep = report === null ? 1 : Math.max(1, Math.ceil(report.byDay.length / (report.byDay.length > 30 ? 6 : 8)))
 
   return <Modal open={open} onClose={onClose} title={t('analyticsTitle')} headless className={css.shell}>
@@ -177,7 +244,8 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
         <div className={css.headActions}>
           {report !== null ? <span className={css.updated}>{t('usageLastUpdated')} {new Date(report.generatedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</span> : null}
           <button type="button" className={css.iconButton} aria-label={t('analyticsRefresh')} title={t('analyticsRefresh')}
-            disabled={loading} onClick={() => { setRevision(value => value + 1) }}>
+            disabled={loading}
+            onClick={() => { forceRef.current = true; toRef.current = Date.now(); setRevision(value => value + 1) }}>
             <RefreshIcon />
           </button>
           <button type="button" className={css.iconButton} aria-label={t('analyticsClose')} title={t('analyticsClose')}
@@ -196,14 +264,16 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
             onClick={() => { setRange(item.key) }}
           >{t(item.label)}</button>)}
         </div>
-        {rangeText !== '' ? <span className={css.rangeNote}>{rangeText}</span> : null}
-        {loading && report !== null ? <span className={css.rangeNote}>{t('analyticsLoading')}</span> : null}
+        {toRef.current > 0 ? <span className={css.rangeNote}>{rangeText}</span> : null}
+        {loading && report !== null ? <span className={css.rangeNote}>{t('analyticsStaleResults')}</span> : null}
       </div>
 
       <div className={css.scroll}>
         {error !== null && <div className={css.error} role="alert">
           <p>{unsupported ? t('analyticsUnsupported') : t('analyticsFailed')}</p>
-          {!unsupported && <button type="button" className={css.action} onClick={() => { setRevision(value => value + 1) }}>
+          {!unsupported && <button type="button" className={css.action} onClick={() => {
+            forceRef.current = true; toRef.current = Date.now(); setRevision(value => value + 1)
+          }}>
             {t('analyticsRetry')}
           </button>}
         </div>}
@@ -330,10 +400,16 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
             <p>{t('analyticsNotInvoice')}</p>
             {report.pricing.unavailable === true ? <p>{t('analyticsPricingUnavailable')}</p> : null}
             {report.coverage.legacyRequests > 0 ? <p>{t('analyticsLegacy')} {number(report.coverage.legacyRequests, locale)}</p> : null}
+            {report.coverage.unattributedRequests !== undefined && report.coverage.unattributedRequests > 0
+              ? <p>{t('analyticsUnattributed')} {number(report.coverage.unattributedRequests, locale)}</p> : null}
+            {report.coverage.unreadSessions !== undefined && report.coverage.unreadSessions > 0
+              ? <p>{t('analyticsUnread')} {number(report.coverage.unreadSessions, locale)}</p> : null}
+            {report.coverage.listMs !== undefined && report.coverage.pricingMs !== undefined
+              ? <p>{t('analyticsScanSegments')} {number(report.coverage.listMs, locale)} / {number(report.coverage.scanMs, locale)} / {number(report.coverage.pricingMs, locale)} ms</p> : null}
             {report.coverage.truncated ? <div className={css.notice}>
               <span>{t('analyticsTruncated')}</span>
-              {maxSessions < 2000 ? <button type="button" className={css.action} disabled={loading}
-                onClick={() => { setMaxSessions(value => Math.min(value * 2, 2000)) }}>
+              {maxSessions < MAX_SESSIONS_CEILING ? <button type="button" className={css.action} disabled={loading}
+                onClick={() => { applyMaxSessions(Math.min(maxSessions * 2, MAX_SESSIONS_CEILING)) }}>
                 {t('analyticsScanMore')}
               </button> : null}
             </div> : null}

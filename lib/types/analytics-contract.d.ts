@@ -60,7 +60,14 @@ export interface AnalyticsDayRow {
     tokens: number;
     estimatedMicroUsd: number;
 }
-/** How complete the scan was. */
+/**
+ * How complete the scan was.
+ *
+ * Newer fields are optional numbers so an older client — whose strict report
+ * codec passes unknown keys through — keeps accepting the report. Never add a
+ * value to the truncation/limitNote enums for the same reason (see the
+ * whitelist note below).
+ */
 export interface AnalyticsCoverage {
     listedSessions: number;
     scannedSessions: number;
@@ -74,11 +81,36 @@ export interface AnalyticsCoverage {
     truncation?: 'sessions' | 'events' | 'time';
     scanMs: number;
     timeZoneFallback?: true;
+    /**
+     * Sessions listed but never scanned because the slice cap or a budget
+     * stopped first (review P16/P18/M1). Observability only — this never
+     * implies the requested range was fully covered.
+     */
+    unreadSessions?: number;
+    /**
+     * Cache entries the end-of-run trim dropped after this report was computed
+     * from run-local results; the next run re-reads them (review P3/S1).
+     */
+    evictedSessions?: number;
+    /**
+     * Model calls in range with no usable routing header or model id, counted
+     * for visibility only — never in tokens or cost (review P12).
+     */
+    unattributedRequests?: number;
+    /** Session listing wall time; scanMs excludes it (review S6). */
+    listMs?: number;
+    /** Pricing harvest wall time; scanMs excludes it (review S6/P4). */
+    pricingMs?: number;
 }
 /** Where the prices came from. */
 export interface AnalyticsPricing {
     source: 'models.dev';
     updatedAt?: number;
+    /**
+     * True only when the whole price table was unavailable; unpricedModels then
+     * lists every model that actually appeared in the range (review P15). A
+     * table that loaded but lacks a model leaves this unset and lists the model.
+     */
     unavailable?: true;
     unpricedModels: string[];
 }
@@ -118,7 +150,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }
     interface TypertRemoteNamespaceMap {
         opencodeGoAnalytics: {
-            read(query: AnalyticsQuery): Promise<RemoteResult<AnalyticsReport>>;
+            read(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsReport>>;
         };
     }
 }

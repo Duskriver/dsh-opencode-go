@@ -54,6 +54,7 @@ export interface FoldedSession {
   readonly attempts: number[]
   /** Model calls with no usable routing header or model id. */
   readonly unattributed: number[]
+  /** Events that passed the fork-prefix filter — never the inherited prefix (review P11). */
   readonly events: number
 }
 
@@ -71,11 +72,17 @@ function usageOf(value: unknown): { input: number; output: number; cacheRead: nu
   if (usage === undefined) return undefined
   const input = count(usage.inputTokens)
   const output = count(usage.outputTokens)
-  const cacheRead = usage.cacheReadTokens === undefined ? 0 : count(usage.cacheReadTokens)
-  const cacheWrite = usage.cacheWriteTokens === undefined ? 0 : count(usage.cacheWriteTokens)
-  if (input === undefined || output === undefined || cacheRead === undefined || cacheWrite === undefined) return undefined
-  if (!Number.isSafeInteger(input + output + cacheRead + cacheWrite)) return undefined
-  return { input, output, cacheRead, cacheWrite }
+  // Field-level degradation (review P8): a present-but-malformed component only
+  // degrades that component to 0 so partially valid tokens still reach the
+  // report; the whole usage counts as missing when input AND output are both
+  // missing or malformed. The safe-integer sum check runs on the degraded
+  // values and still rejects the report when they could overflow.
+  if (input === undefined && output === undefined) return undefined
+  const cacheRead = (usage.cacheReadTokens === undefined ? 0 : count(usage.cacheReadTokens)) ?? 0
+  const cacheWrite = (usage.cacheWriteTokens === undefined ? 0 : count(usage.cacheWriteTokens)) ?? 0
+  const sum = (input ?? 0) + (output ?? 0) + cacheRead + cacheWrite
+  if (!Number.isSafeInteger(sum)) return undefined
+  return { input: input ?? 0, output: output ?? 0, cacheRead, cacheWrite }
 }
 
 function stepKey(data: Record<string, unknown> | undefined): string | undefined {
@@ -111,11 +118,19 @@ export function foldSession(
   const attempts: number[] = []
   const unattributed: number[] = []
   const stepStarts = new Map<string, number>()
+  let lastStart: number | undefined
   let header: { provider: string; model?: string } | undefined
+  let ownEvents = 0
 
+  // Half-open ownership, matching the host's isOwnSeq (dsh-session
+  // lib/index.js:1192-1194: `seq >= this.inheritedEventCount && seq < this.seq`):
+  // the boundary slot seq === inheritedEventCount belongs to this session, and
+  // only the prefix strictly below it is inherited. Skipping `seq <= inherited`
+  // here would drop the session's first own event.
   for (const event of snapshot.events) {
     const seq = count(event.seq)
-    if (seq === undefined || seq <= inherited) continue
+    if (seq === undefined || seq < inherited) continue
+    ownEvents++
     const eventTime = count(event.time)
     const data = record(event.data)
 
@@ -129,14 +144,22 @@ export function foldSession(
 
     if (event.type === 'step/start' || event.type === 'step/end') {
       const key = stepKey(data)
-      if (key === undefined || eventTime === undefined) continue
-      if (event.type === 'step/start') stepStarts.set(key, eventTime)
-      else stepStarts.delete(key)
+      if (event.type === 'step/start') {
+        if (eventTime === undefined) continue
+        if (key !== undefined) stepStarts.set(key, eventTime)
+        // Track the latest start even when the key is malformed (review P10):
+        // legacy, damaged and truncated logs omit turn/step, and falling back
+        // to the completion time double-counts peak pricing, shifts day
+        // buckets and flips the legacy-route cutoff.
+        lastStart = eventTime
+      } else if (key !== undefined) {
+        stepStarts.delete(key)
+      }
       continue
     }
 
     if (event.type === 'assistant/message') {
-      const at = stepStarts.get(stepKey(data) ?? '') ?? eventTime
+      const at = stepStarts.get(stepKey(data) ?? '') ?? lastStart ?? eventTime
       if (at === undefined) continue
       if (header === undefined) { unattributed.push(at); continue }
       if (!isPluginRoute(header.provider, at, cutoff)) continue
@@ -170,11 +193,23 @@ export function foldSession(
     }
 
     if (event.type === 'assistant/attempt') {
-      const at = stepStarts.get(stepKey(data) ?? '') ?? eventTime
-      if (at === undefined || header === undefined) continue
+      // Contract: the host defines assistant/attempt as one model attempt that
+      // "committed no surface message" (dsh-session lib/types/types.d.ts:318-327;
+      // shape {turn, step, stream} — no usage, no message), so every settled
+      // model call surfaces as either an assistant/message or an
+      // assistant/attempt, never both. We collect unconditionally and do not
+      // de-duplicate against facts: a double count would require the host to
+      // violate its own contract, and silently dropping one side would hide
+      // exactly that violation.
+      const at = stepStarts.get(stepKey(data) ?? '') ?? lastStart ?? eventTime
+      if (at === undefined) continue
+      // A headless attempt cannot be attributed to a route, but it must not
+      // vanish without a trace (review U14 / P12 scan half): record its time
+      // as unattributed instead of an attempt.
+      if (header === undefined) { unattributed.push(at); continue }
       if (isPluginRoute(header.provider, at, cutoff)) attempts.push(at)
     }
   }
 
-  return { facts, attempts, unattributed, events: snapshot.events.length }
+  return { facts, attempts, unattributed, events: ownEvents }
 }

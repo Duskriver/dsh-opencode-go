@@ -79,10 +79,14 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
       return result.value
     }
   })
-  let readAnalytics: ((query: AnalyticsQuery) => Promise<AnalyticsReport>) | undefined
+  // The injection seam is cancellation-ready (review M4); the settings-card
+  // callback below passes no signal yet because the controller's inject type
+  // (section-controller, outside this change's files) is single-argument — its
+  // wrapper would drop it. The pill path in client/usage.ts threads the signal.
+  let readAnalytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
   ctx.inject(['remote.opencodeGoAnalytics'], ready => {
-    readAnalytics = async query => {
-      const result = await (ready as ClientContext).remote.opencodeGoAnalytics.read(query)
+    readAnalytics = async (query, signal) => {
+      const result = await (ready as ClientContext).remote.opencodeGoAnalytics.read(query, signal)
       if (!result.ok) throw result.error
       return result.value
     }

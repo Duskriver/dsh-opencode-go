@@ -91,6 +91,10 @@ export declare const en: {
     analyticsUnpriced: string;
     analyticsMissing: string;
     analyticsFailedSessions: string;
+    analyticsUnattributed: string;
+    analyticsUnread: string;
+    analyticsScanSegments: string;
+    analyticsStaleResults: string;
     analyticsTruncated: string;
     analyticsScanMore: string;
     analyticsLimitGo: string;

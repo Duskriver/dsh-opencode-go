@@ -46,6 +46,7 @@ export interface FoldedSession {
     readonly attempts: number[];
     /** Model calls with no usable routing header or model id. */
     readonly unattributed: number[];
+    /** Events that passed the fork-prefix filter — never the inherited prefix (review P11). */
     readonly events: number;
 }
 /**

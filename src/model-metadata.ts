@@ -8,7 +8,15 @@ import { DEFAULT_BASE_URL, migrateGatewayBaseURL } from './gateway-url.ts'
 export const MODEL_METADATA_URL = 'https://models.dev/api.json'
 
 /** Lifecycle and capability data the online catalog adds to a gateway listing. */
-export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'>
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'> & {
+  /**
+   * Present only when the upstream cost block is missing or carries a malformed
+   * component: its zeros are then indistinguishable from a genuinely free model,
+   * so analytics must treat the model as unpriced instead of pricing it at 0.
+   * A published block with legal components stays unmarked even when all zero.
+   */
+  readonly costKnown?: false
+}
 
 export interface ModelMetadata {
   readonly models: ReadonlyMap<string, Model<Api>>
@@ -35,6 +43,22 @@ function rates(value: unknown): ModelCost {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
   }
   return { input: rate('input'), output: rate('output'), cacheRead: rate('cache_read'), cacheWrite: rate('cache_write') }
+}
+
+/**
+ * Whether upstream published a usable cost block. The block itself must be an
+ * object (a fabricated `{}` for a missing or non-object block reads as a free
+ * model), and every rate component must be absent — absent folds to 0 so a
+ * partially published free row keeps its pricing — or a finite non-negative
+ * number. This is the analytics-side "price is known" judgment: a published
+ * block with legal components is known even when all of its rates are zero.
+ */
+function costRatesKnown(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const cost = value as Record<string, unknown>
+  const legal = (rate: unknown): boolean =>
+    rate === undefined || typeof rate === 'number' && Number.isFinite(rate) && rate >= 0
+  return legal(cost.input) && legal(cost.output) && legal(cost.cache_read) && legal(cost.cache_write)
 }
 
 /** Missing controls must not turn into SDK-default effort levels the gateway never advertised. */
@@ -119,7 +143,8 @@ export function readModelMetadata(body: unknown, baseURL: string, builtin: Reado
     const inputModalities = normalizeInputModalities(record(data.modalities).input)
     details.set(id, { deprecated: data.status === 'deprecated',
       ...(validReleaseDate(data.release_date) ? { releaseDate: data.release_date } : {}),
-      ...(inputModalities === undefined ? {} : { inputModalities }) })
+      ...(inputModalities === undefined ? {} : { inputModalities }),
+      ...(costRatesKnown(data.cost) ? {} : { costKnown: false }) })
     try {
       const metadata = record(value)
       const npm = record(metadata.provider).npm ?? provider.npm

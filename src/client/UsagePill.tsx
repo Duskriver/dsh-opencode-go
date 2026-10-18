@@ -51,6 +51,22 @@ function usageFailure(error: unknown): UsageFailure {
   return { retainPrevious: false }
 }
 
+/** A hung readUsage must not hold the refresh latch forever: after this long the
+ *  cycle gives up silently, leaving the displayed state untouched so the minute
+ *  timer and visibility refreshes regain their turn. */
+const usageRefreshTimeoutMs = 30_000
+const refreshTimedOut = Symbol('usage-refresh-timed-out')
+
+function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
+  return new Promise<GoUsage>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(refreshTimedOut), usageRefreshTimeoutMs)
+    read().then(
+      value => { clearTimeout(timeout); resolve(value) },
+      error => { clearTimeout(timeout); reject(error) },
+    )
+  })
+}
+
 /** Bars turn amber near the limit and red once the window is exhausted. */
 function usageLevel(window: UsageWindow): string | undefined {
   if (window.status === 'rate-limited' || window.percent >= 100) return css.limited
@@ -69,6 +85,13 @@ function ChevronLeft() {
 function accountInitial(name: string): string {
   const first = Array.from(name.trim())[0]
   return first === undefined ? '•' : first.toUpperCase()
+}
+
+/** The badge carries the true number of further accounts; past nine it collapses to
+ *  '9+' — the full count stays in the chip's title/aria-label. */
+function accountCountBadge(accounts: number): string {
+  const extra = accounts - 1
+  return extra > 9 ? '9+' : `+${extra}`
 }
 
 function ChartIcon() {
@@ -91,18 +114,31 @@ export function UsagePill({ directory, settings, credentialChanges, ...props }: 
   const readChanges = useCallback(() => credentialChanges?.getSnapshot() ?? unchanged(), [credentialChanges])
   const subscribeChanges = useCallback((listener: () => void) => credentialChanges?.subscribe(listener) ?? noSubscription(), [credentialChanges])
   const credentialRevision = useSyncExternalStore(subscribeChanges, readChanges, readChanges)
+  // The dashboard's open state lives above the remount key: a credential, account,
+  // endpoint or roster change remounts the polling subtree, and that must not close
+  // an open dashboard or drop its in-flight report.
+  const [analyticsOpen, setAnalyticsOpen] = useState(false)
   const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
   const visible = config.status === 'ready' && config.value?.enabled !== false
     && (mode === 'always' || mode === 'auto' && state.current?.provider === PROVIDER_ID)
   const accounts = accountsOf(config.value ?? {})
   const activeRef = accountRefOf(config.value ?? {})
-  return visible ? <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts])}
-    {...props} accounts={accounts} activeRef={activeRef} writable={config.writable} /> : null
+  return visible ? <>
+    <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts])}
+      {...props} accounts={accounts} activeRef={activeRef} writable={config.writable}
+      analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
+    {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
+        its own theme tokens, so leaving the pill's themed span costs no styling. */}
+    {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
+      readAnalytics={props.readAnalytics} readQuota={props.readUsage} t={props.t} getLocale={props.getLocale} /> : null}
+  </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount }: Omit<UsagePillProps, 'directory' | 'settings'> & {
-  accounts: readonly GoAccount[]; activeRef: string; writable: boolean
-}) {
+function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange }:
+  Omit<UsagePillProps, 'directory' | 'settings'> & {
+    accounts: readonly GoAccount[]; activeRef: string; writable: boolean
+    analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
+  }) {
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -110,7 +146,6 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   const [switching, setSwitching] = useState(false)
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
-  const [analyticsOpen, setAnalyticsOpen] = useState(false)
   const tokens = useGoThemeTokens()
   const root = useRef<HTMLSpanElement>(null)
   const retry = useRef<() => void>(() => {})
@@ -125,12 +160,15 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       busy = true
       setRefreshing(true)
       try {
-        const value = await readUsage()
+        const value = await withRefreshTimeout(readUsage)
         if (alive) {
           setSnapshot({ reader: readUsage, usage: value, updatedAt: Date.now() })
           setFailed(null)
         }
       } catch (error: unknown) {
+        // The sentinel only frees the latch (in `finally`) without touching the
+        // snapshot or reporting a failure the read never actually produced.
+        if (error === refreshTimedOut) return
         if (alive) {
           const failure = usageFailure(error)
           setFailed({ reader: readUsage, failure })
@@ -184,10 +222,13 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   const label = usage
     ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
     : `Go · ${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
-  /** The segments concatenate to exactly `label`, so `textContent` — and every assertion built on it —
-   * stays unchanged, while the @container tiers in UsagePill.module.css can hide the brand, the unit
-   * words, the stale wording, the fallback mark and the account name independently. jsdom does not
-   * evaluate container queries, so the tests below exercise the full label in every tier. */
+  /** The segments concatenate to exactly `label`, except the account chip's count badge, which
+   *  adds the number of further accounts as extra on-chip information the spoken label does not
+   *  repeat (the chip's title/aria-label carry the full count). Every other assertion built on
+   *  `textContent` stays unchanged, while the @container tiers in UsagePill.module.css can hide
+   *  the brand, the unit words, the stale wording, the fallback mark and the account name
+   *  independently. jsdom does not evaluate container queries, so the tests below exercise the
+   *  full label in every tier. */
   const segments = usage
     ? <>
       <span className={css.brand}>Go · </span>
@@ -201,7 +242,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       {accounts.length > 1 ? <>{' · '}<span className={css.accountChip} title={accountName + ' · ' + accounts.length}
         aria-label={accountName + ' · ' + accounts.length}>
         <span className={css.accountInitial}>{accountInitial(accountName)}</span>
-        {accounts.length > 2 ? <span className={css.accountCount}>{'+' + Math.min(9, accounts.length - 1)}</span> : null}
+        <span className={css.accountCount}>{accountCountBadge(accounts.length)}</span>
       </span></> : null}
     </>
     : <>
@@ -211,7 +252,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       {accounts.length > 1 ? <>{' · '}<span className={css.accountChip} title={accountName + ' · ' + accounts.length}
         aria-label={accountName + ' · ' + accounts.length}>
         <span className={css.accountInitial}>{accountInitial(accountName)}</span>
-        {accounts.length > 2 ? <span className={css.accountCount}>{'+' + Math.min(9, accounts.length - 1)}</span> : null}
+        <span className={css.accountCount}>{accountCountBadge(accounts.length)}</span>
       </span></> : null}
     </>
   return <span className={css.root} ref={root} style={themeStyle(tokens)}>
@@ -295,7 +336,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           </Fragment>)}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
         {readAnalytics ? <button type="button" className={css.analyticsEntry} aria-haspopup="dialog"
-          onClick={() => { setOpen(false); setAnalyticsOpen(true) }}>
+          onClick={() => { setOpen(false); onAnalyticsOpenChange(true) }}>
           <ChartIcon />
           <span>{t('analyticsOpen')}</span>
           <ChevronRight />
@@ -306,7 +347,5 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       </>}
       </div>
     </div>}
-    {readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
-      readAnalytics={readAnalytics} readQuota={readUsage} t={t} getLocale={getLocale} /> : null}
   </span>
 }

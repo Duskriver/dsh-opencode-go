@@ -67,7 +67,14 @@ export interface AnalyticsDayRow {
   estimatedMicroUsd: number
 }
 
-/** How complete the scan was. */
+/**
+ * How complete the scan was.
+ *
+ * Newer fields are optional numbers so an older client — whose strict report
+ * codec passes unknown keys through — keeps accepting the report. Never add a
+ * value to the truncation/limitNote enums for the same reason (see the
+ * whitelist note below).
+ */
 export interface AnalyticsCoverage {
   listedSessions: number
   scannedSessions: number
@@ -81,12 +88,37 @@ export interface AnalyticsCoverage {
   truncation?: 'sessions' | 'events' | 'time'
   scanMs: number
   timeZoneFallback?: true
+  /**
+   * Sessions listed but never scanned because the slice cap or a budget
+   * stopped first (review P16/P18/M1). Observability only — this never
+   * implies the requested range was fully covered.
+   */
+  unreadSessions?: number
+  /**
+   * Cache entries the end-of-run trim dropped after this report was computed
+   * from run-local results; the next run re-reads them (review P3/S1).
+   */
+  evictedSessions?: number
+  /**
+   * Model calls in range with no usable routing header or model id, counted
+   * for visibility only — never in tokens or cost (review P12).
+   */
+  unattributedRequests?: number
+  /** Session listing wall time; scanMs excludes it (review S6). */
+  listMs?: number
+  /** Pricing harvest wall time; scanMs excludes it (review S6/P4). */
+  pricingMs?: number
 }
 
 /** Where the prices came from. */
 export interface AnalyticsPricing {
   source: 'models.dev'
   updatedAt?: number
+  /**
+   * True only when the whole price table was unavailable; unpricedModels then
+   * lists every model that actually appeared in the range (review P15). A
+   * table that loaded but lacks a model leaves this unset and lists the model.
+   */
   unavailable?: true
   unpricedModels: string[]
 }
@@ -147,6 +179,10 @@ function optionalAmount(value: unknown, field: string): number | null {
   return value === null ? null : amount(value, field)
 }
 
+// Compat rule (review P3/S1-lite): never extend these whitelists — together
+// with the strict codecs below they make an old client reject the whole
+// report. Evolve through optional number/string fields instead; the report
+// validator ignores unknown keys.
 const TRUNCATIONS = ['sessions', 'events', 'time'] as const
 const NOTES = ['unlimited', 'limited-time', 'unknown'] as const
 
@@ -203,6 +239,11 @@ function validateCoverage(value: unknown): void {
   const row = object(value, 'coverage')
   for (const key of ['listedSessions', 'scannedSessions', 'matchedSessions', 'failedSessions', 'eventsScanned',
     'summaries', 'legacyRequests', 'missingUsage', 'scanMs']) integer(row[key], 'coverage.' + key)
+  // Optional observability fields (review P16/P18/P12/S6): validated when a
+  // newer Host sends them, absent when an older Host does not.
+  for (const key of ['unreadSessions', 'evictedSessions', 'unattributedRequests', 'listMs', 'pricingMs']) {
+    if (row[key] !== undefined) integer(row[key], 'coverage.' + key)
+  }
   bool(row.truncated, 'coverage.truncated')
   if (row.truncation !== undefined && !TRUNCATIONS.includes(row.truncation as never)) throw new Error('Invalid analytics truncation')
   if (row.timeZoneFallback !== undefined && row.timeZoneFallback !== true) throw new Error('Invalid analytics timezone fallback')
@@ -246,7 +287,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   }
   interface TypertRemoteNamespaceMap {
     opencodeGoAnalytics: {
-      read(query: AnalyticsQuery): Promise<RemoteResult<AnalyticsReport>>
+      read(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsReport>>
     }
   }
 }
@@ -275,6 +316,10 @@ export const analyticsRemote: TypertRemoteContribution = {
     method: 'read',
     invocation: { kind: 'direct' },
     parameters: [{ name: 'query', wire: 'query', source: 'json', codec: queryCodec }],
+    // Review M4: the signal is injected after the business parameters and
+    // never enters the wire args, so single-argument callers keep working
+    // (precedent: dsh-llm discoverModels, typert.remote-client.js:62).
+    cancellation: { parameter: 'signal' },
     result: reportCodec,
   }],
 }
