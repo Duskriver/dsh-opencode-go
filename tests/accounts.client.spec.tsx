@@ -856,7 +856,7 @@ it('marks the collapsed pill when a fallback notice is active', async () => {
   await act(async () => { render(<UsagePill directory={directory as never} settings={fixture.host.scope} readUsage={read} t={t as never} />) })
   const trigger = screen.getByRole('button', { name: /OpenCode Go usage/ })
   expect(trigger.textContent).toContain('fallback')
-  expect(trigger.textContent).toContain('Primary')
+  expect(trigger.title).toContain('Primary')
   fixture.controller.dispose()
 })
 

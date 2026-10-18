@@ -28,6 +28,20 @@ Under **Settings → OpenCode Go → Advanced settings → Usage display**, choo
 | Always | Also show configured OpenCode Go account usage while using other models |
 | Off | Hide the conversation pill and stop its polling |
 
+## Usage analytics
+
+Open **Usage analytics** at the bottom of the conversation usage panel, or under **Settings → OpenCode Go → Usage analytics**. Both open the same dashboard. It covers **this plugin's route**, including closed sessions, totals input, output, and cache tokens per model, and estimates cost with the Go plan's models.dev prices.
+
+- Ranges: today, 7 days, 30 days, and 90 days. Opening scans local sessions; nothing is uploaded and closing the dialog stops the request.
+- Cost uses the request start time. DeepSeek V4.1 Flash and V4 Pro are charged at twice the off-peak rate during the official peak window (01:00–04:00 and 06:00–10:00 UTC, Monday through Friday).
+- Each model row shows its Go and Go Plus monthly limit (snapshot 2026-10-18). Official quota percentages remain authoritative; the estimate is not an invoice.
+- A scan stops at 500 sessions, 500,000 events, or 12 seconds by default and says so, including why. **Scan more history** raises the session cap to 2,000; the choice is remembered locally.
+- DSH's native OpenCode Go route is excluded; pre-0.1.16 legacy route records are admitted by request time. A Host without `sessionQuery` shows an unavailable state.
+
+**Themes**: switch between **Silent Black, Graphite (default), Sea Salt, and Warm Sand** under **Settings → OpenCode Go → Usage analytics**; the four previews show each palette directly. Themes follow DSH's light/dark mode and are stored locally. The pill popover and the dashboard no longer carry their own switch. With multiple accounts, the pill shows the active account's initial and an extra-accounts badge (`+N`, collapsing to `9+` past nine); the full count sits in the badge's title and the full name stays in the title and the expanded panel.
+
+See [usage analytics notes](docs/usage-analytics.en.md) for the exact accounting rules and limits.
+
 ## Manage multiple accounts
 
 Open **Settings → OpenCode Go → Accounts** to manage accounts:
@@ -134,6 +148,7 @@ dsh plugin --profile web remove dsh-opencode-go
 ## More documentation
 
 - [Advanced guide: Headless, proxies, manual configuration, and error diagnostics](docs/advanced.en.md)
+- [Usage analytics: accounting, pricing, scan limits, and privacy](docs/usage-analytics.en.md)
 - [Development and testing](docs/development.md)
 - [Verification notes](docs/verification.md)
 - [Issues and suggestions](https://github.com/Duskriver/dsh-opencode-go/issues)

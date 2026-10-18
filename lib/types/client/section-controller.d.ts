@@ -11,6 +11,8 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import type { GoModel, GoModelCatalog } from '../models-contract.ts';
+import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts';
+import type { GoUsage } from '../usage-contract.ts';
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { SettingsScope } from './settings.ts';
 import type { OpencodeGoSettings, OpencodeGoModelLimits } from '../config-contract.ts';
@@ -99,6 +101,10 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
     };
     /** Read the gateway's model listing, now or again after a failure. */
     loadModels: () => void;
+    /** Read one aggregate usage report over local session history. */
+    readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport>;
+    /** Read one account's official quota; the dashboard shows it beside the estimate. */
+    readQuota: (ref: string) => Promise<GoUsage>;
     /**
      * Turn the adapter's route on or off, writing immediately.
      * @param next - the state the switch asks for.
@@ -111,7 +117,9 @@ export declare class OpencodeGoSectionController {
     private readonly scope;
     private readonly ctx;
     private readonly readModels;
+    private readonly readUsage;
     private readonly executeAccountCommand;
+    private readonly readAnalytics;
     private readonly form;
     private readonly store;
     private credential;
@@ -129,7 +137,7 @@ export declare class OpencodeGoSectionController {
      * @param ctx - the page plugin's context, whose `remote.credentials` namespace
      *   answers for the credential the section references.
      */
-    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<import('../usage-contract.ts').GoUsage>, executeAccountCommand?: ExecuteAccountCommand);
+    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<GoUsage>, executeAccountCommand?: ExecuteAccountCommand, readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>);
     /** Release subscriptions without disposing the host's shared form. */
     dispose(): void;
     private projection;

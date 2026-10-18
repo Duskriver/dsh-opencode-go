@@ -3,7 +3,15 @@ import type { Api, Model } from './sdk-types.ts';
 import { type GoModel } from './models-contract.ts';
 export declare const MODEL_METADATA_URL = "https://models.dev/api.json";
 /** Lifecycle and capability data the online catalog adds to a gateway listing. */
-export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'>;
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'> & {
+    /**
+     * Present only when the upstream cost block is missing or carries a malformed
+     * component: its zeros are then indistinguishable from a genuinely free model,
+     * so analytics must treat the model as unpriced instead of pricing it at 0.
+     * A published block with legal components stays unmarked even when all zero.
+     */
+    readonly costKnown?: false;
+};
 export interface ModelMetadata {
     readonly models: ReadonlyMap<string, Model<Api>>;
     readonly details: ReadonlyMap<string, ModelDetails>;

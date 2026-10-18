@@ -3,10 +3,13 @@ import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selec
 import { type GoUsage } from '../usage-contract.ts';
 import type { SettingsScope } from './settings.ts';
 import type { OpencodeGoSettings } from './section-controller.ts';
+import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts';
 export interface UsagePillProps {
     directory: SnapshotStore<ModelDirectoryState>;
     settings: SettingsScope<OpencodeGoSettings>;
     readUsage: () => Promise<GoUsage>;
+    /** Optional so an embedded/test render can omit the dashboard. */
+    readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>;
     t: (key: string) => string;
     getLocale?: () => string;
     credentialChanges?: SnapshotStore<number>;

@@ -15,6 +15,8 @@ import type { OpencodeGoSectionProps, OpencodeGoSectionState } from '../src/clie
 import { OpencodeGoSectionController, type OpencodeGoSettings } from '../src/client/section-controller.ts'
 import { stubSettingsScope, acceptSettingsWrites } from './support/client.ts'
 import { en } from '../src/client/locales.ts'
+import { getGoTheme, setGoTheme } from '../src/client/theme.ts'
+import type { AnalyticsQuery, AnalyticsReport } from '../src/analytics-contract.ts'
 
 afterEach(cleanup)
 
@@ -96,12 +98,13 @@ function actions() {
 function renderSection(
   state: OpencodeGoSectionState,
   overrides: Partial<ReturnType<typeof actions>> = {},
-  options: { foldedModels?: boolean } = {},
+  options: { foldedModels?: boolean; analytics?: { readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport> } } = {},
 ) {
   const store = createSnapshotStore(state)
   const props = {
     ...actions(),
     ...overrides,
+    ...(options.analytics ?? {}),
     t,
     useOpencodeGo: bindSnapshotSelector(store),
   } as unknown as OpencodeGoSectionProps
@@ -1023,4 +1026,37 @@ describe('OpencodeGoSectionController through the component', () => {
 
     await vi.waitFor(() => { expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['baseURL'], value: 'https://edited.test/v1' }], expect.any(Number)) })
   })
+})
+
+it('opens the shared analytics dialog from the settings card', async () => {
+  const readAnalytics = vi.fn().mockResolvedValue({
+    generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
+    totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
+      cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
+    byModel: [], byDay: [],
+    coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
+      summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
+    pricing: { source: 'models.dev', unpricedModels: [] },
+  })
+  setGoTheme('graphite')
+  renderSection(stateOf(), {}, { analytics: { readAnalytics } })
+  const row = screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) })
+  expect(row.getAttribute('aria-expanded')).toBe('false')
+  // Folded, the row still names the style in force.
+  expect(row.textContent).toContain(en.themeGraphite)
+  expect(screen.queryByRole('group', { name: en.themeLabel })).toBeNull()
+  await act(async () => { fireEvent.click(row) })
+  expect(row.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByText(en.analyticsBoardLabel)).toBeTruthy()
+  expect(screen.getByText(en.themeHint)).toBeTruthy()
+  const picker = screen.getByRole('group', { name: en.themeLabel })
+  expect(within(picker).getAllByRole('button')).toHaveLength(4)
+  // The style picker is the only entry: choosing one updates the store and the row.
+  await act(async () => { fireEvent.click(within(picker).getByRole('button', { name: en.themeSeaSalt })) })
+  expect(getGoTheme()).toBe('sea-salt')
+  expect(row.textContent).toContain(en.themeSeaSalt)
+  // The first row of the unfolded card opens the dashboard.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard })) })
+  expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+  expect(readAnalytics).toHaveBeenCalled()
 })

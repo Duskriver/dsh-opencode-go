@@ -398,6 +398,44 @@
   padding: 4px 14px 0;
 }
 
+/* The analytics card's two rows: the dashboard entry, then the style picker. A
+   label column takes the slack and the control keeps its own width, so both
+   rows start their text on the same x. */
+.analyticsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 14px 4px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.analyticsSection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.analyticsCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.analyticsLabel {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+.analyticsDivider {
+  height: 0.5px;
+  background: var(--dsw-alias-border-l2);
+}
+
 .cardBody > .input {
   width: 100%;
   box-sizing: border-box;
@@ -653,6 +691,8 @@
 @container (max-width: 440px) {
   /* One column cannot stretch: each row stacks its control under its label. */
   .row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .analyticsSection { grid-template-columns: minmax(0, 1fr); }
+  .analyticsSection > :last-child { justify-self: start; }
   /* One column cannot stretch: the list and the card stack, and each keeps its
      own ceiling. */
   .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); }

@@ -1,0 +1,54 @@
+/* Four miniature previews of the selectable styles, on the Settings page. The
+   page keeps the Host's own chrome; only the swatches carry a plugin palette. */
+.group { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 76px;
+  padding: 6px 6px 5px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.option:hover { background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 80%, transparent); }
+.option[aria-pressed='true'] {
+  border-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 55%, transparent);
+}
+.option:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 1px solid;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.swatchRow { display: flex; align-items: center; gap: 4px; }
+.swatchDot { width: 6px; height: 6px; flex: none; border-radius: 2px; }
+.swatchBar { display: block; width: 100%; height: 3px; border-radius: 2px; }
+
+.name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.option[aria-pressed='true'] .name { color: var(--dsw-alias-label-primary); font-weight: 600; }
