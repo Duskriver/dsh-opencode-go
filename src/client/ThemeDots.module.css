@@ -1,7 +1,0 @@
-.row { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.label { font-size: 10.5px; line-height: 1.5; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); white-space: nowrap; }
-.dot { width: 15px; height: 15px; flex: none; padding: 0; border-radius: 50%; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--go-border, currentColor) 80%, transparent); }
-.dot:hover { transform: scale(1.08); }
-.dot[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--go-surface, Canvas), 0 0 0 3px var(--go-accent, currentColor); }
-.dot:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 2px; }

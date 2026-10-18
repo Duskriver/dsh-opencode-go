@@ -15,6 +15,7 @@ import type { OpencodeGoSectionProps, OpencodeGoSectionState } from '../src/clie
 import { OpencodeGoSectionController, type OpencodeGoSettings } from '../src/client/section-controller.ts'
 import { stubSettingsScope, acceptSettingsWrites } from './support/client.ts'
 import { en } from '../src/client/locales.ts'
+import { getGoTheme, setGoTheme } from '../src/client/theme.ts'
 import type { AnalyticsQuery, AnalyticsReport } from '../src/analytics-contract.ts'
 
 afterEach(cleanup)
@@ -1037,9 +1038,25 @@ it('opens the shared analytics dialog from the settings card', async () => {
       summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
     pricing: { source: 'models.dev', unpricedModels: [] },
   })
+  setGoTheme('graphite')
   renderSection(stateOf(), {}, { analytics: { readAnalytics } })
-  const cardButton = screen.getByRole('button', { name: en.analyticsOpen })
-  await act(async () => { fireEvent.click(cardButton) })
+  const row = screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) })
+  expect(row.getAttribute('aria-expanded')).toBe('false')
+  // Folded, the row still names the style in force.
+  expect(row.textContent).toContain(en.themeGraphite)
+  expect(screen.queryByRole('group', { name: en.themeLabel })).toBeNull()
+  await act(async () => { fireEvent.click(row) })
+  expect(row.getAttribute('aria-expanded')).toBe('true')
+  expect(screen.getByText(en.analyticsBoardLabel)).toBeTruthy()
+  expect(screen.getByText(en.themeHint)).toBeTruthy()
+  const picker = screen.getByRole('group', { name: en.themeLabel })
+  expect(within(picker).getAllByRole('button')).toHaveLength(4)
+  // The style picker is the only entry: choosing one updates the store and the row.
+  await act(async () => { fireEvent.click(within(picker).getByRole('button', { name: en.themeSeaSalt })) })
+  expect(getGoTheme()).toBe('sea-salt')
+  expect(row.textContent).toContain(en.themeSeaSalt)
+  // The first row of the unfolded card opens the dashboard.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard })) })
   expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
   expect(readAnalytics).toHaveBeenCalled()
 })

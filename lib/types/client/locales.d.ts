@@ -105,6 +105,8 @@ export declare const en: {
     analyticsLegacy: string;
     analyticsCardTitle: string;
     analyticsCardHint: string;
+    analyticsBoardLabel: string;
+    analyticsOpenBoard: string;
     analyticsQuota: string;
     analyticsQuotaHint: string;
     analyticsQuotaFailed: string;
@@ -115,6 +117,7 @@ export declare const en: {
     themeGraphite: string;
     themeSeaSalt: string;
     themeWarmSand: string;
+    themeHint: string;
     nav: string;
     title: string;
     titleLabel: string;

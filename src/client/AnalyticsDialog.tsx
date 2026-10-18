@@ -4,7 +4,6 @@ import type { AnalyticsQuery, AnalyticsReport, AnalyticsModelRow } from '../anal
 import type { GoUsage } from '../usage-contract.ts'
 import { GO_PLAN_AS_OF } from '../go-plan.ts'
 import type { en } from './locales.ts'
-import { ThemeDots } from './ThemeDots.tsx'
 import { themeStyle, useGoThemeTokens } from './theme.ts'
 import css from './AnalyticsDialog.module.css'
 
@@ -176,7 +175,6 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
           <p className={css.sub}>{t('analyticsSubtitle')}</p>
         </div>
         <div className={css.headActions}>
-          <ThemeDots t={t} compact />
           {report !== null ? <span className={css.updated}>{t('usageLastUpdated')} {new Date(report.generatedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</span> : null}
           <button type="button" className={css.iconButton} aria-label={t('analyticsRefresh')} title={t('analyticsRefresh')}
             disabled={loading} onClick={() => { setRevision(value => value + 1) }}>

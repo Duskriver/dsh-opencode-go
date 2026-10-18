@@ -38,7 +38,7 @@ Open **Usage analytics** at the bottom of the conversation usage panel, or under
 - A scan stops at 500 sessions, 500,000 events, or 12 seconds by default and says so. **Scan more history** raises the session cap to 2,000.
 - DSH's native OpenCode Go route is excluded; pre-0.1.16 legacy route records are admitted by request time. A Host without `sessionQuery` shows an unavailable state.
 
-**Themes**: switch between **Silent Black, Graphite (default), Sea Salt, and Warm Sand** from the color dots in the pill popover or the dashboard header. Themes follow DSH's light/dark mode and are stored locally. With multiple accounts, the pill shows the active account's initial and the number of extra accounts; the full name stays in the title and the expanded panel.
+**Themes**: switch between **Silent Black, Graphite (default), Sea Salt, and Warm Sand** under **Settings → OpenCode Go → Usage analytics**; the four previews show each palette directly. Themes follow DSH's light/dark mode and are stored locally. The pill popover and the dashboard no longer carry their own switch. With multiple accounts, the pill shows the active account's initial and the number of extra accounts; the full name stays in the title and the expanded panel.
 
 See [usage analytics notes](docs/usage-analytics.en.md) for the exact accounting rules and limits.
 

@@ -9,7 +9,6 @@ import type { OpencodeGoSettings } from './section-controller.ts'
 import { accountsOf, accountRefOf, type GoAccount, type GoAccountSwitch } from '../accounts.ts'
 import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts'
 import { AnalyticsDialog } from './AnalyticsDialog.tsx'
-import { ThemeDots } from './ThemeDots.tsx'
 import { themeStyle, useGoThemeTokens } from './theme.ts'
 import css from './UsagePill.module.css'
 
@@ -295,7 +294,6 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
             </div>
           </Fragment>)}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
-        <div className={css.themeRow}><ThemeDots t={t} /></div>
         {readAnalytics ? <button type="button" className={css.analyticsEntry} aria-haspopup="dialog"
           onClick={() => { setOpen(false); setAnalyticsOpen(true) }}>
           <ChartIcon />

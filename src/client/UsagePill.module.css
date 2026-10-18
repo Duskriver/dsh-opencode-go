@@ -86,9 +86,12 @@
 .limitedText { margin-top: 2px; color: var(--go-danger, #e5484d); font-weight: 600; }
 
 .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 6px 1px; font-size: 10.5px; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
-.themeRow { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 2px; }
-.analyticsEntry { flex: none; display: flex; align-items: center; gap: 7px; width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--go-accent, currentColor) 28%, transparent);
-  border-radius: 8px; background: color-mix(in srgb, var(--go-accent, currentColor) 10%, transparent); color: var(--go-accent, currentColor); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+/* The dashboard entry is the same quiet row as the account tile above it: a
+   surface, not an accent-colored control. */
+.analyticsEntry { flex: none; display: flex; align-items: center; gap: 7px; width: 100%; min-height: 42px; padding: 0 12px;
+  border: 0; border-radius: 10px; background: var(--go-surface-2, color-mix(in srgb, currentColor 6%, transparent));
+  color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
 .analyticsEntry span { flex: 1; min-width: 0; }
-.analyticsEntry:hover { background: color-mix(in srgb, var(--go-accent, currentColor) 16%, transparent); }
+.analyticsEntry .icon { color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
+.analyticsEntry:hover { background: color-mix(in srgb, var(--go-text, currentColor) 8%, var(--go-surface-2, transparent)); }
 .analyticsEntry:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 1px; }

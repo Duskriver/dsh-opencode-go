@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ThemeDots } from '../src/client/ThemeDots.tsx'
+import { ThemePicker } from '../src/client/ThemePicker.tsx'
+import pickerCss from '../src/client/ThemePicker.module.css'
 import { en } from '../src/client/locales.ts'
 import {
   DEFAULT_GO_THEME, GO_THEMES, GO_THEME_TOKENS, getGoTheme, setGoTheme, subscribeGoTheme, themeStyle, useGoThemeTokens,
@@ -34,10 +35,15 @@ it('carries every token into the inline style', () => {
   }
 })
 
-it('renders four palette dots and switches on click', () => {
-  render(<ThemeDots t={key => en[key]} />)
+it('renders four style previews, each in its own palette, and switches on click', () => {
+  const { container } = render(<ThemePicker t={key => en[key]} />)
   expect(screen.getAllByRole('button')).toHaveLength(4)
   expect(screen.getByRole('button', { name: en.themeGraphite }).getAttribute('aria-pressed')).toBe('true')
+  // Every tile paints its own accent, so no two previews look alike.
+  const accents = GO_THEMES.map(id =>
+    (container.querySelector('[data-theme="' + id + '"] .' + pickerCss.swatchDot) as HTMLElement).style.background)
+  expect(accents.every(Boolean)).toBe(true)
+  expect(new Set(accents).size).toBe(GO_THEMES.length)
   fireEvent.click(screen.getByRole('button', { name: en.themeSilentBlack }))
   expect(getGoTheme()).toBe('silent-black')
   expect(screen.getByRole('button', { name: en.themeSilentBlack }).getAttribute('aria-pressed')).toBe('true')

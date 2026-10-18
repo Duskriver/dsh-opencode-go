@@ -468,7 +468,7 @@ it('keeps the account chip compact and countable with three accounts', async () 
   expect(trigger().textContent).toContain('B+2')
 })
 
-it('switches the pill palette from the popover', async () => {
+it('keeps the styling choice out of the popover', async () => {
   const host = usageSettings({ usageDisplay: 'always' })
   await act(async () => {
     render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')}
@@ -477,6 +477,9 @@ it('switches the pill palette from the popover', async () => {
   const root = trigger().parentElement as HTMLElement
   expect(['#111214', '#f6f7f9']).toContain(root.style.getPropertyValue('--go-bg'))
   showDetails()
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.themeSilentBlack })) })
+  // The stored style still paints the pill; only the Settings page may change it.
+  await act(async () => { setGoTheme('silent-black') })
   expect(['#101010', '#f8f8f8']).toContain(root.style.getPropertyValue('--go-bg'))
+  expect(within(openPanel()).queryByRole('group', { name: en.themeLabel })).toBeNull()
+  expect(within(openPanel()).queryByRole('button', { name: en.themeSilentBlack })).toBeNull()
 })

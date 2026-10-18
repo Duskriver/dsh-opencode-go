@@ -4,6 +4,11 @@
 
 This page documents what the `dsh-opencode-go` usage dashboard counts, how it prices requests, and what it deliberately leaves out.
 
+## Entry points
+
+- the **Usage analytics** row at the bottom of the pill's expanded panel, styled like the account row above it;
+- the **Usage analytics** card on the settings page: the same folding card the model and advanced sections use. Unfolded it has two rows — **Dashboard**, which opens the dashboard, and **Theme**, which picks the style. Folded, its trailing note names the style in force.
+
 ## Data source
 
 The Host reads DSH's `ctx.sessionQuery`:
@@ -55,7 +60,8 @@ The official `/usage` five-hour, weekly, and monthly percentages remain authorit
 ## Themes and the pill
 
 - Four styles: **Silent Black**, **Graphite** (default), **Sea Salt**, and **Warm Sand**. Each has a dark and a light variant that follows DSH's color scheme.
-- Switch from the color dots in the pill popover or the dashboard header. The choice is stored in the browser, not in the settings document.
+- The only switch is the **Theme** row inside the settings page's Usage analytics card, where each option previews its own surface, accent and text colors. The choice is stored in the browser, not in the settings document.
+- The pill popover and the dashboard no longer carry a switch; they render whatever style is selected.
 - With multiple accounts, the pill shows the active account's initial and the number of extra accounts (for example `P+2`); the full name stays in the button title and the expanded panel. Account switching is unchanged.
 - The settings page keeps DSH's own appearance and is not affected by these themes.
 
