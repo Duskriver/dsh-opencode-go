@@ -16,7 +16,8 @@ import { closeMockGateways, googleTextEvents, listingBody, mockGateway, textEven
 import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/model-metadata.ts'
 
 const legacy = 'https://opencode.ai/zen/go/v1'
-const current = 'https://opencode.ai/inference/go/v1'
+const gatewayRoot = 'https://opencode.ai/inference/go'
+const current = `${gatewayRoot}/v1`
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
@@ -40,13 +41,14 @@ const responseEvents = [
   { type: 'response.completed', response: { id: 'resp-test', status: 'completed', output: [responseMessage], usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 } } },
 ].map(event => JSON.stringify(event))
 const protocols = [
-  { id: 'chat-model', npm: '@ai-sdk/openai-compatible', path: '/chat/completions', events: textEvents },
-  { id: 'anthropic-model', npm: '@ai-sdk/anthropic', path: '/messages', events: anthropicEvents, namedEvents: true },
-  { id: 'responses-model', npm: '@ai-sdk/openai', path: '/responses', events: responseEvents },
-  { id: 'gemini-4-argon-contributor', npm: '@ai-sdk/google', path: '/models/gemini-4-argon-contributor:streamGenerateContent', events: googleTextEvents },
+  { id: 'glm-5.3-flash', npm: '@ai-sdk/openai-compatible', path: '/openai/v1/chat/completions', events: textEvents },
+  { id: 'claude-haiku-5-5', npm: '@ai-sdk/anthropic', path: '/anthropic/v1/messages', events: anthropicEvents, namedEvents: true },
+  { id: 'grok-4.7', npm: '@ai-sdk/openai', path: '/openai/v1/responses', events: responseEvents },
+  { id: 'gpt-6-luna', npm: '@ai-sdk/openai', path: '/openai/v1/responses', events: responseEvents },
+  { id: 'gemini-4-argon-contributor', npm: '@ai-sdk/google', path: '/google/v1beta/models/gemini-4-argon-contributor:streamGenerateContent', events: googleTextEvents },
 ]
 
-it.each(['profile entry', 'settings document'])('keeps discovery, all protocols and usage working after the old gateway retires: %s', async source => {
+it.each(['default config', 'profile entry', 'settings document'])('uses the documented protocol endpoints with the legacy gateway retired: %s', async source => {
   const dir = await mkdtemp(join(tmpdir(), 'opencode-go-migration-'))
   cleanups.push(() => rm(dir, { recursive: true, force: true }))
   const settingsPath = join(dir, 'settings.yaml')
@@ -58,13 +60,19 @@ it.each(['profile entry', 'settings document'])('keeps discovery, all protocols 
     modelMetadata({ provider: { npm: protocol.npm }, reasoning_options: [] })])))
   const networkFetch = globalThis.fetch
   const requests: string[] = []
+  const routes = new Map([
+    ['/v1/models', 'GET'], ['/v1/usage', 'GET'],
+    ...protocols.map(protocol => [protocol.path, 'POST'] as const),
+  ])
   vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
     const request = new Request(input, init)
     if (request.url === MODELS_METADATA_URL) return Promise.resolve(Response.json(metadata))
     requests.push(request.url)
     if (request.url.startsWith(legacy)) return Promise.reject(new Error('the legacy gateway has permanently retired'))
-    expect(request.url.startsWith(current + '/')).toBe(true)
-    return networkFetch(new Request(request.url.replace(current, gateway.url + '/v1'), request))
+    const url = new URL(request.url)
+    expect(url.origin).toBe('https://opencode.ai')
+    expect(routes.get(url.pathname.replace('/inference/go', ''))).toBe(request.method)
+    return networkFetch(new Request(request.url.replace(gatewayRoot, gateway.url), request))
   })
   const ctx = new Context()
   cleanups.push(() => ctx.fiber.dispose())
@@ -72,7 +80,8 @@ it.each(['profile entry', 'settings document'])('keeps discovery, all protocols 
   await ctx.plugin(FileSettingsProvider, { path: settingsPath, watch: false })
   await ctx.plugin(LocalCredentialProvider, { path: credentialsPath, watch: false })
   await ctx.plugin({ name: 'gateway-migration-test', inject: ['llm'], apply: (scope: Context) => {
-    apply(scope, configOf(source === 'profile entry' ? legacy : 'https://configured.example/v1'))
+    apply(scope, source === 'default config' ? PlainConfig({})
+      : configOf(source === 'profile entry' ? legacy : 'https://configured.example/v1'))
   } })
   const value = () => ctx.settings.describe().find(row => row.ns === NS)!.value
   await expect.poll(() => value().baseURL).toBe(current)
@@ -95,7 +104,7 @@ it.each(['profile entry', 'settings document'])('keeps discovery, all protocols 
   expect(await ctx.typertGateway.invoke({ namespace: 'opencodeGoUsage', method: 'read', args: {} }))
     .toMatchObject(usage)
   expect(requests.map(url => new URL(url).pathname))
-    .toEqual(['/models', ...protocols.map(protocol => protocol.path), '/usage'].map(path => '/inference/go/v1' + path))
+    .toEqual(['/v1/models', ...protocols.map(protocol => protocol.path), '/v1/usage'].map(path => '/inference/go' + path))
   await ctx.settings.update(NS, { baseURL: legacy + '/' })
   await expect.poll(() => value().baseURL).toBe(current)
   await expect.poll(() => readFile(settingsPath, 'utf8')).toContain(current)

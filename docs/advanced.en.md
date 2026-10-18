@@ -89,7 +89,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 
 | Option | Purpose |
 | --- | --- |
-| `baseURL` | Shared OpenCode Go gateway prefix for model discovery, inference and usage; defaults to `https://opencode.ai/inference/go/v1` |
+| `baseURL` | OpenCode Go gateway address; defaults to `https://opencode.ai/inference/go/v1`, with official inference endpoints selected by model protocol |
 | `usageDisplay` | Usage display mode: `auto`, `always`, or `off` |
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
@@ -101,7 +101,16 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
 | `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
 
-Request paths are appended to `baseURL`: `GET /models` lists models, `POST /models/{model}:streamGenerateContent` sends Gemini requests, and `GET /usage` reads usage. A working listing does not verify every inference route. Reading the legacy official base `https://opencode.ai/zen/go/v1` migrates it to the new address for model discovery, every inference protocol and usage requests. Settings writes also store the new address, so operation does not depend on the legacy gateway remaining available. Custom gateways retain their configured addresses.
+The default official gateway lists models at `GET https://opencode.ai/inference/go/v1/models` and reads usage at `GET https://opencode.ai/inference/go/v1/usage`. Inference follows each model's declared protocol and the [official endpoint documentation](https://opencode.ai/v2/docs/console/go/#endpoints). The following paths share the prefix `https://opencode.ai/inference/go`:
+
+| Model protocol | Inference path |
+| --- | --- |
+| OpenAI Chat Completions, such as GLM-5.3-Flash | `/openai/v1/chat/completions` |
+| OpenAI Responses, such as Grok 4.7 and GPT 6 Luna | `/openai/v1/responses` |
+| Anthropic Messages, such as Claude Haiku 5.5 | `/anthropic/v1/messages` |
+| Google, such as Gemini 4 Argon Contributor | `/google/v1beta/models/{model}:streamGenerateContent` |
+
+The legacy official base `https://opencode.ai/zen/go/v1` migrates automatically, and settings writes store the new address. There is no need to change the gateway for each model. Custom gateways keep the configured `baseURL` prefix and let each protocol SDK append its resource path; official protocol segments are not added automatically. A working listing does not verify every inference route.
 
 Usage failures retain the HTTP status and show a redacted summary when the upstream provides a readable reason. HTTP 403 includes a reminder to check the API key and Go subscription permissions. “Key saved” only confirms local credential storage; check the subscription for the account or workspace that owns the key, along with the gateway and proxy settings.
 

@@ -23,17 +23,25 @@ afterEach(async () => {
   await closeMockGateways()
 })
 
-it('uses the canonical gateway for every protocol when reading the public legacy alias', () => {
-  const legacy = 'https://opencode.ai/zen/go/v1'
-  const current = 'https://opencode.ai/inference/go/v1'
-  expect(modelBaseURL('google-generative-ai', legacy + '/')).toBe(current)
-  expect(readModelMetadata(metadata, legacy, new Map()).models.get(id)?.baseUrl).toBe(current)
-  expect(modelBaseURL('google-generative-ai', current)).toBe(current)
+it.each([
+  'https://opencode.ai/zen/go/v1', 'https://opencode.ai/zen/go/v1/',
+  'https://opencode.ai/inference/go/v1', 'https://opencode.ai/inference/go/v1/',
+])('selects the documented protocol base from the official gateway %s', base => {
+  expect(readModelMetadata(metadata, base, new Map()).models.get(id)?.baseUrl)
+    .toBe('https://opencode.ai/inference/go/google/v1beta')
+  expect(modelBaseURL('google-generative-ai', base)).toBe('https://opencode.ai/inference/go/google/v1beta')
+  expect(modelBaseURL('openai-completions', base)).toBe('https://opencode.ai/inference/go/openai/v1')
+  expect(modelBaseURL('openai-responses', base)).toBe('https://opencode.ai/inference/go/openai/v1')
+  // The Anthropic SDK appends /v1/messages itself.
+  expect(modelBaseURL('anthropic-messages', base)).toBe('https://opencode.ai/inference/go/anthropic')
+})
+
+it('preserves custom gateways for every protocol', () => {
   expect(modelBaseURL('google-generative-ai', 'https://gateway.example/zen/go/v1')).toBe('https://gateway.example/zen/go/v1')
   expect(modelBaseURL('google-generative-ai', 'http://127.0.0.1:1234/v1')).toBe('http://127.0.0.1:1234/v1')
-  expect(modelBaseURL('openai-completions', legacy)).toBe(current)
-  expect(modelBaseURL('openai-responses', legacy)).toBe(current)
-  expect(modelBaseURL('anthropic-messages', legacy)).toBe('https://opencode.ai/inference/go')
+  expect(modelBaseURL('openai-completions', 'https://gateway.example/v1/')).toBe('https://gateway.example/v1')
+  expect(modelBaseURL('openai-responses', 'https://gateway.example/v1/')).toBe('https://gateway.example/v1')
+  expect(modelBaseURL('anthropic-messages', 'https://gateway.example/v1/')).toBe('https://gateway.example')
 })
 
 async function setup(overrides: Parameters<typeof configOf>[1] = {}) {

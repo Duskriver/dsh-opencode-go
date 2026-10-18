@@ -204,6 +204,13 @@ describe('experimental protocol override', () => {
     expect(withProtocolOverride(declared, config)).toBe(declared)
   })
 
+  it.each(['https://opencode.ai/zen/go/v1/', 'https://opencode.ai/inference/go/v1'])('keeps experimental Responses on the official OpenAI endpoint for %s', base => {
+    const raw = readModelMetadata(metadataDocument(), base, new Map()).models.get(MODEL)!
+    expect(withProtocolOverride(raw, configOf(base, { protocolOverrides: override })))
+      .toMatchObject({ api: 'openai-responses', baseUrl: 'https://opencode.ai/inference/go/openai/v1' })
+    expect(raw.api).toBe('openai-completions')
+  })
+
   it.each([[], 'openai-responses', { 'kimi-k3': 'openai-responses' }, { [MODEL]: 'anthropic-messages' }])('refuses unsupported override configuration %j', value => {
     expect(() => validateGoConfig(PlainConfig({ protocolOverrides: value }))).toThrow()
   })
