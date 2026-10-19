@@ -82,18 +82,6 @@ function ChevronLeft() {
   return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>
 }
 
-function accountInitial(name: string): string {
-  const first = Array.from(name.trim())[0]
-  return first === undefined ? '•' : first.toUpperCase()
-}
-
-/** The badge carries the true number of further accounts; past nine it collapses to
- *  '9+' — the full count stays in the chip's title/aria-label. */
-function accountCountBadge(accounts: number): string {
-  const extra = accounts - 1
-  return extra > 9 ? '9+' : `+${extra}`
-}
-
 function ChartIcon() {
   return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M2.5 13.5h11M4.5 11V8M8 11V4M11.5 11V6" /></svg>
 }
@@ -220,18 +208,16 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
     }).catch(() => { setSwitchFailed(true) }).finally(() => { setSwitching(false) })
   }
   const label = usage
-    ? `Go · ${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
-    : `Go · ${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
-  /** The segments concatenate to exactly `label`, except the account chip's count badge, which
-   *  adds the number of further accounts as extra on-chip information the spoken label does not
-   *  repeat (the chip's title/aria-label carry the full count). Every other assertion built on
-   *  `textContent` stays unchanged, while the @container tiers in UsagePill.module.css can hide
-   *  the brand, the unit words, the stale wording, the fallback mark and the account name
-   *  independently. jsdom does not evaluate container queries, so the tests below exercise the
-   *  full label in every tier. */
+    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    : `${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+  /** The segments concatenate to exactly `label`: the two readings, the optional stale and
+   *  fallback wording, and the active account's full name once a second account exists. The
+   *  @container tiers in UsagePill.module.css can hide the unit words and the stale/fallback
+   *  wording, while the account name truncates with an ellipsis instead of pushing the readings
+   *  out. jsdom does not evaluate container queries, so the tests below exercise the full label
+   *  in every tier. */
   const segments = usage
     ? <>
-      <span className={css.brand}>Go · </span>
       <span className={css.reading} data-stale={failure ? '' : undefined}>
         <span className={css.unit}>{t('usageRollingShort')} </span>{usage.rolling.percent}%
         {' · '}
@@ -239,21 +225,12 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       </span>
       {failure ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
-      {accounts.length > 1 ? <>{' · '}<span className={css.accountChip} title={accountName + ' · ' + accounts.length}
-        aria-label={accountName + ' · ' + accounts.length}>
-        <span className={css.accountInitial}>{accountInitial(accountName)}</span>
-        <span className={css.accountCount}>{accountCountBadge(accounts.length)}</span>
-      </span></> : null}
+      {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
     </>
     : <>
-      <span className={css.brand}>Go · </span>
       {failure ? t('usageUnavailable') : '…'}
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
-      {accounts.length > 1 ? <>{' · '}<span className={css.accountChip} title={accountName + ' · ' + accounts.length}
-        aria-label={accountName + ' · ' + accounts.length}>
-        <span className={css.accountInitial}>{accountInitial(accountName)}</span>
-        <span className={css.accountCount}>{accountCountBadge(accounts.length)}</span>
-      </span></> : null}
+      {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
     </>
   return <span className={css.root} ref={root} style={themeStyle(tokens)}>
     <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}

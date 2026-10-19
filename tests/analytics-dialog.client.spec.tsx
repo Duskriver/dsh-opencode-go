@@ -39,8 +39,10 @@ it('renders totals, model limits and the estimate disclaimer', async () => {
   const read = vi.fn().mockResolvedValue(report())
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
   expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
-  await screen.findByText('DeepSeek V4.1 Flash')
-  expect(screen.getByText('Go $80 / Plus $160')).toBeTruthy()
+  await screen.findAllByText('DeepSeek V4.1 Flash')
+  // The simplified table no longer carries the invocation id or the plan limits.
+  expect(screen.queryByText('deepseek-v4.1-flash')).toBeNull()
+  expect(screen.queryByText(/Go \$80/)).toBeNull()
   expect(screen.getAllByText(/\$1\.23/).length).toBeGreaterThan(0)
   expect(screen.getByText(/Prices: models\.dev/)).toBeTruthy()
   // Review U5: the disclaimer must name the current-price estimate semantics.
@@ -51,7 +53,7 @@ it('renders totals, model limits and the estimate disclaimer', async () => {
 it('asks for a shorter range and can scan more history', async () => {
   const read = vi.fn().mockResolvedValue(report())
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
   await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
   const sevenDays = read.mock.calls[1][0]
@@ -82,7 +84,7 @@ it('persists the scan-more choice and clamps the stored value', async () => {
   // Reopening keeps the previous choice (review P16/S9).
   const restored = vi.fn().mockResolvedValue(report())
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={restored} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   expect(restored.mock.calls[0][0].maxSessions).toBe(1000)
   cleanup()
 
@@ -90,14 +92,14 @@ it('persists the scan-more choice and clamps the stored value', async () => {
   localStorage.setItem('opencode-go:analytics:maxSessions', '9999')
   const clampedHigh = vi.fn().mockResolvedValue(report())
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={clampedHigh} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   expect(clampedHigh.mock.calls[0][0].maxSessions).toBe(2000)
   cleanup()
 
   localStorage.setItem('opencode-go:analytics:maxSessions', 'not-a-number')
   const clampedJunk = vi.fn().mockResolvedValue(report())
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={clampedJunk} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   expect(clampedJunk.mock.calls[0][0].maxSessions).toBe(500)
 })
 
@@ -109,7 +111,7 @@ it('freezes the window end for one open and moves it on refresh', async () => {
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
   const read = vi.fn().mockResolvedValue(report())
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
   await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
   expect(read.mock.calls[1][0].to).toBe(read.mock.calls[0][0].to)
@@ -129,7 +131,7 @@ it('renders a seen range instantly and revalidates in the background', async () 
     .mockResolvedValueOnce(report({ totals: { ...report().totals, requests: 700 } }))
     .mockResolvedValueOnce(report({ totals: { ...report().totals, requests: 990 } }))
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   expect(screen.getAllByText('12').length).toBeGreaterThan(0)
   fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
   await screen.findByText('700')
@@ -151,7 +153,7 @@ it('labels the previous scan and the selected range while a switch is loading', 
     .mockResolvedValueOnce(report())
     .mockReturnValueOnce(new Promise<AnalyticsReport>(resolve => { resolveSecond = resolve }))
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
   expect(screen.getByRole('button', { name: en.analyticsRange7d }).getAttribute('aria-pressed')).toBe('true')
   expect(screen.getByText(en.analyticsStaleResults)).toBeTruthy()
@@ -235,6 +237,9 @@ it('shows quota cards and switches the daily metric', async () => {
   render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())}
     readQuota={async () => quota} t={t} getLocale={() => 'en'} />)
   await screen.findByText('33%')
+  // The quota row keeps the number, bar and reset time, but no state label or remainder.
+  expect(screen.queryByText('Plenty left')).toBeNull()
+  expect(screen.queryByText('67% left')).toBeNull()
   expect(screen.getByRole('progressbar', { name: en.usage_weekly }).getAttribute('aria-valuenow')).toBe('33')
   const cost = screen.getByRole('button', { name: en.analyticsChartSpend })
   const tokens = screen.getByRole('button', { name: en.analyticsChartTokens })
@@ -247,7 +252,54 @@ it('shows quota cards and switches the daily metric', async () => {
 it('closes through the modal close button', async () => {
   const close = vi.fn()
   render(<AnalyticsDialog open onClose={close} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
-  await screen.findByText('DeepSeek V4.1 Flash')
+  await screen.findAllByText('DeepSeek V4.1 Flash')
   fireEvent.click(screen.getByRole('button', { name: en.analyticsClose }))
   expect(close).toHaveBeenCalled()
+})
+// The daily view exposes a pointer tooltip: the calendar cell and the trend hit
+// area must both surface the same bucket summary, and leaving clears it.
+it('shows a day summary tooltip from the calendar and the trend', async () => {
+  render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
+  await screen.findAllByText('DeepSeek V4.1 Flash')
+
+  const cell = document.querySelector('span[data-day="2026-10-18"]') as HTMLElement
+  expect(cell).toBeTruthy()
+  fireEvent.mouseMove(cell)
+  const tip = await screen.findByRole('tooltip')
+  expect(tip.textContent).toContain('$1.23')
+  expect(tip.textContent).toContain('12')
+  expect(tip.textContent).toContain('6K')
+
+  fireEvent.mouseLeave(document.querySelector('[class*="_daysWrap_"]') as HTMLElement)
+  expect(screen.queryByRole('tooltip')).toBeNull()
+
+  const hit = document.querySelector('rect[data-day="2026-10-18"]') as Element
+  expect(hit).toBeTruthy()
+  fireEvent.mouseMove(hit)
+  expect((await screen.findByRole('tooltip')).textContent).toContain('6K')
+})
+// Regression: moving from a cell into an empty pad must clear the selection.
+// jsdom has no layout, so the cells get synthetic boxes: one 20x20 cell at
+// (100,50) and everything else far away.
+it('clears the day tooltip once the pointer leaves the nearest cell', async () => {
+  render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
+  await screen.findAllByText('DeepSeek V4.1 Flash')
+  const cells = Array.from(document.querySelectorAll('span[data-day]')) as HTMLElement[]
+  expect(cells).toHaveLength(1)
+  const box = (left: number, top: number): DOMRect => ({
+    left, top, right: left + 20, bottom: top + 20, width: 20, height: 20, x: left, y: top, toJSON: () => ({}),
+  }) as DOMRect
+  vi.spyOn(cells[0], 'getBoundingClientRect').mockReturnValue(box(100, 50))
+
+  const heat = document.querySelector('[class*="_heat_"]') as HTMLElement
+  fireEvent.mouseMove(heat, { clientX: 110, clientY: 60 })
+  expect((await screen.findByRole('tooltip')).textContent).toContain('$1.23')
+
+  // 3px outside the cell still counts as "near".
+  fireEvent.mouseMove(heat, { clientX: 123, clientY: 60 })
+  expect(screen.getByRole('tooltip')).toBeTruthy()
+
+  // Empty pad far from every cell clears it.
+  fireEvent.mouseMove(heat, { clientX: 300, clientY: 60 })
+  expect(screen.queryByRole('tooltip')).toBeNull()
 })

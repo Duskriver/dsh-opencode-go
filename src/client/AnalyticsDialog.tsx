@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AnalyticsQuery, AnalyticsReport, AnalyticsModelRow } from '../analytics-contract.ts'
+import type { AnalyticsQuery, AnalyticsReport, AnalyticsDayRow } from '../analytics-contract.ts'
 import type { GoUsage } from '../usage-contract.ts'
-import { GO_PLAN_AS_OF } from '../go-plan.ts'
 import type { en } from './locales.ts'
 import { themeStyle, useGoThemeTokens } from './theme.ts'
 import css from './AnalyticsDialog.module.css'
@@ -22,6 +21,19 @@ const RANGES: readonly { key: RangeKey; label: AnalyticsKey; days: number }[] = 
 const MAX_SESSIONS_STORAGE_KEY = 'opencode-go:analytics:maxSessions'
 const DEFAULT_MAX_SESSIONS = 500
 const MAX_SESSIONS_CEILING = 2000
+const TREND_FILL_ID = 'opencode-go-analytics-trend-fill'
+
+/** Composition colors: five token-derived hues, then a neutral tail. */
+const MODEL_COLORS: readonly string[] = [
+  'var(--go-accent)',
+  'var(--go-accent-2)',
+  'var(--go-success)',
+  'var(--go-warning)',
+  'color-mix(in srgb, var(--go-accent) 52%, var(--go-accent-2))',
+  'color-mix(in srgb, var(--go-accent-2) 52%, var(--go-danger))',
+  'color-mix(in srgb, var(--go-accent) 45%, var(--go-success))',
+  'color-mix(in srgb, var(--go-muted) 65%, transparent)',
+]
 
 function loadMaxSessions(): number {
   try {
@@ -73,8 +85,60 @@ function usd(micro: number, locale?: string): string {
   }).format(micro / 1e6)
 }
 
-function planUsd(value: number, locale?: string): string {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value)
+/** A box only needs these edges to answer "how far is this point". */
+interface Edges { left: number; top: number; right: number; bottom: number }
+
+/**
+ * Index of the box nearest to a point, or null when even the closest box is
+ * farther than `slop`. Distance is 0 inside the box, so gaps and empty
+ * calendar pads stop hovering instead of holding the previous selection.
+ */
+function nearestIndexWithin(boxes: readonly Edges[], x: number, y: number, slop: number): number | null {
+  let best = -1
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (let index = 0; index < boxes.length; index += 1) {
+    const box = boxes[index]
+    const dx = Math.max(box.left - x, 0, x - box.right)
+    const dy = Math.max(box.top - y, 0, y - box.bottom)
+    const distance = dx === 0 && dy === 0 ? 0 : Math.hypot(dx, dy)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = index
+    }
+  }
+  return best >= 0 && bestDistance <= slop ? best : null
+}
+
+/** How far outside a calendar cell the pointer may still select it. */
+const HEAT_HOVER_SLOP = 5
+
+/** Fill braced placeholders the same way the Host locale does. */
+function fill(template: string, values: Readonly<Record<string, string>>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => values[name] ?? match)
+}
+
+/** Axis top rounded to 1/2/2.5/5 x 10^n so labels stay readable. */
+function niceTop(value: number): number {
+  if (!(value > 0)) return 1
+  const exponent = Math.pow(10, Math.floor(Math.log10(value)))
+  const fraction = value / exponent
+  const step = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 2.5 ? 2.5 : fraction <= 5 ? 5 : 10
+  return step * exponent
+}
+
+function dayOfWeek(day: string): number {
+  return (new Date(day + 'T00:00:00Z').getUTCDay() + 6) % 7
+}
+
+function weekdayHeads(locale?: string): string[] {
+  const format = new Intl.DateTimeFormat(locale, { weekday: 'narrow', timeZone: 'UTC' })
+  return Array.from({ length: 7 }, (_, index) => format.format(new Date(Date.UTC(2026, 2, 2 + index))))
+}
+
+/** Short weekday for one YYYY-MM-DD bucket, e.g. "Tue" / "周二". */
+function weekdayLabel(day: string, locale?: string): string {
+  return new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' })
+    .format(new Date(day + 'T00:00:00Z'))
 }
 
 function isUnsupported(error: unknown): boolean {
@@ -92,15 +156,6 @@ function isCancellation(error: unknown): boolean {
   return (error as { code?: unknown }).code === 'gateway/cancelled'
 }
 
-function limitLabel(row: AnalyticsModelRow, t: (key: AnalyticsKey) => string, locale?: string): string {
-  if (row.limitNote === 'unlimited') return t('analyticsLimitUnlimited')
-  if (row.limitGoUsd === null && row.limitGoPlusUsd === null) return t('analyticsLimitUnknown')
-  const go = row.limitGoUsd === null ? '-' : planUsd(row.limitGoUsd, locale)
-  const plus = row.limitGoPlusUsd === null ? '-' : planUsd(row.limitGoPlusUsd, locale)
-  const base = t('analyticsLimitGo') + ' ' + go + ' / ' + t('analyticsLimitPlus') + ' ' + plus
-  return row.limitNote === 'limited-time' ? base + ' (' + t('analyticsLimitLimited') + ')' : base
-}
-
 function RefreshIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M13.2 8.4A5.2 5.2 0 1 1 11.6 4.3" />
@@ -112,6 +167,24 @@ function CloseIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
     <path d="M4 4l8 8M12 4l-8 8" />
   </svg>
+}
+
+/** One sentence that states what the range cost; numbers stay in one text node. */
+function leadFor(report: AnalyticsReport, t: (key: AnalyticsKey) => string, locale?: string): string {
+  const totals = report.totals
+  const tokenTotal = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+  const base = fill(t('analyticsLead'), {
+    requests: number(totals.requests, locale),
+    tokens: compact(tokenTotal, locale),
+    spend: usd(totals.estimatedMicroUsd, locale),
+  })
+  if (totals.estimatedMicroUsd <= 0) return base
+  const top = [...report.byModel].sort((left, right) => right.estimatedMicroUsd - left.estimatedMicroUsd)[0]
+  if (top === undefined || top.estimatedMicroUsd <= 0) return base
+  return base + ' ' + fill(t('analyticsLeadTop'), {
+    model: top.name ?? top.model,
+    share: (top.estimatedMicroUsd / totals.estimatedMicroUsd * 100).toFixed(1) + '%',
+  })
 }
 
 export interface AnalyticsDialogProps {
@@ -217,11 +290,6 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
   }
 
   const counts = report?.totals
-  const tokenTotal = counts === undefined ? 0
-    : counts.inputTokens + counts.outputTokens + counts.cacheReadTokens + counts.cacheWriteTokens
-  const maxModelSpend = report === null ? 0 : Math.max(0, ...report.byModel.map(row => row.estimatedMicroUsd))
-  const maxDayValue = report === null ? 0 : Math.max(0, ...report.byDay.map(row =>
-    chartMode === 'spend' ? row.estimatedMicroUsd : row.tokens))
   const unsupported = error !== null && isUnsupported(error)
   const empty = report !== null && report.totals.requests === 0
   // P19: the range note follows the current selection, also while a scan for
@@ -229,46 +297,50 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
   const selected = queryFor(range, maxSessions, toRef.current)
   const rangeText = new Date(selected.from).toLocaleDateString(locale) + ' – '
     + new Date(selected.to - 1).toLocaleDateString(locale)
-  const labelStep = report === null ? 1 : Math.max(1, Math.ceil(report.byDay.length / (report.byDay.length > 30 ? 6 : 8)))
+  const colorFor = (model: string): string => {
+    const index = report === null ? -1 : report.byModel.findIndex(row => row.model === model)
+    return MODEL_COLORS[(index < 0 ? 0 : index) % MODEL_COLORS.length]
+  }
 
   return <Modal open={open} onClose={onClose} title={t('analyticsTitle')} headless className={css.shell}>
     <div className={css.card} style={themeStyle(tokens)} aria-busy={loading}>
-      <header className={css.head}>
-        <div className={css.headMain}>
-          <div className={css.titleRow}>
-            <h2 className={css.title}>{t('analyticsTitle')}</h2>
-            <span className={css.badge}>OpenCode Go</span>
-          </div>
-          <p className={css.sub}>{t('analyticsSubtitle')}</p>
-        </div>
-        <div className={css.headActions}>
-          {report !== null ? <span className={css.updated}>{t('usageLastUpdated')} {new Date(report.generatedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</span> : null}
-          <button type="button" className={css.iconButton} aria-label={t('analyticsRefresh')} title={t('analyticsRefresh')}
-            disabled={loading}
-            onClick={() => { forceRef.current = true; toRef.current = Date.now(); setRevision(value => value + 1) }}>
-            <RefreshIcon />
-          </button>
-          <button type="button" className={css.iconButton} aria-label={t('analyticsClose')} title={t('analyticsClose')}
-            onClick={onClose}>
-            <CloseIcon />
-          </button>
-        </div>
-      </header>
-
-      <div className={css.toolbar}>
-        <div className={css.seg} role="group" aria-label={t('analyticsRange')}>
-          {RANGES.map(item => <button
-            key={item.key}
-            type="button"
-            aria-pressed={range === item.key}
-            onClick={() => { setRange(item.key) }}
-          >{t(item.label)}</button>)}
-        </div>
-        {toRef.current > 0 ? <span className={css.rangeNote}>{rangeText}</span> : null}
-        {loading && report !== null ? <span className={css.rangeNote}>{t('analyticsStaleResults')}</span> : null}
-      </div>
-
       <div className={css.scroll}>
+        <header>
+          <div className={css.top}>
+            <span className={css.kicker}>OpenCode Go · {t('analyticsKicker')}</span>
+            <span className={css.meta}>
+              {report !== null ? t('usageLastUpdated') + ' ' + new Date(report.generatedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : ''}
+            </span>
+          </div>
+          <div className={css.titleRow}>
+            <h1 className={css.title}>{t('analyticsTitle')}</h1>
+            <div className={css.actions}>
+              <button type="button" className={css.iconButton} aria-label={t('analyticsRefresh')} title={t('analyticsRefresh')}
+                disabled={loading}
+                onClick={() => { forceRef.current = true; toRef.current = Date.now(); setRevision(value => value + 1) }}>
+                <RefreshIcon />
+              </button>
+              <button type="button" className={css.iconButton} aria-label={t('analyticsClose')} title={t('analyticsClose')}
+                onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          {report !== null ? <p className={css.lead}>{leadFor(report, t, locale)}</p> : null}
+          <div className={css.toolbar}>
+            <div className={css.tabs} role="group" aria-label={t('analyticsRange')}>
+              {RANGES.map(item => <button
+                key={item.key}
+                type="button"
+                aria-pressed={range === item.key}
+                onClick={() => { setRange(item.key) }}
+              >{t(item.label)}</button>)}
+            </div>
+            {loading && report !== null ? <span className={css.stale}>{t('analyticsStaleResults')}</span> : null}
+            {toRef.current > 0 ? <span className={css.period}>{rangeText}</span> : null}
+          </div>
+        </header>
+
         {error !== null && <div className={css.error} role="alert">
           <p>{unsupported ? t('analyticsUnsupported') : t('analyticsFailed')}</p>
           {!unsupported && <button type="button" className={css.action} onClick={() => {
@@ -280,142 +352,360 @@ export function AnalyticsDialog({ open, onClose, readAnalytics, readQuota, t, ge
 
         {loading && report === null && error === null && <p className={css.loading} role="status">{t('analyticsLoading')}</p>}
 
-        {quota !== null ? <section className={css.block}>
-          <div className={css.blockHead}>
-            <h3>{t('analyticsQuota')}</h3>
-            <span>{t('analyticsQuotaHint')}</span>
-          </div>
-          <div className={css.quotaGrid}>
-            {(['rolling', 'weekly', 'monthly'] as const).map(key => {
-              const window = quota[key]
-              const color = window.status === 'rate-limited' || window.percent >= 100
-                ? 'var(--go-danger)'
-                : key === 'rolling' ? 'var(--go-accent)' : key === 'weekly' ? 'var(--go-success)' : 'var(--go-warning)'
-              const label = t(key === 'rolling' ? 'usage_rolling' : key === 'weekly' ? 'usage_weekly' : 'usage_monthly')
-              return <div className={css.quotaCard} key={key}>
-                <div className={css.quotaTop}><span>{label}</span><b>{window.percent}%</b></div>
-                <div className={css.track} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
-                  aria-valuenow={Math.round(window.percent)}>
-                  <i style={{ width: Math.min(100, Math.max(0, window.percent)) + '%', background: color }} />
-                </div>
-                <div className={css.quotaFoot}>{t('usageResets')} {new Date(window.resetsAt).toLocaleString(locale)}</div>
-                {window.status === 'rate-limited' ? <div className={css.quotaWarn}>{t('usageLimited')}</div> : null}
-              </div>
-            })}
-          </div>
-        </section> : quotaFailed ? <p className={css.quotaFailed}>{t('analyticsQuotaFailed')}</p> : null}
+        {report !== null && counts !== undefined ? <KpiBand report={report} locale={locale} t={t} /> : null}
+
+        {quota !== null
+          ? <QuotaSection quota={quota} locale={locale} t={t} />
+          : quotaFailed ? <p className={css.quotaFailed}>{t('analyticsQuotaFailed')}</p> : null}
 
         {report !== null && counts !== undefined && <>
-          <div className={css.metrics}>
-            <div className={css.metric}>
-              <b>{number(counts.requests, locale)}</b>
-              <span>{t('analyticsRequests')}</span>
-              <small>{t('analyticsSummaries')} {number(counts.summaries, locale)} · {t('analyticsUnsettled')} {number(counts.unsettledAttempts, locale)}</small>
-            </div>
-            <div className={css.metric}>
-              <b>{compact(tokenTotal, locale)}</b>
-              <span>{t('analyticsTokens')}</span>
-              <small>{t('analyticsInput')} {compact(counts.inputTokens, locale)} · {t('analyticsOutput')} {compact(counts.outputTokens, locale)} · {t('analyticsCacheRead')} {compact(counts.cacheReadTokens, locale)}</small>
-            </div>
-            <div className={css.metric}>
-              <b>{counts.pricedRequests === 0 ? '-' : usd(counts.estimatedMicroUsd, locale)}</b>
-              <span>{t('analyticsSpend')}</span>
-              <small>{t('analyticsPriced')} {number(counts.pricedRequests, locale)} · {t('analyticsUnpriced')} {number(counts.unpricedRequests, locale)}</small>
-            </div>
-            <div className={css.metric}>
-              <b>{number(report.coverage.scannedSessions, locale)} / {number(report.coverage.listedSessions, locale)}</b>
-              <span>{t('analyticsCoverage')}</span>
-              <small>{t('analyticsSessions')} · {t('analyticsSeconds')} {(report.coverage.scanMs / 1000).toFixed(1)}
-                {report.coverage.failedSessions > 0 ? ' · ' + t('analyticsFailedSessions') + ' ' + number(report.coverage.failedSessions, locale) : ''}</small>
-            </div>
-          </div>
-
           {empty ? <p className={css.empty}>{t('analyticsEmpty')}</p> : null}
-
-          {report.byModel.length > 0 ? <section className={css.block}>
-            <div className={css.blockHead}>
-              <h3>{t('analyticsByModel')}</h3>
-              <span>{number(report.byModel.length, locale)}</span>
-            </div>
-            <div className={css.modelList}>
-              {report.byModel.map(row => {
-                const share = maxModelSpend === 0 ? 0 : row.estimatedMicroUsd / maxModelSpend * 100
-                return <article className={css.model} key={row.model}>
-                  <div className={css.modelTop}>
-                    <div className={css.modelName}>
-                      <b>{row.name ?? row.model}</b>
-                      {row.name !== undefined ? <span>{row.model}</span> : null}
-                    </div>
-                    <strong className={css.modelSpend}>{row.pricedRequests === 0 ? '-' : usd(row.estimatedMicroUsd, locale)}</strong>
-                  </div>
-                  <div className={css.modelFacts}>
-                    <span>{t('analyticsRequests')} {number(row.requests, locale)}</span>
-                    <span>{t('analyticsInput')} {compact(row.inputTokens, locale)}</span>
-                    <span>{t('analyticsOutput')} {compact(row.outputTokens, locale)}</span>
-                    <span>{t('analyticsCacheRead')} {compact(row.cacheReadTokens, locale)}</span>
-                    {row.missingUsage > 0 ? <span>{t('analyticsMissing')} {number(row.missingUsage, locale)}</span> : null}
-                    {row.unpricedRequests > 0 ? <span>{t('analyticsUnpriced')} {number(row.unpricedRequests, locale)}</span> : null}
-                    <em className={css.modelLimit}>{limitLabel(row, t, locale)}</em>
-                  </div>
-                  <div className={css.modelBar} aria-hidden="true"><i style={{ width: share + '%' }} /></div>
-                </article>
-              })}
-            </div>
-          </section> : null}
-
-          {report.byDay.length > 0 ? <section className={css.block}>
-            <div className={css.blockHead}>
-              <h3>{t('analyticsByDay')}</h3>
-              <div className={css.segSmall} role="group" aria-label={t('analyticsByDay')}>
-                <button type="button" aria-pressed={chartMode === 'spend'} onClick={() => { setChartMode('spend') }}>
-                  {t('analyticsChartSpend')}
-                </button>
-                <button type="button" aria-pressed={chartMode === 'tokens'} onClick={() => { setChartMode('tokens') }}>
-                  {t('analyticsChartTokens')}
-                </button>
-              </div>
-            </div>
-            <div className={css.chart} role="img" aria-label={t('analyticsByDay')}>
-              <div className={css.bars}>
-                {report.byDay.map((row, index) => {
-                  const value = chartMode === 'spend' ? row.estimatedMicroUsd : row.tokens
-                  const height = maxDayValue === 0 ? 0 : Math.max(2, value / maxDayValue * 100)
-                  const showLabel = index === 0 || index === report.byDay.length - 1 || index % labelStep === 0
-                  const title = row.day + ' · ' + t('analyticsRequests') + ' ' + number(row.requests, locale)
-                    + ' · ' + compact(row.tokens, locale) + ' · ' + usd(row.estimatedMicroUsd, locale)
-                  return <div className={css.bar} key={row.day} title={title}>
-                    <i style={{ height: height + '%' }} />
-                    {showLabel ? <b>{row.day.slice(5).replace('-', '/')}</b> : null}
-                  </div>
-                })}
-              </div>
-            </div>
-          </section> : null}
-
-          <footer className={css.foot}>
-            <div className={css.footLine}>
-              <span>{t('analyticsPriceSource')} models.dev{report.pricing.updatedAt === undefined ? '' : ' · ' + new Date(report.pricing.updatedAt).toLocaleString(locale)}</span>
-              <span>{t('analyticsLimitSnapshot')} {GO_PLAN_AS_OF}</span>
-            </div>
-            <p>{t('analyticsNotInvoice')}</p>
-            {report.pricing.unavailable === true ? <p>{t('analyticsPricingUnavailable')}</p> : null}
-            {report.coverage.legacyRequests > 0 ? <p>{t('analyticsLegacy')} {number(report.coverage.legacyRequests, locale)}</p> : null}
-            {report.coverage.unattributedRequests !== undefined && report.coverage.unattributedRequests > 0
-              ? <p>{t('analyticsUnattributed')} {number(report.coverage.unattributedRequests, locale)}</p> : null}
-            {report.coverage.unreadSessions !== undefined && report.coverage.unreadSessions > 0
-              ? <p>{t('analyticsUnread')} {number(report.coverage.unreadSessions, locale)}</p> : null}
-            {report.coverage.listMs !== undefined && report.coverage.pricingMs !== undefined
-              ? <p>{t('analyticsScanSegments')} {number(report.coverage.listMs, locale)} / {number(report.coverage.scanMs, locale)} / {number(report.coverage.pricingMs, locale)} ms</p> : null}
-            {report.coverage.truncated ? <div className={css.notice}>
-              <span>{t('analyticsTruncated')}</span>
-              {maxSessions < MAX_SESSIONS_CEILING ? <button type="button" className={css.action} disabled={loading}
-                onClick={() => { applyMaxSessions(Math.min(maxSessions * 2, MAX_SESSIONS_CEILING)) }}>
-                {t('analyticsScanMore')}
-              </button> : null}
-            </div> : null}
-          </footer>
+          <Composition report={report} locale={locale} t={t} colorFor={colorFor} />
+          <ModelTable report={report} locale={locale} t={t} colorFor={colorFor} />
+          <DaySection report={report} mode={chartMode} onMode={setChartMode} locale={locale} t={t} />
+          <Footer report={report} locale={locale} t={t} maxSessions={maxSessions}
+            loading={loading} onScanMore={() => { applyMaxSessions(Math.min(maxSessions * 2, MAX_SESSIONS_CEILING)) }} />
         </>}
       </div>
     </div>
   </Modal>
+}
+
+/* ---------- shared props ---------- */
+
+interface CopyProps {
+  locale?: string
+  t: (key: AnalyticsKey) => string
+}
+
+function KpiBand({ report, locale, t }: CopyProps & { report: AnalyticsReport }) {
+  const totals = report.totals
+  const coverage = report.coverage
+  const tokenTotal = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+  const cacheShare = tokenTotal === 0 ? 0 : totals.cacheReadTokens / tokenTotal * 100
+  const spanDays = Math.max(1, Math.ceil((report.range.to - report.range.from) / 86_400_000))
+  const daily = Math.round(totals.requests / spanDays)
+  return <section className={css.band}>
+    <div className={css.kpi}>
+      <span className={css.kpiLabel}>{t('analyticsRequests')}</span>
+      <b className={css.kpiValue}>{number(totals.requests, locale)}</b>
+      <span className={css.kpiNote}>
+        {t('analyticsDailyAverage')} {number(daily, locale)} · {t('analyticsSummaries')} {number(totals.summaries, locale)} · {t('analyticsUnsettled')} {number(totals.unsettledAttempts, locale)}
+      </span>
+    </div>
+    <div className={css.kpi}>
+      <span className={css.kpiLabel}>{t('analyticsTokens')}</span>
+      <b className={css.kpiValue}>{compact(tokenTotal, locale)}</b>
+      <span className={css.kpiNote}>
+        {t('analyticsInput')} {compact(totals.inputTokens, locale)} · {t('analyticsOutput')} {compact(totals.outputTokens, locale)}<br />
+        {t('analyticsCacheRead')} {compact(totals.cacheReadTokens, locale)} · {cacheShare.toFixed(1)}% {t('analyticsCacheHit')}
+      </span>
+    </div>
+    <div className={css.kpi}>
+      <span className={css.kpiLabel}>{t('analyticsSpend')}</span>
+      <b className={css.kpiValue}>{totals.pricedRequests === 0 ? '-' : usd(totals.estimatedMicroUsd, locale)}</b>
+      <span className={css.kpiNote}>
+        {t('analyticsPriced')} {number(totals.pricedRequests, locale)} · <span className={css.warn}>{t('analyticsUnpriced')} {number(totals.unpricedRequests, locale)}</span><br />
+        {t('analyticsMissing')} {number(totals.missingUsage, locale)}
+      </span>
+    </div>
+    <div className={css.kpi}>
+      <span className={css.kpiLabel}>{t('analyticsCoverage')}</span>
+      <b className={css.kpiValue}>{number(coverage.scannedSessions, locale)}<em> / {number(coverage.listedSessions, locale)}</em></b>
+      <span className={css.kpiNote}>
+        {t('analyticsFailedSessions')} {number(coverage.failedSessions, locale)} · {t('analyticsSeconds')} {(coverage.scanMs / 1000).toFixed(1)}s
+      </span>
+    </div>
+  </section>
+}
+
+function QuotaSection({ quota, locale, t }: CopyProps & { quota: GoUsage }) {
+  const windows = [
+    { key: 'rolling', label: t('usage_rolling'), window: quota.rolling },
+    { key: 'weekly', label: t('usage_weekly'), window: quota.weekly },
+    { key: 'monthly', label: t('usage_monthly'), window: quota.monthly },
+  ] as const
+  return <section className={css.sec}>
+    <div className={css.secHead}>
+      <h2>{t('analyticsQuota')}</h2>
+      <span className={css.secHint}>{t('analyticsQuotaHint')}</span>
+    </div>
+    <div className={css.quotaGrid}>
+      {windows.map(({ key, label, window }) => {
+        const limited = window.status === 'rate-limited'
+        const percent = Math.min(100, Math.max(0, window.percent))
+        const state = limited || percent >= 100 ? 'full' : percent >= 80 ? 'high' : 'ok'
+        return <div className={css.quota} data-state={state} key={key}>
+          <div className={css.qTop}><span className={css.qLabel}>{label}</span></div>
+          <b className={css.qValue}>{window.percent}%</b>
+          <div className={css.qTrack} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
+            aria-valuenow={Math.round(window.percent)}>
+            <i className={css.qFill} style={{ width: percent + '%' }} />
+            <span className={css.qTick} />
+          </div>
+          <div className={css.qFoot}>
+            <span>{t('usageResets')} {new Date(window.resetsAt).toLocaleString(locale)}</span>
+          </div>
+          {limited ? <div className={css.qWarn}>{t('usageLimited')}</div> : null}
+        </div>
+      })}
+    </div>
+  </section>
+}
+
+function Composition({ report, locale, t, colorFor }: CopyProps & { report: AnalyticsReport; colorFor: (model: string) => string }) {
+  const total = report.totals.estimatedMicroUsd
+  const priced = report.byModel
+    .filter(row => row.estimatedMicroUsd > 0)
+    .sort((left, right) => right.estimatedMicroUsd - left.estimatedMicroUsd)
+  if (total <= 0 || priced.length === 0) return null
+  const top = priced.slice(0, 5)
+  const rest = priced.slice(5)
+  const restValue = rest.reduce((sum, row) => sum + row.estimatedMicroUsd, 0)
+  const unpriced = report.byModel.filter(row => row.pricedRequests === 0 && row.requests > 0)
+  const unpricedNames = unpriced.slice(0, 4).map(row => row.name ?? row.model)
+  return <section className={css.sec}>
+    <div className={css.secHead}>
+      <h2>{t('analyticsComposition')}</h2>
+      <span className={css.secHint}>{t('analyticsCompositionHint')}</span>
+    </div>
+    <div className={css.compBar} role="img" aria-label={t('analyticsComposition')}>
+      {top.map(row => <i key={row.model} className={css.compSeg}
+        style={{ width: (row.estimatedMicroUsd / total * 100) + '%', background: colorFor(row.model) }}
+        title={(row.name ?? row.model) + ' · ' + usd(row.estimatedMicroUsd, locale) + ' · ' + (row.estimatedMicroUsd / total * 100).toFixed(1) + '%'} />)}
+      {rest.length > 0 ? <i className={css.compSeg} style={{ width: (restValue / total * 100) + '%', background: 'var(--go-muted)' }}
+        title={fill(t('analyticsCompositionOther'), { count: String(rest.length) }) + ' · ' + usd(restValue, locale)} /> : null}
+    </div>
+    <div className={css.compLegend}>
+      {top.map(row => <div className={css.compItem} key={row.model}>
+        <i className={css.compDot} style={{ background: colorFor(row.model) }} />
+        <span className={css.compText}>{row.name ?? row.model}<b>{usd(row.estimatedMicroUsd, locale)}<em>{(row.estimatedMicroUsd / total * 100).toFixed(1)}%</em></b></span>
+      </div>)}
+      {rest.length > 0 ? <div className={css.compItem}>
+        <i className={css.compDot} style={{ background: 'var(--go-muted)' }} />
+        <span className={css.compText}>{fill(t('analyticsCompositionOther'), { count: String(rest.length) })}<b>{usd(restValue, locale)}<em>{(restValue / total * 100).toFixed(1)}%</em></b></span>
+      </div> : null}
+    </div>
+    {unpriced.length > 0 ? <p className={css.compNote}>
+      {t('analyticsCompositionFree')} {unpricedNames.join(' · ')}{unpriced.length > unpricedNames.length ? ' +' + (unpriced.length - unpricedNames.length) : ''}
+    </p> : null}
+  </section>
+}
+
+function ModelTable({ report, locale, t, colorFor }: CopyProps & { report: AnalyticsReport; colorFor: (model: string) => string }) {
+  if (report.byModel.length === 0) return null
+  const total = report.totals.estimatedMicroUsd
+  return <section className={css.sec}>
+    <div className={css.secHead}>
+      <h2>{t('analyticsByModel')}</h2>
+      <span className={css.secHint}>{number(report.byModel.length, locale)}</span>
+    </div>
+    <table className={css.table}>
+      <thead>
+        <tr>
+          <th>{t('analyticsModel')}</th>
+          <th>{t('analyticsRequests')}</th>
+          <th>{t('analyticsInput')}</th>
+          <th>{t('analyticsOutput')}</th>
+          <th>{t('analyticsCacheRead')}</th>
+          <th>{t('analyticsCost')}</th>
+          <th>{t('analyticsShare')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {report.byModel.map(row => {
+          const share = total === 0 ? 0 : row.estimatedMicroUsd / total * 100
+          const unpriced = row.pricedRequests === 0 && row.requests > 0
+          return <tr key={row.model}>
+            <td>
+              <span className={css.nameCell}>
+                <i className={css.mDot} style={{ background: colorFor(row.model) }} />
+                <b className={css.mName}>{row.name ?? row.model}</b>
+              </span>
+            </td>
+            <td>{number(row.requests, locale)}</td>
+            <td className={css.dim}>{compact(row.inputTokens, locale)}</td>
+            <td className={css.dim}>{compact(row.outputTokens, locale)}</td>
+            <td className={css.dim}>{compact(row.cacheReadTokens, locale)}</td>
+            <td className={css.spend}>{unpriced ? <span className={css.tag}>{t('analyticsUnpriced')}</span> : usd(row.estimatedMicroUsd, locale)}</td>
+            <td>
+              <span className={css.shareCell}>
+                {unpriced
+                  ? <span className={css.dim}>—</span>
+                  : <>
+                    <span className={css.shareBar}><i style={{ width: share + '%' }} /></span>
+                    <span className={css.shareValue}>{share.toFixed(1)}%</span>
+                  </>}
+              </span>
+            </td>
+          </tr>
+        })}
+      </tbody>
+    </table>
+  </section>
+}
+
+function DaySection({ report, mode, onMode, locale, t }: CopyProps & { report: AnalyticsReport; mode: ChartMode; onMode: (mode: ChartMode) => void }) {
+  const days = report.byDay
+  // Hover state is shared by the calendar and the trend so both highlight the
+  // same bucket; the tooltip follows the pointer inside the day wrapper.
+  const [hover, setHover] = useState<{ index: number; left: number; top: number; below: boolean } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const heatRef = useRef<HTMLDivElement>(null)
+  if (days.length === 0) return null
+  const valueOf = (day: AnalyticsDayRow): number => mode === 'spend' ? day.estimatedMicroUsd : day.tokens
+  const format = (value: number): string => mode === 'spend' ? usd(value, locale) : compact(value, locale)
+  const values = days.map(valueOf)
+  const max = Math.max(0, ...values)
+  const top = niceTop(max)
+  const total = values.reduce((sum, value) => sum + value, 0)
+  const average = total / days.length
+  const peakIndex = values.indexOf(max)
+  const width = 560
+  const height = 132
+  const padLeft = 50
+  const padRight = 4
+  const axisY = 106
+  const xOf = (index: number): number => days.length === 1
+    ? padLeft + (width - padLeft - padRight) / 2
+    : padLeft + index / (days.length - 1) * (width - padLeft - padRight)
+  const yOf = (value: number): number => axisY - (top === 0 ? 0 : value / top) * (axisY - 12)
+  const showHover = (index: number, event: { clientX: number; clientY: number }): void => {
+    const box = wrapRef.current?.getBoundingClientRect()
+    const wrapWidth = box === undefined ? 0 : box.width
+    const x = box === undefined ? 0 : event.clientX - box.left
+    const y = box === undefined ? 0 : event.clientY - box.top
+    const below = y < 92
+    setHover({
+      index,
+      left: Math.min(Math.max(x + 12, 8), Math.max(wrapWidth - 190, 8)),
+      top: below ? y + 18 : y - 12,
+      below,
+    })
+  }
+  const showHeatHover = (event: { clientX: number; clientY: number }): void => {
+    const heat = heatRef.current
+    if (heat === null) {
+      setHover(null)
+      return
+    }
+    const boxes = Array.from(heat.querySelectorAll<HTMLElement>('[data-day]'), cell => cell.getBoundingClientRect())
+    const index = nearestIndexWithin(boxes, event.clientX, event.clientY, HEAT_HOVER_SLOP)
+    if (index === null) setHover(null)
+    else showHover(index, event)
+  }
+  const line = days.map((day, index) => (index === 0 ? 'M' : 'L') + xOf(index).toFixed(1) + ' ' + yOf(valueOf(day)).toFixed(1)).join(' ')
+  const area = days.length > 1
+    ? line + ' L' + xOf(days.length - 1).toFixed(1) + ' ' + axisY + ' L' + xOf(0).toFixed(1) + ' ' + axisY + ' Z'
+    : ''
+  const heatHeads = weekdayHeads(locale)
+  const offset = dayOfWeek(days[0].day)
+  const headCell = heatHeads.map((head, index) => <span className={css.heatDay} key={'h' + index}>{head}</span>)
+  const pads = Array.from({ length: offset }, (_, index) => <span className={css.heatPad} key={'p' + index} />)
+  const cells = days.map((day, index) => {
+    const ratio = max === 0 ? 0 : valueOf(day) / max
+    const lightness = Math.round(12 + ratio * 88)
+    return <span key={day.day} className={css.heatCell} data-day={day.day}
+      data-active={hover?.index === index ? '' : undefined}
+      role="img"
+      aria-label={day.day + ' · ' + usd(day.estimatedMicroUsd, locale) + ' · ' + compact(day.tokens, locale) + ' tokens'}
+      style={{ background: 'color-mix(in srgb, var(--go-accent) ' + lightness + '%, var(--go-surface-2))' }} />
+  })
+  const labels = [0, 0.5, 1].map(ratio => <text key={ratio} x={padLeft - 8} y={yOf(top * ratio) + 3} textAnchor="end">{format(ratio === 0 ? 0 : Math.round(top * ratio))}</text>)
+  const xLabels = days.map((day, index) => {
+    if (!(index === 0 || index === days.length - 1 || index % 6 === 0)) return null
+    const anchor = index === 0 ? 'start' : index === days.length - 1 ? 'end' : 'middle'
+    const x = index === 0 ? padLeft : index === days.length - 1 ? width - padRight : xOf(index)
+    return <text key={day.day} x={x} y={height - 4} textAnchor={anchor}>{day.day.slice(5).replace('-', '/')}</text>
+  })
+  const hovered = hover === null ? undefined : days[hover.index]
+  const hitWidth = Math.max((width - padLeft - padRight) / Math.max(days.length, 1), 6)
+  const hitRects = days.map((day, index) => {
+    const x = Math.min(Math.max(xOf(index) - hitWidth / 2, padLeft), width - padRight - hitWidth)
+    return <rect key={'hit-' + day.day} data-day={day.day} className={css.trendHit}
+      x={x} y={8} width={hitWidth} height={axisY - 8} onMouseMove={(event) => showHover(index, event)} />
+  })
+  return <section className={css.sec} style={{ borderBottom: '0', paddingBottom: 0 }}>
+    <div className={css.secHead}>
+      <h2>{t('analyticsByDay')}</h2>
+      <div className={css.seg} role="group" aria-label={t('analyticsByDay')}>
+        <button type="button" aria-pressed={mode === 'spend'} onClick={() => onMode('spend')}>{t('analyticsChartSpend')}</button>
+        <button type="button" aria-pressed={mode === 'tokens'} onClick={() => onMode('tokens')}>{t('analyticsChartTokens')}</button>
+      </div>
+    </div>
+    <div className={css.daysWrap} ref={wrapRef} onMouseLeave={() => setHover(null)}>
+      <div className={css.heat} role="group" aria-label={t('analyticsByDay')} ref={heatRef}
+        onMouseMove={showHeatHover} onMouseLeave={() => setHover(null)}>{headCell}{pads}{cells}</div>
+      <div className={css.trend}>
+        <svg className={css.trendSvg} viewBox={'0 0 ' + width + ' ' + height} role="img" aria-label={t('analyticsByDay')}
+          onMouseMove={(event) => { if ((event.target as Element).closest('[data-day]') === null) setHover(null) }}
+          onMouseLeave={() => setHover(null)}>
+          <defs>
+            <linearGradient id={TREND_FILL_ID} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--go-accent)" stopOpacity="0.26" />
+              <stop offset="1" stopColor="var(--go-accent)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <line className={css.trendGrid} x1={padLeft} x2={width - padRight} y1={yOf(top * 0.5)} y2={yOf(top * 0.5)} />
+          <line className={css.trendBase} x1={padLeft} x2={width - padRight} y1={axisY} y2={axisY} />
+          {labels}
+          {hover !== null ? <line className={css.trendGuide} x1={xOf(hover.index)} x2={xOf(hover.index)} y1={8} y2={axisY} /> : null}
+          {area !== '' ? <path className={css.trendArea} d={area} style={{ fill: 'url(#' + TREND_FILL_ID + ')' }} /> : null}
+          <path className={css.trendLine} d={line} />
+          <circle className={css.trendPeak} cx={xOf(peakIndex)} cy={yOf(max)} r="3" />
+          <text x={xOf(peakIndex)} y={yOf(max) - 8} textAnchor="middle" style={{ fill: 'var(--go-text)', fontWeight: 600 }}>{format(max)}</text>
+          {hover !== null && hovered !== undefined ? <circle className={css.trendFocus} cx={xOf(hover.index)} cy={yOf(valueOf(hovered))} r="3.2" /> : null}
+          {xLabels}
+          {hitRects}
+        </svg>
+        <div className={css.trendFoot}>
+          <span>{t('analyticsPeak')} <b>{days[peakIndex].day.slice(5).replace('-', '/')}</b> · {format(max)} · {number(days[peakIndex].requests, locale)} {t('analyticsRequests')}</span>
+          <span>{t('analyticsTotal')} <b>{format(total)}</b> · {t('analyticsDailyAverage')} <b>{format(Math.round(average))}</b></span>
+        </div>
+      </div>
+      {hover !== null && hovered !== undefined ? <div className={css.dayTip} role="tooltip"
+        style={{ left: hover.left, top: hover.top, transform: hover.below ? 'none' : 'translateY(-100%)' }}>
+        <div className={css.dayTipHead}>
+          <b>{hovered.day.slice(5).replace('-', '/')}</b>
+          <span>{weekdayLabel(hovered.day, locale)}</span>
+        </div>
+        <div className={css.dayTipValue}>{usd(hovered.estimatedMicroUsd, locale)}</div>
+        <div className={css.dayTipMeta}>
+          {number(hovered.requests, locale)} {t('analyticsRequests')} · {compact(hovered.tokens, locale)} {t('analyticsTokens')}
+        </div>
+      </div> : null}
+    </div>
+  </section>
+}
+
+function Footer({ report, locale, t, maxSessions, loading, onScanMore }: CopyProps & {
+  report: AnalyticsReport
+  maxSessions: number
+  loading: boolean
+  onScanMore: () => void
+}) {
+  const coverage = report.coverage
+  return <footer className={css.foot}>
+    {coverage.truncated ? <div className={css.notice}>
+      <span>{t('analyticsTruncated')}</span>
+      {maxSessions < MAX_SESSIONS_CEILING ? <button type="button" className={css.action} disabled={loading} onClick={onScanMore}>
+        {t('analyticsScanMore')}
+      </button> : null}
+    </div> : null}
+    <div className={css.footCol}>
+      <p>{t('analyticsPriceSource')} models.dev{report.pricing.updatedAt === undefined ? '' : ' · ' + new Date(report.pricing.updatedAt).toLocaleString(locale)}</p>
+      <p>{t('analyticsNotInvoice')}</p>
+      {report.pricing.unavailable === true ? <p>{t('analyticsPricingUnavailable')}</p> : null}
+    </div>
+    <div className={css.footCol}>
+      {coverage.listMs !== undefined && coverage.pricingMs !== undefined
+        ? <p>{t('analyticsScanSegments')} {number(coverage.listMs, locale)} / {number(coverage.scanMs, locale)} / {number(coverage.pricingMs, locale)} ms</p>
+        : null}
+      {coverage.legacyRequests > 0 ? <p>{t('analyticsLegacy')} {number(coverage.legacyRequests, locale)}</p> : null}
+      {coverage.unattributedRequests !== undefined && coverage.unattributedRequests > 0
+        ? <p>{t('analyticsUnattributed')} {number(coverage.unattributedRequests, locale)}</p> : null}
+      {coverage.unreadSessions !== undefined && coverage.unreadSessions > 0
+        ? <p>{t('analyticsUnread')} {number(coverage.unreadSessions, locale)}</p> : null}
+    </div>
+  </footer>
 }
