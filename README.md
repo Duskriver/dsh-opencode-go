@@ -1,6 +1,15 @@
-# dsh-opencode-go
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo-light.png" alt="DSH-OCGO" width="480">
+  </picture>
+</p>
 
-[English](README.en.md)
+<h1 align="center">dsh-opencode-go</h1>
+
+<p align="center">
+  <a href="README.en.md">English</a>
+</p>
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供 **OpenCode Go 订阅用量查看与多账号管理**，让额度、重置时间和账号切换更方便。
 

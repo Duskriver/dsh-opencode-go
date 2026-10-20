@@ -1,6 +1,15 @@
-# dsh-opencode-go
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo-light.png" alt="DSH-OCGO" width="480">
+  </picture>
+</p>
 
-[简体中文](README.md)
+<h1 align="center">dsh-opencode-go</h1>
+
+<p align="center">
+  <a href="README.md">简体中文</a>
+</p>
 
 **OpenCode Go subscription usage and multiple-account management** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), with convenient access to quotas, reset times, and account switching.
 
