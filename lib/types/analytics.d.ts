@@ -7,9 +7,13 @@
  * whose eviction runs once, at the end of a scan (review P2/M2/S1); a live
  * session's fold is reused only inside a short window (review P6), and a
  * session that closes is re-read once before its closed cache entry takes
- * over (review P9/S2). Aggregation consumes run-local fold results, so a
- * mid-scan eviction can never subtract a session from the report it was read
- * for (review P3/C3/S1). Reads run through a bounded, configurable pool
+ * over (review P9/S2). When the Host mounts ctx.sessionPersistence, a closed
+ * session's fold is also keyed by the log's durable revision in an on-disk
+ * cache, so a later process skips every session whose revision did not
+ * change; live folds are never written. Aggregation consumes run-local fold
+ * results, so a mid-scan eviction can never subtract a session from the
+ * report it was read for (review P3/C3/S1). Reads run through a bounded,
+ * configurable pool
  * (review P1/S3), each read carrying its own share of the time budget
  * (review P18/C2), and pricing is fetched in parallel with the scan with a
  * stale-on-error fallback to the last successful table (review P4/S4).
@@ -36,6 +40,24 @@ export interface AnalyticsSessionRecord {
 export interface AnalyticsSessionQuery {
     listSessions(signal?: AbortSignal): Promise<readonly AnalyticsSessionRecord[]>;
     readSession(id: string): Promise<AnalyticsSnapshotLike>;
+}
+/** Structural face of one ctx.sessionPersistence record. */
+export interface AnalyticsPersistenceRecord {
+    readonly header?: {
+        readonly id?: string;
+    };
+    readonly revision?: string;
+}
+/**
+ * The subset of ctx.sessionPersistence this service needs. A durable revision
+ * changes if and only if the session log changes, so it can validate a fold
+ * that was written by an earlier process. The service is optional on the Host:
+ * without it, only the in-process cache survives between runs.
+ */
+export interface AnalyticsPersistence {
+    list(options?: {
+        signal?: AbortSignal;
+    }): Promise<readonly AnalyticsPersistenceRecord[]>;
 }
 /** Structural face of one catalog model. */
 export interface AnalyticsPricingModel {
@@ -71,6 +93,14 @@ export interface AnalyticsOptions {
      * concurrently.
      */
     maxConcurrency?: number;
+    /**
+     * Durable session index, when the Host mounts ctx.sessionPersistence. Its
+     * revisions validate on-disk folds across restarts; without it the scan
+     * behaves exactly as before.
+     */
+    persistence?: () => AnalyticsPersistence | undefined;
+    /** Overrides the default analytics fold cache path (tests). */
+    foldCachePath?: string;
 }
 /**
  * Build the analytics price book from one catalog snapshot (review P14 core
@@ -89,6 +119,12 @@ export declare class GoAnalyticsService extends TypertRemoteService {
     /** The most recent successful price table; stale-on-error fallback (review P4/S4). */
     private lastPriceBook;
     private factTotal;
+    /**
+     * The on-disk fold cache, loaded lazily once per service. The promise is
+     * memoized even when loading fails, because a missing or corrupt file is an
+     * empty cache and retrying it on every run would only add latency.
+     */
+    private folds;
     constructor(ctx: Context, options: AnalyticsOptions);
     /**
      * Read one aggregate report.
@@ -99,8 +135,24 @@ export declare class GoAnalyticsService extends TypertRemoteService {
      */
     read(raw: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport>;
     private now;
+    private foldPath;
+    /** Load the persistent folds once; later runs share the same map. */
+    private diskFolds;
+    /**
+     * Ask the durable index for the current revisions. Any failure — the service
+     * is absent, rejects, or the caller aborts — yields an empty table, which
+     * disables disk reuse for this run without touching the scan.
+     */
+    private revisionTable;
     private limitOf;
     private run;
+    /**
+     * Merge this run's newly read folds into the persistent cache. Entries the
+     * run never looked at are kept, entries past the age limit are dropped, and
+     * saveFoldCache applies the byte cap by storedAt. The write is best-effort:
+     * a failed save leaves the previous file and never fails the report.
+     */
+    private persistFolds;
     private remember;
     /** The one eviction point; returns how many entries it dropped (review S1/P2). */
     private trim;

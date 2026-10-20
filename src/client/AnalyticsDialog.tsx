@@ -141,6 +141,48 @@ function weekdayLabel(day: string, locale?: string): string {
     .format(new Date(day + 'T00:00:00Z'))
 }
 
+/**
+ * The calendar day of an instant in the report's zone, as YYYY-MM-DD. An
+ * invalid zone falls back to UTC instead of throwing during render.
+ */
+function dayKeyOf(at: number, timeZone: string): string {
+  const shaped = (zone: string): string => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date(at))
+    const value = (type: string): string => parts.find(part => part.type === type)?.value ?? ''
+    return value('year') + '-' + value('month') + '-' + value('day')
+  }
+  try { return shaped(timeZone) } catch { return shaped('UTC') }
+}
+
+/** The next calendar key; UTC parsing keeps this arithmetic timezone-free. */
+function nextDayKey(day: string): string {
+  return new Date(Date.parse(day + 'T00:00:00Z') + 86_400_000).toISOString().slice(0, 10)
+}
+
+/**
+ * Widen the Host's sparse by-day buckets to one row per calendar day in the
+ * reported range, so a quiet day still occupies its weekday column. Capped at
+ * 366 rows; an unusable range returns no rows and the caller falls back.
+ */
+function denseDays(report: AnalyticsReport): AnalyticsDayRow[] {
+  const { from, to } = report.range
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return []
+  const buckets = new Map(report.byDay.map(row => [row.day, row]))
+  const end = dayKeyOf(Math.max(from, to - 1), report.timeZone)
+  const series: AnalyticsDayRow[] = []
+  let key = dayKeyOf(from, report.timeZone)
+  while (series.length < 366) {
+    series.push(buckets.get(key) ?? { day: key, requests: 0, tokens: 0, estimatedMicroUsd: 0 })
+    if (key >= end) break
+    const next = nextDayKey(key)
+    if (next <= key) break
+    key = next
+  }
+  return series
+}
+
 function isUnsupported(error: unknown): boolean {
   if (error === null || typeof error !== 'object' || !('code' in error) || !('details' in error)) return false
   const details = error.details
@@ -173,10 +215,11 @@ function CloseIcon() {
 function leadFor(report: AnalyticsReport, t: (key: AnalyticsKey) => string, locale?: string): string {
   const totals = report.totals
   const tokenTotal = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+  // Nothing priced means no estimate to print, not a zero-dollar estimate.
   const base = fill(t('analyticsLead'), {
     requests: number(totals.requests, locale),
     tokens: compact(tokenTotal, locale),
-    spend: usd(totals.estimatedMicroUsd, locale),
+    spend: totals.pricedRequests === 0 ? '—' : usd(totals.estimatedMicroUsd, locale),
   })
   if (totals.estimatedMicroUsd <= 0) return base
   const top = [...report.byModel].sort((left, right) => right.estimatedMicroUsd - left.estimatedMicroUsd)[0]
@@ -382,7 +425,9 @@ function KpiBand({ report, locale, t }: CopyProps & { report: AnalyticsReport })
   const totals = report.totals
   const coverage = report.coverage
   const tokenTotal = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
-  const cacheShare = tokenTotal === 0 ? 0 : totals.cacheReadTokens / tokenTotal * 100
+  // Verification spec: output tokens never enter the cache-hit denominator.
+  const cachedInput = totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+  const cacheShare = cachedInput === 0 ? 0 : totals.cacheReadTokens / cachedInput * 100
   const spanDays = Math.max(1, Math.ceil((report.range.to - report.range.from) / 86_400_000))
   const daily = Math.round(totals.requests / spanDays)
   return <section className={css.band}>
@@ -462,7 +507,8 @@ function Composition({ report, locale, t, colorFor }: CopyProps & { report: Anal
   const top = priced.slice(0, 5)
   const rest = priced.slice(5)
   const restValue = rest.reduce((sum, row) => sum + row.estimatedMicroUsd, 0)
-  const unpriced = report.byModel.filter(row => row.pricedRequests === 0 && row.requests > 0)
+  // Only models the price table could not price; missing-usage rows are not "free".
+  const unpriced = report.byModel.filter(row => row.pricedRequests === 0 && row.unpricedRequests > 0)
   const unpricedNames = unpriced.slice(0, 4).map(row => row.name ?? row.model)
   return <section className={css.sec}>
     <div className={css.secHead}>
@@ -515,7 +561,12 @@ function ModelTable({ report, locale, t, colorFor }: CopyProps & { report: Analy
       <tbody>
         {report.byModel.map(row => {
           const share = total === 0 ? 0 : row.estimatedMicroUsd / total * 100
-          const unpriced = row.pricedRequests === 0 && row.requests > 0
+          // Three states: fully unpriced (price missing), fully missing usage
+          // (nothing was reported), and everything else, which keeps the money
+          // even when some requests in the same row lacked a price.
+          const unpriced = row.pricedRequests === 0 && row.unpricedRequests > 0
+          const missing = row.pricedRequests === 0 && row.unpricedRequests === 0 && row.requests > 0
+          const noAmount = unpriced || missing
           return <tr key={row.model}>
             <td>
               <span className={css.nameCell}>
@@ -527,10 +578,14 @@ function ModelTable({ report, locale, t, colorFor }: CopyProps & { report: Analy
             <td className={css.dim}>{compact(row.inputTokens, locale)}</td>
             <td className={css.dim}>{compact(row.outputTokens, locale)}</td>
             <td className={css.dim}>{compact(row.cacheReadTokens, locale)}</td>
-            <td className={css.spend}>{unpriced ? <span className={css.tag}>{t('analyticsUnpriced')}</span> : usd(row.estimatedMicroUsd, locale)}</td>
+            <td className={css.spend}>
+              {unpriced
+                ? <span className={css.tag}>{t('analyticsUnpriced')}</span>
+                : missing ? <span className={css.dim}>—</span> : usd(row.estimatedMicroUsd, locale)}
+            </td>
             <td>
               <span className={css.shareCell}>
-                {unpriced
+                {noAmount
                   ? <span className={css.dim}>—</span>
                   : <>
                     <span className={css.shareBar}><i style={{ width: share + '%' }} /></span>
@@ -546,7 +601,11 @@ function ModelTable({ report, locale, t, colorFor }: CopyProps & { report: Analy
 }
 
 function DaySection({ report, mode, onMode, locale, t }: CopyProps & { report: AnalyticsReport; mode: ChartMode; onMode: (mode: ChartMode) => void }) {
-  const days = report.byDay
+  // The calendar, trend, peak, hit areas and x axis all index the same dense
+  // series so a hovered grid column and its trend point stay one bucket. An
+  // empty report keeps hiding the section; an unusable range falls back.
+  const series = report.byDay.length === 0 ? [] : denseDays(report)
+  const days = series.length === 0 ? report.byDay : series
   // Hover state is shared by the calendar and the trend so both highlight the
   // same bucket; the tooltip follows the pointer inside the day wrapper.
   const [hover, setHover] = useState<{ index: number; left: number; top: number; below: boolean } | null>(null)
@@ -559,7 +618,9 @@ function DaySection({ report, mode, onMode, locale, t }: CopyProps & { report: A
   const max = Math.max(0, ...values)
   const top = niceTop(max)
   const total = values.reduce((sum, value) => sum + value, 0)
-  const average = total / days.length
+  // Same calendar-day denominator as the KPI band, not the bucket count.
+  const spanDays = Math.max(1, Math.ceil((report.range.to - report.range.from) / 86_400_000))
+  const average = total / spanDays
   const peakIndex = values.indexOf(max)
   const width = 560
   const height = 132

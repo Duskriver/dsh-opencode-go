@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Gateway from '@deepseek-ai/dsh-api-gateway'
@@ -7,12 +9,14 @@ import {
   GoAnalyticsService,
   analyticsPriceBook,
   type AnalyticsOptions,
+  type AnalyticsPersistence,
   type AnalyticsPriceBook,
   type AnalyticsSessionQuery,
   type AnalyticsSessionRecord,
 } from '../src/analytics.ts'
 import { parseAnalyticsQuery, parseAnalyticsReport, type AnalyticsQuery, type AnalyticsReport } from '../src/analytics-contract.ts'
-import type { AnalyticsSnapshotLike } from '../src/analytics-scan.ts'
+import type { AnalyticsSnapshotLike, RequestFact } from '../src/analytics-scan.ts'
+import { loadFoldCache, saveFoldCache, type AnalyticsFoldEntry } from '../src/analytics-fold-cache.ts'
 
 const T1 = Date.UTC(2026, 9, 19, 0, 30)
 const LEGACY = Date.UTC(2026, 8, 25, 8, 0)
@@ -73,6 +77,33 @@ function corpus(sessions: number, factsPer: number, base = T1): {
 
 const delay = (ms: number): Promise<void> => new Promise(resolve => { setTimeout(resolve, ms) })
 
+const foldCachePath = (): string => join(process.env.DSH_HOME!, 'analytics-folds.json')
+
+/** Current durable revisions for the default fixture corpus. */
+function revisionsOf(): Map<string, string> {
+  return new Map([
+    ['session-secret-a', 'rev-a-1'],
+    ['session-secret-b', 'rev-b-1'],
+    ['session-secret-c', 'rev-c-1'],
+  ])
+}
+
+/** A persistence fake exposing one revision per session id. */
+function persistenceOf(revisions: Map<string, string>): () => AnalyticsPersistence {
+  return () => ({
+    list: async () => [...revisions].map(([id, revision]) => ({ header: { id }, revision })),
+  })
+}
+
+/** One synthetic persisted fold for cache-seeding tests. */
+function foldEntry(revision: string, at: number): AnalyticsFoldEntry {
+  const facts: RequestFact[] = [{
+    at, model: 'deepseek-v4.1-flash', input: 1, output: 1, cacheRead: 0, cacheWrite: 0,
+    legacy: false, kind: 'message', missingUsage: false,
+  }]
+  return { revision, storedAt: NOW, createdAt: at, events: 1, facts, attempts: [], unattributed: [] }
+}
+
 async function harness(options: {
   query?: () => AnalyticsSessionQuery | undefined
   reads?: string[]
@@ -84,6 +115,8 @@ async function harness(options: {
   limits?: Partial<Pick<AnalyticsOptions, 'budgetMs' | 'maxSessions' | 'maxEvents' | 'maxFacts' | 'maxConcurrency'>>
   order?: string[]
   listSignals?: (AbortSignal | undefined)[]
+  persistence?: () => AnalyticsPersistence | undefined
+  foldCachePath?: string
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(Registry)
@@ -108,6 +141,8 @@ async function harness(options: {
     query: options.query ?? (() => queryService),
     pricing: options.pricing ?? (async () => pricing),
     now: options.now ?? (() => NOW),
+    ...(options.persistence === undefined ? {} : { persistence: options.persistence }),
+    ...(options.foldCachePath === undefined ? {} : { foldCachePath: options.foldCachePath }),
     ...options.limits,
   })
   const read = async (value: AnalyticsQuery = query(), signal?: AbortSignal): Promise<AnalyticsReport> =>
@@ -608,4 +643,206 @@ it('rejects malformed queries and reports instead of trusting the wire', () => {
   }
   expect(() => parseAnalyticsQuery(query({ maxSessions: 5000 }))).toThrow('Invalid analytics')
   expect(() => parseAnalyticsReport({})).toThrow('Invalid analytics')
+})
+
+// Restart reuse: a second service (empty in-memory cache) shares the same
+// fold file and reads only the sessions whose durable revision changed. The
+// live session is re-read because live folds are never persisted.
+it('reuses persisted folds across a restart when the revision is unchanged', async () => {
+  const path = foldCachePath()
+  const revisions = revisionsOf()
+  const signals: (AbortSignal | undefined)[] = []
+  const listSignals: (AbortSignal | undefined)[] = []
+  const tracked = (): AnalyticsPersistence => ({
+    list: async options => {
+      signals.push(options?.signal)
+      return [...revisions].map(([id, revision]) => ({ header: { id }, revision }))
+    },
+  })
+  const signal = new AbortController().signal
+  const first = await harness({ persistence: tracked, foldCachePath: path, listSignals })
+  let firstReport: AnalyticsReport | undefined
+  try {
+    firstReport = await first.read(query(), signal)
+    expect([...first.reads].sort()).toEqual([
+      'session-secret-a', 'session-secret-b', 'session-secret-c',
+    ])
+    // The revision list receives the caller's signal, exactly like listSessions.
+    expect(signals[0]).toBe(signal)
+    expect(signals[0]).toBe(listSignals[0])
+  } finally { await first.ctx.fiber.dispose() }
+  const cached = await loadFoldCache(path)
+  expect([...cached.keys()].sort()).toEqual(['session-secret-a', 'session-secret-b'])
+  expect(cached.get('session-secret-a')?.revision).toBe('rev-a-1')
+  expect(cached.get('session-secret-b')?.events).toBe(2)
+
+  const second = await harness({ persistence: persistenceOf(revisions), foldCachePath: path })
+  try {
+    const report = await second.read()
+    expect(second.reads).toEqual(['session-secret-c'])
+    expect(report.totals).toEqual(firstReport?.totals)
+    parseAnalyticsReport(report)
+  } finally { await second.ctx.fiber.dispose() }
+})
+
+it('re-reads a persisted session when its revision changes across a restart', async () => {
+  const path = foldCachePath()
+  const revisions = revisionsOf()
+  const tables = structuredClone(snapshots)
+  const persistence = persistenceOf(revisions)
+  const first = await harness({ persistence, foldCachePath: path, snapshots: tables })
+  try { await first.read() } finally { await first.ctx.fiber.dispose() }
+
+  revisions.set('session-secret-a', 'rev-a-2')
+  tables['session-secret-a'].events.push(message(3, T1 + 1000, { inputTokens: 100, outputTokens: 50 }))
+  const second = await harness({ persistence, foldCachePath: path, snapshots: tables })
+  try {
+    const report = await second.read()
+    expect([...second.reads].sort()).toEqual(['session-secret-a', 'session-secret-c'])
+    expect(report.totals.requests).toBe(4)
+  } finally { await second.ctx.fiber.dispose() }
+})
+
+// P9/S2 boundary for the disk half: a live record must never be served from
+// the disk cache, because a live fold is not written there in the first place.
+it('re-reads a live session even when the disk cache holds a matching revision', async () => {
+  const path = foldCachePath()
+  const revisions = revisionsOf()
+  expect(await saveFoldCache(path, [['session-secret-c', foldEntry('rev-c-1', SUMMARY)]])).toBe(true)
+  const { ctx, read, reads } = await harness({ persistence: persistenceOf(revisions), foldCachePath: path })
+  try {
+    const report = await read()
+    expect(reads).toContain('session-secret-c')
+    // The real log wins: the seeded fold has one input token, the snapshot 1000.
+    expect(report.totals.inputTokens).toBe(1_002_000)
+  } finally { await ctx.fiber.dispose() }
+})
+
+it('keeps the legacy behavior without a persistence service', async () => {
+  const path = foldCachePath()
+  expect(await saveFoldCache(path, [['session-secret-a', foldEntry('rev-any', T1)]])).toBe(true)
+  const first = await harness({ foldCachePath: path })
+  try {
+    const report = await first.read()
+    expect(report.totals.requests).toBe(3)
+    expect([...first.reads].sort()).toEqual([
+      'session-secret-a', 'session-secret-b', 'session-secret-c',
+    ])
+  } finally { await first.ctx.fiber.dispose() }
+  const second = await harness({ foldCachePath: path })
+  try {
+    const report = await second.read()
+    expect(report.totals.requests).toBe(3)
+    expect([...second.reads].sort()).toEqual([
+      'session-secret-a', 'session-secret-b', 'session-secret-c',
+    ])
+  } finally { await second.ctx.fiber.dispose() }
+  // Without revisions nothing could ever be validated, so nothing is written.
+  expect([...await loadFoldCache(path)].map(([id]) => id)).toEqual(['session-secret-a'])
+})
+
+it('does not persist folds from a cancelled run', async () => {
+  const path = foldCachePath()
+  const { records: bulk, snapshots: tables } = corpus(2, 1)
+  const revisions = new Map([['session-bulk-0', 'rev-0'], ['session-bulk-1', 'rev-1']])
+  const reads: string[] = []
+  const { ctx, read } = await harness({
+    records: bulk,
+    snapshots: tables,
+    persistence: persistenceOf(revisions),
+    foldCachePath: path,
+    limits: { maxConcurrency: 1 },
+    readSession: async id => {
+      reads.push(id)
+      if (reads.length > 1) await delay(100)
+      return tables[id] as never
+    },
+  })
+  try {
+    const controller = new AbortController()
+    const pending = read(query(), controller.signal)
+    await delay(20)
+    controller.abort()
+    await expect(pending).rejects.toThrow()
+    expect(reads.length).toBeGreaterThan(0)
+    expect((await loadFoldCache(path)).size).toBe(0)
+  } finally { await ctx.fiber.dispose() }
+})
+
+it('ignores a corrupt fold cache and still reports', async () => {
+  const path = foldCachePath()
+  await writeFile(path, '{not json')
+  const { ctx, read, reads } = await harness({
+    persistence: persistenceOf(revisionsOf()), foldCachePath: path,
+  })
+  try {
+    const report = await read()
+    parseAnalyticsReport(report)
+    expect(report.totals.requests).toBe(3)
+    expect([...reads].sort()).toEqual([
+      'session-secret-a', 'session-secret-b', 'session-secret-c',
+    ])
+  } finally { await ctx.fiber.dispose() }
+  // The successful scan replaced the corrupt file with valid entries.
+  expect([...(await loadFoldCache(path)).keys()].sort()).toEqual([
+    'session-secret-a', 'session-secret-b',
+  ])
+})
+
+it('scans normally when the revision list fails', async () => {
+  const path = foldCachePath()
+  const { ctx, read, reads } = await harness({
+    persistence: () => ({ list: async () => { throw new Error('persistence unavailable') } }),
+    foldCachePath: path,
+  })
+  try {
+    const report = await read()
+    expect(report.totals.requests).toBe(3)
+    expect([...reads].sort()).toEqual([
+      'session-secret-a', 'session-secret-b', 'session-secret-c',
+    ])
+  } finally { await ctx.fiber.dispose() }
+  // Without revisions nothing can be validated, so the failed service writes nothing.
+  expect((await loadFoldCache(path)).size).toBe(0)
+})
+
+it('reports even when the fold cache cannot be written', async () => {
+  const blocked = join(process.env.DSH_HOME!, 'blocked')
+  await writeFile(blocked, 'not a directory')
+  const { ctx, read } = await harness({
+    persistence: persistenceOf(revisionsOf()),
+    foldCachePath: join(blocked, 'analytics-folds.json'),
+  })
+  try {
+    const report = await read()
+    expect(report.totals.requests).toBe(3)
+  } finally { await ctx.fiber.dispose() }
+})
+
+// A capped scan merges only the sessions it read: an entry this run never
+// looked at, and a stale entry whose revision no longer matches, are handled
+// independently.
+it('merges a partial scan without dropping unseen cache entries', async () => {
+  const path = foldCachePath()
+  expect(await saveFoldCache(path, [
+    ['session-secret-a', foldEntry('rev-a-0', T1)],
+    ['session-unseen', foldEntry('rev-z-1', T1)],
+  ])).toBe(true)
+  const { ctx, read, reads } = await harness({
+    persistence: persistenceOf(revisionsOf()),
+    foldCachePath: path,
+    limits: { maxSessions: 2 },
+  })
+  try {
+    const report = await read()
+    expect(report.coverage).toMatchObject({
+      listedSessions: 3, scannedSessions: 2, truncated: true, truncation: 'sessions',
+    })
+    expect([...reads].sort()).toEqual(['session-secret-a', 'session-secret-c'])
+  } finally { await ctx.fiber.dispose() }
+  const cached = await loadFoldCache(path)
+  expect(cached.get('session-secret-a')?.revision).toBe('rev-a-1')
+  expect(cached.has('session-unseen')).toBe(true)
+  expect(cached.has('session-secret-b')).toBe(false)
+  expect(cached.has('session-secret-c')).toBe(false)
 })

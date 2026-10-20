@@ -48,7 +48,12 @@ import { Config, readConfig } from './config.ts'
 import type { LiveConfig, OpencodeGoConfig } from './config.ts'
 import { GoUsageService } from './usage.ts'
 import { GoModelsService } from './models.ts'
-import { GoAnalyticsService, analyticsPriceBook, type AnalyticsSessionQuery } from './analytics.ts'
+import {
+  GoAnalyticsService,
+  analyticsPriceBook,
+  type AnalyticsPersistence,
+  type AnalyticsSessionQuery,
+} from './analytics.ts'
 import { registerGoRemotes } from './remotes.ts'
 import { accountsOf, accountRefOf } from './accounts.ts'
 import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
@@ -179,8 +184,13 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   })
   const sessionQueryOf = (): AnalyticsSessionQuery | undefined =>
     (ctx as unknown as { get(name: string): unknown }).get('sessionQuery') as AnalyticsSessionQuery | undefined
+  // The durable session index is optional: a Host without it leaves the
+  // analytics service on the in-process cache and re-reads after a restart.
+  const sessionPersistenceOf = (): AnalyticsPersistence | undefined =>
+    (ctx as unknown as { get(name: string): unknown }).get('sessionPersistence') as AnalyticsPersistence | undefined
   ctx.plugin(GoAnalyticsService, {
     query: sessionQueryOf,
+    persistence: sessionPersistenceOf,
     // Review P14 (core half): the price book omits cost for models whose
     // upstream cost block is missing or malformed (ModelDetails.costKnown ===
     // false), so their requests are reported unpriced instead of silently
