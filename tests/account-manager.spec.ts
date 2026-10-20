@@ -12,7 +12,7 @@ function fixture(initial: AccountSettings = { accounts: [] }) {
   const secrets = new Map<string, string>()
   const settings = {
     describe: () => [{ ns: 'opencode-go', revision, value }],
-    mutate: vi.fn(async (_ns: string, ops: readonly { op: 'set'; path: string[]; value: unknown }[], expected?: number) => {
+    mutate: vi.fn(async (_ns: string, ops: readonly { op: 'set'; path: string[]; value: unknown }[], expected?: number): Promise<unknown> => {
       if (expected !== revision) return false
       value = { ...value, ...Object.fromEntries(ops.map(op => [op.path[0], op.value])) }
       revision++
@@ -253,7 +253,7 @@ it('preserves another surface\'s selection and account edits while a key write i
 
 it.each([false, undefined])('never writes a key without confirmed durable intention (%s)', async verdict => {
   const f = fixture()
-  f.settings.mutate.mockResolvedValue(verdict as never)
+  f.settings.mutate.mockResolvedValue(verdict)
   expect(await f.manager.execute(add())).toBe(verdict === false ? 'rejected' : 'unknown')
   expect(f.credentials.set).not.toHaveBeenCalled()
   expect(f.value().accounts).toEqual([])
@@ -288,4 +288,79 @@ it('rejects malformed commands before performing settings or credential work', (
   expect(() => f.manager.execute({ kind: 'replace-key', ref: '../INVALID', key: 'key' })).toThrow('Invalid account reference')
   expect(f.settings.mutate).not.toHaveBeenCalled()
   expect(f.credentials.set).not.toHaveBeenCalled()
+})
+
+it.each(['intention', 'completion'] as const)('rebases an addition after a revision conflict during %s without losing another edit', async phase => {
+  const f = fixture({ accounts: [backup], apiKeyEnv: backup.apiKeyEnv })
+  f.secrets.set(backup.apiKeyEnv, 'backup-secret')
+  await f.manager.recover()
+  const commit = f.settings.mutate.getMockImplementation()!
+  if (phase === 'completion') f.settings.mutate.mockImplementationOnce(commit)
+  f.settings.mutate.mockImplementationOnce(async () => {
+    f.externalEdit({ accounts: [{ ...backup, name: 'Edited elsewhere' }] })
+    throw Object.assign(new Error('Settings revision changed'), { code: 'SETTINGS_CONFLICT' })
+  })
+
+  expect(await f.manager.execute(add())).toBe('applied')
+  expect(f.value().accounts).toEqual([
+    { ...backup, name: 'Edited elsewhere' }, expect.objectContaining({ id: owned.id }),
+  ])
+  expect(f.value().apiKeyEnv).toBe(backup.apiKeyEnv)
+  expect(f.value().accountOperations).toEqual([])
+  expect(f.settings.mutate.mock.calls.map(([, , revision]) => revision)).toEqual([1, 2, 3])
+  expect(f.credentials.set).toHaveBeenCalledTimes(1)
+})
+
+it.each([
+  { error: Object.assign(new Error('Settings revision changed'), { name: 'SettingsConflictError' }), attempts: 3 },
+  { error: new Error('Storage unavailable'), attempts: 1 },
+])('bounds failed intention commits to $attempts attempts', async ({ error, attempts }) => {
+  const f = fixture()
+  await f.manager.recover()
+  f.settings.mutate.mockRejectedValue(error)
+
+  expect(await f.manager.execute(add())).toBe('unknown')
+  expect(f.settings.mutate).toHaveBeenCalledTimes(attempts)
+  expect(f.credentials.set).not.toHaveBeenCalled()
+  expect(f.value().accounts).toEqual([])
+})
+
+it.each([
+  { verdict: false, throws: false, status: 'rejected' },
+  { verdict: undefined, throws: false, status: 'unknown' },
+  { verdict: undefined, throws: true, status: 'unknown' },
+])('keeps a competing manual selection when its own commit returns $status (throws=$throws)', async ({ verdict, throws, status }) => {
+  const primary = { id: 'primary', name: 'Primary', apiKeyEnv: 'PRIMARY_KEY' }
+  const third = { id: 'third', name: 'Third', apiKeyEnv: 'THIRD_KEY' }
+  const f = fixture({ accounts: [primary, backup, third], apiKeyEnv: primary.apiKeyEnv })
+  await f.manager.recover()
+  f.settings.mutate.mockImplementationOnce(async () => {
+    f.externalEdit({ accounts: [third, primary, backup], apiKeyEnv: third.apiKeyEnv })
+    if (throws) throw Object.assign(new Error('Settings revision changed'), { name: 'SettingsConflictError' })
+    return verdict
+  })
+
+  expect(await f.manager.execute({ kind: 'select', ref: backup.apiKeyEnv })).toBe(status)
+  expect(f.settings.mutate).toHaveBeenCalledTimes(1)
+  expect(f.value()).toMatchObject({ accounts: [third, primary, backup], apiKeyEnv: third.apiKeyEnv })
+})
+
+it.each([
+  { verdict: true, landed: false, status: 'applied' },
+  { verdict: undefined, landed: true, status: 'applied' },
+  { verdict: undefined, landed: false, status: 'unknown' },
+  { verdict: false, landed: true, status: 'rejected' },
+])('preserves manual selection acknowledgment rules (verdict=$verdict, landed=$landed)', async ({ verdict, landed, status }) => {
+  const primary = { id: 'primary', name: 'Primary', apiKeyEnv: 'PRIMARY_KEY' }
+  const f = fixture({ accounts: [primary, backup], apiKeyEnv: primary.apiKeyEnv })
+  await f.manager.recover()
+  const commit = f.settings.mutate.getMockImplementation()!
+  f.settings.mutate.mockImplementationOnce(async (...args) => {
+    if (landed) await commit(...args)
+    return verdict
+  })
+
+  expect(await f.manager.execute({ kind: 'select', ref: backup.apiKeyEnv })).toBe(status)
+  expect(f.settings.mutate).toHaveBeenCalledTimes(1)
+  expect(f.value().apiKeyEnv).toBe(landed ? backup.apiKeyEnv : primary.apiKeyEnv)
 })

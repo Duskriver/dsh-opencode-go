@@ -207,14 +207,18 @@ describe('OpencodeGoAdapter stream', () => {
     expect(gateway.bodies[0]).not.toHaveProperty('reasoning_effort')
   })
 
-  it('refuses GenerateOptions.stop as unsupported', async () => {
+  it.each(['stream', 'prepare'] as const)('refuses GenerateOptions.stop as unsupported through %s', async operation => {
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
     const adapter = await adapterFor(gateway.url)
 
-    await expect(drain(adapter.stream(requestOf({ stop: ['now'] }))))
-      .rejects.toMatchObject({ code: 'UNSUPPORTED_OPTION' })
-    // The refusal happens before the catalog is even read.
-    expect(gateway.paths).toEqual([])
+    const request = requestOf({ stop: ['now'] })
+    const stream = operation === 'prepare'
+      ? (await adapter.prepareCall(PROVIDER_ID, request.model)).stream(request)
+      : adapter.stream(request)
+    await expect(drain(stream)).rejects.toMatchObject({ code: 'UNSUPPORTED_OPTION' })
+    // Direct streaming refuses the option before reading the catalog.
+    if (operation === 'stream') expect(gateway.paths).toEqual([])
+    expect(gateway.bodies).toHaveLength(0)
   })
 
   it('reports an abort mid-stream as aborted, not as a server fault', async () => {

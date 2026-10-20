@@ -17,6 +17,6 @@ export declare function accountSettingsRow(settings: AccountSettingsWriter): {
     value: unknown;
 } | undefined;
 export type SettingsWriteResult = 'applied' | 'rejected' | 'unknown';
-/** A modern verdict is authoritative; legacy writes need a committed-state check. */
-export declare function settingsWriteResult(verdict: unknown, committed: () => boolean): SettingsWriteResult;
+/** Legacy writes need observation; callers may require it for acknowledgments too. */
+export declare function settingsWriteResult(verdict: unknown, committed: () => boolean, confirmation?: 'acknowledged' | 'observed'): SettingsWriteResult;
 export declare function isSettingsConflict(error: unknown): boolean;
