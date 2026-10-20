@@ -2,22 +2,21 @@
    the Host's alias variables as fallbacks for a surface mounted without them. */
 .root { position: relative; display: inline-flex; min-width: 0; color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); }
 .trigger { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 16%, transparent));
-  background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; font-size: 11.5px; line-height: 1.6;
-  padding: 2px 6px; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+  background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; font-size: 12.5px; line-height: 1.6;
+  padding: 4px 9px; border-radius: 12px; cursor: pointer; white-space: nowrap; }
 .trigger:hover, .trigger:focus-visible { background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); border-color: color-mix(in srgb, var(--go-accent, currentColor) 42%, var(--go-border, transparent)); }
-.brand { flex: none; color: var(--go-accent, currentColor); font-weight: 650; }
-.reading { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.reading { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stale { color: var(--go-warning, currentColor); }
 .fallback { color: var(--go-warning, currentColor); }
-.accountChip { display: inline-flex; align-items: center; gap: 2px; flex: none; height: 17px; padding: 0 4px; border-radius: 5px;
-  background: color-mix(in srgb, var(--go-accent, currentColor) 14%, transparent); color: var(--go-accent, currentColor); font-size: 9.5px; font-weight: 650; }
-.accountInitial { line-height: 1; }
-.accountCount { font-size: 8.5px; opacity: .85; }
+/* The active account's full name yields to the readings first: it shrinks three
+   times as fast and ends in an ellipsis, while the button's title keeps the
+   complete label for hover and the screen reader. */
+.account { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-/* Narrow composer, tier 1: drop the brand and the stale/fallback wording. The
-   small account chip stays visible so a multi-account setup is still readable. */
+/* Narrow composer, tier 1: drop the stale/fallback wording. The account name keeps
+   its place but truncates, so a multi-account setup stays identifiable. */
 @container (max-width: 460px) {
-  .brand, .stale, .fallback { display: none; }
+  .stale, .fallback { display: none; }
   .reading[data-stale]::after { content: '*'; }
   .trigger[data-fallback]::after { content: ' ↳'; }
 }

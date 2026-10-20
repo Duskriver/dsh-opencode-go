@@ -48,10 +48,9 @@ const usageError = (options: { retainPrevious?: boolean; retryable?: boolean; so
     },
   })
 const trigger = () => screen.getByRole<HTMLButtonElement>('button', { name: new RegExp(en.usageTitle) })
-const percentageLabel = (value: GoUsage) => `Go · ${en.usageRollingShort} ${value.rolling.percent}% · ${en.usageWeekShort} ${value.weekly.percent}%`
-/** The multi-account chip's initial, preceded by the label separator. */
-const accountInitial = (name: string) => Array.from(name.trim())[0]!.toUpperCase()
-const accountSuffix = (name: string) => ` · ${accountInitial(name)}`
+const percentageLabel = (value: GoUsage) => `${en.usageRollingShort} ${value.rolling.percent}% · ${en.usageWeekShort} ${value.weekly.percent}%`
+/** The multi-account suffix carries the active account's full name. */
+const accountSuffix = (name: string) => ` · ${name}`
 const twoAccounts = [
   { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
   { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
@@ -165,10 +164,9 @@ it.each(['deepseek', 'opencode-go'])('shows plugin usage only on its route and s
   await act(async () => { store.set({ ...store.getSnapshot(), current: { provider: 'dsh-opencode-go', model: 'deepseek-v4-flash' } }) })
   expect(trigger().textContent).toContain(percentageLabel(usage))
   // The label stays one string for accessibility and for textContent, but renders as addressable spans
-  // for the narrow-composer tiers: brand, reading (with a stale flag) and two unit words. No stale or
+  // for the narrow-composer tiers: reading (with a stale flag) and two unit words. No stale or
   // account segment while a single account is configured.
   expect(trigger().title).toBe(percentageLabel(usage))
-  expect(trigger().querySelector(`.${css.brand}`)?.textContent).toBe('Go · ')
   expect(trigger().querySelectorAll(`.${css.unit}`)).toHaveLength(2)
   expect(trigger().querySelector(`.${css.reading}`)?.hasAttribute('data-stale')).toBe(false)
   expect(trigger().querySelector(`.${css.stale}`)).toBeNull()
@@ -244,9 +242,7 @@ it.each([
   expect(trigger().textContent).toContain(en.usageUnavailable)
   expect(trigger().textContent).not.toContain('%')
   expect(trigger().textContent).not.toContain(en.usageStaleShort)
-  // The non-usage state keeps the brand span so the <=460px tier can drop it, but carries no reading,
-  // no unit words and no stale segment.
-  expect(trigger().querySelector(`.${css.brand}`)?.textContent).toBe('Go · ')
+  // The non-usage state carries no reading, no unit words and no stale segment.
   expect(trigger().querySelector(`.${css.reading}`)).toBeNull()
   expect(trigger().querySelector(`.${css.unit}`)).toBeNull()
   expect(trigger().querySelector(`.${css.stale}`)).toBeNull()
@@ -314,7 +310,7 @@ it('releases the busy latch when a usage read never settles and resumes timer re
   const read = vi.fn().mockImplementation(() => new Promise<GoUsage>(() => {}))
   await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
   expect(read).toHaveBeenCalledTimes(1)
-  expect(trigger().textContent).toBe('Go · …')
+  expect(trigger().textContent).toBe('…')
   // Just before the sentinel, the minute timer stays latched out behind the hung read.
   await tick(29_000)
   expect(read).toHaveBeenCalledTimes(1)
@@ -322,7 +318,7 @@ it('releases the busy latch when a usage read never settles and resumes timer re
   // minute cycle regains its turn.
   await tick(31_000)
   expect(read).toHaveBeenCalledTimes(2)
-  expect(trigger().textContent).toBe('Go · …')
+  expect(trigger().textContent).toBe('…')
   expect(screen.queryByText(en.usageUnavailable)).toBeNull()
 })
 
@@ -386,15 +382,16 @@ it('marks windows near or at their limit so the bars are not all shown as health
   expect(screen.getByText(en.usageLimited)).toBeTruthy()
 })
 
-it('renders the account segment as a hideable span and keeps the label string unchanged with more than one account', async () => {
+it('renders the active account’s full name as a truncatable span with more than one account', async () => {
   const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
   const read = vi.fn().mockResolvedValue(usage)
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
-  // The badge is extra on-chip information the label string does not repeat: two accounts read '+1'.
-  expect(trigger().textContent).toBe(`${percentageLabel(usage)}${accountSuffix('Backup')}+1`)
+  // The name is part of the spoken label itself, so visible and accessible strings agree.
+  expect(trigger().textContent).toBe(`${percentageLabel(usage)}${accountSuffix('Backup')}`)
   expect(trigger().title).toContain('Backup')
-  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(`${accountInitial('Backup')}+1`)
-  expect(trigger().querySelector(`.${css.accountCount}`)?.textContent).toBe('+1')
+  expect(trigger().querySelectorAll(`.${css.account}`)).toHaveLength(1)
+  expect(trigger().querySelector(`.${css.account}`)?.textContent).toBe('Backup')
+  expect(trigger().textContent).not.toMatch(/\+\d/)
   expect(trigger().querySelectorAll(`.${css.unit}`)).toHaveLength(2)
 })
 
@@ -402,9 +399,9 @@ it('keeps the account segment in the non-usage state with more than one account'
   const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
   const read = vi.fn().mockRejectedValue(usageError())
   await act(async () => { render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
-  expect(trigger().textContent).toBe(`Go · ${en.usageUnavailable}${accountSuffix('Backup')}+1`)
+  expect(trigger().textContent).toBe(`${en.usageUnavailable}${accountSuffix('Backup')}`)
   expect(trigger().title).toContain('Backup')
-  expect(trigger().querySelector(`.${css.accountChip}`)?.textContent).toBe(`${accountInitial('Backup')}+1`)
+  expect(trigger().querySelector(`.${css.account}`)?.textContent).toBe('Backup')
   expect(trigger().querySelector(`.${css.reading}`)).toBeNull()
   expect(trigger().querySelector(`.${css.unit}`)).toBeNull()
 })
@@ -528,46 +525,31 @@ it('keeps the analytics dialog open when a credential revision bump remounts the
   expect(analytics).toHaveBeenCalledTimes(1)
 })
 
-it('keeps the account chip compact and countable with three accounts', async () => {
+it('names the active account in full no matter how many accounts follow it', async () => {
   const host = usageSettings({ usageDisplay: 'always', accounts: threeAccounts, apiKeyEnv: 'ACCOUNT_B' })
   await act(async () => {
     render(<UsagePill settings={host.scope} directory={directory('dsh-opencode-go')}
       readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
   })
-  const chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
-  expect(chip.textContent).toBe('B+2')
-  expect(chip.title).toContain('Backup')
-  expect(trigger().querySelector(`.${css.accountCount}`)?.textContent).toBe('+2')
-  expect(trigger().textContent).toContain('B+2')
+  const account = trigger().querySelector(`.${css.account}`) as HTMLElement
+  expect(account.textContent).toBe('Backup')
+  expect(trigger().textContent).toContain('Backup')
+  expect(trigger().textContent).not.toContain('+2')
 })
 
 const manyAccounts = (count: number) => Array.from({ length: count }, (_, index) => ({
   id: `account-${index + 1}`, name: `Account ${index + 1}`, apiKeyEnv: `ACCOUNT_${index + 1}`,
 }))
 
-it('shows the true extra count up to nine further accounts and collapses beyond that to 9+', async () => {
-  // Ten accounts: nine further ones still read out in full.
-  const ten = usageSettings({ usageDisplay: 'always', accounts: manyAccounts(10), apiKeyEnv: 'ACCOUNT_2' })
-  await act(async () => {
-    render(<UsagePill settings={ten.scope} directory={directory('dsh-opencode-go')}
-      readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
-  })
-  let chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
-  expect(chip.textContent).toBe('A+9')
-  expect(chip.title).toContain('Account 2 · 10')
-  // Eleven accounts: the twelfth would be the first to overflow, so the badge collapses.
-  cleanup()
+it('uses the full name instead of an extra-count badge with many accounts', async () => {
   const eleven = usageSettings({ usageDisplay: 'always', accounts: manyAccounts(11), apiKeyEnv: 'ACCOUNT_2' })
   await act(async () => {
     render(<UsagePill settings={eleven.scope} directory={directory('dsh-opencode-go')}
       readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
   })
-  chip = trigger().querySelector(`.${css.accountChip}`) as HTMLElement
-  expect(chip.textContent).toBe('A9+')
-  // The full count stays reachable through the chip's title/aria-label.
-  expect(chip.title).toContain('Account 2 · 11')
-  expect(chip.getAttribute('aria-label')).toContain('· 11')
-  expect(trigger().textContent).toContain('A9+')
+  expect(trigger().querySelector(`.${css.account}`)?.textContent).toBe('Account 2')
+  expect(trigger().textContent).not.toContain('+9')
+  expect(trigger().textContent).not.toContain('9+')
 })
 
 it('keeps the styling choice out of the popover', async () => {

@@ -2,7 +2,12 @@ node_modules/
 *.tgz
 coverage/
 .env
+# 宣传片渲染产物（逐帧 JPEG 约 150MB，可随时用 video/render.mjs 重生成）
+video/out/
 .verification-root
 mockups/
+# 本地构建产物与上游检查缓存（不入库）
+/out/
+.upstream-watch/
 .archify/
 opencode-protocol-benchmark-*/

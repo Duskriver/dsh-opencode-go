@@ -41,3 +41,14 @@ it('nudges the switch chevron onto the label\u2019s optical centre', () => {
   expect(rule('.switch svg')).toContain('display: block')
   expect(rule('.switch svg')).toContain('transform: translateY(.5px)')
 })
+
+/**
+ * The pill sits beside the Host's own model chip; the reporter asked for the outer
+ * frame and its text to grow with that control without turning the composer row into
+ * a second toolbar. These values are the accepted size (2026-10-19).
+ */
+it('keeps the composer pill at its enlarged size', () => {
+  expect(rule('.trigger')).toContain('font-size: 12.5px')
+  expect(rule('.trigger')).toContain('padding: 4px 9px')
+  expect(rule('.trigger')).toContain('border-radius: 12px')
+})

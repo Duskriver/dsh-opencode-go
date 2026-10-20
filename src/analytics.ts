@@ -7,9 +7,13 @@
  * whose eviction runs once, at the end of a scan (review P2/M2/S1); a live
  * session's fold is reused only inside a short window (review P6), and a
  * session that closes is re-read once before its closed cache entry takes
- * over (review P9/S2). Aggregation consumes run-local fold results, so a
- * mid-scan eviction can never subtract a session from the report it was read
- * for (review P3/C3/S1). Reads run through a bounded, configurable pool
+ * over (review P9/S2). When the Host mounts ctx.sessionPersistence, a closed
+ * session's fold is also keyed by the log's durable revision in an on-disk
+ * cache, so a later process skips every session whose revision did not
+ * change; live folds are never written. Aggregation consumes run-local fold
+ * results, so a mid-scan eviction can never subtract a session from the
+ * report it was read for (review P3/C3/S1). Reads run through a bounded,
+ * configurable pool
  * (review P1/S3), each read carrying its own share of the time budget
  * (review P18/C2), and pricing is fetched in parallel with the scan with a
  * stale-on-error fallback to the last successful table (review P4/S4).
@@ -30,6 +34,13 @@ import {
   type AnalyticsTotals,
 } from './analytics-contract.ts'
 import { foldSession, type AnalyticsSnapshotLike, type FoldedSession, type RequestFact } from './analytics-scan.ts'
+import {
+  ANALYTICS_FOLD_CACHE_MAX_AGE_MS,
+  analyticsFoldCachePath,
+  loadFoldCache,
+  saveFoldCache,
+  type AnalyticsFoldEntry,
+} from './analytics-fold-cache.ts'
 import { isFreeCost, priceUsage, type ModelCostLike, type UsageCounts } from './analytics-pricing.ts'
 import { goMonthlyLimit } from './go-plan.ts'
 
@@ -44,6 +55,22 @@ export interface AnalyticsSessionRecord {
 export interface AnalyticsSessionQuery {
   listSessions(signal?: AbortSignal): Promise<readonly AnalyticsSessionRecord[]>
   readSession(id: string): Promise<AnalyticsSnapshotLike>
+}
+
+/** Structural face of one ctx.sessionPersistence record. */
+export interface AnalyticsPersistenceRecord {
+  readonly header?: { readonly id?: string }
+  readonly revision?: string
+}
+
+/**
+ * The subset of ctx.sessionPersistence this service needs. A durable revision
+ * changes if and only if the session log changes, so it can validate a fold
+ * that was written by an earlier process. The service is optional on the Host:
+ * without it, only the in-process cache survives between runs.
+ */
+export interface AnalyticsPersistence {
+  list(options?: { signal?: AbortSignal }): Promise<readonly AnalyticsPersistenceRecord[]>
 }
 
 /** Structural face of one catalog model. */
@@ -81,6 +108,14 @@ export interface AnalyticsOptions {
    * concurrently.
    */
   maxConcurrency?: number
+  /**
+   * Durable session index, when the Host mounts ctx.sessionPersistence. Its
+   * revisions validate on-disk folds across restarts; without it the scan
+   * behaves exactly as before.
+   */
+  persistence?: () => AnalyticsPersistence | undefined
+  /** Overrides the default analytics fold cache path (tests). */
+  foldCachePath?: string
 }
 
 const DEFAULT_BUDGET_MS = 12_000
@@ -309,6 +344,12 @@ export class GoAnalyticsService extends TypertRemoteService {
   /** The most recent successful price table; stale-on-error fallback (review P4/S4). */
   private lastPriceBook: AnalyticsPriceBook | undefined
   private factTotal = 0
+  /**
+   * The on-disk fold cache, loaded lazily once per service. The promise is
+   * memoized even when loading fails, because a missing or corrupt file is an
+   * empty cache and retrying it on every run would only add latency.
+   */
+  private folds: Promise<Map<string, AnalyticsFoldEntry>> | undefined
 
   constructor(ctx: Context, private readonly options: AnalyticsOptions) {
     super(ctx, 'opencodeGoAnalytics')
@@ -344,6 +385,43 @@ export class GoAnalyticsService extends TypertRemoteService {
     return this.options.now?.() ?? Date.now()
   }
 
+  private foldPath(): string {
+    return this.options.foldCachePath ?? analyticsFoldCachePath()
+  }
+
+  /** Load the persistent folds once; later runs share the same map. */
+  private diskFolds(): Promise<Map<string, AnalyticsFoldEntry>> {
+    this.folds ??= loadFoldCache(this.foldPath())
+    return this.folds
+  }
+
+  /**
+   * Ask the durable index for the current revisions. Any failure — the service
+   * is absent, rejects, or the caller aborts — yields an empty table, which
+   * disables disk reuse for this run without touching the scan.
+   */
+  private async revisionTable(
+    persistence: AnalyticsPersistence | undefined,
+    signal?: AbortSignal,
+  ): Promise<Map<string, string>> {
+    if (persistence === undefined) return new Map()
+    try {
+      const listed = await persistence.list({ signal })
+      const revisions = new Map<string, string>()
+      for (const record of listed) {
+        const id = record.header?.id
+        const revision = record.revision
+        if (typeof id === 'string' && id.length > 0
+          && typeof revision === 'string' && revision.length > 0) {
+          revisions.set(id, revision)
+        }
+      }
+      return revisions
+    } catch {
+      return new Map()
+    }
+  }
+
   private limitOf(name: 'budgetMs' | 'maxSessions' | 'maxEvents' | 'maxFacts' | 'maxConcurrency', fallback: number): number {
     const value = this.options[name]
     return value === undefined ? fallback : value
@@ -356,6 +434,15 @@ export class GoAnalyticsService extends TypertRemoteService {
         reason: 'no-session-query', retryable: false,
       })
     }
+    // The durable revision table and the on-disk folds load alongside the
+    // session listing, so a warm restart adds no round trip before the scan.
+    // Without the persistence service there are no revisions to validate
+    // against, so the disk file is not even read.
+    const persistence = this.options.persistence?.()
+    const revisionsPromise = this.revisionTable(persistence, signal)
+    const foldsPromise = persistence === undefined
+      ? Promise.resolve(new Map<string, AnalyticsFoldEntry>())
+      : this.diskFolds()
     const listStarted = this.now()
     let listed: readonly AnalyticsSessionRecord[]
     try {
@@ -367,6 +454,8 @@ export class GoAnalyticsService extends TypertRemoteService {
       }, { cause: error })
     }
     const listMs = Math.max(0, this.now() - listStarted)
+    const revisions = await revisionsPromise
+    const cachedFolds = await foldsPromise
 
     const zone = resolveTimeZone(query.timeZone)
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -387,6 +476,10 @@ export class GoAnalyticsService extends TypertRemoteService {
     // concurrent run's remember()/trim() cannot subtract a session from this
     // report. Keys are unique, which also folds any duplicate host ids (U10).
     const local = new Map<string, FoldedSession>()
+    // Folds read this run from sessions that have a durable revision; they are
+    // merged into the on-disk cache when the scan ends. Live entries are never
+    // added (P9/S2), and a partial scan never deletes unseen entries.
+    const readFolds = new Map<string, AnalyticsFoldEntry>()
     let scanned = 0
     let events = 0
     let newEvents = 0
@@ -405,6 +498,7 @@ export class GoAnalyticsService extends TypertRemoteService {
       const id = idOf(record)
       if (id === undefined) { scanned++; failed++; return }
       const live = record.live === true
+      const revision = live ? undefined : revisions.get(id)
       const cached = this.cache.get(id)
       // S2/P9 + P6: a closed record must not serve a fold captured while the
       // session was live, and a live session's fold is reused only inside the
@@ -421,6 +515,24 @@ export class GoAnalyticsService extends TypertRemoteService {
         local.set(id, sortedFacts(cached.facts))
         return
       }
+      // Reuse a fold persisted by an earlier process only when all three hold:
+      // the record is not live, an entry exists, and its revision is exactly
+      // the current one. Revision equality proves the log did not change, so
+      // the fold is what a fresh read would produce; anything else re-reads.
+      if (revision !== undefined) {
+        const stored = cachedFolds.get(id)
+        if (stored !== undefined && stored.revision === revision) {
+          scanned++
+          events += stored.events
+          local.set(id, sortedFacts({
+            facts: stored.facts,
+            attempts: stored.attempts,
+            unattributed: stored.unattributed,
+            events: stored.events,
+          }))
+          return
+        }
+      }
       if (this.now() - started > budgetMs) { stopped = 'time'; return }
       if (newEvents > maxEvents) { stopped = 'events'; return }
       // C2: each read carries its own remaining share of the budget, so one
@@ -435,6 +547,19 @@ export class GoAnalyticsService extends TypertRemoteService {
         newEvents += facts.events
         this.remember(id, createdAtOf(record), facts, live, this.now())
         local.set(id, sortedFacts(facts))
+        // Only a closed session with a known revision can be validated by a
+        // later process; live folds are deliberately never persisted.
+        if (revision !== undefined) {
+          readFolds.set(id, {
+            revision,
+            storedAt: this.now(),
+            createdAt: createdAtOf(record),
+            events: facts.events,
+            facts: facts.facts,
+            attempts: facts.attempts,
+            unattributed: facts.unattributed,
+          })
+        }
       } catch (error: unknown) {
         // Aborted in flight: neither scanned nor failed — the session lands in
         // unreadSessions, and the run rethrows once the pool drains.
@@ -471,6 +596,11 @@ export class GoAnalyticsService extends TypertRemoteService {
     // S6/U2/P4: scanMs measures the scan loop only — the pricing wait and the
     // listing are reported separately.
     const scanMs = Math.max(0, this.now() - started)
+    // A cancelled run persists nothing; a partial run merges what it did read
+    // and leaves the rest of the file alone. Failure is silent by contract.
+    if (readFolds.size > 0 && signal?.aborted !== true) {
+      await this.persistFolds(cachedFolds, readFolds)
+    }
 
     let priceBook: AnalyticsPriceBook | undefined
     let pricingUnavailable = false
@@ -658,6 +788,24 @@ export class GoAnalyticsService extends TypertRemoteService {
       },
     }
     return report
+  }
+
+  /**
+   * Merge this run's newly read folds into the persistent cache. Entries the
+   * run never looked at are kept, entries past the age limit are dropped, and
+   * saveFoldCache applies the byte cap by storedAt. The write is best-effort:
+   * a failed save leaves the previous file and never fails the report.
+   */
+  private async persistFolds(
+    cached: Map<string, AnalyticsFoldEntry>,
+    read: ReadonlyMap<string, AnalyticsFoldEntry>,
+  ): Promise<void> {
+    const oldest = this.now() - ANALYTICS_FOLD_CACHE_MAX_AGE_MS
+    for (const [id, entry] of cached) {
+      if (entry.storedAt < oldest) cached.delete(id)
+    }
+    for (const [id, entry] of read) cached.set(id, entry)
+    await saveFoldCache(this.foldPath(), cached)
   }
 
   private remember(id: string, createdAt: number, facts: FoldedSession, live: boolean, storedAt: number): void {

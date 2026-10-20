@@ -115,12 +115,12 @@ function expectCopy(active: 'zh' | 'en'): void {
   expect(screen.getAllByText(copy.newBadge).length).toBeGreaterThan(0)
   expect(screen.getByText(copy.configurationMissing)).toBeTruthy()
   expect(screen.getByRole('button', { name: copy.modelsRefresh })).toBeTruthy()
-  // UsagePill renders this label as segmented spans (brand/reading/unit/stale/account) so the narrow-composer
+  // UsagePill renders this label as segmented spans (reading/unit/stale/account) so the narrow-composer
   // container queries can hide them independently; the label text is therefore no longer a single text node
   // and getByText's own-text match no longer applies. Match the trigger's textContent instead, which still
   // concatenates to exactly this string.
-  expect(screen.getByRole('button', { name: `${copy.usageTitle}: Go · ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }).textContent)
-    .toBe(`Go · ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%`)
+  expect(screen.getByRole('button', { name: `${copy.usageTitle}: ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }).textContent)
+    .toBe(`${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%`)
 }
 
 it.each([
@@ -135,7 +135,7 @@ it.each([
   expectCopy(active)
   expect(host.set).not.toHaveBeenCalled()
   const copy = active === 'zh' ? zh : en
-  fireEvent.click(screen.getByRole('button', { name: `${copy.usageTitle}: Go · ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }))
+  fireEvent.click(screen.getByRole('button', { name: `${copy.usageTitle}: ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }))
   expect(screen.getByRole('dialog', { name: copy.usageTitle })).toBeTruthy()
   expect(screen.getByRole('progressbar', { name: copy.usage_monthly })).toBeTruthy()
   expect(screen.getAllByText(`${copy.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString(active)}`)).toHaveLength(3)
@@ -156,7 +156,7 @@ it('updates mounted plugin surfaces when the Host locale changes while preservin
   fireEvent.click(screen.getByText(zh.advancedLabel))
   const refreshInput = screen.getByLabelText(zh.refreshMinutesLabel)
   fireEvent.change(refreshInput, { target: { value: '30' } })
-  fireEvent.click(screen.getByRole('button', { name: `${zh.usageTitle}: Go · ${zh.usageRollingShort} 0% · ${zh.usageWeekShort} 10%` }))
+  fireEvent.click(screen.getByRole('button', { name: `${zh.usageTitle}: ${zh.usageRollingShort} 0% · ${zh.usageWeekShort} 10%` }))
   expect(snapshot().dirty).toBe(true)
 
   await act(async () => { locale.setLocale('en') })
