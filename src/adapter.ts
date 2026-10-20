@@ -23,42 +23,35 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { normalizeContext } from 'opencode-go-pi-ai'
+import { OpencodeGoRequestExecutor } from './request-executor.ts'
+import type { OpencodeGoRequestExecutorOptions } from './request-executor.ts'
 import type { Api, Model } from './sdk-types.ts'
 import {
   LlmAdapter,
   LlmError,
   ReasoningEffortId,
-  attributionHeaders,
-  contentHasImage,
 } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
-  ImageAttachmentAccess,
   LlmModelInfo,
   LlmResolvedModelInfo,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { toPiContext, toStreamChunks } from './conversion/index.ts'
-import type { PiImageRequestContext } from './conversion/index.ts'
-import { deadline, idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { PROVIDER_ID, DISPLAY_NAME, OpencodeGoCatalog, type CatalogSnapshot, type CatalogDiagnostic } from './catalog.ts'
 import { assertBaseURL, DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from './config.ts'
 import { GoCatalogManager } from './catalog-manager.ts'
 import { withProtocolOverride } from './protocol-policy.ts'
 import { accountFallback, isGatewayKeyRejection } from './account-policy.ts'
 import { ProxyTransport } from './proxy.ts'
-import { GatewayDiagnostics } from './gateway-diagnostics.ts'
 import type { OpencodeGoConfig, OpencodeGoModelLimits } from './config.ts'
 import { isModelEnabled } from './models-contract.ts'
-import { reasoningChoices, reasoningIntent, reasoningRequest } from './reasoning.ts'
+import { reasoningChoices } from './reasoning.ts'
 import { accountsOf, accountRefOf, type GoAccountSwitch } from './accounts.ts'
-import { waitWithSignal } from './request-control.ts'
 import { CallTrace, type GoCallTrace } from './call-trace.ts'
-import { ImagePayloadLease } from './conversion/image-pool.ts'
 import { requestMaxTokens } from './request-budget.ts'
 export type { GoCallTrace } from './call-trace.ts'
+export type { OpencodeGoImageAccess } from './request-executor.ts'
 
 /** Recheck a gateway-rejected key after a bounded window. */
 const REJECTED_KEY_TTL_MS = 5 * 60_000
@@ -75,18 +68,6 @@ function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model
   }
 }
 
-/**
- * The attachment-service bridges one image request reads. Construction-time
- * (context-dependent); the config-dependent policy numbers are merged per
- * request from the current configuration.
- */
-export interface OpencodeGoImageAccess {
-  /** Resolve the optional durable attachment service at request time. */
-  resolveAttachments: () => AttachmentStore | undefined
-  /** Bridge one attachment reference into the current model-tool execution world. */
-  resolveImageAccess: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined
-}
-
 /** One request's serving account, with the identity captured before discovery. */
 export interface GoAccountSettlement {
   seq: number
@@ -97,28 +78,19 @@ export interface GoAccountSettlement {
 }
 
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
-export interface OpencodeGoAdapterOptions {
+export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptions {
   /** Shared with Host usage reads for this plugin mount. */
   transport?: ProxyTransport
   /** Mount-owned discovery; direct construction supplies its own manager. */
   catalog?: (config: OpencodeGoConfig) => OpencodeGoCatalog
-  /** Optional directory for bounded HTTP error evidence; request contents are omitted. */
-  debugDirectory?: () => string | undefined
   /**
    * The current configuration, re-read at every operation: a settings write
    * reaches the next request without a restart, and one operation never mixes
    * two configuration generations.
    */
   config: () => OpencodeGoConfig
-  /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
-  resolveApiKey: (config: OpencodeGoConfig, signal?: AbortSignal) => Promise<string | undefined>
   /** Observe one bounded, content-free summary for every dispatched call. */
   onCallTrace?: (trace: GoCallTrace) => void
-  /**
-   * Image input machinery; absent refuses image content, which is the posture
-   * for direct construction without a durable attachment service behind it.
-   */
-  imageAccess?: OpencodeGoImageAccess
   /** Observe the catalog falling back to the curated table. */
   onFallback?: (detail: { url: string; error: unknown; kept: number }) => void
   /** Observe live ids the curated table cannot route. */
@@ -126,8 +98,6 @@ export interface OpencodeGoAdapterOptions {
   onCatalogWarning?: (warning: string) => void
   /** Content-free timings for cache restoration and each shared online refresh. */
   onCatalogDiagnostic?: (event: CatalogDiagnostic) => void
-  /** Observe assistant history degrading to provider-neutral conversion. */
-  onReplayDegrade?: (reason: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
   /** Host account-state version for actual requests, captured before asynchronous model discovery. */
@@ -179,6 +149,7 @@ function opencodeSessionValue(sessionId: string | undefined): string {
 export class OpencodeGoAdapter extends LlmAdapter {
   private readonly resolveCatalog: (config: OpencodeGoConfig) => OpencodeGoCatalog
   private readonly transport: ProxyTransport
+  private readonly requestExecutor: OpencodeGoRequestExecutor
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
   private readonly rejectedKeys = new Map<string, Map<string, number>>()
@@ -191,6 +162,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
     this.transport = options.transport ?? new ProxyTransport()
+    this.requestExecutor = new OpencodeGoRequestExecutor(options, this.transport)
     const catalogs = options.catalog ? undefined : new GoCatalogManager({
       transport: this.transport, onFallback: options.onFallback, onOmitted: options.onOmitted,
       onRefresh: options.onCatalogRefresh, onWarning: options.onCatalogWarning, onDiagnostic: options.onCatalogDiagnostic,
@@ -292,20 +264,6 @@ export class OpencodeGoAdapter extends LlmAdapter {
       ...defaultMaxTokens === undefined ? {} : { defaultMaxTokens },
       ...reasoning,
     }
-  }
-
-  /** Validate an explicit effort against the model's own levels, without clamping. */
-  private resolveReasoningLevel(
-    model: Model<Api>,
-    effort: GenerateOptions['reasoningEffort'],
-  ): string | undefined {
-    if (effort === undefined) return undefined
-    const supported = reasoningChoices(model).map(choice => choice.id)
-    if (supported.some(level => level === effort)) return effort
-    throw new LlmError(
-      `opencode-go model "${model.id}" does not support reasoning effort "${effort}"`,
-      'UNSUPPORTED_REASONING_EFFORT',
-    )
   }
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -415,8 +373,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
         this.options.onAccountSwitch?.(notice, snapshot.config, seq)
       }
       try {
-        for await (const chunk of this.streamAttempt(options, {
-          ...snapshot, config: { ...snapshot.config, apiKeyEnv: refs[attempt]! },
+        for await (const chunk of this.requestExecutor.stream(options, {
+          config: { ...snapshot.config, apiKeyEnv: refs[attempt]! },
+          model: snapshot.model, provider: snapshot.catalog.provider, sessionId: snapshot.sessionId,
         }, trace)) {
           if (chunk.type === 'usage') { usage = chunk; continue }
           if (chunk.type === 'finish') {
@@ -452,145 +411,5 @@ export class OpencodeGoAdapter extends LlmAdapter {
   forgetRejectedKey(ref: string): void {
     this.credentialVersions.set(ref, (this.credentialVersions.get(ref) ?? 0) + 1)
     this.rejectedKeys.delete(ref)
-  }
-
-  /** One account, one SDK attempt; host recovery still owns failures after output. */
-  private async *streamAttempt(options: GenerateOptions, snapshot: OpencodeGoDispatchSnapshot, trace: CallTrace): AsyncIterable<StreamChunk> {
-    if (options.stop !== undefined) {
-      throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
-    }
-    const { config, catalog, model, sessionId } = snapshot
-    const maxTokens = requestMaxTokens(model, config.modelLimits, options.maxTokens)
-    const reasoning = this.resolveReasoningLevel(model, options.reasoningEffort)
-
-    const consumer = new AbortController()
-    const upstream = options.signal === undefined
-      ? consumer.signal
-      : AbortSignal.any([options.signal, consumer.signal])
-    using watchdog = idleWatchdog(upstream, config.streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
-    using preparation = deadline(watchdog.signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
-    using payloadLease = new ImagePayloadLease(trace.imagePool)
-
-    try {
-      const apiKey = await trace.measure('credential', () => waitWithSignal(
-        () => this.options.resolveApiKey(config, preparation.signal), preparation.signal,
-      ))
-      if (!apiKey) throw new LlmError('llm-opencode-go: no credential resolved for the route', 'MISSING_CREDENTIAL')
-      // Image gate before any provider I/O: only catalog models declaring the
-      // image modality accept one, and converting an attachment requires the
-      // durable attachment service this adapter was constructed with. The gate
-      // rides inside the try so a concurrent caller abort classifies a
-      // conversion failure as aborted, like every other conversion fault.
-      const containsImage = options.messages.some(message => contentHasImage(message.content))
-      if (containsImage && !model.input.includes('image')) {
-        throw new LlmError(`opencode-go model "${model.id}" does not support image input`, 'UNSUPPORTED_CONTENT')
-      }
-      let imageRequest: PiImageRequestContext | undefined
-      if (containsImage) {
-        const access = this.options.imageAccess
-        const store = access?.resolveAttachments()
-        if (access === undefined || store === undefined) {
-          throw new LlmError('llm-opencode-go image input requires the durable attachment service', 'UNSUPPORTED_CONTENT')
-        }
-        imageRequest = {
-          attachments: store,
-          resolveImageAccess: ref => access.resolveImageAccess(store, ref),
-          maxImages: config.maxImages ?? undefined,
-          maxRequestImageBytes: config.maxRequestImageBytes,
-          requestImagePolicy: {
-            maxPixels: config.requestImagePixelBudget,
-            maxBytes: config.requestImageMaxBytes,
-          },
-          payloadLease,
-          onImagePool: trace.imagePool,
-        }
-      }
-      // The sync overload converts every message from the session log; the
-      // images overload additionally converts attachment references through
-      // the mounted attachment service.
-      const context = await trace.measure('images', () => waitWithSignal(() => imageRequest === undefined
-        ? Promise.resolve(toPiContext(options, undefined, this.options.onReplayDegrade))
-        : toPiContext({ ...options, signal: preparation.signal }, imageRequest, this.options.onReplayDegrade), preparation.signal))
-      preparation[Symbol.dispose]()
-      watchdog.signal.throwIfAborted()
-      // Direct providers accept a transcript, unlike Models which normalizes
-      // Context itself. Preserve prompts and tool declarations on every host.
-      const diagnostics = new GatewayDiagnostics({
-        provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
-        fetch: this.transport.forProxy(config.proxyURL),
-        directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
-        callId: trace.callId, attempt: trace.attempts,
-        contextWindow: model.contextWindow,
-        onResponse: (status, requestId) => trace.response(status, requestId),
-      })
-      const events = catalog.provider.streamSimple(model, normalizeContext(context), {
-        apiKey,
-        fetch: diagnostics.fetch,
-        ...reasoningRequest(reasoningIntent(model, reasoning)),
-        ...options.temperature === undefined ? {} : { temperature: options.temperature },
-        ...maxTokens === undefined ? {} : { maxTokens },
-        sessionId,
-        signal: watchdog.signal,
-        // Harness-owned request identity: the gateway refuses requests without
-        // `x-opencode-session` and profiles clients by User-Agent, and
-        // attribution merges last in pi-ai's client.
-        headers: {
-          'x-opencode-session': sessionId,
-          ...attributionHeaders(),
-        },
-        // The agent recovery layer owns visible attempts; one adapter call is
-        // one SDK attempt.
-        maxRetries: 0,
-      })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, options.provider, maxTokens)[Symbol.asyncIterator]()
-      let exhausted = false
-      try {
-        while (true) {
-          const result = await trace.measure('stream', () => waitWithSignal(() => watchdog.next(iterator), watchdog.signal))
-          if (timeoutOf(watchdog.signal, 'LLM_REQUEST_TIMEOUT')) throw new LlmError('opencode-go whole request timeout', 'TIMEOUT')
-          if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
-            throw new LlmError('opencode-go stream idle timeout', 'TIMEOUT')
-          }
-          if (result.done) {
-            exhausted = true
-            return
-          }
-          const chunk = result.value
-          if ((chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && chunk.text.length > 0
-            || chunk.type === 'tool-call-delta' && chunk.argumentsDelta.length > 0) trace.firstOutput()
-          if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-            const failure = chunk.reason.failure
-            const message = await waitWithSignal(() => diagnostics.failureMessage(failure.message), watchdog.signal)
-            const code = await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal)
-            yield { ...chunk, reason: options.signal?.aborted
-              ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }
-              : { ...chunk.reason, failure: { ...chunk.reason.failure, message, code } } }
-          } else yield chunk
-        }
-      } finally {
-        if (!exhausted) {
-          consumer.abort('opencode-go stream consumer stopped')
-          try {
-            void iterator.return(undefined).catch(() => {})
-          } catch (_abortedSdkTeardown) {
-            // The stable signal already owns SDK termination; return-time abort cannot add an outcome.
-          }
-        }
-      }
-    } catch (error: unknown) {
-      if (timeoutOf(preparation.signal, 'LLM_PREPARATION_TIMEOUT')) {
-        throw new LlmError('opencode-go credential/image preparation timeout', 'TIMEOUT', { cause: error })
-      }
-      if (timeoutOf(watchdog.signal, 'LLM_REQUEST_TIMEOUT')) {
-        throw new LlmError('opencode-go whole request timeout', 'TIMEOUT', { cause: error })
-      }
-      if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
-        throw new LlmError('opencode-go stream idle timeout', 'TIMEOUT', { cause: error })
-      }
-      if (options.signal?.aborted) {
-        throw new LlmError('opencode-go request aborted by caller', 'ABORTED', { cause: error })
-      }
-      throw error
-    }
   }
 }

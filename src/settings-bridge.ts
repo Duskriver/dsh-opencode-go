@@ -13,9 +13,9 @@ export function accountSettingsRow(settings: AccountSettingsWriter) {
 
 export type SettingsWriteResult = 'applied' | 'rejected' | 'unknown'
 
-/** A modern verdict is authoritative; legacy writes need a committed-state check. */
-export function settingsWriteResult(verdict: unknown, committed: () => boolean): SettingsWriteResult {
-  if (verdict === true) return 'applied'
+/** Legacy writes need observation; callers may require it for acknowledgments too. */
+export function settingsWriteResult(verdict: unknown, committed: () => boolean, confirmation: 'acknowledged' | 'observed' = 'acknowledged'): SettingsWriteResult {
+  if (verdict === true && confirmation === 'acknowledged') return 'applied'
   if (verdict === false) return 'rejected'
   return committed() ? 'applied' : 'unknown'
 }

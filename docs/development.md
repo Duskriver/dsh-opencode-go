@@ -45,7 +45,7 @@ All host JavaScript imports use ordinary Node resolution. The fixtures do not re
 
 ## Architecture and ownership
 
-`src/index.ts` composes the host services. `src/config-contract.ts` is the browser-safe configuration vocabulary; both faces import it instead of maintaining separate interfaces. Version-dependent settings attachment lives in `src/host-settings.ts` and `src/client/host-compat.ts`. `src/settings-bridge.ts` owns section/profile selection and the applied/rejected/unknown write verdict: modern acknowledgments are authoritative, while older hosts require a committed-state check.
+`src/index.ts` composes the host services. `src/config-contract.ts` is the browser-safe configuration vocabulary; both faces import it instead of maintaining separate interfaces. Version-dependent settings attachment lives in `src/host-settings.ts` and `src/client/host-compat.ts`. `src/settings-bridge.ts` owns section/profile selection and the applied/rejected/unknown write verdict: modern acknowledgments are authoritative by default, while older hosts require a committed-state check. Callers can also require observation after a modern acknowledgment; explicit refusal always remains rejected.
 
 `GoCatalogManager` owns one configuration-keyed catalog per mount. Inference, model discovery and the settings model service share that catalog directly. The inference adapter retains its standalone catalog fallback for public callers. A superseded catalog cannot send a late route-refresh notification.
 
@@ -59,7 +59,11 @@ Model information reads capture the plugin configuration without querying accoun
 
 The browser sends typed `opencodeGoAccounts.execute` commands for account additions, removals, selection, naming, ordering, automatic switching and key replacement, including staged key drafts. `GoAccountManager` serializes these commands with recovery; both use `accountOperationPatch` to finish the same durable intention. A client-generated addition ID makes RPC retries idempotent. The UI owns drafts, busy state and quota display; the host owns credentials and revision-guarded metadata writes. Add account operations to the shared command contract and host manager, rather than creating another browser write path.
 
-`src/account-policy.ts` decides whether a failed request may try another account and whether a gateway key should be remembered as rejected. Error classification stays in `src/gateway-error.ts`; stream lifecycle and dispatch stay in `src/adapter.ts`. Both terminal stream errors and thrown errors use the same policy, which blocks fallback after any output, positive token usage or cancellation.
+`src/account-commit.ts` shares revision-guarded writes, atomic ordering/selection patches, exact committed-revision checks and bounded conflict retry rules between account commands, recovery and automatic adoption. The callers retain their existing freshness checks and retry scope: foreground intention creation and addition completion allow up to three attempts on thrown conflicts; ordinary manual selection and automatic adoption do not retry. Automatic adoption restores its notice only after observing the same settings row at the next revision with the expected configuration, connection, credentials and request sequence, even when the host acknowledges success.
+
+`src/adapter.ts` owns model resolution, captured call configuration, session identity, whole-call deadlines and account dispatch. `src/request-executor.ts` executes one captured account attempt: credential resolution, image preparation, SDK streaming, diagnostics, idle/preparation deadlines and stream cleanup. It borrows the adapter's transport and returns chunks or errors without selecting accounts or owning transport disposal.
+
+`src/account-policy.ts` decides whether a failed request may try another account and whether a gateway key should be remembered as rejected. Error classification stays in `src/gateway-error.ts`. Both terminal stream errors and thrown errors use the same policy, which blocks fallback after any output, positive token usage or cancellation.
 
 ## Session routing and upstream follow-up
 

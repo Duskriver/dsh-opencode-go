@@ -21,26 +21,16 @@
  *
  * @module dsh-llm-opencode-go/adapter
  */
+import type { OpencodeGoRequestExecutorOptions } from './request-executor.ts';
 import { LlmAdapter } from '@deepseek-ai/dsh-llm';
-import type { GenerateOptions, ImageAttachmentAccess, LlmModelInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
-import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
+import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { OpencodeGoCatalog, type CatalogDiagnostic } from './catalog.ts';
 import { ProxyTransport } from './proxy.ts';
 import type { OpencodeGoConfig } from './config.ts';
 import { type GoAccountSwitch } from './accounts.ts';
 import { type GoCallTrace } from './call-trace.ts';
 export type { GoCallTrace } from './call-trace.ts';
-/**
- * The attachment-service bridges one image request reads. Construction-time
- * (context-dependent); the config-dependent policy numbers are merged per
- * request from the current configuration.
- */
-export interface OpencodeGoImageAccess {
-    /** Resolve the optional durable attachment service at request time. */
-    resolveAttachments: () => AttachmentStore | undefined;
-    /** Bridge one attachment reference into the current model-tool execution world. */
-    resolveImageAccess: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined;
-}
+export type { OpencodeGoImageAccess } from './request-executor.ts';
 /** One request's serving account, with the identity captured before discovery. */
 export interface GoAccountSettlement {
     seq: number;
@@ -50,28 +40,19 @@ export interface GoAccountSettlement {
     notice?: GoAccountSwitch;
 }
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
-export interface OpencodeGoAdapterOptions {
+export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptions {
     /** Shared with Host usage reads for this plugin mount. */
     transport?: ProxyTransport;
     /** Mount-owned discovery; direct construction supplies its own manager. */
     catalog?: (config: OpencodeGoConfig) => OpencodeGoCatalog;
-    /** Optional directory for bounded HTTP error evidence; request contents are omitted. */
-    debugDirectory?: () => string | undefined;
     /**
      * The current configuration, re-read at every operation: a settings write
      * reaches the next request without a restart, and one operation never mixes
      * two configuration generations.
      */
     config: () => OpencodeGoConfig;
-    /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
-    resolveApiKey: (config: OpencodeGoConfig, signal?: AbortSignal) => Promise<string | undefined>;
     /** Observe one bounded, content-free summary for every dispatched call. */
     onCallTrace?: (trace: GoCallTrace) => void;
-    /**
-     * Image input machinery; absent refuses image content, which is the posture
-     * for direct construction without a durable attachment service behind it.
-     */
-    imageAccess?: OpencodeGoImageAccess;
     /** Observe the catalog falling back to the curated table. */
     onFallback?: (detail: {
         url: string;
@@ -83,8 +64,6 @@ export interface OpencodeGoAdapterOptions {
     onCatalogWarning?: (warning: string) => void;
     /** Content-free timings for cache restoration and each shared online refresh. */
     onCatalogDiagnostic?: (event: CatalogDiagnostic) => void;
-    /** Observe assistant history degrading to provider-neutral conversion. */
-    onReplayDegrade?: (reason: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
     /** Host account-state version for actual requests, captured before asynchronous model discovery. */
@@ -103,6 +82,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly options;
     private readonly resolveCatalog;
     private readonly transport;
+    private readonly requestExecutor;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
     /** Reference updates invalidate rejections from attempts using an older key. */
@@ -134,8 +114,6 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     }>;
     /** Report the same default allowance used by dispatch so the host can budget compaction. */
     private modelInfo;
-    /** Validate an explicit effort against the model's own levels, without clamping. */
-    private resolveReasoningLevel;
     stream(options: GenerateOptions): AsyncIterable<StreamChunk>;
     private streamWithSnapshot;
     private dispatch;
@@ -143,6 +121,4 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private rememberRejectedKey;
     /** A stored change to a reference outranks the gateway's last rejection of it. */
     forgetRejectedKey(ref: string): void;
-    /** One account, one SDK attempt; host recovery still owns failures after output. */
-    private streamAttempt;
 }

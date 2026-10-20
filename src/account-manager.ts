@@ -1,7 +1,8 @@
 import { credentialRef, type CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import { ACCOUNT_REF_PREFIX, accountRefOf, accountsOf, MAX_ACCOUNTS, moveAccountFirst, type AccountSettings } from './accounts.ts'
 import { accountOperationPatch, assertAccountOperations, ownsAccountCredential, visibleAccountsOf, type GoAccountOperation } from './account-operations.ts'
-import { accountSettingsRow, isSettingsConflict, settingsWriteResult, type AccountSettingsWriter, type SettingsWriteResult } from './settings-bridge.ts'
+import { accountSettingsRow, settingsWriteResult, type AccountSettingsWriter, type SettingsWriteResult } from './settings-bridge.ts'
+import { ACCOUNT_COMMIT_ATTEMPTS, accountSelectionPatch, canRetryAccountCommit, commitAccountSettings } from './account-commit.ts'
 import { parseAccountCommand, type AccountCommand } from './accounts-contract.ts'
 import { randomUUID } from 'node:crypto'
 import { deadline } from '@deepseek-ai/dsh-timeout'
@@ -88,10 +89,8 @@ export class GoAccountManager {
     if (accounts.length === value.accounts.length
       && accounts.every((account, index) => account.apiKeyEnv === value.accounts![index]!.apiKeyEnv)) return
     using timeout = deadline(connection.cancel.signal, ACCOUNT_RECOVERY_TIMEOUT_MS, 'OPENCODE_ACCOUNT_RECOVERY_TIMEOUT')
-    await waitWithSignal(() => connection.settings.mutate(row.ns, [
-      { op: 'set', path: ['accounts'], value: accounts },
-      { op: 'set', path: ['apiKeyEnv'], value: accountRefOf(value) },
-    ], row.revision), timeout.signal)
+    await waitWithSignal(() => commitAccountSettings(connection.settings, row,
+      accountSelectionPatch(accounts, accountRefOf(value))), timeout.signal)
   }
 
   private async complete(connection: NonNullable<GoAccountManager['connection']>, operation: GoAccountOperation, keyConfirmed = false, signal?: AbortSignal): Promise<SettingsWriteResult> {
@@ -143,8 +142,8 @@ export class GoAccountManager {
     if (!state) return 'unknown'
     timeout.signal.throwIfAborted()
     const target = state
-    const result = await wait(() => connection.settings.mutate(target.row.ns,
-      accountOperationPatch(target.value, operation, dropLegacyRef), target.row.revision))
+    const result = await wait(() => commitAccountSettings(connection.settings, target.row,
+      accountOperationPatch(target.value, operation, dropLegacyRef)))
     timeout.signal.throwIfAborted()
     if (this.connection !== connection) throw new Error('Account connection changed')
     const status = settingsWriteResult(result, () => !get())
@@ -177,7 +176,7 @@ export class GoAccountManager {
       const write = async (ops: Parameters<AccountSettingsWriter['mutate']>[1], committed: (value: AccountSettings) => boolean, target = read()) => {
         const { row } = target
         read()
-        const verdict = await wait(() => connection.settings.mutate(row.ns, ops, row.revision))
+        const verdict = await wait(() => commitAccountSettings(connection.settings, row, ops))
         read()
         return settingsWriteResult(verdict, () => committed(read().value))
       }
@@ -186,7 +185,7 @@ export class GoAccountManager {
         catch { read(); return undefined }
       }
       const begin = async (operation: GoAccountOperation): Promise<SettingsWriteResult> => {
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < ACCOUNT_COMMIT_ATTEMPTS; attempt++) {
           const target = read()
           const { value } = target
           const operations = value.accountOperations ?? []
@@ -199,7 +198,7 @@ export class GoAccountManager {
             const status = await write([{ op: 'set', path: ['accountOperations'], value: next }],
               value => value.accountOperations?.some(entry => entry.id === operation.id) === true, target)
             return status
-          } catch (error) { if (attempt === 2 || !isSettingsConflict(error)) throw error }
+          } catch (error) { if (!canRetryAccountCommit(error, attempt)) throw error }
         }
         return 'unknown'
       }
@@ -234,9 +233,9 @@ export class GoAccountManager {
           }))
           if (!stored) return 'rejected'
           read()
-          for (let attempt = 0; attempt < 3; attempt++) {
+          for (let attempt = 0; attempt < ACCOUNT_COMMIT_ATTEMPTS; attempt++) {
             try { return await this.complete(connection, operation, true, timeout.signal) }
-            catch (error) { if (attempt === 2 || !isSettingsConflict(error)) throw error }
+            catch (error) { if (!canRetryAccountCommit(error, attempt)) throw error }
           }
           return 'unknown'
         }
@@ -284,10 +283,8 @@ export class GoAccountManager {
         const accounts = [...accountsOf(value)]
         if (command.kind === 'select') {
           if (!accounts.some(account => account.apiKeyEnv === command.ref)) return 'rejected'
-          return await write([
-            { op: 'set', path: ['accounts'], value: moveAccountFirst(accounts, command.ref) },
-            { op: 'set', path: ['apiKeyEnv'], value: command.ref },
-          ], value => value.accounts?.[0]?.apiKeyEnv === command.ref && accountRefOf(value) === command.ref, target)
+          return await write(accountSelectionPatch(moveAccountFirst(accounts, command.ref), command.ref),
+            value => value.accounts?.[0]?.apiKeyEnv === command.ref && accountRefOf(value) === command.ref, target)
         }
         if (command.kind === 'rename') {
           if (!accounts.some(account => account.apiKeyEnv === command.ref)) return 'rejected'
@@ -298,7 +295,7 @@ export class GoAccountManager {
         if (from < 0 || command.toIndex >= accounts.length || from === command.toIndex) return 'rejected'
         const [moved] = accounts.splice(from, 1)
         accounts.splice(command.toIndex, 0, moved!)
-        return await write([{ op: 'set', path: ['accounts'], value: accounts }, { op: 'set', path: ['apiKeyEnv'], value: accounts[0]!.apiKeyEnv }],
+        return await write(accountSelectionPatch(accounts, accounts[0]!.apiKeyEnv),
           value => value.accounts?.[command.toIndex]?.apiKeyEnv === command.ref && accountRefOf(value) === accounts[0]!.apiKeyEnv, target)
       } catch { return 'unknown' }
     })

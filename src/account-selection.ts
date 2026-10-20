@@ -1,8 +1,9 @@
 import type { GoAccountSettlement } from './adapter.ts'
 import { accountRefOf, accountsOf, moveAccountFirst, type GoAccountSwitch } from './accounts.ts'
+import { accountCommitMatches, accountSelectionPatch, commitAccountSettings } from './account-commit.ts'
 import type { OpencodeGoConfig } from './config.ts'
 
-import { accountSettingsRow, type AccountSettingsWriter } from './settings-bridge.ts'
+import { accountSettingsRow, settingsWriteResult, type AccountSettingsWriter } from './settings-bridge.ts'
 export type { AccountSettingsWriter } from './settings-bridge.ts'
 
 function identity(config: OpencodeGoConfig): string {
@@ -93,18 +94,15 @@ export class GoAccountSelection {
         || selected !== accountRefOf(event.config)) return
       const accounts = [...moveAccountFirst(accountsOf(event.config), event.ref)]
       const expected = identity({ ...event.config, accounts, apiKeyEnv: event.ref })
-      const result = await settings.mutate(row.ns, [
-        { op: 'set', path: ['accounts'], value: accounts },
-        { op: 'set', path: ['apiKeyEnv'], value: event.ref },
-      ], row.revision)
+      const result = await commitAccountSettings(settings, row, accountSelectionPatch(accounts, event.ref))
       // A committed selection invalidates in-flight requests like any settings
       // edit. Restore its notice only after confirming this exact write. No
       // pending reference can leak from a refused write into a later user edit.
       this.capture()
       const committed = this.row()
-      if (result !== false && this.connection === connection && this.credentials === credentials
-        && event.seq === this.latestSeq && committed?.ns === row.ns && committed.revision === row.revision + 1
-        && identity(this.config()) === expected) this.notice = event.notice
+      if (settingsWriteResult(result, () => this.connection === connection && this.credentials === credentials
+        && event.seq === this.latestSeq && accountCommitMatches(row, committed)
+        && identity(this.config()) === expected, 'observed') === 'applied') this.notice = event.notice
     } catch (error: unknown) {
       this.logger.warn(`llm-opencode-go: could not make "${event.ref}" the current account (${String(error)})`)
     }
