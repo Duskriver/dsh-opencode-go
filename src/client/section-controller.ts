@@ -132,7 +132,7 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   /** Read the gateway's model listing, now or again after a failure. */
   loadModels: () => void
   /** Read one aggregate usage report over local session history. */
-  readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport>
+  readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   /** Read one account's official quota; the dashboard shows it beside the estimate. */
   readQuota: (ref: string) => Promise<GoUsage>
   /**
@@ -179,7 +179,7 @@ export class OpencodeGoSectionController {
       const result = await ctx.remote.opencodeGoAccounts.execute(command)
       return result.ok ? result.value : 'unknown'
     },
-    private readonly readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport> = async () => {
+    private readonly readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport> = async () => {
       throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
         code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
       })
@@ -456,7 +456,7 @@ export class OpencodeGoSectionController {
     this.face ??= {
       hooks: { opencodeGo: this.store },
       loadModels: () => { this.loadModels() },
-      readAnalytics: (query) => this.readAnalytics(query),
+      readAnalytics: (query, signal) => this.readAnalytics(query, signal),
       readQuota: (ref) => this.readUsage(ref),
       setEnabled: (next) => { void this.setEnabled(next) },
       setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },

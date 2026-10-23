@@ -1,15 +1,21 @@
+// @vitest-environment jsdom
+
 /**
  * The browser-half entry: locale registration, the bound settings scope, the
  * credential invalidation subscription, and the `settings.section`
  * registration for the OpenCode Go page.
  */
 
+import { createElement } from 'react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { stubSettingsScope } from './support/client.ts'
+import { bindSnapshotSelector, stubSettingsScope } from './support/client.ts'
 import { apply } from '../src/client/index.ts'
 import { OpencodeGoSection } from '../src/client/Section.tsx'
 import { en } from '../src/client/locales.ts'
 import { accountCommands } from '../src/client/host-compat.ts'
+import type { OpencodeGoSectionFace } from '../src/client/section-controller.ts'
+import type { AnalyticsQuery } from '../src/analytics-contract.ts'
 
 interface ClientHarness {
   ctx: Record<string, unknown>
@@ -19,11 +25,18 @@ interface ClientHarness {
   credentialListeners: Array<(ref: string) => void>
   emitCredential: (ref: string) => void
   runInjectCallback: () => unknown
+  settings: ReturnType<typeof stubSettingsScope>
+  analyticsRead: ReturnType<typeof vi.fn>
+  dispose: () => Promise<void>
 }
 
 /** A client root context scripted down to the services the entry reaches. */
-function clientHarness(): ClientHarness {
-  const scope = stubSettingsScope().scope
+function clientHarness(settingsService: 'settingsScope' | 'configForms' = 'settingsScope'): ClientHarness {
+  const settings = stubSettingsScope()
+  const { scope } = settings
+  const analyticsRead = vi.fn()
+  const effects: unknown[] = []
+  const configForms = { get: () => scope }
   const slotsInject = vi.fn()
   const slotsRegister = vi.fn(() => () => {})
   const localeRegister = vi.fn(() => () => {})
@@ -31,10 +44,11 @@ function clientHarness(): ClientHarness {
   let injectCallback: (() => unknown) | undefined
   const ctx = {
     inject: vi.fn((services: string[], callback: (child: unknown) => void) => {
-      if (services.includes('settingsScope')) callback(ctx)
+      if (services.includes(settingsService) || services.includes('remote.opencodeGoAnalytics')) callback(ctx)
     }),
+    get: (service: string) => service === 'configForms' ? configForms : undefined,
     effect: (fn: () => unknown) => {
-      fn()
+      effects.push(fn())
       return () => {}
     },
     locale: {
@@ -53,6 +67,7 @@ function clientHarness(): ClientHarness {
     remote: {
       $mount: vi.fn(async () => () => {}),
       opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
+      opencodeGoAnalytics: { read: analyticsRead },
       credentials: {
         describe: vi.fn(() => Promise.resolve({ ok: true, value: {} })),
         set: vi.fn(() => Promise.resolve({ ok: true, value: undefined })),
@@ -79,6 +94,14 @@ function clientHarness(): ClientHarness {
     slotsRegister,
     localeRegister,
     credentialListeners,
+    settings,
+    analyticsRead,
+    dispose: async () => {
+      for (const effect of effects.splice(0).reverse()) {
+        const dispose = await effect
+        if (typeof dispose === 'function') dispose()
+      }
+    },
     emitCredential: (ref) => {
       for (const listener of credentialListeners) listener(ref)
     },
@@ -90,6 +113,51 @@ function clientHarness(): ClientHarness {
 }
 
 describe('client entry', () => {
+  it.each(['settingsScope', 'configForms'] as const)(
+    'cancels superseded and closed settings analytics requests through %s', async settingsService => {
+      const harness = clientHarness(settingsService)
+      harness.settings.publish({ status: 'ready', writable: true, value: {}, base: {}, user: {} })
+      const signals: (AbortSignal | undefined)[] = []
+      let cancelled = 0
+      harness.analyticsRead.mockImplementation((_query: AnalyticsQuery, signal?: AbortSignal) => {
+        signals.push(signal)
+        return new Promise(resolve => {
+          signal?.addEventListener('abort', () => {
+            cancelled++
+            resolve({ ok: false, error: Object.assign(new Error('cancelled'), { code: 'gateway/cancelled' }) })
+          }, { once: true })
+        })
+      })
+      apply(harness.ctx as never)
+      harness.runInjectCallback()
+      const registration = harness.slotsRegister.mock.calls[0]?.[0] as {
+        inject: () => OpencodeGoSectionFace & { t: (key: keyof typeof en) => string }
+      }
+      const injected = registration.inject()
+      const view = render(createElement(OpencodeGoSection, {
+        ...injected, useOpencodeGo: bindSnapshotSelector(injected.hooks.opencodeGo),
+      }))
+      try {
+        fireEvent.click(screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) }))
+        fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard }))
+        await waitFor(() => expect(signals).toHaveLength(1))
+        expect(signals[0]?.aborted).toBe(false)
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d })) })
+        await waitFor(() => expect(signals).toHaveLength(2))
+        expect(signals[0]?.aborted).toBe(true)
+        expect(signals[1]?.aborted).toBe(false)
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsClose })) })
+        expect(signals[1]?.aborted).toBe(true)
+        expect(cancelled).toBe(2)
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(screen.queryByText(en.analyticsFailed)).toBeNull()
+      } finally {
+        view.unmount()
+        await harness.dispose()
+      }
+    },
+  )
+
   it('uses the injected account service and releases it when its connection closes', async () => {
     let connect!: (ready: unknown) => void
     let disconnect!: () => void

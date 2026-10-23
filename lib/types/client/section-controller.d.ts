@@ -102,7 +102,7 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
     /** Read the gateway's model listing, now or again after a failure. */
     loadModels: () => void;
     /** Read one aggregate usage report over local session history. */
-    readAnalytics: (query: AnalyticsQuery) => Promise<AnalyticsReport>;
+    readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>;
     /** Read one account's official quota; the dashboard shows it beside the estimate. */
     readQuota: (ref: string) => Promise<GoUsage>;
     /**
@@ -137,7 +137,7 @@ export declare class OpencodeGoSectionController {
      * @param ctx - the page plugin's context, whose `remote.credentials` namespace
      *   answers for the credential the section references.
      */
-    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<GoUsage>, executeAccountCommand?: ExecuteAccountCommand, readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>);
+    constructor(scope: SettingsScope<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<GoUsage>, executeAccountCommand?: ExecuteAccountCommand, readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>);
     /** Release subscriptions without disposing the host's shared form. */
     dispose(): void;
     private projection;

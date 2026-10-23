@@ -3,9 +3,9 @@
  * ctx.sessionQuery, fold each log into request facts, price them with the
  * catalog's rates, and return aggregate numbers only.
  *
- * Closed sessions are cached for the process lifetime under an LRU policy
- * whose eviction runs once, at the end of a scan (review P2/M2/S1); a live
- * session's fold is reused only inside a short window (review P6), and a
+ * Closed sessions are cached by durable revision under an LRU policy
+ * whose eviction runs once, at the end of a scan (review P2/M2/S1); live
+ * or unversioned folds are reused only inside a short window, and a
  * session that closes is re-read once before its closed cache entry takes
  * over (review P9/S2). When the Host mounts ctx.sessionPersistence, a closed
  * session's fold is also keyed by the log's durable revision in an on-disk
@@ -125,14 +125,15 @@ const DEFAULT_MAX_FACTS = 200_000
 const DEFAULT_MAX_CONCURRENCY = 8
 const MAX_CACHE_SESSIONS = 2000
 const PRICING_TIMEOUT_MS = 4000
-/** A live session's cached fold is reused at most this long (review P6). */
-const LIVE_REUSE_MS = 5000
+/** Bound reuse when a live or closed log has no durable freshness token. */
+const UNVERSIONED_REUSE_MS = 5000
 
 interface CachedSession {
   readonly createdAt: number
   readonly facts: FoldedSession
   readonly live: boolean
-  /** When the fold was stored; drives the live reuse window (review P6). */
+  readonly revision?: string
+  /** When the fold was stored; bounds reuse without a durable revision. */
   readonly storedAt: number
 }
 
@@ -500,12 +501,14 @@ export class GoAnalyticsService extends TypertRemoteService {
       const live = record.live === true
       const revision = live ? undefined : revisions.get(id)
       const cached = this.cache.get(id)
-      // S2/P9 + P6: a closed record must not serve a fold captured while the
-      // session was live, and a live session's fold is reused only inside the
-      // short window; anything else re-reads once and re-folds.
+      // A session can resume and close between dashboard opens. Both memory
+      // and disk folds must match its current revision, even if neither scan
+      // saw it live. Without a revision, reuse is bounded like live folds.
       const reusable = cached !== undefined
-        && ((!live && !cached.live)
-          || (live && cached.live && this.now() - cached.storedAt < LIVE_REUSE_MS))
+        && live === cached.live
+        && (!live && revision !== undefined
+          ? cached.revision === revision
+          : this.now() - cached.storedAt < UNVERSIONED_REUSE_MS)
       if (reusable && cached !== undefined) {
         // LRU touch (P2/M2): a hit moves the entry to the tail.
         this.cache.delete(id)
@@ -545,7 +548,7 @@ export class GoAnalyticsService extends TypertRemoteService {
         scanned++
         events += facts.events
         newEvents += facts.events
-        this.remember(id, createdAtOf(record), facts, live, this.now())
+        this.remember(id, createdAtOf(record), facts, live, this.now(), revision)
         local.set(id, sortedFacts(facts))
         // Only a closed session with a known revision can be validated by a
         // later process; live folds are deliberately never persisted.
@@ -808,13 +811,13 @@ export class GoAnalyticsService extends TypertRemoteService {
     await saveFoldCache(this.foldPath(), cached)
   }
 
-  private remember(id: string, createdAt: number, facts: FoldedSession, live: boolean, storedAt: number): void {
+  private remember(id: string, createdAt: number, facts: FoldedSession, live: boolean, storedAt: number, revision?: string): void {
     const previous = this.cache.get(id)
     if (previous !== undefined) this.factTotal -= previous.facts.facts.length
     // Delete-then-set moves an updated entry to the tail: the cache is LRU
     // (review P2/M2), and eviction is deferred to trim() at the end of a run.
     this.cache.delete(id)
-    this.cache.set(id, { createdAt, facts, live, storedAt })
+    this.cache.set(id, { createdAt, facts, live, storedAt, revision })
     this.factTotal += facts.facts.length
   }
 

@@ -17,7 +17,7 @@ export interface UsagePillProps {
   settings: SettingsScope<OpencodeGoSettings>
   readUsage: () => Promise<GoUsage>
   /** Optional so an embedded/test render can omit the dashboard. */
-  readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>
+  readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   t: (key: string) => string
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>

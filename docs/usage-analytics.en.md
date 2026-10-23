@@ -19,6 +19,8 @@ The Host reads DSH's `ctx.sessionQuery`:
 
 The browser receives aggregate numbers only: no session ids, titles, content, working directories, or credentials.
 
+Session scanning and aggregation run locally, but model and pricing metadata may refresh from `https://models.dev/api.json`. That request carries no conversation content, account keys or per-request analytics. Normal inference and quota requests still reach your configured model gateway; there is no additional telemetry or analytics service.
+
 ## What is counted
 
 ### Included
@@ -81,12 +83,12 @@ The calendar is laid out densely by calendar date across the selected range (a 3
 - by default, at most **500 sessions**, **500,000 events**, and **12 seconds**, read with up to eight concurrent session reads (falling back to serial for a Host that cannot read concurrently);
 - exceeding a limit marks the report incomplete with its cause (session slice / event budget / time budget); the footer also reports how many sessions were left unread when the budget or cap stopped the scan, without implying the range was fully covered;
 - **Scan more history** raises the session cap to 1,000 then 2,000; the choice is stored in the browser and survives reopening the panel;
-- closed sessions' folds are cached in memory and served LRU-style; a live session's fold is reused for five seconds, after which — or once the session closes — it is re-read once; eviction happens only at the end of a scan, and a report is always built from the results actually read in that run, so cache eviction cannot silently drop requests;
+- closed sessions' folds are cached in memory and served LRU-style, checking their durable log revision on every scan: a session resumed and closed between dashboard opens is re-read when its revision changes. When the Host has no revision, its index fails, or the session is missing from that index, in-memory reuse is limited to five seconds. Live folds also have a five-second reuse window and are re-read on closing; eviction happens only at the end of a scan, and a report is always built from the results actually read in that run, so cache eviction cannot silently drop requests;
 - folds are also persisted to `~/.dsh/cache/dsh-opencode-go/analytics-folds.v1.json` (honoring `DSH_HOME`): the file is versioned, capped at 32MB, replaced atomically, and entries not re-verified for 30 days are dropped on the next write. Entries are validated against the durable log revision reported by the Host's `sessionPersistence`, so after an app restart every session whose log did not change is reused without being read again. Live sessions are never written, a cancelled scan writes nothing, and an incomplete scan only merges what it read instead of deleting unseen entries; a Host without `sessionPersistence` (or with a failing one) falls back to the in-memory cache with no effect on the report. The cache holds session ids, model names, token counts and timestamps only — no titles, message text, working directories or credentials;
 - the price table is fetched in parallel with the scan, waiting at most 4 seconds;
 - the footer splits list / scan / pricing timings;
 - within one open, the window end is taken once at open time, so re-entering the same range does not rescan; **Refresh** forces a new scan;
-- the first scan after a cold start is still a full read under the limits above; every later open re-reads only the sessions that changed, which makes the second and subsequent opens markedly faster;
+- without a reusable cache, the first scan reads the target sessions under the limits above; when durable revisions are available, later scans re-read only changed closed sessions, and persisted folds can also be reused after a restart;
 - a range already seen in this open renders its previous report immediately and revalidates in the background, explicitly labeled as the previous scan while loading;
 - closing the dialog aborts the running scan; there is no background polling.
 

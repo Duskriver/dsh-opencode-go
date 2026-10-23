@@ -185,7 +185,8 @@ it('returns priced tokens, limits, summaries and legacy records through the RPC 
 // inside a short window and re-folded once the window passes.
 it('serves live sessions from the cache inside the reuse window and re-folds after it', async () => {
   let clock = NOW
-  const { ctx, read, reads } = await harness({ now: () => clock })
+  const { ctx, read, reads } = await harness({ now: () => clock,
+    persistence: persistenceOf(revisionsOf()), foldCachePath: foldCachePath() })
   try {
     await read()
     await read()
@@ -644,6 +645,64 @@ it('rejects malformed queries and reports instead of trusting the wire', () => {
   expect(() => parseAnalyticsQuery(query({ maxSessions: 5000 }))).toThrow('Invalid analytics')
   expect(() => parseAnalyticsReport({})).toThrow('Invalid analytics')
 })
+
+it('refreshes a closed session in the same process when its durable revision changes', async () => {
+  const path = foldCachePath()
+  const revisions = revisionsOf()
+  const tables = structuredClone(snapshots)
+  let clock = NOW
+  const { ctx, read, reads } = await harness({
+    now: () => clock, persistence: persistenceOf(revisions), foldCachePath: path, snapshots: tables,
+  })
+  try {
+    const first = await read()
+    clock += 60_000
+    // An unchanged closed log still reuses its fold beyond the live reuse window.
+    expect((await read()).totals).toEqual(first.totals)
+    expect(reads.filter(id => id === 'session-secret-a')).toHaveLength(1)
+
+    // The session was resumed and closed between dashboard opens; neither scan
+    // saw it live, so its durable revision is the freshness signal.
+    revisions.set('session-secret-a', 'rev-a-2')
+    tables['session-secret-a'].events.push(message(3, T1 + 1000, { inputTokens: 100, outputTokens: 50 }))
+    const updated = await read()
+    expect(updated.totals.requests).toBe(4)
+    expect(updated.totals.inputTokens).toBe(first.totals.inputTokens + 100)
+    expect(reads.filter(id => id === 'session-secret-a')).toHaveLength(2)
+    expect((await read()).totals).toEqual(updated.totals)
+    expect(reads.filter(id => id === 'session-secret-a')).toHaveLength(2)
+    const saved = (await loadFoldCache(path)).get('session-secret-a')
+    expect(saved?.revision).toBe('rev-a-2')
+    expect(saved?.facts).toHaveLength(2)
+  } finally { await ctx.fiber.dispose() }
+})
+
+it.each(['absent', 'failed', 'missing-revision'] as const)(
+  'expires closed folds when durable revisions are %s', async availability => {
+    const { records: bulk, snapshots: tables } = corpus(1, 1)
+    let clock = NOW
+    const { ctx, read, reads } = await harness({
+      records: bulk, snapshots: tables, now: () => clock,
+      ...(availability === 'absent' ? {} : {
+        persistence: () => ({ list: async () => {
+          if (availability === 'failed') throw new Error('persistence unavailable')
+          return []
+        } }),
+      }),
+      foldCachePath: foldCachePath(),
+    })
+    try {
+      expect((await read()).totals.requests).toBe(1)
+      tables['session-bulk-0'].events.push(message(3, T1 + 1000, { inputTokens: 100, outputTokens: 50 }))
+      // Brief repeats remain cheap even on legacy Hosts.
+      expect((await read()).totals.requests).toBe(1)
+      expect(reads).toHaveLength(1)
+      clock += 5001
+      expect((await read()).totals.requests).toBe(2)
+      expect(reads).toHaveLength(2)
+    } finally { await ctx.fiber.dispose() }
+  },
+)
 
 // Restart reuse: a second service (empty in-memory cache) shares the same
 // fold file and reads only the sessions whose durable revision changed. The

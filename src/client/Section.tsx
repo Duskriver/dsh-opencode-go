@@ -244,7 +244,7 @@ function Loaded(props: {
   loadModels: () => void
   setEnabled: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
-  readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport>
+  readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   readQuota?: (ref: string) => Promise<GoUsage>
   getLocale?: () => string
   accountActions?: GoAccountsActions

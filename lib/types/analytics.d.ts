@@ -3,9 +3,9 @@
  * ctx.sessionQuery, fold each log into request facts, price them with the
  * catalog's rates, and return aggregate numbers only.
  *
- * Closed sessions are cached for the process lifetime under an LRU policy
- * whose eviction runs once, at the end of a scan (review P2/M2/S1); a live
- * session's fold is reused only inside a short window (review P6), and a
+ * Closed sessions are cached by durable revision under an LRU policy
+ * whose eviction runs once, at the end of a scan (review P2/M2/S1); live
+ * or unversioned folds are reused only inside a short window, and a
  * session that closes is re-read once before its closed cache entry takes
  * over (review P9/S2). When the Host mounts ctx.sessionPersistence, a closed
  * session's fold is also keyed by the log's durable revision in an on-disk

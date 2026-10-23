@@ -79,10 +79,7 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
       return result.value
     }
   })
-  // The injection seam is cancellation-ready (review M4); the settings-card
-  // callback below passes no signal yet because the controller's inject type
-  // (section-controller, outside this change's files) is single-argument — its
-  // wrapper would drop it. The pill path in client/usage.ts threads the signal.
+  // Both settings generations share the same cancellable Host endpoint.
   let readAnalytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
   ctx.inject(['remote.opencodeGoAnalytics'], ready => {
     readAnalytics = async (query, signal) => {
@@ -100,11 +97,11 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
     // of reaching for a context that never injected it.
     if (readAccount === undefined) throw new Error('OpenCode Go account usage is unavailable in this session')
     return readAccount(ref)
-  }, executeAccountCommand, async query => {
+  }, executeAccountCommand, async (query, signal) => {
     if (readAnalytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
       code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
     })
-    return readAnalytics(query)
+    return readAnalytics(query, signal)
   })
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']

@@ -166,6 +166,48 @@ describe('llm-opencode-go plugin mount', () => {
     expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
   })
 
+  it('keeps private inference data on the gateway while fetching public model metadata', async () => {
+    const apiKey = 'private-fixture-key'
+    const prompt = 'private fixture conversation'
+    const sessionId = 'private-fixture-session'
+    vi.stubEnv('OPENCODE_API_KEY', apiKey)
+    const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+    gateway.pushCompletions({ events: textEvents })
+    const fetch = globalThis.fetch
+    const metadataRequests: Request[] = []
+    const destinations: string[] = []
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input)
+      destinations.push(url)
+      if (url === MODELS_METADATA_URL) metadataRequests.push(new Request(input, init))
+      return fetch(input, init)
+    })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    try {
+      apply(ctx, configOf(gateway.url))
+      const chunks: StreamChunk[] = []
+      for await (const chunk of ctx.llm.stream({
+        provider: 'dsh-opencode-go', model: 'deepseek-v4.1-flash', sessionId: sessionId as never,
+        messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'test' } })],
+      })) chunks.push(chunk)
+      expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'hello' }))
+      expect(gateway.headers.at(-1)?.authorization).toBe(`Bearer ${apiKey}`)
+      expect(JSON.stringify(gateway.bodies)).toContain(prompt)
+      expect(metadataRequests.length).toBeGreaterThan(0)
+      for (const request of metadataRequests) {
+        expect(request.method).toBe('GET')
+        expect(request.body).toBeNull()
+        expect(request.headers.get('authorization')).toBeNull()
+        expect(request.headers.get('cookie')).toBeNull()
+        expect(request.headers.get('x-opencode-session')).toBeNull()
+        const publicRequest = JSON.stringify([request.url, [...request.headers]])
+        for (const privateValue of [apiKey, prompt, sessionId]) expect(publicRequest).not.toContain(privateValue)
+      }
+      expect(destinations.every(url => url === MODELS_METADATA_URL || url.startsWith(`${gateway.url}/`))).toBe(true)
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('streams through the mounted route, resolving the credential from the environment', async () => {
     vi.stubEnv('OPENCODE_API_KEY', 'test-key')
     const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
