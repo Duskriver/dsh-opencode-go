@@ -19,7 +19,7 @@ import { toPiAssistant } from './replay.ts'
 import { requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './config.ts'
 import { projectRequestImages } from './image-offload.ts'
-import { IMAGE_PREPARATION_CONCURRENCY, ImagePayloadLease, withImagePermit, type ImagePoolObserver } from './image-pool.ts'
+import { IMAGE_PREPARATION_CONCURRENCY, ImagePayloadLease, retryImagePreparation, withImagePermit, type ImagePoolObserver } from './image-pool.ts'
 import { waitWithSignal } from '../request-control.ts'
 
 /** Join the text blocks of a harness message. */
@@ -384,13 +384,14 @@ async function toPiContextWithImages(
   })
   // Standalone conversion owns preparation admission; the adapter supplies a
   // longer-lived lease because its returned context remains live while streaming.
-  using localLease = images.payloadLease === undefined ? new ImagePayloadLease() : undefined
-  const requestImages = await prepareRequestImages(requestMessages, attachments, requestImagePolicy, options.signal, maxRequestImageBytes, versions => {
+  using localLease = images.payloadLease === undefined ? new ImagePayloadLease(images.onImagePool) : undefined
+  const lease = images.payloadLease ?? localLease!
+  const requestImages = await retryImagePreparation(() => prepareRequestImages(requestMessages, attachments, requestImagePolicy, options.signal, maxRequestImageBytes, versions => {
     // Unknown prepared sizes contribute zero: this is a lower bound, so it
     // can stop excess work without offloading from source-size estimates.
     projectRequestImages(requestMessages, { ...projection, exact: true,
       byteLength: ref => versions.get(ref.attachmentId)?.bytes ?? 0 })
-  }, images.payloadLease ?? localLease, images.onImagePool)
+  }, lease, images.onImagePool), lease, options.signal)
   const exactMessages = projectRequestImages(requestMessages, {
     ...projection, exact: true,
     byteLength: ref => (requestImages.get(ref.attachmentId) as RequestImageAttachment).bytes,

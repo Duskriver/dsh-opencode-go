@@ -1,13 +1,24 @@
 import { LlmError } from '@deepseek-ai/dsh-llm'
+import { waitWithSignal } from '../request-control.ts'
 
-/** Shared across requests so concurrent conversations cannot multiply image work. */
-export const IMAGE_PREPARATION_CONCURRENCY = 4
-export const IMAGE_PREPARATION_QUEUE_LIMIT = 32
+/** Local protection defaults, not limits reported by the upstream gateway. */
+export const IMAGE_PREPARATION_CONCURRENCY = 100
+export const IMAGE_PREPARATION_QUEUE_LIMIT = 300
 /** Raw prepared bytes plus base64 payloads, not a bound on native decoder RSS. */
-export const IMAGE_PAYLOAD_BUDGET_BYTES = 128 * 1024 * 1024
+export const IMAGE_PAYLOAD_BUDGET_BYTES = 2 * 1024 * 1024 * 1024
 let active = 0
 let retainedBytes = 0
 const queued: Array<() => void> = []
+const leases = new Set<ImagePayloadLease>()
+let permitReleased = Promise.withResolvers<void>()
+let retryTail = Promise.resolve()
+
+/** A local collision can be retried once an actual competing resource releases. */
+class ImageResourceBusyError extends LlmError {
+  constructor(message: string, readonly retryAfter: Promise<void>) {
+    super(message, 'IMAGE_RESOURCE_BUSY')
+  }
+}
 
 export interface ImagePoolObservation {
   queueWaitMs: number
@@ -28,22 +39,74 @@ function observe(observer: ImagePoolObserver | undefined, started: number, rejec
 export class ImagePayloadLease {
   private bytes = 0
   private closed = false
+  private released = Promise.withResolvers<void>()
   constructor(private readonly observer?: ImagePoolObserver) {}
   reserve(bytes: number): void {
     if (this.closed) throw new LlmError('Image preparation was cancelled', 'ABORTED')
-    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > IMAGE_PAYLOAD_BUDGET_BYTES - retainedBytes) {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > IMAGE_PAYLOAD_BUDGET_BYTES - this.bytes) {
       observe(this.observer, performance.now(), true)
-      throw new LlmError('OpenCode Go image payload capacity is busy; retry after another image request completes', 'IMAGE_RESOURCE_BUSY')
+      throw new LlmError('OpenCode Go single image request exceeds the local 2 GiB raw plus base64 budget; reduce maxImages, maxRequestImageBytes or requestImageMaxBytes', 'IMAGE_PAYLOAD_TOO_LARGE')
+    }
+    if (bytes > IMAGE_PAYLOAD_BUDGET_BYTES - retainedBytes) {
+      observe(this.observer, performance.now(), true)
+      // Capture competing releases now, so releasing our own partial payload
+      // neither causes a retry loop nor loses an already-completed wakeup.
+      const retryAfter = Promise.race([...leases].filter(lease => lease !== this).map(lease => lease.released.promise))
+      throw new ImageResourceBusyError('OpenCode Go image payload capacity is busy', retryAfter)
     }
     this.bytes += bytes
     retainedBytes += bytes
+    if (this.bytes > 0) leases.add(this)
     observe(this.observer, performance.now())
+  }
+  /** Discard a failed preparation before waiting; partial leases must not deadlock. */
+  reset(): void {
+    if (this.bytes === 0) return
+    retainedBytes -= this.bytes
+    this.bytes = 0
+    leases.delete(this)
+    this.released.resolve()
+    this.released = Promise.withResolvers<void>()
+  }
+  async waitForCapacity(error: ImageResourceBusyError, signal?: AbortSignal): Promise<void> {
+    const started = performance.now()
+    try { await waitWithSignal(() => error.retryAfter, signal) }
+    finally { observe(this.observer, started) }
   }
   [Symbol.dispose](): void {
     if (this.closed) return
     this.closed = true
-    retainedBytes -= this.bytes
+    this.reset()
   }
+}
+
+/** Retry only local admission failures, before any provider request is sent. */
+export async function retryImagePreparation<T>(work: () => Promise<T>, lease: ImagePayloadLease, signal?: AbortSignal): Promise<T> {
+  let busy: ImageResourceBusyError
+  try { return await work() }
+  catch (error) {
+    if (!(error instanceof ImageResourceBusyError)) throw error
+    lease.reset()
+    busy = error
+  }
+  // Serialize colliding retries so large requests cannot repeatedly split the
+  // budget, release it together, and collide again without making progress.
+  const previous = retryTail
+  const turn = Promise.withResolvers<void>()
+  retryTail = previous.then(() => turn.promise)
+  try {
+    await waitWithSignal(() => previous, signal)
+    while (true) {
+      await lease.waitForCapacity(busy, signal)
+      signal?.throwIfAborted()
+      try { return await work() }
+      catch (error) {
+        if (!(error instanceof ImageResourceBusyError)) throw error
+        lease.reset()
+        busy = error
+      }
+    }
+  } finally { turn.resolve() }
 }
 
 function acquire(signal?: AbortSignal, observer?: ImagePoolObserver): Promise<() => void> {
@@ -61,12 +124,17 @@ function acquire(signal?: AbortSignal, observer?: ImagePoolObserver): Promise<()
       signal?.removeEventListener('abort', abort)
       active++
       observe(observer, started)
-      resolve(() => { active--; queued.shift()?.() })
+      resolve(() => {
+        active--
+        permitReleased.resolve()
+        permitReleased = Promise.withResolvers<void>()
+        queued.shift()?.()
+      })
     }
     if (active < IMAGE_PREPARATION_CONCURRENCY) start()
     else if (queued.length >= IMAGE_PREPARATION_QUEUE_LIMIT) {
       observe(observer, started, true)
-      reject(new LlmError('OpenCode Go image preparation queue is full; retry after another image request completes', 'IMAGE_RESOURCE_BUSY'))
+      reject(new ImageResourceBusyError('OpenCode Go image preparation queue is full', permitReleased.promise))
     } else {
       queued.push(start)
       signal?.addEventListener('abort', abort, { once: true })

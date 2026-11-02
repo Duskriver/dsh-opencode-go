@@ -11,6 +11,7 @@ import { toPiContext, toStreamChunks } from './conversion/index.ts'
 import type { PiImageRequestContext } from './conversion/index.ts'
 import { ImagePayloadLease } from './conversion/image-pool.ts'
 import { GatewayDiagnostics } from './gateway-diagnostics.ts'
+import { ResponsesDiagnostics } from './responses-diagnostics.ts'
 import { reasoningChoices, reasoningIntent, reasoningRequest } from './reasoning.ts'
 import { requestMaxTokens } from './request-budget.ts'
 import { waitWithSignal } from './request-control.ts'
@@ -89,6 +90,8 @@ export class OpencodeGoRequestExecutor {
     using watchdog = idleWatchdog(upstream, config.streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
     using preparation = deadline(watchdog.signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
     using payloadLease = new ImagePayloadLease(trace.imagePool)
+    let responsesDiagnostics: ResponsesDiagnostics | undefined
+    let diagnosticTermination: Parameters<ResponsesDiagnostics['end']>[0] = 'consumer-stopped'
 
     try {
       const apiKey = await trace.measure('credential', () => waitWithSignal(
@@ -134,18 +137,36 @@ export class OpencodeGoRequestExecutor {
       watchdog.signal.throwIfAborted()
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
+      const debugDirectory = this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR
+      if (model.api === 'openai-responses' && debugDirectory?.trim()) {
+        responsesDiagnostics = new ResponsesDiagnostics({ directory: debugDirectory,
+          callId: trace.callId, attempt: trace.attempts, model, sessionId })
+        responsesDiagnostics.context(context)
+      }
       const diagnostics = new GatewayDiagnostics({
         provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
         fetch: this.transport.forProxy(config.proxyURL),
-        directory: this.options.debugDirectory ? this.options.debugDirectory() : process.env.DSH_OPENCODE_GO_DEBUG_DIR,
+        directory: debugDirectory,
         callId: trace.callId, attempt: trace.attempts,
         contextWindow: model.contextWindow,
-        onResponse: (status, requestId) => trace.response(status, requestId),
+        onResponse: (status, requestId) => {
+          trace.response(status, requestId)
+          responsesDiagnostics?.http(status, requestId)
+        },
       })
+      const reasoningOptions = reasoningRequest(reasoningIntent(model, reasoning))
       const events = provider.streamSimple(model, normalizeContext(context), {
         apiKey,
         fetch: diagnostics.fetch,
-        ...reasoningRequest(reasoningIntent(model, reasoning)),
+        ...reasoningOptions,
+        ...responsesDiagnostics === undefined ? {} : {
+          onPayload: (payload: unknown) => {
+            const result = reasoningOptions.onPayload(payload)
+            responsesDiagnostics?.payload(result)
+            return result
+          },
+          onProviderStreamEvent: (event: unknown) => responsesDiagnostics?.providerEvent(event),
+        },
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
         sessionId,
@@ -172,6 +193,7 @@ export class OpencodeGoRequestExecutor {
           }
           if (result.done) {
             exhausted = true
+            diagnosticTermination = 'completed'
             return
           }
           const chunk = result.value
@@ -181,10 +203,17 @@ export class OpencodeGoRequestExecutor {
             const failure = chunk.reason.failure
             const message = await waitWithSignal(() => diagnostics.failureMessage(failure.message), watchdog.signal)
             const code = await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal)
-            yield { ...chunk, reason: options.signal?.aborted
+            const finished: StreamChunk = { ...chunk, reason: options.signal?.aborted
               ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }
               : { ...chunk.reason, failure: { ...chunk.reason.failure, message, code } } }
-          } else yield chunk
+            responsesDiagnostics?.chunk(finished)
+            diagnosticTermination = finished.reason.kind === 'aborted' ? 'caller-aborted' : 'completed'
+            yield finished
+          } else {
+            responsesDiagnostics?.chunk(chunk)
+            if (chunk.type === 'finish') diagnosticTermination = chunk.reason.kind === 'aborted' ? 'caller-aborted' : 'completed'
+            yield chunk
+          }
         }
       } finally {
         if (!exhausted) {
@@ -197,6 +226,9 @@ export class OpencodeGoRequestExecutor {
         }
       }
     } catch (error: unknown) {
+      diagnosticTermination = options.signal?.aborted ? 'caller-aborted'
+        : timeoutOf(preparation.signal, 'LLM_PREPARATION_TIMEOUT') || timeoutOf(watchdog.signal, 'LLM_REQUEST_TIMEOUT')
+          || timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') ? 'timeout' : 'exception'
       if (timeoutOf(preparation.signal, 'LLM_PREPARATION_TIMEOUT')) {
         throw new LlmError('opencode-go credential/image preparation timeout', 'TIMEOUT', { cause: error })
       }
@@ -210,6 +242,9 @@ export class OpencodeGoRequestExecutor {
         throw new LlmError('opencode-go request aborted by caller', 'ABORTED', { cause: error })
       }
       throw error
+    } finally {
+      responsesDiagnostics?.end(diagnosticTermination)
+      await responsesDiagnostics?.save()
     }
   }
 }

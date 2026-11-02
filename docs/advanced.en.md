@@ -116,7 +116,9 @@ Usage failures retain the HTTP status and show a redacted summary when the upstr
 
 Image offloading keeps the original attachment and replaces the old image in the request with a text placeholder. Raising the limit does not automatically restore previously offloaded images.
 
-Image count overflow is detected before attachment reads. Preparation shares four execution slots and at most 32 queued tasks within the plugin module, and stops scheduling images when known encoded bytes exceed the payload cap. Active image attempts share a 128 MiB budget for prepared raw data plus base64 payloads; this is not a process memory limit. Queue or shared-budget overflow returns `IMAGE_RESOURCE_BUSY`; retry after another request completes. Count and byte limits may require successive host offload retries.
+Image count overflow is detected before attachment reads. Preparation shares 100 execution slots and at most 300 queued tasks within the plugin module, and stops scheduling images when known encoded bytes exceed the payload cap. Active image attempts share a 2 GiB budget for prepared raw data plus base64 payloads; this is not a process memory limit. These three values are local protection defaults, not gateway-reported limits, and do not change with `maxImages`.
+
+When the preparation queue is full or other requests occupy the shared budget, the plugin releases this preparation's partial payload reservation, waits for resources to release, and prepares again. Transient `IMAGE_RESOURCE_BUSY` no longer ends the conversation directly. Waiting observes cancellation, `requestPreparationTimeoutMs` and `requestTimeoutMs`; expiration still reports `TIMEOUT`, without account switching. A single request exceeding 2 GiB of raw plus base64 data reports `IMAGE_PAYLOAD_TOO_LARGE`, since waiting cannot make it fit; reduce `maxImages`, `maxRequestImageBytes` or `requestImageMaxBytes`. Configured count and byte limits may still require successive host offload retries.
 
 A cold catalog outage reports `DISCOVERY_FAILED`; a warm catalog retains previously verified models. Only an explicit empty gateway listing clears membership. A partially malformed listing keeps its valid models and reports the ignored row count in settings and logs. Ordinary advanced form settings commit in one revision-checked batch. Credentials use a separate service; failed credential drafts remain, and retry submits only uncommitted parts.
 
@@ -137,6 +139,10 @@ dsh web
 ```
 
 Reproduce the failure to get a JSON file path in the error message. The record contains the model, request parameter summaries, HTTP status, upstream log and route IDs, and the error response, for use in an [issue report](https://github.com/Duskriver/dsh-opencode-go/issues). Review the returned error content before sharing. Clear the environment variable and restart DSH to disable diagnostics.
+
+With this switch enabled, Responses requests also write `responses-replay-*.json` in the same directory, for both successful and failed attempts. To investigate reasoning replay, keep the failed request's report and the preceding successful tool turns. These compare the next request's history, SDK request parameters, received stream events, and the adapter's output replay state. They contain field presence, text lengths and SHA-256 fingerprints, without prompts, reasoning text, tool arguments or encrypted content. They never insert reasoning into requests. Existing HTTP-error files may still contain error text returned by the service.
+
+The latest 64 Responses reports are retained, each limited to 4 MiB; omitted detail is marked `truncated`. Reports locate where data disappears but do not establish the gateway's internal cause. Copy the relevant reports and disable the switch after reproducing the failure.
 
 DSH debug logs contain a call ID and each attempt's stage timings, HTTP status, upstream request ID, time to first output and error code, including stream failures after HTTP 200. Image attempts also report aggregate queue waiting and peak resource occupancy. Error files carry the same call ID and attempt number for correlation. These summaries exclude prompts, keys, proxy addresses and raw session IDs.
 

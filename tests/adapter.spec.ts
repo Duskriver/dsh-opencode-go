@@ -566,6 +566,55 @@ it('retains image payload admission through streaming and releases it when the c
   ] })
 })
 
+it.each(['release', 'caller', 'preparation', 'whole'] as const)('handles payload contention with %s recovery', async kind => {
+  const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+  gateway.pushCompletions({ events: textEvents })
+  using competing = new ImagePayloadLease()
+  competing.reserve(IMAGE_PAYLOAD_BUDGET_BYTES)
+  const read = vi.fn(async () => ({
+    variantId: `sha256:${'b'.repeat(64)}`, attachment: IMAGE_REF, data: Uint8Array.of(1),
+    mediaType: 'image/png', bytes: 1, width: 1, height: 1, depth: 'uchar', space: 'srgb', hasAlpha: true,
+  }))
+  const trace = vi.fn()
+  const controller = new AbortController()
+  let warmed = false
+  const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, {
+    requestPreparationTimeoutMs: warmed && kind === 'preparation' ? 150 : 1000,
+    requestTimeoutMs: kind === 'whole' ? 150 : 1000,
+  }), resolveApiKey: async () => 'fixture-key', onCallTrace: trace, imageAccess: {
+    resolveAttachments: () => ({ readImageRequest: read }) as never,
+    resolveImageAccess: () => undefined,
+  } })
+  await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+  warmed = true
+  const pending = drain(adapter.stream(requestOf({ signal: controller.signal, messages: [createUserMessage({
+    content: [{ type: 'image', attachment: IMAGE_REF }], source: { kind: 'plugin', plugin: 'test' },
+  })] })))
+  const outcome = pending.then(value => ({ value }), error => ({ error }))
+  try {
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1), { interval: 5 })
+    expect(gateway.bodies).toHaveLength(0)
+    if (kind === 'release') {
+      competing[Symbol.dispose]()
+      expect(await outcome).toMatchObject({ value: expect.arrayContaining([expect.objectContaining({ type: 'finish', reason: { kind: 'stop' } })]) })
+      expect(read).toHaveBeenCalledTimes(2)
+      expect(gateway.bodies).toHaveLength(1)
+      expect(trace.mock.calls[0]?.[0]).toMatchObject({ attempts: 1, outcome: 'completed', attemptDetails: [
+        { imagePool: { rejected: true } },
+      ] })
+    } else {
+      if (kind === 'caller') controller.abort()
+      if (kind === 'caller') expect(await outcome).toMatchObject({ value: [{ type: 'finish', reason: { kind: 'aborted' } }] })
+      else expect(await outcome).toMatchObject({ error: { code: 'TIMEOUT' } })
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(gateway.bodies).toHaveLength(0)
+    }
+  } finally { controller.abort(); competing[Symbol.dispose](); await outcome }
+  // The cancelled wait cannot send a late request when capacity becomes free.
+  await Promise.resolve()
+  expect(gateway.bodies).toHaveLength(kind === 'release' ? 1 : 0)
+})
+
 it('times out image preparation even when the attachment service ignores cancellation', async () => {
   const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
   const late = Promise.withResolvers<never>()

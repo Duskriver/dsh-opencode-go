@@ -11,6 +11,7 @@ import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-ll
 import { toPiContext } from '../src/conversion/context.ts'
 import type { PiImageRequestContext } from '../src/conversion/context.ts'
 import { toPiAssistant } from '../src/conversion/replay.ts'
+import { IMAGE_PREPARATION_CONCURRENCY, IMAGE_PREPARATION_QUEUE_LIMIT } from '../src/conversion/image-pool.ts'
 
 const ref: ImageAttachmentRef = {
   attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
@@ -682,14 +683,43 @@ it('bounds image preparation across simultaneous requests', async () => {
     try { await new Promise(resolve => setTimeout(resolve, 3)); return requestImage(value, Uint8Array.of(1)) }
     finally { active-- }
   })
-  const messages = [user(Array.from({ length: 20 }, (_, index) => ({
+  const messages = [user(Array.from({ length: IMAGE_PREPARATION_CONCURRENCY }, (_, index) => ({
     type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
   })))]
   await Promise.all([toPiContext(request(messages), imageContext(projectionStore(read))),
     toPiContext(request(messages), imageContext(projectionStore(read)))])
-  expect(read).toHaveBeenCalledTimes(40)
-  expect(peak).toBeLessThanOrEqual(4)
+  expect(read).toHaveBeenCalledTimes(IMAGE_PREPARATION_CONCURRENCY * 2)
+  expect(peak).toBe(IMAGE_PREPARATION_CONCURRENCY)
   expect(active).toBe(0)
+})
+
+it('waits through a full preparation queue and converts every request after permits release', async () => {
+  const release = Promise.withResolvers<void>()
+  let active = 0, peak = 0
+  const read = vi.fn(async (value: ImageAttachmentRef) => {
+    active++; peak = Math.max(peak, active)
+    try { await release.promise; return requestImage(value, Uint8Array.of(1)) }
+    finally { active-- }
+  })
+  const observation = vi.fn()
+  const messages = [user([{ type: 'image', attachment: ref }])]
+  const count = IMAGE_PREPARATION_CONCURRENCY + IMAGE_PREPARATION_QUEUE_LIMIT + 4
+  const requests = Array.from({ length: count }, () => toPiContext(request(messages),
+    imageContext(projectionStore(read), { onImagePool: observation })))
+  const completed = Promise.all(requests)
+  try {
+    await vi.waitFor(() => expect(observation).toHaveBeenCalledWith(expect.objectContaining({
+      queued: IMAGE_PREPARATION_QUEUE_LIMIT, rejected: true,
+    })))
+    expect(read).toHaveBeenCalledTimes(IMAGE_PREPARATION_CONCURRENCY)
+  } finally { release.resolve() }
+  const contexts = await completed
+  expect(contexts).toHaveLength(count)
+  for (const context of contexts) expect(context.messages[0]).toMatchObject({
+    content: expect.arrayContaining([{ type: 'image', data: 'AQ==', mimeType: 'image/png' }]),
+  })
+  expect(read).toHaveBeenCalledTimes(count)
+  expect(peak).toBe(IMAGE_PREPARATION_CONCURRENCY)
 })
 
 it('stops scheduling images as soon as the known encoded bytes exceed the request cap', async () => {
@@ -697,12 +727,12 @@ it('stops scheduling images as soon as the known encoded bytes exceed the reques
     await new Promise(resolve => setTimeout(resolve, 3))
     return requestImage(value, Uint8Array.of(1, 2, 3, 4))
   })
-  const messages = [user(Array.from({ length: 100 }, (_, index) => ({
+  const messages = [user(Array.from({ length: IMAGE_PREPARATION_CONCURRENCY * 2 }, (_, index) => ({
     type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
   })))]
   await expect(toPiContext(request(messages), imageContext(projectionStore(read), { maxRequestImageBytes: 4 })))
     .rejects.toMatchObject({ code: 'IMAGE_OFFLOAD_REQUIRED' })
-  expect(read.mock.calls.length).toBeLessThanOrEqual(4)
+  expect(read.mock.calls.length).toBeLessThanOrEqual(IMAGE_PREPARATION_CONCURRENCY)
   // Allow still-running native reads to release their shared permits.
   await new Promise(resolve => setTimeout(resolve, 10))
 })
@@ -711,11 +741,11 @@ it('cancels a queued image request without releasing permits held by unresponsiv
   const release = Promise.withResolvers<void>()
   const started = Promise.withResolvers<void>()
   const reads = vi.fn(async (value: ImageAttachmentRef) => {
-    if (reads.mock.calls.length === 4) started.resolve()
+    if (reads.mock.calls.length === IMAGE_PREPARATION_CONCURRENCY) started.resolve()
     await release.promise
     return requestImage(value, Uint8Array.of(1))
   })
-  const messages = [user(Array.from({ length: 4 }, (_, index) => ({
+  const messages = [user(Array.from({ length: IMAGE_PREPARATION_CONCURRENCY }, (_, index) => ({
     type: 'image' as const, attachment: { ...ref, attachmentId: AttachmentId(`image-${index}`) },
   })))]
   const first = toPiContext(request(messages), imageContext(projectionStore(reads)))
