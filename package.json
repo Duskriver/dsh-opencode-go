@@ -107,8 +107,6 @@
     "@deepseek-ai/dsh-api-settings-controller": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-atomic-write": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-attachment": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-attachment-local": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-brand": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-locale": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-store": "0.1.6-alpha.1",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.6-alpha.1",
