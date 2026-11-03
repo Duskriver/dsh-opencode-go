@@ -77,7 +77,7 @@ export function validReleaseDate(value: unknown): value is string {
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export function isNewModel(model: GoModel, now = Date.now()): boolean {
   if (model.deprecated || !validReleaseDate(model.releaseDate)) return false
-  const days = Math.floor(now / 86_400_000) - Date.parse(model.releaseDate) / 86_400_000
+  const days = Math.floor(now / 86_400_000) - Math.floor(Date.parse(model.releaseDate) / 86_400_000)
   return days >= 0 && days < 7
 }
 
@@ -94,7 +94,7 @@ export function parseGoModels(value: unknown): GoModel[] {
     const row = entry as Record<string, unknown>
     if (typeof row.id !== 'string' || !row.id) throw new Error('Missing OpenCode Go model id')
     const model: GoModel = { id: row.id }
-    if (typeof row.name === 'string') model.name = row.name
+    if (typeof row.name === 'string' && row.name.trim().length > 0) model.name = row.name.trim()
     for (const key of ['contextWindow', 'maxTokens'] as const) {
       if (typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] > 0) model[key] = row[key]
     }

@@ -40,7 +40,9 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
     return () => { clearInterval(timer) }
   }, [])
   // Saved overrides never establish membership: only a successful gateway listing does.
-  const all = sortModels(models.status === 'ready' ? models.entries : [], now)
+  const all = sortModels(models.status === 'ready' ? models.entries : [], now).map(model => ({
+    ...model, name: model.name && model.name.trim().length > 0 ? model.name : model.id,
+  }))
   const normalized = query.trim().toLocaleLowerCase()
   const entries = all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
     && (filter === 'all' || filter === 'new' && isNewModel(model, now)

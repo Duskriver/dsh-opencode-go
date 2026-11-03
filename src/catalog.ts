@@ -404,7 +404,8 @@ function listingError(snapshot: CatalogSnapshot): LlmError {
 
 function describeConfiguredModels(snapshot: CatalogSnapshot): readonly LlmDiscoveredModel[] {
   return [...snapshot.models.values()].map(model => ({
-    id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
+    id: model.id, name: model.name && model.name.trim().length > 0 ? model.name : model.id,
+    contextWindow: model.contextWindow, maxTokens: model.maxTokens,
   }))
 }
 
@@ -423,7 +424,9 @@ export async function discoverSettingsModels(catalog: OpencodeGoCatalog): Promis
     .filter((message): message is string => message !== undefined)
   return {
     models: sortModels([
-      ...describeConfiguredModels(snapshot),
+      ...describeConfiguredModels(snapshot).map(model => ({
+        ...model, name: model.name && model.name.trim().length > 0 ? model.name : model.id,
+      })),
       ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
     ].map(model => {
       const configured = snapshot.models.get(model.id)
