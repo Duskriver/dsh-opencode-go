@@ -1,36 +1,59 @@
+/** Request snapshots, SDK dispatch, deadlines and seamless account fallback. */
+import { type OpencodeGoModelLimits, type GoAccountSwitch } from './contracts.ts';
+import { type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
+import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
+import type { Api, Model, Provider } from './sdk-types.ts';
+import { type OpencodeGoConfig } from './config.ts';
+import { ProxyTransport } from './transport.ts';
+import { OpencodeGoCatalog } from './catalog.ts';
 /**
- * The OpenCode Go adapter: one route, one catalog, per-request routing header.
- *
- * Every request to the gateway carries two Harness-owned headers: the
- * attribution User-Agent (`deepseek-harness/<version>`), which pi-ai's client
- * lets request headers override, and `x-opencode-session`, which the gateway
- * requires and uses to route a conversation and share its prompt cache. The
- * header value follows the request's session id, with special strings mapped
- * to stable ASCII values across continuation and restore. Actual cache reads
- * remain an upstream usage fact. A request with no session id gets one fresh
- * random value shared by every account attempt in that logical call.
- *
- * Multi-turn correctness rides on the shared pi-ai conversion machinery
- * (`toPiContext` reconstructs provider-native replay state from the session
- * log; `toStreamChunks` maps events to seam chunks), so assistant history,
- * tool calls, and usage land in the session log exactly as the generic pi-ai
- * adapter records them. Image content rides the same machinery: models whose
- * catalog entry declares the image modality convert attachments through the
- * durable attachment service, and every other model refuses image content
- * before any provider I/O.
- *
- * @module dsh-llm-opencode-go/adapter
+ * Reserve 64k by default only for deepseek-v4.1-flash. Other models retain the
+ * SDK's default when neither the caller nor settings specify an allowance.
+ * Per-model settings continue to cap caller values for every model. The model
+ * has already had capacity overrides applied.
  */
-import type { OpencodeGoRequestExecutorOptions } from './request-executor.ts';
-import { LlmAdapter } from '@deepseek-ai/dsh-llm';
-import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
-import { OpencodeGoCatalog, type CatalogDiagnostic } from './catalog.ts';
-import { ProxyTransport } from './proxy.ts';
-import type { OpencodeGoConfig } from './config.ts';
-import { type GoAccountSwitch } from './accounts.ts';
-import { type GoCallTrace } from './call-trace.ts';
-export type { GoCallTrace } from './call-trace.ts';
-export type { OpencodeGoImageAccess } from './request-executor.ts';
+export declare function requestMaxTokens(model: {
+    id: string;
+    maxTokens: number;
+}, limits: OpencodeGoModelLimits, requested?: number): number | undefined;
+/**
+ * The attachment-service bridges one image request reads. Construction-time
+ * (context-dependent); the config-dependent policy numbers are merged per
+ * request from the current configuration.
+ */
+export interface OpencodeGoImageAccess {
+    /** Resolve the optional durable attachment service at request time. */
+    resolveAttachments: () => AttachmentStore | undefined;
+    /** Bridge one attachment reference into the current model-tool execution world. */
+    resolveImageAccess: (attachments: AttachmentStore, ref: ImageAttachmentRef) => ImageAttachmentAccess | undefined;
+}
+/** Host dependencies used by a single attempt, independent of account selection. */
+export interface OpencodeGoRequestExecutorOptions {
+    /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
+    resolveApiKey: (config: OpencodeGoConfig, signal?: AbortSignal) => Promise<string | undefined>;
+    /**
+     * Image input machinery; absent refuses image content, which is the posture
+     * for direct construction without a durable attachment service behind it.
+     */
+    imageAccess?: OpencodeGoImageAccess;
+    /** Observe assistant history degrading to provider-neutral conversion. */
+    onReplayDegrade?: (reason: string) => void;
+}
+/** Inputs already resolved by the adapter, including one account and the wire session ID. */
+export interface OpencodeGoRequestSnapshot {
+    config: OpencodeGoConfig;
+    model: Model<Api>;
+    provider: Provider;
+    sessionId: string;
+}
+/** Shares the adapter's transport without owning its lifetime or retrying accounts. */
+export declare class OpencodeGoRequestExecutor {
+    private readonly options;
+    private readonly transport;
+    constructor(options: OpencodeGoRequestExecutorOptions, transport: ProxyTransport);
+    /** One account, one SDK attempt; host recovery still owns failures after output. */
+    stream(options: GenerateOptions, snapshot: OpencodeGoRequestSnapshot): AsyncIterable<StreamChunk>;
+}
 /** One request's serving account, with the identity captured before discovery. */
 export interface GoAccountSettlement {
     seq: number;
@@ -51,8 +74,6 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
      * two configuration generations.
      */
     config: () => OpencodeGoConfig;
-    /** Observe one bounded, content-free summary for every dispatched call. */
-    onCallTrace?: (trace: GoCallTrace) => void;
     /** Observe the catalog falling back to the curated table. */
     onFallback?: (detail: {
         url: string;
@@ -62,8 +83,6 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
     /** Observe live ids the curated table cannot route. */
     onOmitted?: (ids: readonly string[]) => void;
     onCatalogWarning?: (warning: string) => void;
-    /** Content-free timings for cache restoration and each shared online refresh. */
-    onCatalogDiagnostic?: (event: CatalogDiagnostic) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
     /** Host account-state version for actual requests, captured before asynchronous model discovery. */

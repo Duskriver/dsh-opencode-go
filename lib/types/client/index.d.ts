@@ -1,12 +1,7 @@
-/**
- * OpenCode Go settings plugin, browser half. Registers the "OpenCode Go"
- * settings page over the `llm-opencode-go` namespace: the API key (stored
- * write-only through the credentials domain), the gateway's current model
- * listing, and the adapter knobs behind the page's advanced disclosure. The
- * Host settings and credential contracts stay behind their existing wire APIs.
- */
-import type { Context as ClientContext } from '@deepseek-ai/cordis';
-import { en } from './locales.ts';
+import type { Context as ClientContext, Context } from '@deepseek-ai/cordis';
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
+import { type OpencodeGoSettings, type ExecuteAccountCommand } from './controller.ts';
+import { en } from './presentation.ts';
 declare module '@deepseek-ai/dsh-client-ui-slots' {
     interface LocaleNamespaceMap {
         /** The OpenCode Go settings page copy. */
@@ -14,9 +9,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     }
 }
 export type { OpencodeGoSectionProps } from './Section.tsx';
-export type { OpencodeGoSectionState, OpencodeGoSettings } from './section-controller.ts';
-export { OPENCODE_GO_NS } from './section-controller.ts';
-export type { OpencodeGoKey } from './locales.ts';
+export type { OpencodeGoSectionState, OpencodeGoSettings } from './controller.ts';
+export { OPENCODE_GO_NS } from './controller.ts';
+export type { OpencodeGoKey } from './presentation.ts';
 /**
  * Required services (cordis fiber inject). The target slot is declared by
  * ui-settings' apply, whose activation order relative to this one is NOT
@@ -32,3 +27,5 @@ export declare const inject: string[];
  * @param ctx - client root context.
  */
 export declare function apply(ctx: ClientContext): void;
+export declare function accountCommands(ctx: Context): ExecuteAccountCommand;
+export declare function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>): void;

@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
-import { writeFile, rm } from 'node:fs/promises'
+import { resolve, join } from 'node:path'
+import { writeFile, rm, mkdtemp, mkdir, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 
-const root = resolve(process.argv[2])
-const patch = resolve(root, 'smoke.patch.yml')
+const root = resolve(process.argv[2] ?? '.')
+const scratch = await mkdtemp(join(tmpdir(), 'dsh-go-headless-'))
+const patch = join(scratch, 'smoke.patch.yml')
 const requests = []
 const server = createServer((request, response) => {
   request.resume()
@@ -28,12 +30,14 @@ const server = createServer((request, response) => {
 })
 let child
 try {
+  await mkdir(join(scratch, 'home'))
+  await symlink(resolve(root, 'node_modules'), join(scratch, 'home', 'node_modules'), 'junction')
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
-  await writeFile(patch, `- id: opencode-go\n  config:\n    apiKeyEnv: OPENCODE_GO_INSTALL_TEST_KEY\n    baseURL: http://127.0.0.1:${server.address().port}\n- id: agent-default-model\n  config:\n    provider: dsh-opencode-go\n    model: deepseek-v4.1-flash\n- id: session-title-llm\n  disabled: true\n`)
+  await writeFile(patch, `- insert:\n    - id: opencode-go-smoke\n      name: dsh-opencode-go\n      config:\n        apiKeyEnv: OPENCODE_GO_INSTALL_TEST_KEY\n        baseURL: http://127.0.0.1:${server.address().port}\n- id: agent-default-model\n  config:\n    provider: dsh-opencode-go\n    model: deepseek-v4.1-flash\n- id: session-title-llm\n  disabled: true\n`)
   child = spawn(resolve(root, 'node_modules/.bin/dsh'), ['--profile', 'headless', '--patch', patch, 'Say standalone-ok'], {
     cwd: root,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, DSH_HOME: resolve(root, 'home'), OPENCODE_GO_INSTALL_TEST_KEY: 'fixture-key' },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, DSH_HOME: join(scratch, 'home'), OPENCODE_GO_INSTALL_TEST_KEY: 'fixture-key' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let stdout = '', stderr = ''
@@ -55,5 +59,5 @@ try {
   }
   server.closeAllConnections()
   await new Promise(resolve => server.close(resolve))
-  await rm(patch, { force: true })
+  await rm(scratch, { recursive: true, force: true })
 }

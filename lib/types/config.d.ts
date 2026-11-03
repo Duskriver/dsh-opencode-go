@@ -1,16 +1,8 @@
-/**
- * Configuration schema for the OpenCode Go adapter plugin. The section is
- * installed under the `llm-opencode-go` settings namespace on DSH 0.1.5/0.1.6.
- * DSH 0.1.7 edits the `opencode-go` profile entry through live references.
- * Both paths update field by field without a restart. Self-contained constraints
- * (URL shape, numeric bounds) fail at load for the composition layer and
- * refuse the write for the settings layer.
- *
- * @module dsh-llm-opencode-go/config
- */
+/** Live profile configuration, validation and settings presentation. */
 import z from '@deepseek-ai/schemastery';
-import type { OpencodeGoConfig } from './config-contract.ts';
-export type { OpencodeGoConfig, OpencodeGoModelLimit, OpencodeGoModelLimits } from './config-contract.ts';
+import { type OpencodeGoConfig } from './contracts.ts';
+import type { Context } from '@deepseek-ai/cordis';
+export type { OpencodeGoConfig, OpencodeGoModelLimit, OpencodeGoModelLimits } from './contracts.ts';
 /** Environment variable resolving the OpenCode API key. */
 export declare const DEFAULT_API_KEY_ENV = "OPENCODE_API_KEY";
 /** Successful refresh lifetime; failed refreshes retry sooner and explicit discovery revalidates immediately. */
@@ -19,9 +11,9 @@ export declare const DEFAULT_REFRESH_MINUTES = 60;
 export declare const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300000;
 export declare const DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS = 60000;
 export declare const DEFAULT_REQUEST_TIMEOUT_MS: number;
-/** Plain values used by the adapter and by pre-0.1.7 settings documents. */
+/** Plain configuration values used by validation and direct adapter consumers. */
 export declare const PlainConfig: z<OpencodeGoConfig>;
-/** 0.1.7's Loader retains these references when profile fields change. */
+/** The Loader retains these references when profile fields change. */
 export type LiveConfig = {
     [K in keyof OpencodeGoConfig]-?: {
         get(): OpencodeGoConfig[K];
@@ -46,3 +38,6 @@ export declare function assertBaseURL(raw: string): string;
  * @param raw - the configured credential reference.
  */
 export declare function assertApiKeyEnv(raw: string): void;
+export declare function validateGoConfig(value: OpencodeGoConfig): void;
+/** DSH profile forms edit the plugin's live Config fields directly. */
+export declare function installHostSettings(ctx: Context): void;

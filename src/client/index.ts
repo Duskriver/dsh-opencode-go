@@ -1,30 +1,28 @@
-/**
- * OpenCode Go settings plugin, browser half. Registers the "OpenCode Go"
- * settings page over the `llm-opencode-go` namespace: the API key (stored
- * write-only through the credentials domain), the gateway's current model
- * listing, and the adapter knobs behind the page's advanced disclosure. The
- * Host settings and credential contracts stay behind their existing wire APIs.
- */
-import type { Context as ClientContext } from '@deepseek-ai/cordis'
-// Type-only: pulls the shell's SlotMap merge (the 'settings.section' entry).
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { SettingsScope } from './settings.ts'
-// Type-only: pulls the slot registry Context merge (ctx.slots).
+/** Browser registration for the settings page and conversation usage pill. */
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-// Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type-only: pulls the ctx.remote merge (the forwarded credentials event key)
-// into this program.
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import { OpencodeGoSection } from './Section.tsx'
-import type { OpencodeGoSectionInjected } from './Section.tsx'
-import { OpencodeGoSectionController, type OpencodeGoSettings } from './section-controller.ts'
-import { en, zh } from './locales.ts'
-import type { GoUsage } from '../usage-contract.ts'
-import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts'
-import { goRemote } from '../remote-contract.ts'
-import { registerUsagePill } from './usage.ts'
-import { accountCommands, mountSettingsScopes } from './host-compat.ts'
+import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { Context as ClientContext, Context } from '@deepseek-ai/cordis'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
+import {
+  PROFILE_ENTRY_ID,
+  type GoUsage,
+  type AnalyticsQuery,
+  type AnalyticsReport,
+  goRemote,
+  accountsOf,
+} from '../contracts.ts'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import { OpencodeGoSection, type OpencodeGoSectionInjected } from './Section.tsx'
+import {
+  OpencodeGoSectionController,
+  type OpencodeGoSettings,
+  type ExecuteAccountCommand,
+} from './controller.ts'
+import { en, zh, type OpencodeGoKey } from './presentation.ts'
+import { UsagePill } from './UsagePill.tsx'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -37,9 +35,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 const NS = 'settings.opencode-go'
 
 export type { OpencodeGoSectionProps } from './Section.tsx'
-export type { OpencodeGoSectionState, OpencodeGoSettings } from './section-controller.ts'
-export { OPENCODE_GO_NS } from './section-controller.ts'
-export type { OpencodeGoKey } from './locales.ts'
+
+export type { OpencodeGoSectionState, OpencodeGoSettings } from './controller.ts'
+
+export { OPENCODE_GO_NS } from './controller.ts'
+
+export type { OpencodeGoKey } from './presentation.ts'
 
 /**
  * Required services (cordis fiber inject). The target slot is declared by
@@ -60,17 +61,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'llm-opencode-go: copy dictionaries')
   const modelsReady = ctx.remote.$mount(goRemote)
   ctx.effect(async () => await modelsReady)
-  mountSettingsScopes(ctx, (child, scope) => mountSettings(child, scope, modelsReady))
+  ctx.inject(['configForms', 'remote.opencodeGoModels'], child => {
+    mountSettings(child, child.configForms.get<OpencodeGoSettings>(PROFILE_ENTRY_ID), modelsReady)
+  })
 }
 
-function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
+function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
   const executeAccountCommand = accountCommands(ctx)
   registerUsagePill(ctx, scope, async ref => (await executeAccountCommand({ kind: 'select', ref })) === 'applied')
-  // The rows read the plugin's own usage namespace, and a context may only reach
-  // a remote namespace it injected. It gets an injection of its own — the way the
-  // pill declares it — because the two settings injections above must name
-  // exactly the services their host generation provides: a host carrying both
-  // service sets would otherwise mount this page twice.
   let readAccount: ((ref: string) => Promise<GoUsage>) | undefined
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     readAccount = async ref => {
@@ -79,7 +77,7 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
       return result.value
     }
   })
-  // Both settings generations share the same cancellable Host endpoint.
+  // Read the cancellable Host analytics endpoint.
   let readAnalytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
   ctx.inject(['remote.opencodeGoAnalytics'], ready => {
     readAnalytics = async (query, signal) => {
@@ -121,4 +119,72 @@ function mountSettings(ctx: ClientContext, scope: SettingsScope<OpencodeGoSettin
     label: () => t('nav'),
     inject: injected,
   }, OpencodeGoSection))
+}
+
+export function accountCommands(ctx: Context): ExecuteAccountCommand {
+  const unavailable: ExecuteAccountCommand = async () => 'unknown'
+  let execute = unavailable
+  ctx.inject(['remote.opencodeGoAccounts'], ready => {
+    ready.effect(() => {
+      const connected: ExecuteAccountCommand = async command => {
+        const result = await ready.remote.opencodeGoAccounts.execute(command)
+        return result.ok ? result.value : 'unknown'
+      }
+      execute = connected
+      return () => { if (execute === connected) execute = unavailable }
+    })
+  })
+  return command => execute(command)
+}
+
+export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>): void {
+  ctx.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
+    scope.inject(['remote.opencodeGoUsage'], ready => {
+      const credentialChanges = createSnapshotStore(0)
+      ready.effect(() => ready.remote.$on('credentials/reference-updated', ref => {
+        if (accountsOf(settings.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) {
+          credentialChanges.set(credentialChanges.getSnapshot() + 1)
+        }
+      }))
+      const readUsage = async () => {
+        const result = await ready.remote.opencodeGoUsage.read()
+        if (!result.ok) throw result.error
+        return result.value
+      }
+      // Keep the quota pill available while the analytics namespace activates.
+      // Cancellation is injected by the descriptor, outside the wire arguments.
+      let analytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
+      scope.inject(['remote.opencodeGoAnalytics'], withAnalytics => {
+        analytics = async (query, signal) => {
+          const result = await withAnalytics.remote.opencodeGoAnalytics.read(query, signal)
+          if (!result.ok) throw result.error
+          return result.value
+        }
+      })
+      const readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> => {
+        if (analytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
+          code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
+        })
+        return analytics(query, signal)
+      }
+      const translate = ready.locale.bind('settings.opencode-go')
+      ready.slots.inject('conversation.input.right', () => ready.slots.register({
+        name: 'conversation.input.right', id: 'opencode-go-usage', order: 1000,
+        inject: sessionId => ({
+          directory: ready.modelDirectories.directoryFor(sessionId as SessionId).store,
+          settings,
+          credentialChanges,
+          selectAccount: async ref => {
+            const snapshot = settings.getSnapshot()
+            if (!snapshot.writable || !accountsOf(snapshot.value ?? {}).some(account => account.apiKeyEnv === ref)) return false
+            return selectAccount ? selectAccount(ref).catch(() => false) : false
+          },
+          readUsage,
+          readAnalytics,
+          getLocale: () => ready.locale.getLocale().active,
+          t: (key: string) => translate(key as OpencodeGoKey),
+        }),
+      }, UsagePill))
+    })
+  })
 }

@@ -1,7 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ResponseCreateParamsStreaming } from 'openai/resources/responses/responses.js';
 import OpenAI from 'openai';
-import { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 
 interface TSchema {
 }
@@ -3093,63 +3092,15 @@ interface Provider<TApi extends Api = Api> {
     classify?(model: ClassifierModel<ClassifierApi>, context: ClassifierContext, options?: ClassifierOptions): Promise<ClassifierResult>;
 }
 
-/** Settings discovery includes lifecycle data that the host's generic model DTO omits. */
-
-interface GoModel {
-    id: string;
-    name?: string;
-    contextWindow?: number;
-    maxTokens?: number;
-    /** Token budget controls available to this model, including their catalog bounds. */
-    reasoningBudget?: ThinkingBudgetRange;
-    deprecated?: boolean;
-    releaseDate?: string;
-    /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
-    inputModalities?: readonly InputModality[];
-    /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
-    configurationMissing?: boolean;
-}
-interface ThinkingBudgetRange {
-    min: number;
-    max: number;
-}
-/**
- * Input modalities this page can name. models.dev uses these same five tokens, so
- * an unknown token is dropped rather than rendered as an untranslatable chip.
- */
-declare const INPUT_MODALITIES: readonly ["text", "image", "audio", "video", "pdf"];
-type InputModality = typeof INPUT_MODALITIES[number];
-/** Last successful check of one catalog source, plus any current refresh failure. */
-interface GoCatalogSourceStatus {
-    readonly updatedAt?: number;
-    readonly error?: string;
-    readonly warning?: string;
-}
-/** A failed refresh retains the Host's usable data with an explicit diagnostic. */
-interface GoModelCatalog {
-    readonly models: readonly GoModel[];
-    readonly stale: boolean;
-    readonly error?: string;
-    /** Optional for clients reading an older Host response. Timestamps are Unix milliseconds. */
-    readonly sources?: {
-        readonly listing: GoCatalogSourceStatus;
-        readonly metadata: GoCatalogSourceStatus;
-    };
-}
-declare module '@deepseek-ai/dsh-typert-protocol' {
-    interface TypertRemoteNamespaceMap {
-        opencodeGoModels: {
-            read(): Promise<RemoteResult<GoModelCatalog>>;
-        };
-    }
-}
-
-/** Public SDK types are bundled at build time, alongside the private implementation. */
+/** Public SDK types bundled independently of the private runtime implementation. */
 
 /** User controls are independent of the SDK's internal level used to enable a switch. */
 type Model<TApi extends Api> = Model$1<TApi> & {
     reasoningControl?: 'toggle' | 'effort' | 'budget';
-    reasoningBudget?: ThinkingBudgetRange;
+    reasoningBudget?: {
+        min: number;
+        max: number;
+    };
     reasoningBudgetPresets?: readonly number[];
 };
 

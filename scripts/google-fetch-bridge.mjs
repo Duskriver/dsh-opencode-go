@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const sdk = fileURLToPath(import.meta.resolve('@google/genai'))
 const adapter = fileURLToPath(import.meta.resolve('opencode-go-pi-ai/api/google-generative-ai'))
-const bridge = fileURLToPath(new URL('../src/google-fetch.ts', import.meta.url))
+const bridge = fileURLToPath(new URL('../src/transport.ts', import.meta.url))
 
 /** Vite IDs use forward slashes on Windows, while Node returns native paths. */
 export function matchesGoogleModuleId(id, filename) {

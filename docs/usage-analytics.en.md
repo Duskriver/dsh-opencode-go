@@ -15,7 +15,7 @@ The Host reads DSH's `ctx.sessionQuery`:
 
 - `listSessions()` lists sessions newest-first;
 - `readSession(id)` returns the complete event log, including closed sessions;
-- only events are scanned; the dashboard never parses compressed logs on disk or makes a session live. After an app restart, unchanged sessions are served from the local fold cache without decompressing their logs again.
+- only events are scanned; the dashboard never parses compressed logs on disk or makes a session live. After an app restart, the Host reads session events again; the plugin does not keep an on-disk fold cache.
 
 The browser receives aggregate numbers only: no session ids, titles, content, working directories, or credentials.
 
@@ -60,7 +60,7 @@ The request start comes from the matching `step/start` event; when that key is a
 
 ## Model detail
 
-Each model row shows only the display name plus requests, input, output, cache read, cost, and cost share; the invocation id and the Go / Go Plus monthly limits are no longer rendered (the snapshot data remains in `src/go-plan.ts`).
+Each model row shows only the display name plus requests, input, output, cache read, cost, and cost share; the invocation id and the Go / Go Plus monthly limits are no longer rendered (the snapshot data remains in `src/analytics.ts`).
 
 The cost cell has three states: priced requests render the estimate (even when some requests in the same row are unpriced); `pricedRequests === 0` with `unpricedRequests > 0` renders the **unpriced** tag; a row whose requests all lack usage (both pricing counters are zero) renders `—`, meaning the row carries no usable data rather than "free". The share cell renders `—` whenever there is no amount, and the composition note's "also free or unpriced" line only lists genuinely unpriced models, no longer mixing in missing-usage rows.
 
@@ -83,21 +83,17 @@ The calendar is laid out densely by calendar date across the selected range (a 3
 - by default, at most **500 sessions**, **500,000 events**, and **12 seconds**, read with up to eight concurrent session reads (falling back to serial for a Host that cannot read concurrently);
 - exceeding a limit marks the report incomplete with its cause (session slice / event budget / time budget); the footer also reports how many sessions were left unread when the budget or cap stopped the scan, without implying the range was fully covered;
 - **Scan more history** raises the session cap to 1,000 then 2,000; the choice is stored in the browser and survives reopening the panel;
-- closed sessions' folds are cached in memory and served LRU-style, checking their durable log revision on every scan: a session resumed and closed between dashboard opens is re-read when its revision changes. When the Host has no revision, its index fails, or the session is missing from that index, in-memory reuse is limited to five seconds. Live folds also have a five-second reuse window and are re-read on closing; eviction happens only at the end of a scan, and a report is always built from the results actually read in that run, so cache eviction cannot silently drop requests;
-- folds are also persisted to `~/.dsh/cache/dsh-opencode-go/analytics-folds.v1.json` (honoring `DSH_HOME`): the file is versioned, capped at 32MB, replaced atomically, and entries not re-verified for 30 days are dropped on the next write. Entries are validated against the durable log revision reported by the Host's `sessionPersistence`, so after an app restart every session whose log did not change is reused without being read again. Live sessions are never written, a cancelled scan writes nothing, and an incomplete scan only merges what it read instead of deleting unseen entries; a Host without `sessionPersistence` (or with a failing one) falls back to the in-memory cache with no effect on the report. The cache holds session ids, model names, token counts and timestamps only — no titles, message text, working directories or credentials;
+- session folds are cached in memory under an LRU policy for at most five seconds; live sessions are re-read on closing, and restarting clears the cache. Eviction happens after scanning, while each report uses its own scan results;
 - the price table is fetched in parallel with the scan, waiting at most 4 seconds;
 - the footer splits list / scan / pricing timings;
 - within one open, the window end is taken once at open time, so re-entering the same range does not rescan; **Refresh** forces a new scan;
-- without a reusable cache, the first scan reads the target sessions under the limits above; when durable revisions are available, later scans re-read only changed closed sessions, and persisted folds can also be reused after a restart;
+- without a reusable in-memory cache, the scan reads target sessions under those budgets; sessions are read again after restarting or after the five-second reuse window;
 - a range already seen in this open renders its previous report immediately and revalidates in the background, explicitly labeled as the previous scan while loading;
 - closing the dialog aborts the running scan; there is no background polling.
 
-## Contract compatibility rules
+## Query and report contracts
 
-The dashboard's query and report are validated on both sides by the strict codecs in `src/analytics-contract.ts`. Two rules are now fixed repository policy:
-
-- **New fields travel as optional numbers/strings**: the report validator passes unknown keys through and the query validator drops unknown fields, so adding optional numeric or string fields is safe when both ends ship together. The new `coverage.listMs` / `pricingMs` / `unreadSessions` / `evictedSessions` / `unattributedRequests` fields followed this channel; an older client keeps accepting a report that carries them;
-- **Never add a value to an enum**: `coverage.truncation` and a model row's `limitNote` are whitelist-validated enum fields — an older client rejects the **whole report** on an unknown enum value. Do not extend these enums without shipping the change on both ends.
+`src/contracts.ts` validates query dates, timezone and scan limits. Report types and aggregation live in `src/analytics.ts`. RPC checks the response envelope without manually revalidating every aggregate field. The host and client ship in the same package.
 
 ## Known limitations
 
@@ -109,4 +105,4 @@ The dashboard's query and report are validated on both sides by the strict codec
 
 ## Verification
 
-The `analytics-scan`, `analytics-pricing`, and `analytics` specs plus the two client specs cover provider filtering, fork cutoffs, peak pricing, tiers, per-field usage degradation, request-time fallbacks, the cache reuse window, truncation and budget stops, the concurrency pool, unpriced models, price-table fallback, cancellation, segmented timings, and both entry points. All use synthetic sessions and a fake query service; no real user logs are read.
+Phase one checks peak/off-peak and tiered pricing, event folding, five-second memory reuse, Go / Go Plus limit data, and the full AnalyticsDialog rendering and interactions. Checks use synthetic sessions and fake query services without reading real user logs. Existing test paths and removed internal contracts will be migrated together in phase two.

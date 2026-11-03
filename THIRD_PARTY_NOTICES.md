@@ -1,6 +1,6 @@
 # Third-party notices
 
-The initial adapter, settings UI, and `src/conversion/{context,stream,replay}.ts` were derived from DeepSeek Harness, copyright (c) 2026 DeepSeek, under the MIT license included in LICENSE. The original DeepSeek copyright notice is retained for these derived portions. The conversion modules are maintained in this package because the published DSH pi-ai package does not export its conversion helpers.
+The initial adapter, settings UI, and `src/conversion.ts` were derived from DeepSeek Harness, copyright (c) 2026 DeepSeek, under the MIT license included in LICENSE. The original DeepSeek copyright notice is retained for these derived portions. The conversion code is maintained in this package because the published DSH pi-ai package does not export its conversion helpers.
 
 Original additions and subsequent modifications made in this project are copyright (c) 2026 dsh-opencode-go contributors and are also licensed under MIT. LICENSE records both the upstream attribution and this project's contributor attribution.
 

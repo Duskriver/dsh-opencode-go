@@ -29,7 +29,7 @@ DSH 原生支持接入 OpenCode Go，但原生模式无法满足复杂的生产�
 
 ## 🚀 快速开始
 
-适用于 DSH `0.1.5-rc.1` 及以上版本（完整支持矩阵见[兼容矩阵](docs/development.md#installed-package-matrix)）。
+适用于 DSH `0.2.1-rc.5` 及以上版本；开发与验证方式见[开发说明](docs/development.md)。
 
 ### 1. 安装插件
 
@@ -47,7 +47,7 @@ dsh plugin --profile web add dsh-opencode-go
 *命令行安装后请重启 `dsh web`。Headless 用户请使用 `--profile headless`。*
 
 ### 2. 配置与使用
-1. 打开 **设置 → OpenCode Go**，填入你的 OpenCode Go API Key；若有多个账号，可在 **账号** 卡片中点击添加。
+1. 打开 **设置 → OpenCode Go → 账号**，点击添加，填写账号名称与 OpenCode Go API Key 后确认。
 2. 在任意会话的模型选择器中，选择 **DSH OpenCode Go** 目录下的模型。
 3. 开始对话，输入区右下角即可看到实时的用量胶囊。
 
@@ -91,7 +91,7 @@ dsh plugin --profile web add dsh-opencode-go
 
 点击用量面板底部的 **用量统计**，或进入 **设置 → OpenCode Go → 用量统计** 即可唤出看板：
 
-- **本地扫描与缓存**：直接调用 DSH 宿主 `sessionQuery` 扫描本地历史会话，统计本插件产生的 Token 消耗，不会为统计上传会话内容。模型和价格元数据会从 models.dev 联网刷新。已关闭会话的折叠结果会按日志 revision 缓存在本地；revision 可用时只重读变更过的会话，不可用时最多复用 5 秒。
+- **本地扫描与缓存**：直接调用 DSH 宿主 `sessionQuery` 扫描本地历史会话，统计本插件产生的 Token 消耗，不会为统计上传会话内容。模型和价格元数据会从 models.dev 联网刷新。会话折叠结果仅在内存中最多复用 5 秒，重启后重新扫描，不写入磁盘缓存。
 - **峰谷电价式开销估算**：使用从 models.dev 获取的模型价格；自动识别 DeepSeek V4.1 Flash / V4 Pro 等模型的官方峰时时段（UTC 周一至周五 01:00–04:00、06:00–10:00）并按双倍费率估算金额。
 - **四款专属主题**：支持在 **寂静黑 / 石墨（默认）/ 海盐青 / 暖砂** 之间切换，自动适配系统的亮色/暗色模式。
 
@@ -99,30 +99,28 @@ dsh plugin --profile web add dsh-opencode-go
 
 ## 🛠️ 架构设计与工作原理
 
-本插件采用严格的宿主-客户端分离（Host-Client Separation）架构：
+源码按领域收敛为 17 个实现模块，宿主与浏览器通过 DSH Typert RPC 通讯：
 
+```text
+src/
+├── index.ts + config.ts          插件挂载、configure 设置与热更新
+├── contracts.ts                 浏览器可用的配置、模型与 RPC 契约
+├── adapter.ts                   请求执行、会话头、容灾与冷却
+├── catalog.ts                   模型目录与公共元数据缓存
+├── conversion.ts                上下文、单次请求图片预算、回放与流转换
+├── google.ts + sdk-types.ts      Google SDK 接入与公开类型
+├── accounts.ts                  串行账号命令、凭据写入与官方配额
+├── analytics.ts                 本地统计、内存会话缓存与计价
+├── transport.ts                 HTTP/HTTPS/SOCKS5、超时与脱敏错误
+└── client/
+    ├── index.ts + controller.ts  configForms 接入、类型化草稿与账号操作
+    ├── Section.tsx              设置页、账号卡片、模型编辑器与主题选择
+    ├── UsagePill.tsx            会话额度胶囊
+    ├── AnalyticsDialog.tsx      用量与费用看板
+    └── presentation.ts          多语言、主题与显示格式
 ```
-[ DSH 前端 UI (React + Slots) ]
-   ├── UsagePill.tsx (会话胶囊组件)
-   ├── AccountsCard.tsx (账号拖拽与管理卡片)
-   ├── ModelEditor.tsx (模型自定义编辑器)
-   └── AnalyticsDialog.tsx (本地用量与费用看板)
-               │ (通过 DSH Typert RPC 双向通讯)
-               ▼
-[ DSH 宿主服务 (Node.js ESM) ]
-   ├── OpencodeGoAdapter (核心适配器，实现 LlmAdapter 协议)
-   │     ├── rejectedKeys (5分钟失败 Key 冷却熔断器)
-   │     └── autoSwitch (出词前备用账号轮询状态机)
-   ├── OpencodeGoRequestExecutor (请求执行器)
-   │     ├── x-opencode-session (稳定会话 ID 哈希，绑定网关 Prompt 缓存)
-   │     ├── ImagePayloadLease (图片尺寸预算池，防止高并发 OOM)
-   │     └── idleWatchdog (流空闲超时看门狗，防长连接挂死)
-   ├── GoUsageService (配额查询服务，代理 /usage 接口)
-   └── Conversion 层 (上下文与流事件双向映射)
-               │
-               ▼
-   [ OpenCode Go 在线网关 API ]
-```
+
+账号操作在内存串行队列中直接更新凭据与设置。模型容量草稿始终保留为对象；图片按单次请求限制数量、编码字节及最多四路并行准备。宿主仅使用 DSH `0.2.1-rc.5` 起提供的设置与图片卸载接口。包的 `.` 与 `./client` 导出路径保持不变。
 
 ### 为什么必须要携带 `x-opencode-session`？
 OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插件会自动将你的 DSH 对话 ID 经过单向哈希（保留可读字符并在需要时转为安全散列），以稳定的形式放入 `x-opencode-session` 请求头中。这样不仅能让多轮对话始终落在同一推理节点上，还能最大化命中网关的 Prompt Cache，显著节省思考与生成时间。
@@ -201,11 +199,27 @@ dsh plugin --profile web remove dsh-opencode-go
 
 ---
 
+## 🧪 开发与验证
+
+使用 Node.js `^22.19.0 || >=24.0.0`，开发依赖锁定 DSH `0.2.1-rc.5`、Cordis `4.0.5`；宿主 Cordis 要求 `~4.0.5`。
+
+```sh
+npm ci
+npm test
+npm run typecheck
+npm run check:dist
+npm run verify
+```
+
+测试按 12 个领域文件覆盖宿主、协议转换、账号、统计、传输和前端。修改源码后先运行 `npm run compile` 更新 `lib/`；`verify` 包含类型检查、产物一致性、全量测试与包加载冒烟。独立安装和 Headless 验证见[开发说明](docs/development.md)。
+
+---
+
 ## 📚 更多文档与链接
 
 - 📖 [高级使用指南（Headless 部署、代理策略与错误排查）](docs/advanced.md)
 - 📊 [用量看板统计说明（计价口径与扫描策略）](docs/usage-analytics.md)
 - 🛠️ [开发与贡献指南](docs/development.md)
-- 🧪 [多版本兼容性与验证记录](docs/verification.md)
+- 🧪 [验收范围与验证记录](docs/verification.md)
 - 🐛 [提交 Issue 与建议](https://github.com/Duskriver/dsh-opencode-go/issues)
 - 📄 [MIT 开源许可证](LICENSE)

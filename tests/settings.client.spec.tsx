@@ -1,0 +1,1473 @@
+// @vitest-environment jsdom
+import { apply, accountCommands } from '../src/client/index.ts'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
+import { bindSnapshotSelector, createConfigForm, acceptFormWrites } from './support/client.tsx'
+import * as store from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { OpencodeGoSection, type OpencodeGoSectionProps, type OpencodeGoSectionState } from '../src/client/Section.tsx'
+import {
+  OpencodeGoSectionController,
+  type OpencodeGoSettings,
+  type OpencodeGoSectionFace,
+} from '../src/client/controller.ts'
+import { en, getGoTheme, setGoTheme, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
+import type { AnalyticsQuery, AnalyticsReport } from '../src/contracts.ts'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { runInNewContext } from 'node:vm'
+import * as React from 'react'
+import * as jsx from 'react/jsx-runtime'
+import { Context } from '@deepseek-ai/cordis'
+import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
+import type { LocaleRuntime as HostLocaleRuntime, LocaleSettings } from '@deepseek-ai/dsh-client-locale/client'
+import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import { UsagePill, type UsagePillProps } from '../src/client/UsagePill.tsx'
+
+describe("settings page and typed capacity editing", () => {
+
+  const t = (key: keyof typeof en, params?: Record<string, unknown>): string =>
+    Object.entries(params ?? {}).reduce(
+      (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+      en[key],
+    )
+
+  function field(text: string, rest: Partial<OpencodeGoSectionState['baseURL']> = {}): OpencodeGoSectionState['baseURL'] {
+    return { text, overridden: false, invalid: false, ...rest }
+  }
+
+  type SectionField = 'baseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+    | 'usageDisplay' | 'protocolOverrides'
+    | 'maxImages'
+    | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
+    | 'modelLimits' | 'modelLimitDraft'
+
+  const settled: Omit<OpencodeGoSectionState, SectionField> = {
+    available: true,
+    writable: true,
+    dirty: false,
+    invalid: false,
+    saving: false,
+    failed: false,
+    enabled: true,
+    modelVisibility: {},
+    pickerSaving: false,
+    pickerFailed: false,
+    accounts: { entries: [], activeRef: 'OPENCODE_API_KEY', autoSwitch: false, busy: false, blocked: false, refreshing: false },
+  }
+
+  type ModelEntry = import('../src/contracts.ts').GoModel
+
+  function listing(entries: readonly ModelEntry[]) {
+    return {
+      status: 'ready' as const,
+      count: entries.length,
+      preview: entries.map(entry => entry.name ?? entry.id),
+      entries,
+    }
+  }
+
+  function stateOf(overrides: Partial<OpencodeGoSectionState> = {}): OpencodeGoSectionState {
+    return {
+      ...settled,
+      usageDisplay: field('auto'),
+      protocolOverrides: field('auto'),
+      baseURL: field('https://opencode.ai/zen/go/v1'),
+      proxyURL: field(''),
+      refreshMinutes: field('60'),
+      streamIdleTimeoutMs: field('300000'),
+      maxImages: field(''),
+      maxRequestImageBytes: field('20971520'),
+      requestImagePixelBudget: field('4194304'),
+      requestImageMaxBytes: field('1048576'),
+      modelLimits: { overridden: false, invalid: false },
+      modelLimitDraft: {},
+      models: { status: 'idle' },
+      ...overrides,
+    }
+  }
+
+  function actions() {
+    return {
+      edit: vi.fn(),
+      editModelLimits: vi.fn(),
+      loadAccounts: vi.fn(),
+      addAccount: vi.fn(async () => true),
+      renameAccount: vi.fn(async () => true),
+      removeAccount: vi.fn(async () => true),
+      selectAccount: vi.fn(async () => true),
+      setAutoSwitch: vi.fn(async () => true),
+      replaceAccountKey: vi.fn(async () => true),
+      moveAccount: vi.fn(async () => true),
+      resetField: vi.fn(),
+      save: vi.fn(),
+      discard: vi.fn(),
+      loadModels: vi.fn(),
+      setEnabled: vi.fn(),
+      setModelEnabled: vi.fn(),
+    }
+  }
+
+  function renderSection(
+    state: OpencodeGoSectionState,
+    overrides: Partial<ReturnType<typeof actions>> = {},
+    options: { foldedModels?: boolean; analytics?: { readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport> } } = {},
+  ) {
+    const store = createSnapshotStore(state)
+    const props = {
+      ...actions(),
+      ...overrides,
+      ...(options.analytics ?? {}),
+      t,
+      useOpencodeGo: bindSnapshotSelector(store),
+    } as unknown as OpencodeGoSectionProps
+    render(<OpencodeGoSection {...props} />)
+    // The page ships with the model card folded; most of these tests are about what
+    // is inside it, so they open it the way a reader would.
+    if (options.foldedModels !== true) openModelLimits()
+    return store
+  }
+
+  /** The page's advanced disclosure starts collapsed; open it before its fields. */
+  function openAdvanced(): void {
+    fireEvent.click(screen.getByText(en.advancedLabel))
+  }
+
+  /** The model card ships folded; open it before its list and its capacities. */
+  function openModelLimits(): void {
+    // Nothing is served in the unavailable posture, and then there is no card.
+    const trigger = document.querySelector('[aria-controls="opencode-go-models"]')
+    if (trigger !== null) fireEvent.click(trigger)
+  }
+
+  describe('OpencodeGoSection', () => {
+    it('exposes only automatic and experimental Responses routing and stages the selection', () => {
+      const reading = actions()
+      renderSection(stateOf({ protocolOverrides: field('openai-responses', { overridden: true }) }), reading)
+      openAdvanced()
+      const group = screen.getByRole('radiogroup', { name: en.protocolOverridesLabel })
+      const choices = within(group).getAllByRole('radio')
+      expect(choices.map(choice => choice.textContent)).toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
+      expect(choices.map(choice => choice.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+      fireEvent.click(choices[0])
+      expect(reading.edit).toHaveBeenCalledWith('protocolOverrides', 'auto')
+      expect(reading.save).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      expect(reading.resetField).toHaveBeenCalledWith('protocolOverrides')
+    })
+
+    it('stages the three usage display modes in advanced settings and offers reset', () => {
+      const reading = actions()
+      renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)
+      expect(screen.queryByRole('radiogroup', { name: en.usageDisplayLabel })).toBeNull()
+      openAdvanced()
+      const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
+      const choices = within(group).getAllByRole('radio')
+      expect(choices.map(choice => choice.textContent))
+        .toEqual([en.usageDisplay_auto, en.usageDisplay_always, en.usageDisplay_off])
+      expect(choices[1].getAttribute('aria-checked')).toBe('true')
+      fireEvent.click(choices[2])
+      expect(reading.edit).toHaveBeenCalledWith('usageDisplay', 'off')
+      expect(reading.save).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      expect(reading.resetField).toHaveBeenCalledWith('usageDisplay')
+    })
+
+    it('disables usage display editing in a read-only deployment', () => {
+      renderSection(stateOf({ writable: false }))
+      openAdvanced()
+      const choices = within(screen.getByRole('radiogroup', { name: en.usageDisplayLabel })).getAllByRole('radio')
+      expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
+    })
+
+    it('moves the segmented selection with the arrow keys', () => {
+      const reading = actions()
+      renderSection(stateOf({ usageDisplay: field('auto') }), reading)
+      openAdvanced()
+      const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
+      within(group).getAllByRole('radio')[0].focus()
+      fireEvent.keyDown(group, { key: 'ArrowRight' })
+      expect(reading.edit).toHaveBeenLastCalledWith('usageDisplay', 'always')
+      fireEvent.keyDown(group, { key: 'ArrowLeft' })
+      expect(reading.edit).toHaveBeenLastCalledWith('usageDisplay', 'off')
+    })
+
+    it('hangs each hint off its field description, not a visible line', () => {
+      renderSection(stateOf())
+      openAdvanced()
+      const input = screen.getByLabelText<HTMLInputElement>(en.baseURLLabel)
+      const hint = document.getElementById(input.getAttribute('aria-describedby') ?? '')
+      expect(hint?.textContent).toBe(en.baseURLHint)
+      // The sentence lives in the description only; the row shows the hint mark.
+      expect(screen.getAllByText(en.baseURLHint)).toHaveLength(1)
+    })
+
+    it('opens hints with keyboard focus and closes them when focus moves to the field', () => {
+      renderSection(stateOf())
+      openAdvanced()
+      const input = screen.getByLabelText<HTMLInputElement>(en.baseURLLabel)
+      const trigger = screen.getByRole<HTMLButtonElement>('button', { name: en.baseURLHint })
+      expect(trigger.type).toBe('button')
+      expect(trigger.tabIndex).toBe(0)
+      expect(trigger.getAttribute('aria-hidden')).not.toBe('true')
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      act(() => { trigger.focus() })
+      expect(document.activeElement).toBe(trigger)
+      expect(screen.getByRole('tooltip').textContent).toBe(en.baseURLHint)
+      act(() => { input.focus() })
+      expect(screen.queryByRole('tooltip')).toBeNull()
+      expect(document.getElementById(input.getAttribute('aria-describedby') ?? '')?.textContent).toBe(en.baseURLHint)
+    })
+
+    it('groups the tuning rows under four headings', () => {
+      renderSection(stateOf())
+      openAdvanced()
+      const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
+      const order: [string, string][] = [
+        [en.groupUsageProtocol, en.usageDisplayLabel],
+        [en.groupConnection, en.baseURLLabel],
+        [en.groupCacheTimeouts, en.refreshMinutesLabel],
+        [en.groupImages, en.maxImagesLabel],
+      ]
+      for (const [heading, firstRow] of order) {
+        expect(text).toContain(heading)
+        expect(text.indexOf(heading)).toBeLessThan(text.indexOf(firstRow))
+      }
+    })
+
+    it('renders nothing until every injected seat is present', () => {
+      const { container } = render(<OpencodeGoSection t={t} />)
+      expect(container.innerHTML).toBe('')
+    })
+
+    it('shows the unavailable posture while the namespace is not served', () => {
+      const reading = actions()
+      renderSection(stateOf({ available: false }), reading)
+      expect(screen.getByText(en.unavailable)).toBeTruthy()
+      // Nothing is served, so there is no listing to ask the gateway for.
+      expect(reading.loadModels).not.toHaveBeenCalled()
+    })
+
+    it('reads the model listing once on mount, and not again when one is already held', () => {
+      const reading = actions()
+      renderSection(stateOf(), reading)
+      expect(reading.loadModels).toHaveBeenCalledTimes(1)
+
+      cleanup()
+      const held = actions()
+      renderSection(stateOf({ models: listing([{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }]) }), held)
+      expect(held.loadModels).not.toHaveBeenCalled()
+    })
+
+    it('reflects the switch state and writes the flip straight through', () => {
+      const reading = actions()
+      renderSection(stateOf({ enabled: true }), reading)
+
+      const control = screen.getByRole('switch', { name: en.enabledLabel })
+      expect(control.getAttribute('aria-checked')).toBe('true')
+      // The sentence is the switch's description, not a paragraph under it.
+      expect(control.getAttribute('title')).toBe(en.enabledHint)
+
+      // The toggle writes on the click: no save gesture stands between the user
+      // and the route leaving the pickers.
+      fireEvent.click(control)
+      expect(reading.setEnabled).toHaveBeenCalledWith(false)
+      expect(reading.save).not.toHaveBeenCalled()
+    })
+
+    it('explains the withdrawn state while the switch is off', () => {
+      renderSection(stateOf({ enabled: false }))
+
+      const control = screen.getByRole('switch', { name: en.enabledLabel })
+      expect(control.getAttribute('aria-checked')).toBe('false')
+      expect(control.getAttribute('title')).toBe(en.enabledOff)
+    })
+
+    it('locks the switch with the same read-only document that locks the form', () => {
+      renderSection(stateOf({ writable: false }))
+
+      expect(screen.getByRole('switch', { name: en.enabledLabel }).hasAttribute('disabled')).toBe(true)
+    })
+
+    it('keeps deprecated gateway models configurable and changes picker visibility immediately', () => {
+      const acts = actions()
+      renderSection(stateOf({ models: listing([{ id: 'old', name: 'Old model', deprecated: true }]),
+        modelLimitDraft: { absent: { maxTokens: 10 } },
+      }), acts)
+      expect(screen.queryByRole('button', { name: /absent/ })).toBeNull()
+      expect(screen.getByLabelText(t('limitsOutputLabel', { name: 'Old model' })).hasAttribute('disabled')).toBe(false)
+      const toggle = screen.getByRole('switch', { name: t('modelVisibleLabel', { name: 'Old model' }) })
+      expect(toggle.getAttribute('aria-checked')).toBe('false')
+      fireEvent.click(toggle)
+      expect(acts.setModelEnabled).toHaveBeenCalledWith('old', true)
+      expect(acts.save).not.toHaveBeenCalled()
+    })
+
+    it('shows new models first, deprecated models last, and retains search within status filters', () => {
+      renderSection(stateOf({ models: listing([
+        { id: 'old', name: 'Old', deprecated: true }, { id: 'normal', name: 'Normal' },
+        { id: 'new', name: 'New', releaseDate: new Date().toISOString().slice(0, 10) },
+      ]) }))
+      const nav = () => screen.getByRole('navigation', { name: en.modelsLabel })
+      expect(within(nav()).getAllByRole('button').map(button => button.textContent?.split(' ')[0])).toEqual(['New', 'Normal', 'Old'])
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterDeprecated + ' 1') }))
+      expect(within(nav()).getAllByRole('button')).toHaveLength(1)
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'new' } })
+      expect(screen.queryByRole('navigation')).toBeNull()
+    })
+
+    it('shows one selected model editor immediately alongside the searchable list', () => {
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+      expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+      expect(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' }))).toBeTruthy()
+      expect(screen.queryByRole('button', { name: en.limitsLabel })).toBeNull()
+    })
+
+    it('names every input modality in catalog order, including the ones the model does not accept', () => {
+      renderSection(stateOf({ models: listing([
+        { id: 'omni', name: 'Omni', contextWindow: 1_000_000, maxTokens: 131_072, inputModalities: ['text', 'image', 'video'] },
+      ]) }))
+      const text = screen.getByRole('region', { name: en.modelDetails }).textContent ?? ''
+      const labels = [en.modalityText, en.modalityImage, en.modalityAudio, en.modalityVideo, en.modalityPdf]
+      labels.forEach(label => { expect(text).toContain(label) })
+      const positions = labels.map(label => text.indexOf(label))
+      expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    })
+
+    it('falls back to an undeclared posture when the catalog carries no modalities', () => {
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+      const pane = screen.getByRole('region', { name: en.modelDetails })
+      expect(within(pane).getByText(en.modalityUnknown)).toBeTruthy()
+      expect(within(pane).queryByText(en.modalityVideo)).toBeNull()
+    })
+
+    it('marks a model carrying a capacity override in the compact list', () => {
+      renderSection(stateOf({
+        models: listing([{ id: 'm', name: 'Model' }]),
+        modelLimitDraft: { m: { contextWindow: 1024 } },
+      }))
+      const nav = screen.getByRole('navigation', { name: en.modelsLabel })
+      expect(nav.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
+      expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
+    })
+
+    it('keeps the compact row to the model name and its badges', () => {
+      const today = new Date().toISOString().slice(0, 10)
+      renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
+      const row = within(screen.getByRole('navigation', { name: en.modelsLabel })).getByRole('button')
+      expect(row.textContent).toContain('Fresh')
+      expect(row.textContent).toContain(en.newBadge)
+      // The model id and the release date are the parameter card's job.
+      expect(row.textContent).not.toContain('fresh-model')
+      expect(row.textContent).not.toContain(today)
+      expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain('fresh-model')
+    })
+
+    it('shares one line between the model id and its release date', () => {
+      const today = new Date().toISOString().slice(0, 10)
+      renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
+      const pane = screen.getByRole('region', { name: en.modelDetails })
+      const id = pane.querySelector('code')
+      const date = within(pane).getByText(today)
+      // The date rides the id's line instead of taking a provenance row of its own.
+      expect(date.parentElement).toBe(id?.parentElement)
+      // The full provenance stays one hover away, without spending a line on it.
+      expect(date.getAttribute('title')).toBe(t('releaseSource', { date: today }))
+    })
+
+    it('adds the forwarding caveat only where a model declares inputs beyond text and images', () => {
+      renderSection(stateOf({ models: listing([{ id: 'omni', name: 'Omni', inputModalities: ['text', 'video'] }]) }))
+      expect(screen.getByRole('region', { name: en.modelDetails }).textContent).toContain(en.modalitiesForwarding)
+
+      cleanup()
+      renderSection(stateOf({ models: listing([{ id: 'vision', name: 'Vision', inputModalities: ['text', 'image'] }]) }))
+      expect(screen.getByRole('region', { name: en.modelDetails }).textContent).not.toContain(en.modalitiesForwarding)
+    })
+
+    it('makes model capacities searchable and stages numeric edits', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        models: listing([
+          { id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 262_144, maxTokens: 32_768 },
+          { id: 'kimi-k2', name: 'Kimi K2', contextWindow: 131_072, maxTokens: 16_384 },
+        ]),
+        modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
+      }), edits)
+
+      expect(screen.getByRole('region', { name: en.modelDetails })).toBeTruthy()
+      const context = screen.getByLabelText(t('limitsContextLabel', { name: 'DeepSeek V4.1 Flash' })) as HTMLInputElement
+      expect(context.type).toBe('number')
+      expect(context.value).toBe('131072')
+
+      fireEvent.change(context, { target: { value: '262144' } })
+      expect(edits.editModelLimits).toHaveBeenCalledWith({"deepseek-v4.1-flash":{"contextWindow":262144}})
+
+      const filter = screen.getByLabelText(en.limitsFilterLabel)
+      fireEvent.change(filter, { target: { value: 'kimi' } })
+      expect(screen.queryByRole('button', { name: /DeepSeek V4\.1 Flash/ })).toBeNull()
+      expect(screen.getByRole('button', { name: /Kimi K2/ })).toBeTruthy()
+
+      fireEvent.change(filter, { target: { value: 'not-there' } })
+      expect(screen.getByText(t('limitsNoMatches', { query: 'not-there' }))).toBeTruthy()
+    })
+
+    it('offers a clear action that returns a model to its catalog capacities', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        models: listing([{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', contextWindow: 262_144 }]),
+        modelLimitDraft: { 'deepseek-v4.1-flash': { contextWindow: 131_072 } },
+      }), edits)
+
+      fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
+      expect(edits.editModelLimits).toHaveBeenCalledWith({"deepseek-v4.1-flash":null})
+    })
+
+    it('stages clearing one field without dropping the other or restoring an inherited value', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        models: listing([{ id: 'm', name: 'Model' }]),
+        modelLimitDraft: { m: { contextWindow: 123456, maxTokens: 1024 }, previous: null },
+      }), edits)
+      fireEvent.change(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })), { target: { value: '' } })
+      expect(edits.editModelLimits).toHaveBeenCalledWith({"m":{"contextWindow":null,"maxTokens":1024},"previous":null})
+      fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+      expect(edits.editModelLimits).toHaveBeenCalledWith({"m":null,"previous":null})
+    })
+
+    it('does not count explicit catalog resets as customized models', () => {
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]), modelLimitDraft: { m: null } }))
+      expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
+      expect(screen.queryByRole('button', { name: en.limitsResetModel })).toBeNull()
+      expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
+    })
+
+    it('ships the model card folded and opens it on demand', () => {
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+      const trigger = screen.getByRole('button', { name: en.modelsLabel })
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(document.getElementById('opencode-go-models')).toBeNull()
+      expect(screen.queryByRole('navigation', { name: en.modelsLabel })).toBeNull()
+
+      fireEvent.click(trigger)
+      expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      expect(document.getElementById('opencode-go-models')).not.toBeNull()
+      expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+
+      fireEvent.click(trigger)
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(document.getElementById('opencode-go-models')).toBeNull()
+    })
+
+    it('keeps what the model card reports out of the fold', () => {
+      // The card ships folded, so a notice behind it is a notice nobody reads:
+      // the refused switch write and the listing's own diagnostics both show.
+      renderSection(stateOf({ pickerFailed: true, models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+      expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+      expect(screen.getByText(en.pickerFailed)).toBeTruthy()
+
+      cleanup()
+      renderSection(stateOf({ models: { status: 'failed', message: 'offline' } }), {}, { foldedModels: true })
+      expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+      expect(screen.getByText(en.modelsFailed)).toBeTruthy()
+      expect(screen.getByText('offline')).toBeTruthy()
+
+      // A healthy listing still leaves the folded card with nothing to say.
+      cleanup()
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+    })
+
+    it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+      expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+
+      const refresh = screen.getByRole('button', { name: en.modelsRefresh })
+      const filters = screen.getByRole('group', { name: en.filterLabel })
+      expect(filters.contains(refresh)).toBe(true)
+    })
+
+    it('closes the model card with the tally on its own row beside the clear action', () => {
+      renderSection(stateOf({
+        models: listing([{ id: 'm', name: 'Model' }]),
+        modelLimitDraft: { m: { contextWindow: 1024 } },
+      }))
+      const tally = screen.getByText(t('limitsSummary', { count: 1 }))
+      const action = screen.getByRole('button', { name: en.limitsResetAll })
+      // One row of its own, under the model area, tally left of the action.
+      expect(tally.parentElement).toBe(action.parentElement)
+      expect(tally.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      // The action is a control, not decoration: live while the document is.
+      expect(action.hasAttribute('disabled')).toBe(false)
+
+      cleanup()
+      renderSection(stateOf({
+        writable: false,
+        models: listing([{ id: 'm', name: 'Model' }]),
+        modelLimitDraft: { m: { contextWindow: 1024 } },
+      }))
+      expect(screen.getByRole('button', { name: en.limitsResetAll }).hasAttribute('disabled')).toBe(true)
+    })
+
+    it('never invents gateway membership from offline saved overrides, but permits clearing them', () => {
+      const edits = actions()
+      renderSection(stateOf({ models: { status: 'failed', message: 'offline' },
+        modelLimitDraft: { retired: { maxTokens: 1024 }, reset: null },
+      }), edits)
+      expect(screen.queryByRole('button', { name: /retired/ })).toBeNull()
+      expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+      expect(edits.editModelLimits).toHaveBeenCalledWith({"retired":null,"reset":null})
+    })
+
+    it('reports a reading listing, an empty listing, and a failed one', () => {
+      renderSection(stateOf())
+      expect(screen.getByText(en.modelsLoading)).toBeTruthy()
+
+      cleanup()
+      renderSection(stateOf({ models: listing([]) }))
+      expect(screen.getByText(en.modelsEmpty)).toBeTruthy()
+
+      cleanup()
+      renderSection(stateOf({ models: { status: 'failed', message: 'the live model listing is unreachable' } }))
+      expect(screen.getByText(en.modelsFailed)).toBeTruthy()
+      expect(screen.getByText('the live model listing is unreachable')).toBeTruthy()
+    })
+
+    it('re-reads the listing on demand, and refuses a second read while one is outstanding', () => {
+      const reading = actions()
+      renderSection(stateOf({ models: listing([{ id: 'a' }]) }), reading)
+      fireEvent.click(screen.getByText(en.modelsRefresh))
+      expect(reading.loadModels).toHaveBeenCalledTimes(1)
+
+      cleanup()
+      const pending = actions()
+      renderSection(stateOf({ models: { status: 'loading' } }), pending)
+      expect(screen.getByText<HTMLButtonElement>(en.modelsRefresh).disabled).toBe(true)
+    })
+
+    it('keeps the tuning fields collapsed until the disclosure is opened', () => {
+      renderSection(stateOf({ refreshMinutes: field('30', { overridden: true }) }))
+
+      expect(screen.queryByLabelText(en.baseURLLabel)).toBeNull()
+      // The collapsed row still says a tuning field carries a user value.
+      expect(screen.getByRole('button', { name: new RegExp(en.advancedLabel) }).textContent).toContain(en.overridden)
+      expect(screen.queryByText(en.advancedHint)).toBeNull()
+
+      openAdvanced()
+      expect(screen.getByLabelText(en.baseURLLabel)).toHaveProperty('value', 'https://opencode.ai/zen/go/v1')
+      expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
+      expect(screen.getByRole('button', { name: new RegExp(en.accountsTitle) })).toBeTruthy()
+    })
+
+    it('keeps the advanced header to its title, with no summary line', () => {
+      renderSection(stateOf())
+      const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
+      // The row is the title and the disclosure chevron; the tuning summary that used
+      // to sit between them said what the card already says once it is open.
+      expect(trigger.textContent).toBe(en.advancedLabel)
+      expect(trigger.querySelectorAll('span')).toHaveLength(1)
+    })
+
+    it('ties the advanced disclosure to the region it controls', () => {
+      renderSection(stateOf())
+      const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(trigger.getAttribute('aria-controls')).toBe('opencode-go-advanced')
+
+      fireEvent.click(trigger)
+      expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      expect(document.getElementById('opencode-go-advanced')).not.toBeNull()
+    })
+
+    it('reads down the page as connection, models, then tuning', () => {
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
+      expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(en.titleLabel)
+      // Account management sits between the provider switch and model settings.
+      const sequence = [
+        screen.getByRole('switch', { name: en.enabledLabel }),
+        screen.getByRole('button', { name: new RegExp(en.accountsTitle) }),
+        screen.getByRole('navigation', { name: en.modelsLabel }),
+        screen.getByText(en.advancedLabel),
+      ]
+      for (let index = 1; index < sequence.length; index += 1) {
+        const relation = sequence[index - 1].compareDocumentPosition(sequence[index])
+        expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      }
+      // The tuning card is the last thing on the page, under the list it tunes.
+      const tuning = screen.getByText(en.advancedLabel).closest('section') as HTMLElement
+      expect(tuning.parentElement?.lastElementChild).toBe(tuning)
+    })
+
+    it('stages edits through the injected actions and resets on demand', () => {
+      const edits = actions()
+      renderSection(stateOf({ refreshMinutes: field('60', { overridden: true }) }), edits)
+      openAdvanced()
+
+      fireEvent.change(screen.getByLabelText(en.baseURLLabel), { target: { value: 'https://other.test/v1' } })
+      expect(edits.edit).toHaveBeenCalledWith('baseURL', 'https://other.test/v1')
+
+      fireEvent.click(screen.getByText(en.advancedResetAll))
+      expect(edits.resetField).toHaveBeenCalledWith('refreshMinutes')
+    })
+
+    it('enables save only for a dirty, valid form and shows the failure note', () => {
+      const acts = actions()
+      const { rerender } = render((
+        <OpencodeGoSection {...{
+          ...acts,
+          t,
+          useOpencodeGo: bindSnapshotSelector(createSnapshotStore(stateOf({ dirty: true }))),
+        }}
+        />
+      ))
+      const save = screen.getByText(en.save) as HTMLButtonElement
+      const discard = screen.getByText(en.discard) as HTMLButtonElement
+      expect(save.disabled).toBe(false)
+      expect(discard.disabled).toBe(false)
+      fireEvent.click(save)
+      expect(acts.save).toHaveBeenCalled()
+
+      rerender((
+        <OpencodeGoSection {...{
+          ...acts,
+          t,
+          useOpencodeGo: bindSnapshotSelector(createSnapshotStore(stateOf({ dirty: true, failed: true }))),
+        }}
+        />
+      ))
+      expect(screen.getByText(en.savedFailed)).toBeTruthy()
+    })
+
+    it('exercises every field control: edits, resets, invalid and numeric states', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        baseURL: field('https://opencode.ai/zen/go/v1', { overridden: true }),
+        refreshMinutes: field('not-a-number', { overridden: true, invalid: true }),
+        streamIdleTimeoutMs: field('300000', { overridden: true }),
+        maxImages: field('30', { overridden: true }),
+        maxRequestImageBytes: field('20971520', { overridden: true }),
+        requestImagePixelBudget: field('4194304', { overridden: true }),
+        requestImageMaxBytes: field('1048576', { overridden: true }),
+      }), edits)
+
+      openAdvanced()
+      const fields: readonly (readonly [label: string, name: string, numeric: boolean])[] = [
+        [en.baseURLLabel, 'baseURL', false],
+        [en.refreshMinutesLabel, 'refreshMinutes', true],
+        [en.streamIdleTimeoutMsLabel, 'streamIdleTimeoutMs', true],
+        [en.maxImagesLabel, 'maxImages', true],
+        [en.maxRequestImageBytesLabel, 'maxRequestImageBytes', true],
+        [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget', true],
+        [en.requestImageMaxBytesLabel, 'requestImageMaxBytes', true],
+      ]
+      fields.forEach(([label, name, numeric]) => {
+        const input = screen.getByLabelText(label) as HTMLInputElement
+        expect(input.inputMode).toBe(numeric ? 'numeric' : '')
+        expect(input.type).toBe(numeric ? 'number' : 'text')
+        const nextValue = numeric ? '123' : `edited-${name}`
+        fireEvent.change(input, { target: { value: nextValue } })
+        expect(edits.edit).toHaveBeenCalledWith(name, nextValue)
+      })
+      // The card owns one reset, and it returns every customized row at once.
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(fields.map(([, name]) => name).sort())
+
+      // The invalid refresh draft renders the invalid style and copy.
+      expect(screen.getByText(en.invalidValue)).toBeTruthy()
+    })
+
+    it('returns only the customized rows from the card reset', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        usageDisplay: field('always', { overridden: true }),
+        baseURL: field('https://other.test/v1', { overridden: true }),
+      }), edits)
+      openAdvanced()
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(['baseURL', 'usageDisplay'])
+    })
+
+    it('keeps the card reset out of reach while every row inherits its value', () => {
+      renderSection(stateOf())
+      openAdvanced()
+      expect(screen.getByRole('button', { name: en.advancedResetAll }).hasAttribute('disabled')).toBe(true)
+    })
+
+    it('carries the provider hint as the switch description, behind its mark', () => {
+      renderSection(stateOf())
+      // The Switch primitive forwards no aria-describedby, so the sentence rides the
+      // one channel it does forward while the mark opens it in the Host's bubble.
+      expect(screen.getByRole('switch', { name: en.enabledLabel }).getAttribute('title')).toBe(en.enabledHint)
+      expect(screen.queryByText(en.enabledHint)).toBeNull()
+    })
+
+    it('describes an invalid draft with its error, and a valid one with its hint', () => {
+      renderSection(stateOf({ proxyURL: field('not-a-url', { overridden: true, invalid: true }) }))
+      openAdvanced()
+      const invalid = screen.getByLabelText<HTMLInputElement>(en.proxyURLLabel)
+      const described = (invalid.getAttribute('aria-describedby') ?? '').split(' ')
+      // The alert announces the failure once; the description keeps it available
+      // every time the control is focused again.
+      expect(described).toHaveLength(2)
+      const error = document.getElementById(described[0]!)
+      expect(error?.textContent).toBe(en.proxyURLInvalid)
+      expect(error?.getAttribute('role')).toBe('alert')
+      expect(document.getElementById(described[1]!)?.textContent).toBe(en.proxyURLHint)
+
+      cleanup()
+      renderSection(stateOf())
+      openAdvanced()
+      expect(screen.getByLabelText(en.baseURLLabel).getAttribute('aria-describedby'))
+        .toBe('opencode-go-base-url-hint')
+    })
+
+    it('shows the saving state while a save crosses the wire', () => {
+      renderSection(stateOf({ dirty: true, saving: true }))
+      expect(screen.getByText<HTMLButtonElement>(en.saving).disabled).toBe(true)
+      expect(screen.getByText<HTMLButtonElement>(en.discard).disabled).toBe(true)
+    })
+
+  })
+
+  describe('OpencodeGoSectionController through the component', () => {
+    it('adds, saves, discards, and removes a custom budget without changing capacities', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+
+      const controller = new OpencodeGoSectionController(host.form, { remote: {
+        credentials: { describe: async () => ({ ok: true, value: {} }) },
+      } } as never, async () => ({ ok: true, value: { stale: false, models: [
+        { id: 'budget', name: 'Budget Model', maxTokens: 32768, reasoningBudget: { min: 1024, max: 20000 } },
+        { id: 'effort', name: 'Effort Model' },
+      ] } }))
+      host.publish({ status: 'ready', writable: true, value: { modelLimits: { budget: { contextWindow: 100000 } } }, user: {} })
+      render(<OpencodeGoSection {...controller.inject()} t={t}
+        useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+      try {
+        await act(async () => { await Promise.resolve() })
+        openModelLimits()
+        fireEvent.click(screen.getByText(en.thinkingBudgets))
+        const input = () => screen.getByLabelText<HTMLInputElement>(t('thinkingBudgetAddLabel', { name: 'Budget Model' }))
+        const add = () => screen.getByRole<HTMLButtonElement>('button', { name: en.thinkingBudgetAdd })
+        for (const value of ['512', '1.5', '20001']) {
+          fireEvent.change(input(), { target: { value } })
+          expect(input().getAttribute('aria-invalid')).toBe('true')
+          expect(add().disabled).toBe(true)
+        }
+        fireEvent.change(input(), { target: { value: '4096' } })
+        fireEvent.click(add())
+        expect(host.set).not.toHaveBeenCalled()
+        expect(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })).toBeTruthy()
+        fireEvent.click(screen.getByText(en.discard))
+        expect(screen.queryByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })).toBeNull()
+        fireEvent.change(input(), { target: { value: '6000' } })
+        fireEvent.click(add())
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: [6000] } })
+        fireEvent.click(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 6000 }) }))
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: null } })
+        fireEvent.click(screen.getByRole('button', { name: 'Effort Model' }))
+        expect(screen.queryByText(en.thinkingBudgets)).toBeNull()
+      } finally { controller.dispose() }
+    })
+
+    it('preserves the current account when resetting advanced settings', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+      const accounts = [
+        { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
+        { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+      ]
+      const base = { accounts, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true, baseURL: 'https://opencode.ai/zen/go/v1' }
+      const user = { accounts: [accounts[1]!, accounts[0]!], apiKeyEnv: 'ACCOUNT_B', baseURL: 'https://other.test/v1' }
+      host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
+      const controller = new OpencodeGoSectionController(host.form, { remote: {
+        credentials: { describe: async () => ({ ok: true, value: {} }) },
+        llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+      } } as never)
+      render(<OpencodeGoSection {...controller.inject()} t={t}
+        useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+      try {
+        await act(async () => { await Promise.resolve() })
+        openAdvanced()
+        expect(screen.queryByDisplayValue('ACCOUNT_B')).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['baseURL'] }], expect.any(Number))
+        expect(host.form.getSnapshot().value).toEqual({ ...base, accounts: user.accounts, apiKeyEnv: 'ACCOUNT_B' })
+        expect(host.form.getSnapshot().user).toEqual({ accounts: user.accounts, apiKeyEnv: 'ACCOUNT_B' })
+        expect(screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll }).disabled).toBe(true)
+      } finally { controller.dispose() }
+    })
+
+    it('validates, saves, clears and resets the proxy address in advanced settings', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+      const base = { proxyURL: 'http://localhost:7890' }
+
+      host.publish({ status: 'ready', writable: true, value: base, base, user: {} })
+      const controller = new OpencodeGoSectionController(host.form, { remote: {
+        credentials: { describe: async () => ({ ok: true, value: {} }) },
+        llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+      } } as never)
+      render(<OpencodeGoSection {...controller.inject()} t={t}
+        useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+      try {
+        await act(async () => { await Promise.resolve() })
+        openAdvanced()
+        const input = () => screen.getByLabelText<HTMLInputElement>(en.proxyURLLabel)
+        expect(input().value).toBe(base.proxyURL)
+        for (const value of ['127.0.0.1:7890', 'socks4://localhost:1080', 'http://localhost:7890/path']) {
+          fireEvent.change(input(), { target: { value } })
+          expect(input().getAttribute('aria-invalid')).toBe('true')
+          expect(screen.getByText(en.proxyURLInvalid)).toBeTruthy()
+          expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
+        }
+        fireEvent.change(input(), { target: { value: 'socks5://localhost:1080' } })
+        expect(host.set).not.toHaveBeenCalled()
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: 'socks5://localhost:1080' }], expect.any(Number))
+        fireEvent.change(input(), { target: { value: '' } })
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['proxyURL'], value: '' }], expect.any(Number))
+        expect(input().value).toBe('')
+        fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['proxyURL'] }], expect.any(Number))
+        expect(input().value).toBe(base.proxyURL)
+      } finally { controller.dispose() }
+    })
+
+    it('saves an optional image count, rejects invalid counts, and clears or resets the override', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+
+      const controller = new OpencodeGoSectionController(host.form, { remote: {
+        credentials: { describe: async () => ({ ok: true, value: {} }) },
+        llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+      } } as never)
+      host.publish({ status: 'ready', writable: true, value: {}, base: {}, user: {} })
+      render(<OpencodeGoSection {...controller.inject()} t={t}
+        useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+      try {
+        await act(async () => { await Promise.resolve() })
+        openAdvanced()
+        const input = () => screen.getByLabelText<HTMLInputElement>(en.maxImagesLabel)
+        expect(input().value).toBe('')
+        expect(document.getElementById(input().getAttribute('aria-describedby') ?? '')?.textContent)
+          .toBe(en.maxImagesHint)
+        for (const value of ['0', '-1', '1.5', '9007199254740992']) {
+          fireEvent.change(input(), { target: { value } })
+          expect(input().getAttribute('aria-invalid')).toBe('true')
+          expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
+        }
+        fireEvent.change(input(), { target: { value: '30' } })
+        fireEvent.click(screen.getByText(en.discard))
+        expect(input().value).toBe('')
+        expect(host.set).not.toHaveBeenCalled()
+        fireEvent.change(input(), { target: { value: '30' } })
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['maxImages'], value: 30 }], expect.any(Number))
+        expect(input().value).toBe('30')
+        fireEvent.change(input(), { target: { value: '' } })
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['maxImages'] }], expect.any(Number))
+        expect(host.form.getSnapshot().value?.maxImages).toBeUndefined()
+        expect(input().value).toBe('')
+
+        // Reset follows the shared settings convention, including inherited caps.
+        act(() => { host.publish({ value: { maxImages: 30 }, base: { maxImages: 60 }, user: { maxImages: 30 } }) })
+        fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+        expect(input().value).toBe('60')
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().value?.maxImages).toBe(60)
+        expect(host.form.getSnapshot().user).toEqual({})
+      } finally {
+        controller.dispose()
+      }
+    })
+
+    it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+
+      const controller = new OpencodeGoSectionController(host.form, { remote: {
+        credentials: { describe: async () => ({ ok: true, value: {} }) },
+        llm: { discoverModels: async () => ({ ok: true, value: [{ id: 'm', name: 'Model', contextWindow: 262144, maxTokens: 32768 }] }) },
+      } } as never)
+      host.publish({ status: 'ready', writable: true,
+        value: { modelLimits: { m: { contextWindow: 100000, maxTokens: 1024 } } }, user: {} })
+      render(<OpencodeGoSection {...controller.inject()} t={t}
+        useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+      try {
+        await act(async () => { await Promise.resolve() })
+        openModelLimits()
+        const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+        fireEvent.change(input(), { target: { value: '200000' } })
+        expect(host.set).not.toHaveBeenCalled()
+        fireEvent.click(screen.getByText(en.discard))
+        expect(input().value).toBe('100000')
+        fireEvent.change(input(), { target: { value: '200000' } })
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().value?.modelLimits?.m?.contextWindow).toBe(200000)
+        expect(screen.getByText(t('capacityDefault', { value: '262,144' }) + ' · ' + en.overridden)).toBeTruthy()
+        expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
+
+        fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
+        expect(input().value).toBe('')
+        fireEvent.click(screen.getByText(en.discard))
+        expect(input().value).toBe('200000')
+        fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ m: null })
+        expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
+        fireEvent.change(input(), { target: { value: '150000' } })
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ m: { contextWindow: 150000, maxTokens: null, thinkingBudgets: null } })
+      } finally {
+        controller.dispose()
+      }
+    })
+
+    it('drives a staged edit end to end against the ConfigForm', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+
+      const ctx = {
+        remote: {
+          credentials: { describe: vi.fn(() => Promise.resolve({ ok: true, value: {} })), set: vi.fn() },
+          llm: { discoverModels: vi.fn(() => Promise.resolve({ ok: true, value: [] })) },
+        },
+      } as never
+      const controller = new OpencodeGoSectionController(host.form, ctx)
+      host.publish({ status: 'ready', writable: true, value: { baseURL: 'https://opencode.ai/zen/go/v1' }, user: {} })
+
+      render((
+        <OpencodeGoSection
+          {...{
+            ...controller.inject(),
+            t,
+            useOpencodeGo: bindSnapshotSelector(controller.inject().hooks.opencodeGo),
+          }}
+        />
+      ))
+
+      openAdvanced()
+      fireEvent.change(screen.getByLabelText(en.baseURLLabel), { target: { value: 'https://edited.test/v1' } })
+      await act(async () => { screen.getByText(en.save).click() })
+
+      await vi.waitFor(() => { expect(host.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['baseURL'], value: 'https://edited.test/v1' }], expect.any(Number)) })
+    })
+  })
+
+  it('opens the shared analytics dialog from the settings card', async () => {
+    const readAnalytics = vi.fn().mockResolvedValue({
+      generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
+      totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
+        cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
+      byModel: [], byDay: [],
+      coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
+        summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
+      pricing: { source: 'models.dev', unpricedModels: [] },
+    })
+    setGoTheme('graphite')
+    renderSection(stateOf(), {}, { analytics: { readAnalytics } })
+    const row = screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) })
+    expect(row.getAttribute('aria-expanded')).toBe('false')
+    // Folded, the row still names the style in force.
+    expect(row.textContent).toContain(en.themeGraphite)
+    expect(screen.queryByRole('group', { name: en.themeLabel })).toBeNull()
+    await act(async () => { fireEvent.click(row) })
+    expect(row.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(en.analyticsBoardLabel)).toBeTruthy()
+    expect(screen.getByText(en.themeHint)).toBeTruthy()
+    const picker = screen.getByRole('group', { name: en.themeLabel })
+    expect(within(picker).getAllByRole('button')).toHaveLength(4)
+    // The style picker is the only entry: choosing one updates the store and the row.
+    await act(async () => { fireEvent.click(within(picker).getByRole('button', { name: en.themeSeaSalt })) })
+    expect(getGoTheme()).toBe('sea-salt')
+    expect(row.textContent).toContain(en.themeSeaSalt)
+    // The first row of the unfolded card opens the dashboard.
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard })) })
+    expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+    expect(readAnalytics).toHaveBeenCalled()
+  })
+})
+
+describe("advanced settings reset", () => {
+
+  async function mount(user: Partial<OpencodeGoSettings> = {}) {
+    const host = createConfigForm<OpencodeGoSettings>()
+    acceptFormWrites(host)
+    const base = { proxyURL: '', refreshMinutes: 60, maxImages: 10 }
+    host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
+    const controller = new OpencodeGoSectionController(host.form, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+    } } as never)
+    render(<OpencodeGoSection {...controller.inject()} t={key => en[key]}
+      useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByText(en.advancedLabel))
+    return { host, controller }
+  }
+
+  it.each([{}, { proxyURL: 'http://localhost:7890' }])(
+    'resets an invalid proxy draft to its inherited value with user settings %j', async user => {
+      const { host, controller } = await mount(user)
+      try {
+        const proxy = screen.getByLabelText<HTMLInputElement>(en.proxyURLLabel)
+        fireEvent.change(proxy, { target: { value: 'not-a-proxy-url' } })
+        expect(proxy.getAttribute('aria-invalid')).toBe('true')
+        const reset = screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll })
+        expect(reset.disabled).toBe(false)
+        fireEvent.click(reset)
+        expect(proxy.value).toBe('')
+        expect(proxy.hasAttribute('aria-invalid')).toBe(false)
+        await act(async () => { screen.getByText(en.save).click() })
+        expect(host.form.getSnapshot().user).toEqual({})
+        expect(reset.disabled).toBe(true)
+      } finally { controller.dispose() }
+    },
+  )
+
+  it('resets an invalid numeric draft even when no advanced value is overridden', async () => {
+    const { host, controller } = await mount()
+    try {
+      const count = screen.getByLabelText<HTMLInputElement>(en.maxImagesLabel)
+      fireEvent.change(count, { target: { value: '-1' } })
+      expect(count.getAttribute('aria-invalid')).toBe('true')
+      const reset = screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll })
+      expect(reset.disabled).toBe(false)
+      fireEvent.click(reset)
+      expect(count.value).toBe('10')
+      expect(count.hasAttribute('aria-invalid')).toBe(false)
+      expect(reset.disabled).toBe(true)
+      expect(host.mutate).not.toHaveBeenCalled()
+    } finally { controller.dispose() }
+  })
+
+  it('resets invalid drafts together with saved overrides and permits saving the reset', async () => {
+    const { host, controller } = await mount({ refreshMinutes: 15 })
+    try {
+      const proxy = screen.getByLabelText<HTMLInputElement>(en.proxyURLLabel)
+      fireEvent.change(proxy, { target: { value: 'not-a-proxy-url' } })
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      expect(screen.getByLabelText<HTMLInputElement>(en.refreshMinutesLabel).value).toBe('60')
+      expect(proxy.value).toBe('')
+      expect(proxy.hasAttribute('aria-invalid')).toBe(false)
+      expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(false)
+      await act(async () => { screen.getByText(en.save).click() })
+      expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['refreshMinutes'] }], expect.any(Number))
+      expect(host.form.getSnapshot().user).toEqual({})
+    } finally { controller.dispose() }
+  })
+})
+
+describe("installed Host localization", () => {
+
+  const require = createRequire(import.meta.url)
+
+  const localeBundle = readFileSync(require.resolve('@deepseek-ai/dsh-client-locale/client'), 'utf8')
+
+  const namespace = 'settings.opencode-go'
+
+  const cleanups: Array<() => void | Promise<void>> = []
+
+  let originalStyles: Set<HTMLStyleElement>
+
+  beforeEach(() => {
+    originalStyles = new Set(document.head.querySelectorAll('style'))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-23T12:00:00Z'))
+  })
+
+  afterEach(async () => {
+    cleanup()
+    for (const dispose of cleanups.splice(0).reverse()) await dispose()
+    for (const style of document.head.querySelectorAll('style')) if (!originalStyles.has(style)) style.remove()
+    vi.useRealTimers()
+  })
+
+  function createLocale(languages: string[], preference?: string) {
+    vi.stubGlobal('navigator', { languages, language: languages[0] ?? '' })
+    const table = new Map<string, unknown>([
+      ['react', React], ['react/jsx-runtime', jsx],
+      ['@deepseek-ai/dsh-client-store', store],
+      ['@deepseek-ai/dsh-client-ui-primitives', primitives],
+    ])
+    type Exports = { LocaleRuntime: typeof HostLocaleRuntime }
+    let registration: { factory: (require: (id: string) => unknown) => Exports } | undefined
+    // Published browser packages use the Host module table, not Node's ESM loader.
+    runInNewContext(localeBundle, {
+      document, navigator, console,
+      window: { __ModuleLoader__: { load: (entry: typeof registration) => { registration = entry } } },
+    })
+    if (!registration) throw new Error('installed locale bundle did not register')
+    const { LocaleRuntime } = registration.factory(id => {
+      if (!table.has(id)) throw new Error(`Unprovided locale dependency: ${id}`)
+      return table.get(id)
+    })
+    const host = createConfigForm<LocaleSettings>()
+    host.publish({ status: 'ready', writable: true, value: preference ? { preference } : {}, base: {}, user: {} })
+    const ctx = new Context()
+    cleanups.push(() => ctx.fiber.dispose())
+    const locale = new LocaleRuntime(ctx, host.form)
+    locale.register(namespace, 'zh', zh)
+    locale.register(namespace, 'en', en)
+    return { locale, host }
+  }
+
+  const windowUsage = { status: 'ok' as const, percent: 10, resetsAt: '2026-09-24T13:05:00Z' }
+
+  const usage = { rolling: { ...windowUsage, percent: 0 }, weekly: windowUsage, monthly: windowUsage }
+
+  async function mountSurfaces(locale: HostLocaleRuntime) {
+    const settings = createConfigForm<OpencodeGoSettings>()
+    settings.publish({ status: 'ready', writable: true, value: {}, base: {}, user: {} })
+    const readModels = vi.fn(async () => ({ ok: true as const, value: { stale: false, models: [
+      { id: 'alpha', name: 'Alpha', releaseDate: '2026-09-23', contextWindow: 123456, maxTokens: 8192 },
+      { id: 'missing', name: 'missing', configurationMissing: true },
+    ] } }))
+    const controller = new OpencodeGoSectionController(settings.form, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+    } } as never, readModels)
+    cleanups.push(() => controller.dispose())
+    const face = controller.inject()
+    const useOpencodeGo = bindSnapshotSelector(face.hooks.opencodeGo)
+    const t = locale.bind(namespace)
+    const directory = store.createSnapshotStore<ModelDirectoryState>({
+      current: { provider: 'dsh-opencode-go', model: 'alpha' }, routable: true,
+      groups: [], failures: [], status: 'ready', error: null,
+    })
+    const readUsage = vi.fn(async () => usage)
+    const subscribe = (listener: () => void) => locale.subscribe(listener)
+    const getSnapshot = () => locale.getSnapshot()
+    const getLocale = () => locale.getSnapshot().active
+    const usageTranslate = (key: string) => t(key as OpencodeGoKey)
+    // Host slot injection caches these faces; getters must remain live without rebuilding them.
+    const sectionProps = { ...face, t, getLocale, useOpencodeGo }
+    const usageProps = { directory, settings: settings.form, readUsage, t: usageTranslate, getLocale }
+    function Surfaces() {
+      // The real Host SlotOutlet subscribes to this same locale revision source.
+      React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+      return <>
+        <OpencodeGoSection {...sectionProps} />
+        <UsagePill {...usageProps} />
+      </>
+    }
+    await act(async () => { render(<Surfaces />) })
+    // The model card ships folded; the copy checks read the list inside it.
+    await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
+    return { snapshot: face.hooks.opencodeGo.getSnapshot, readModels, readUsage }
+  }
+
+  function expectCopy(active: 'zh' | 'en'): void {
+    const copy = active === 'zh' ? zh : en
+    expect(screen.getByText(copy.intro)).toBeTruthy()
+    expect(screen.getAllByText(copy.newBadge).length).toBeGreaterThan(0)
+    expect(screen.getByText(copy.configurationMissing)).toBeTruthy()
+    expect(screen.getByRole('button', { name: copy.modelsRefresh })).toBeTruthy()
+    // UsagePill renders this label as segmented spans (reading/unit/stale/account) so the narrow-composer
+    // container queries can hide them independently; the label text is therefore no longer a single text node
+    // and getByText's own-text match no longer applies. Match the trigger's textContent instead, which still
+    // concatenates to exactly this string.
+    expect(screen.getByRole('button', { name: `${copy.usageTitle}: ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }).textContent)
+      .toBe(`${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%`)
+  }
+
+  it.each([
+    { language: 'zh-CN', active: 'zh' },
+    { language: 'zh-TW', active: 'zh' },
+    { language: 'en-US', active: 'en' },
+    { language: 'fr-FR', active: 'en' },
+  ] as const)('uses the Host browser-language resolution for $language, displaying $active without saving a preference', async ({ language, active }) => {
+    const { locale, host } = createLocale([language])
+    expect(locale.getLocale().active).toBe(active)
+    await mountSurfaces(locale)
+    expectCopy(active)
+    expect(host.set).not.toHaveBeenCalled()
+    const copy = active === 'zh' ? zh : en
+    fireEvent.click(screen.getByRole('button', { name: `${copy.usageTitle}: ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }))
+    expect(screen.getByRole('dialog', { name: copy.usageTitle })).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: copy.usage_monthly })).toBeTruthy()
+    expect(screen.getAllByText(`${copy.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString(active)}`)).toHaveLength(3)
+  })
+
+  it('honors an explicit Host English preference over a Chinese browser', async () => {
+    const { locale, host } = createLocale(['zh-CN'], 'en')
+    expect(locale.getLocale().active).toBe('en')
+    await mountSurfaces(locale)
+    expectCopy('en')
+    expect(host.set).not.toHaveBeenCalled()
+  })
+
+  it('updates mounted plugin surfaces when the Host locale changes while preserving the form draft and open usage panel', async () => {
+    const { locale, host } = createLocale(['zh-CN'])
+    const { snapshot, readModels, readUsage } = await mountSurfaces(locale)
+    const t = locale.bind(namespace)
+    fireEvent.click(screen.getByText(zh.advancedLabel))
+    const refreshInput = screen.getByLabelText(zh.refreshMinutesLabel)
+    fireEvent.change(refreshInput, { target: { value: '30' } })
+    fireEvent.click(screen.getByRole('button', { name: `${zh.usageTitle}: ${zh.usageRollingShort} 0% · ${zh.usageWeekShort} 10%` }))
+    expect(snapshot().dirty).toBe(true)
+
+    await act(async () => { locale.setLocale('en') })
+
+    expect(locale.bind(namespace)).toBe(t)
+    expectCopy('en')
+    expect(screen.getByLabelText(en.refreshMinutesLabel)).toBe(refreshInput)
+    expect(refreshInput).toHaveProperty('value', '30')
+    expect(snapshot().dirty).toBe(true)
+    expect(screen.getByRole('dialog', { name: en.usageTitle })).toBeTruthy()
+    expect(screen.getAllByText(`${en.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString('en')}`)).toHaveLength(3)
+    expect(host.set).toHaveBeenCalledExactlyOnceWith('preference', 'en')
+    expect(readModels).toHaveBeenCalledTimes(1)
+    expect(readUsage).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('typed ConfigForm drafts and writes', () => {
+  const controllers: OpencodeGoSectionController[] = []
+  afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose() })
+  function setup(value: OpencodeGoSettings = {}) {
+    const host = createConfigForm(value)
+    const controller = new OpencodeGoSectionController(host.form, {} as never)
+    controllers.push(controller)
+    const actions = controller.inject()
+    return { host, controller, actions, snapshot: actions.hooks.opencodeGo.getSnapshot }
+  }
+
+  it('sends typed capacity objects and text fields together at one revision', async () => {
+    const { host, controller, actions, snapshot } = setup({ refreshMinutes: 60 })
+    const limits = { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } }
+    actions.editModelLimits(limits)
+    limits.m.maxTokens = 1
+    actions.edit('refreshMinutes', '30')
+    expect(snapshot()).toMatchObject({ dirty: true, modelLimitDraft: { m: { maxTokens: 8192 } } })
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([
+      { op: 'set', path: ['modelLimits'], value: { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } } },
+      { op: 'set', path: ['refreshMinutes'], value: 30 },
+    ], 0)
+    expect(snapshot().dirty).toBe(false)
+    expect(typeof host.form.getSnapshot().value?.modelLimits).toBe('object')
+  })
+
+  it.each(['refused', 'rejected'] as const)('preserves every draft after a %s batch', async outcome => {
+    const { host, controller, actions, snapshot } = setup()
+    actions.edit('baseURL', 'https://new.invalid/v1')
+    actions.editModelLimits({ m: null })
+    if (outcome === 'refused') host.mutate.mockResolvedValueOnce(false)
+    else host.mutate.mockRejectedValueOnce(new Error('SETTINGS_CONFLICT'))
+    await controller.save()
+    expect(snapshot()).toMatchObject({ failed: true, dirty: true, saving: false,
+      baseURL: { text: 'https://new.invalid/v1' }, modelLimitDraft: { m: null } })
+    await controller.save()
+    expect(snapshot()).toMatchObject({ failed: false, dirty: false })
+  })
+
+  it('preserves a newer draft while the accepted older save completes', async () => {
+    const { host, controller, actions, snapshot } = setup({ refreshMinutes: 60 })
+    const pending = Promise.withResolvers<boolean>()
+    host.mutate.mockReturnValueOnce(pending.promise)
+    actions.edit('refreshMinutes', '30')
+    const saving = controller.save()
+    actions.edit('refreshMinutes', '15')
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledTimes(1)
+    pending.resolve(true)
+    await saving
+    expect(snapshot()).toMatchObject({ dirty: true, saving: false, refreshMinutes: { text: '15' } })
+    await controller.save()
+    expect(host.form.getSnapshot().value?.refreshMinutes).toBe(15)
+  })
+
+  it.each(['-1', '0', '1.5', 'Infinity', 'abc'])('blocks an invalid image count %s without writing', async text => {
+    const { host, controller, actions, snapshot } = setup()
+    actions.edit('maxImages', text)
+    expect(snapshot()).toMatchObject({ dirty: true, invalid: true })
+    await controller.save()
+    expect(host.mutate).not.toHaveBeenCalled()
+    actions.discard()
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false })
+  })
+
+  it('previews inherited resets, and treats structurally equal capacity maps as clean', async () => {
+    const { host, controller, actions, snapshot } = setup({ refreshMinutes: 15, modelLimits: { m: { maxTokens: 8192 } } })
+    host.publish({ base: { refreshMinutes: 60 }, user: { refreshMinutes: 15 } })
+    actions.editModelLimits({ m: { maxTokens: 8192 } })
+    expect(snapshot().dirty).toBe(false)
+    actions.resetField('refreshMinutes')
+    expect(snapshot().refreshMinutes).toMatchObject({ text: '60', overridden: false })
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'unset', path: ['refreshMinutes'] }], 0)
+    expect(host.form.getSnapshot().value?.refreshMinutes).toBe(60)
+  })
+
+  it('keeps drafts while read-only and binds ConfigForm prototype methods correctly', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    expect(host.listenerCount()).toBe(1)
+    host.publish({ writable: false })
+    actions.edit('proxyURL', 'socks5://127.0.0.1:1080')
+    await controller.save()
+    await controller.setEnabled(false)
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(host.set).not.toHaveBeenCalled()
+    expect(snapshot().dirty).toBe(true)
+    host.publish({ writable: true })
+    await controller.save()
+    expect(host.form.getSnapshot().value?.proxyURL).toBe('socks5://127.0.0.1:1080')
+    controller.dispose()
+    expect(host.listenerCount()).toBe(0)
+  })
+
+  it('resets protocol and usage modes to the inherited values while preserving account selection', async () => {
+    const value = { apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'always' as const,
+      protocolOverrides: { 'deepseek-v4.1-flash': 'openai-responses' as const } }
+    const { host, controller, actions, snapshot } = setup(value)
+    host.publish({ base: { usageDisplay: 'auto', protocolOverrides: {} }, user: value })
+    actions.edit('usageDisplay', 'off')
+    actions.edit('protocolOverrides', 'auto')
+    await controller.save()
+    expect(host.form.getSnapshot().value).toMatchObject({ apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'off',
+      protocolOverrides: { 'deepseek-v4.1-flash': null } })
+    actions.resetField('usageDisplay')
+    actions.resetField('protocolOverrides')
+    await controller.save()
+    expect(snapshot().usageDisplay.text).toBe('auto')
+    expect(snapshot().protocolOverrides.text).toBe('auto')
+    expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')
+  })
+})
+
+describe('client registration and remote lifecycle', () => {
+  function clientHarness() {
+    const settings = createConfigForm<OpencodeGoSettings>({})
+    const effects: unknown[] = []
+    const listeners = new Set<(ref: string) => void>()
+    const slotsRegister = vi.fn(() => () => {})
+    const slotsInject = vi.fn((_slot: string, install: () => void) => install())
+    const localeRegister = vi.fn(() => () => {})
+    const analyticsRead = vi.fn()
+    const configForms = { get: vi.fn(() => settings.form) }
+    const ctx = {
+      configForms,
+      inject: (services: string[], install: (ready: unknown) => void) => {
+        if (services.every(path => path.split('.').reduce<unknown>((value, key) =>
+          value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined, ctx))) install(ctx)
+      },
+      effect: (install: () => unknown) => { effects.push(install()); return () => {} },
+      locale: { register: localeRegister, getLocale: () => ({ active: 'en' }), bind: () => (key: keyof typeof en) => en[key] },
+      remote: {
+        $mount: vi.fn(async () => () => {}),
+        $on: vi.fn((_event: string, listener: (ref: string) => void) => { listeners.add(listener); return () => listeners.delete(listener) }),
+        opencodeGoModels: { read: vi.fn(async () => ({ ok: true, value: { models: [], stale: false } })) },
+        opencodeGoAccounts: { execute: vi.fn(async () => ({ ok: true, value: 'applied' })) },
+        opencodeGoAnalytics: { read: analyticsRead },
+        credentials: { describe: vi.fn(async () => ({ ok: true, value: {} })) },
+        llm: { discoverModels: vi.fn(async () => ({ ok: true, value: [] })) },
+      },
+      slots: { inject: slotsInject, register: slotsRegister },
+    }
+    return { ctx, settings, slotsRegister, slotsInject, localeRegister, configForms, analyticsRead, listeners,
+      dispose: async () => { for (const effect of effects.splice(0).reverse()) { const dispose = await effect; if (typeof dispose === 'function') dispose() } },
+    }
+  }
+
+  it('mounts the current ConfigForm and dictionaries, registers the page and releases its subscriptions', async () => {
+    const harness = clientHarness()
+    apply(harness.ctx as never)
+    expect(harness.configForms.get).toHaveBeenCalledExactlyOnceWith('opencode-go')
+    expect(harness.localeRegister).toHaveBeenCalledWith('settings.opencode-go', { en, zh })
+    expect(harness.slotsInject).toHaveBeenCalledWith('settings.section', expect.any(Function))
+    const [registration, component] = harness.slotsRegister.mock.calls[0] as unknown as [
+      { id: string; label: () => string; inject: () => { getLocale: () => string } }, unknown,
+    ]
+    expect(registration.id).toBe('opencode-go')
+    expect(registration.label()).toBe(en.nav)
+    expect(registration.inject().getLocale()).toBe('en')
+    expect(component).toBe(OpencodeGoSection)
+    expect(harness.listeners.size).toBe(1)
+    expect(harness.settings.listenerCount()).toBe(1)
+    await harness.dispose()
+    expect(harness.listeners.size).toBe(0)
+    expect(harness.settings.listenerCount()).toBe(0)
+  })
+
+  it('cancels superseded and closed analytics queries through the registered settings page', async () => {
+    const harness = clientHarness()
+    const signals: (AbortSignal | undefined)[] = []
+    harness.analyticsRead.mockImplementation((_query: AnalyticsQuery, signal?: AbortSignal) => {
+      signals.push(signal)
+      return new Promise(resolve => signal?.addEventListener('abort', () => resolve({ ok: false,
+        error: Object.assign(new Error('cancelled'), { code: 'gateway/cancelled' }) }), { once: true }))
+    })
+    apply(harness.ctx as never)
+    const registration = harness.slotsRegister.mock.calls[0]?.[0] as unknown as { inject: () => OpencodeGoSectionFace }
+    const injected = registration.inject()
+    const view = render(<OpencodeGoSection {...injected} t={key => en[key]}
+      useOpencodeGo={bindSnapshotSelector(injected.hooks.opencodeGo)} />)
+    try {
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard })) })
+      expect(signals).toHaveLength(1)
+      expect(signals[0]?.aborted).toBe(false)
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d })) })
+      expect(signals).toHaveLength(2)
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[1]?.aborted).toBe(false)
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsClose })) })
+      expect(signals[1]?.aborted).toBe(true)
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(screen.queryByText(en.analyticsFailed)).toBeNull()
+    } finally { view.unmount(); await harness.dispose() }
+  })
+
+  it('uses the account service only for its live connection', async () => {
+    let connect!: (ready: unknown) => void
+    let disconnect!: () => void
+    const execute = vi.fn(async () => ({ ok: true, value: 'applied' }))
+    const command = accountCommands({ inject: (_services: unknown, install: typeof connect) => { connect = install } } as never)
+    await expect(command({ kind: 'auto-switch', value: true })).resolves.toBe('unknown')
+    connect({ remote: { opencodeGoAccounts: { execute } }, effect: (install: () => () => void) => { disconnect = install() } })
+    await expect(command({ kind: 'auto-switch', value: true })).resolves.toBe('applied')
+    disconnect()
+    await expect(command({ kind: 'auto-switch', value: false })).resolves.toBe('unknown')
+    expect(execute).toHaveBeenCalledExactlyOnceWith({ kind: 'auto-switch', value: true })
+  })
+  it('registers the conversation pill with live account commands and filters credential invalidations', async () => {
+    const harness = clientHarness()
+    harness.settings.publish({ value: { accounts: [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' }], apiKeyEnv: 'ACCOUNT_A' } })
+    const directory = createSnapshotStore<ModelDirectoryState>({
+      current: { provider: 'dsh-opencode-go', model: 'alpha' }, routable: true,
+      groups: [], failures: [], status: 'ready', error: null,
+    })
+    const quota = { rolling: { status: 'ok', percent: 10, resetsAt: '2026-12-01T00:00:00Z' } }
+    const read = vi.fn(async () => ({ ok: true, value: quota }))
+    Object.assign(harness.ctx, { sessions: {}, modelDirectories: { directoryFor: vi.fn(() => ({ store: directory })) } })
+    Object.assign(harness.ctx.remote, { session: {}, opencodeGoUsage: { read } })
+    apply(harness.ctx as never)
+    const registrations = harness.slotsRegister.mock.calls as unknown as Array<[{ id: string; inject: (sessionId: string) => UsagePillProps }]>
+    const registration = registrations.find(([entry]) => entry.id === 'opencode-go-usage')![0]
+    const face = registration.inject('session-a')
+    expect(face.directory).toBe(directory)
+    expect(face.settings).toBe(harness.settings.form)
+    await expect(face.readUsage()).resolves.toEqual(quota)
+    expect(face.credentialChanges!.getSnapshot()).toBe(0)
+    for (const listener of harness.listeners) listener('SOME_OTHER_KEY')
+    expect(face.credentialChanges!.getSnapshot()).toBe(0)
+    for (const listener of harness.listeners) listener('ACCOUNT_A')
+    expect(face.credentialChanges!.getSnapshot()).toBe(1)
+    await expect(face.selectAccount!('MISSING')).resolves.toBe(false)
+    await expect(face.selectAccount!('ACCOUNT_A')).resolves.toBe(true)
+    expect(harness.ctx.remote.opencodeGoAccounts.execute).toHaveBeenCalledExactlyOnceWith({ kind: 'select', ref: 'ACCOUNT_A' })
+    harness.settings.publish({ writable: false })
+    await expect(face.selectAccount!('ACCOUNT_A')).resolves.toBe(false)
+    await harness.dispose()
+    expect(harness.listeners.size).toBe(0)
+  })
+
+})

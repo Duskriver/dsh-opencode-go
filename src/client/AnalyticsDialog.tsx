@@ -1,13 +1,14 @@
+/** Usage analytics dashboard with trends, model breakdowns and quota. */
+import css from './AnalyticsDialog.module.css'
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AnalyticsQuery, AnalyticsReport, AnalyticsDayRow } from '../analytics-contract.ts'
-import type { GoUsage } from '../usage-contract.ts'
-import type { en } from './locales.ts'
-import { themeStyle, useGoThemeTokens } from './theme.ts'
-import css from './AnalyticsDialog.module.css'
+import type { AnalyticsQuery, AnalyticsReport, AnalyticsDayRow, GoUsage } from '../contracts.ts'
+import { type en, themeStyle, useGoThemeTokens } from './presentation.ts'
 
 type AnalyticsKey = keyof typeof en
+
 type RangeKey = 'today' | '7d' | '30d' | '90d'
+
 type ChartMode = 'spend' | 'tokens'
 
 const RANGES: readonly { key: RangeKey; label: AnalyticsKey; days: number }[] = [
@@ -19,8 +20,11 @@ const RANGES: readonly { key: RangeKey; label: AnalyticsKey; days: number }[] = 
 
 /** The scan cap persists under the plugin's own namespace (review P16/S9). */
 const MAX_SESSIONS_STORAGE_KEY = 'opencode-go:analytics:maxSessions'
+
 const DEFAULT_MAX_SESSIONS = 500
+
 const MAX_SESSIONS_CEILING = 2000
+
 const TREND_FILL_ID = 'opencode-go-analytics-trend-fill'
 
 /** Composition colors: five token-derived hues, then a neutral tail. */

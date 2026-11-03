@@ -116,39 +116,15 @@ Usage failures retain the HTTP status and show a redacted summary when the upstr
 
 Image offloading keeps the original attachment and replaces the old image in the request with a text placeholder. Raising the limit does not automatically restore previously offloaded images.
 
-Image count overflow is detected before attachment reads. Preparation shares 100 execution slots and at most 300 queued tasks within the plugin module, and stops scheduling images when known encoded bytes exceed the payload cap. Active image attempts share a 2 GiB budget for prepared raw data plus base64 payloads; this is not a process memory limit. These three values are local protection defaults, not gateway-reported limits, and do not change with `maxImages`.
+Image count overflow is detected before attachment reads. Each request prepares at most four images concurrently and stops when known encoded bytes exceed its payload budget. There is no plugin-wide image queue or shared payload pool.
 
-When the preparation queue is full or other requests occupy the shared budget, the plugin releases this preparation's partial payload reservation, waits for resources to release, and prepares again. Transient `IMAGE_RESOURCE_BUSY` no longer ends the conversation directly. Waiting observes cancellation, `requestPreparationTimeoutMs` and `requestTimeoutMs`; expiration still reports `TIMEOUT`, without account switching. A single request exceeding 2 GiB of raw plus base64 data reports `IMAGE_PAYLOAD_TOO_LARGE`, since waiting cannot make it fit; reduce `maxImages`, `maxRequestImageBytes` or `requestImageMaxBytes`. Configured count and byte limits may still require successive host offload retries.
 
 A cold catalog outage reports `DISCOVERY_FAILED`; a warm catalog retains previously verified models. Only an explicit empty gateway listing clears membership. A partially malformed listing keeps its valid models and reports the ignored row count in settings and logs. Ordinary advanced form settings commit in one revision-checked batch. Credentials use a separate service; failed credential drafts remain, and retry submits only uncommitted parts.
 
-### Export error diagnostics
-
-To investigate a failed request, set a diagnostics directory before starting DSH:
-
-```sh
-export DSH_OPENCODE_GO_DEBUG_DIR=/tmp/dsh-opencode-go-debug
-dsh web
-```
-
-Windows PowerShell:
-
-```powershell
-$env:DSH_OPENCODE_GO_DEBUG_DIR = "$env:TEMP\dsh-opencode-go-debug"
-dsh web
-```
-
-Reproduce the failure to get a JSON file path in the error message. The record contains the model, request parameter summaries, HTTP status, upstream log and route IDs, and the error response, for use in an [issue report](https://github.com/Duskriver/dsh-opencode-go/issues). Review the returned error content before sharing. Clear the environment variable and restart DSH to disable diagnostics.
-
-With this switch enabled, Responses requests also write `responses-replay-*.json` in the same directory, for both successful and failed attempts. To investigate reasoning replay, keep the failed request's report and the preceding successful tool turns. These compare the next request's history, SDK request parameters, received stream events, and the adapter's output replay state. They contain field presence, text lengths and SHA-256 fingerprints, without prompts, reasoning text, tool arguments or encrypted content. They never insert reasoning into requests. Existing HTTP-error files may still contain error text returned by the service.
-
-The latest 64 Responses reports are retained, each limited to 4 MiB; omitted detail is marked `truncated`. Reports locate where data disappears but do not establish the gateway's internal cause. Copy the relevant reports and disable the switch after reproducing the failure.
-
-DSH debug logs contain a call ID and each attempt's stage timings, HTTP status, upstream request ID, time to first output and error code, including stream failures after HTTP 200. Image attempts also report aggregate queue waiting and peak resource occupancy. Error files carry the same call ID and attempt number for correlation. These summaries exclude prompts, keys, proxy addresses and raw session IDs.
-
+Request failures retain HTTP classification, redacted upstream summaries and applicable context-capacity hints. The plugin no longer writes internal diagnostic files or per-call traces.
 
 ## Account operations and saving
 
-If adding or removing an account is interrupted by closing the page or losing the connection, the host resumes recovery at startup or after settings and credential updates. An addition whose key was never stored stays visible so you can replace its key or remove it. Recovery preserves a current-account choice made in the meantime.
+Account operations run in a host-owned memory queue, with credential writes completed before settings updates. Closing the page does not cancel a storage write already in progress. There is no transaction journal or startup recovery loop; retry an unsuccessful operation from the accounts card.
 
 Reset all to defaults in advanced settings removes overrides at the current layer and restores inherited values; save to apply the reset. It does not remove accounts or keys, or clear model limit overrides.

@@ -44,7 +44,7 @@ Open **Usage analytics** at the bottom of the conversation usage panel, or under
 - Ranges: today, 7 days, 30 days, and 90 days. Opening scans local sessions without uploading their contents; closing the dialog stops the request. Model and pricing metadata may refresh from [models.dev](https://models.dev/api.json), without sending it conversation content, account keys or per-request analytics. Normal inference sends request content to your configured model gateway, which also serves quota queries; there is no additional telemetry or analytics service.
 - Cost uses the request start time. DeepSeek V4.1 Flash and V4 Pro are charged at twice the off-peak rate during the official peak window (01:00–04:00 and 06:00–10:00 UTC, Monday through Friday).
 - Each model row shows only the display name and usage figures. Official quota percentages remain authoritative; the estimate is not an invoice.
-- A scan stops at 500 sessions, 500,000 events, or 12 seconds by default and says so, including why. **Scan more history** raises the session cap to 2,000; the choice is remembered locally. Closed sessions' folds are cached locally against the durable log revision, so only changed sessions are re-read when revisions are available, including after a restart. Without a revision, in-memory reuse is limited to five seconds.
+- A scan stops at 500 sessions, 500,000 events, or 12 seconds by default and says so, including why. **Scan more history** raises the session cap to 2,000; the choice is remembered locally. Session folds are reused in memory for at most five seconds and scanned again after a restart; no fold cache is written to disk.
 - DSH's native OpenCode Go route is excluded; pre-0.1.16 legacy route records are admitted by request time. A Host without `sessionQuery` shows an unavailable state.
 
 **Themes**: switch between **Silent Black, Graphite (default), Sea Salt, and Warm Sand** under **Settings → OpenCode Go → Usage analytics**; the four previews show each palette directly. Themes follow DSH's light/dark mode and are stored locally. The pill popover and the dashboard no longer carry their own switch. The pill no longer carries the `Go ·` prefix; with multiple accounts it shows the active account's full name, truncated with an ellipsis when long, with the complete name kept in the button title and the expanded panel.
@@ -62,13 +62,15 @@ Open **Settings → OpenCode Go → Accounts** to manage accounts:
 - Drag a row's handle to reorder accounts. The first row becomes current, and the order determines automatic fallback priority.
 - Click **Switch** in the conversation usage panel to move the selected account first for subsequent requests in this profile. The other accounts keep their relative order.
 
-With **Automatic fallback** enabled, an exhausted quota or unusable key causes the plugin to try other accounts in order before output begins. A fallback account that starts producing output moves first and becomes current, and the usage panel shows a switch notice. Requests that have already produced output, recorded token usage, or been canceled are not automatically resent through another account.
+With **Automatic fallback** enabled, HTTP 401/403/429 or exhausted quota causes the plugin to try other accounts in order before output begins. A fallback account that starts producing output moves first and becomes current, and the usage panel shows a switch notice. Requests that have already produced output, recorded token usage, or been canceled are not automatically resent through another account.
+
+Gateway-rejected keys cool down in memory for five minutes. Account commands write credentials and settings through one serial host queue.
 
 Keys are saved through DSH's credential service. Settings never displays an already saved key.
 
 ## Install and get started
 
-Requires DSH `0.1.5-rc.1` or later. See the [compatibility matrix](docs/development.md#installed-package-matrix) for verified host versions.
+Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for the current validation workflow.
 
 ### Install from DSH
 
@@ -94,7 +96,7 @@ Start or restart `dsh web` after command-line installation. Web and Headless use
 
 ### Get started
 
-1. Open **Settings → OpenCode Go**, enter your OpenCode Go subscription API key and save, or add an account in **Accounts**.
+1. Open **Settings → OpenCode Go → Accounts**, click **Add account**, enter a name and your OpenCode Go subscription API key, and confirm.
 2. Select a model under **DSH OpenCode Go** in the conversation model picker.
 3. Start chatting and check usage beside the input. With multiple accounts, open the panel to switch.
 
@@ -140,19 +142,45 @@ Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reope
 
 **Why is usage hidden?** Auto mode shows it only for **DSH OpenCode Go** models. Check that the plugin is enabled, a key is configured, and the display mode is appropriate. Choose Always to show usage with other providers.
 
-**What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. An added account whose key was not saved can be repaired with a key or removed. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving) for recovery behavior.
+**What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. Account actions run in a serial host queue; unsuccessful operations can be retried. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving).
 
 **What if a long conversation keeps returning 400?** Check the output allowance and context window in the error, then run `/compact` or lower that model's **Max output** before retrying. Explicit context overflow is passed to DSH's recovery mechanism; an unexplained 400 keeps its classification and includes troubleshooting guidance. Failed attempts without measured tokens omit zero usage so they do not report an empty context.
 
 **Why does an old conversation need its model selected again?** When upgrading from `0.1.16` or earlier, select **DSH OpenCode Go** again in existing conversations or Agent presets. Manual configurations use `provider: dsh-opencode-go`.
 
-**Which hosts are verified?** Installed compatibility covers ten host versions from `0.1.5-rc.1` through `0.2.1-alpha.1`. Later versions need verification. Developer messages, dynamic tool additions/removals, and deferred tool loading are explicitly rejected; see [development and compatibility](docs/development.md).
+**Which host is targeted?** The development baseline is DSH `0.2.1-rc.5`. Developer messages, dynamic tool additions/removals, and deferred tool loading are explicitly rejected; see [development and testing](docs/development.md).
 
 Uninstall:
 
 ```sh
 dsh plugin --profile web remove dsh-opencode-go
 ```
+
+## Architecture and verification
+
+The source contains 17 implementation modules:
+
+| Domain | Modules |
+| --- | --- |
+| Plugin composition, settings and contracts | `index.ts`, `config.ts`, `contracts.ts` |
+| Requests, model catalog and protocol conversion | `adapter.ts`, `catalog.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
+| Accounts, official quota, local analytics and transport | `accounts.ts`, `analytics.ts`, `transport.ts` |
+| Browser registration and typed state | `client/index.ts`, `client/controller.ts` |
+| Settings, account/model controls, usage, themes and copy | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
+
+The browser uses DSH's `configForms`; capacities remain typed objects while editing. Images use per-request count and encoded-byte budgets, with at most four preparations per request. The package keeps its `.` and `./client` exports. Development dependencies pin DSH `0.2.1-rc.5` and Cordis `4.0.5`; runtime Cordis requires `~4.0.5`.
+
+Use Node.js `^22.19.0 || >=24.0.0`:
+
+```sh
+npm ci
+npm test
+npm run typecheck
+npm run check:dist
+npm run verify
+```
+
+Twelve test files cover host services, accounts, catalog, protocols, analytics, transport and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
 
 ## More documentation
 

@@ -1,26 +1,27 @@
-/**
- * Configuration schema for the OpenCode Go adapter plugin. The section is
- * installed under the `llm-opencode-go` settings namespace on DSH 0.1.5/0.1.6.
- * DSH 0.1.7 edits the `opencode-go` profile entry through live references.
- * Both paths update field by field without a restart. Self-contained constraints
- * (URL shape, numeric bounds) fail at load for the composition layer and
- * refuse the write for the settings layer.
- *
- * @module dsh-llm-opencode-go/config
- */
-
+/** Live profile configuration, validation and settings presentation. */
+import z from '@deepseek-ai/schemastery'
+import type {} from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import {
   DEFAULT_MAX_REQUEST_IMAGE_BYTES,
   DEFAULT_REQUEST_IMAGE_MAX_BYTES,
   DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
-} from './conversion/index.ts'
-import z from '@deepseek-ai/schemastery'
-import { DEFAULT_BASE_URL, migrateGatewayBaseURL } from './gateway-url.ts'
-import { DEFAULT_USAGE_DISPLAY, USAGE_DISPLAY_MODES } from './usage-display.ts'
-import { ACCOUNT_REF_PATTERN, DEFAULT_ACCOUNT_REF, MAX_ACCOUNTS } from './accounts.ts'
-import type { OpencodeGoConfig } from './config-contract.ts'
-export type { OpencodeGoConfig, OpencodeGoModelLimit, OpencodeGoModelLimits } from './config-contract.ts'
+  DEFAULT_BASE_URL,
+  migrateGatewayBaseURL,
+  DEFAULT_USAGE_DISPLAY,
+  USAGE_DISPLAY_MODES,
+  ACCOUNT_REF_PATTERN,
+  DEFAULT_ACCOUNT_REF,
+  MAX_ACCOUNTS,
+  type OpencodeGoConfig,
+  PROFILE_ENTRY_ID,
+  assertProxyURL,
+  assertAccounts,
+  assertProtocolOverrides,
+} from './contracts.ts'
+import type { Context } from '@deepseek-ai/cordis'
+
+export type { OpencodeGoConfig, OpencodeGoModelLimit, OpencodeGoModelLimits } from './contracts.ts'
 
 /** Environment variable resolving the OpenCode API key. */
 export const DEFAULT_API_KEY_ENV = DEFAULT_ACCOUNT_REF
@@ -30,7 +31,9 @@ export const DEFAULT_REFRESH_MINUTES = 60
 
 /** Default maximum idle interval while a stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
+
 export const DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS = 60_000
+
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * 60_000
 
 /** Runtime schema for {@link OpencodeGoConfig}. */
@@ -48,9 +51,6 @@ const fields = {
     apiKeyEnv: z.string().role('credential-ref').pattern(ACCOUNT_REF_PATTERN).required(),
   })).max(MAX_ACCOUNTS)]).default(null),
   autoSwitch: z.boolean().default(false),
-  // Internal recovery state uses the same durable profile/section as its accounts.
-  // Cross-field ownership and discriminants are checked before any side effect.
-  accountOperations: z.array(z.any()).max(MAX_ACCOUNTS).default([]).hidden(),
   // Settings rebuild and serialize this schema before sending it to clients.
   // Keep it data-only: a rehydrated transform loses its callback on forwarding.
   baseURL: z.string().default(DEFAULT_BASE_URL),
@@ -73,11 +73,12 @@ const fields = {
   })])).default({}),
 }
 
-/** Plain values used by the adapter and by pre-0.1.7 settings documents. */
+/** Plain configuration values used by validation and direct adapter consumers. */
 export const PlainConfig: z<OpencodeGoConfig> = z.object(fields)
 
-/** 0.1.7's Loader retains these references when profile fields change. */
+/** The Loader retains these references when profile fields change. */
 export type LiveConfig = { [K in keyof OpencodeGoConfig]-?: { get(): OpencodeGoConfig[K] } }
+
 export const Config = z.object(Object.fromEntries(
   Object.entries(fields).map(([key, schema]) => [key, schema.volatile()]),
 )) as z<Partial<OpencodeGoConfig>, LiveConfig>
@@ -125,4 +126,41 @@ export function assertApiKeyEnv(raw: string): void {
   if (!ACCOUNT_REF_PATTERN.test(raw)) {
     throw new Error(`llm-opencode-go: apiKeyEnv "${raw}" must be an environment variable name ([A-Za-z_][A-Za-z0-9_]*)`)
   }
+}
+
+export function validateGoConfig(value: OpencodeGoConfig): void {
+  assertBaseURL(value.baseURL)
+  assertProxyURL(value.proxyURL)
+  assertApiKeyEnv(value.apiKeyEnv)
+  assertAccounts(value.accounts, value.apiKeyEnv)
+  assertProtocolOverrides(value.protocolOverrides)
+}
+
+/** DSH profile forms edit the plugin's live Config fields directly. */
+export function installHostSettings(ctx: Context): void {
+  ctx.inject(['settings'], settingsCtx => {
+    settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber))
+    let migrating = false
+    const migrateSavedGateway = (): void => {
+      if (migrating || !settingsCtx.settings.writable) return
+      const row = settingsCtx.settings.describe().find(row => row.ns === PROFILE_ENTRY_ID)
+      const raw = (row?.user as { baseURL?: unknown } | undefined)?.baseURL
+      if (typeof raw !== 'string' || migrateGatewayBaseURL(raw) === raw) return
+      migrating = true
+      void settingsCtx.settings.mutate(PROFILE_ENTRY_ID,
+        [{ op: 'set', path: ['baseURL'], value: migrateGatewayBaseURL(raw) }], row!.revision)
+        .catch(() => { ctx.logger.warn('llm-opencode-go: could not save the migrated gateway address') })
+        .finally(() => { migrating = false })
+    }
+    settingsCtx.on('settings/document-updated', ns => { if (ns === PROFILE_ENTRY_ID) migrateSavedGateway() })
+    migrateSavedGateway()
+  })
+  ctx.on('internal/config', function (_raw, next) {
+    const value = next()
+    if (this !== ctx.fiber) return value
+    const raw = value as { apiKeyEnv?: unknown; baseURL?: unknown }
+    if (typeof raw.apiKeyEnv === 'string') assertApiKeyEnv(raw.apiKeyEnv)
+    validateGoConfig(PlainConfig(value))
+    return typeof raw.baseURL === 'string' ? { ...value, baseURL: migrateGatewayBaseURL(raw.baseURL) } : value
+  })
 }

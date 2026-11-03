@@ -1,6 +1,5 @@
-import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts';
-import type { GoUsage } from '../usage-contract.ts';
-import type { en } from './locales.ts';
+import type { AnalyticsQuery, AnalyticsReport, GoUsage } from '../contracts.ts';
+import { type en } from './presentation.ts';
 type AnalyticsKey = keyof typeof en;
 export interface AnalyticsDialogProps {
     open: boolean;

@@ -1,68 +1,37 @@
-/**
- * Dedicated OpenCode Go adapter plugin. Registers one `dsh-opencode-go` route
- * whose catalog follows the gateway's live model listing and models.dev
- * metadata, and installs the `llm-opencode-go` settings section: the Web UI
- * renders it as its own settings page where the API key and every knob are
- * edited, and a change reaches the next request without a restart. The plugin
- * exists because the gateway has wire requirements a generic pi-ai route
- * cannot express: a mandatory per-conversation `x-opencode-session` routing
- * header and a model list that rotates faster than any shipped catalog.
- *
- * DSH 0.1.5/0.1.6 layer the settings document over the composition entry;
- * 0.1.7 edits live configuration fields on the profile entry directly.
- *
- * ```yaml
- * - id: llm-opencode-go
- *   name: 'dsh-opencode-go'
- *   config:
- *     enabled: true                     # false withdraws the route; the plugin stays mounted
- *     apiKeyEnv: OPENCODE_API_KEY       # default
- *     baseURL: https://opencode.ai/inference/go/v1   # default
- *     refreshMinutes: 60                # live catalog re-resolution interval
- * ```
- *
- * The credential resolves per request through the credentials seam, falling
- * back to the process environment — the same reference semantics the generic
- * pi-ai adapter uses. The route registers atomically: if another adapter
- * mount already owns `dsh-opencode-go`,
- * the refusal is logged with the reason and everything else this plugin does
- * still works.
- *
- * @module dsh-opencode-go
- */
-
+/** Host plugin composition, route lifecycle and remote registration. */
+import type {} from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-typert-registry'
 import type { Context } from '@deepseek-ai/cordis'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { LlmError, assertUsableApiKey, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
-import type { AdapterRegistrationHandle, LlmModelDiscoveryRequest } from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-fs'
-import type {} from '@deepseek-ai/dsh-settings'
+import {
+  LlmError,
+  assertUsableApiKey,
+  resolveImageAttachmentAccess,
+  type AdapterRegistrationHandle,
+  type LlmModelDiscoveryRequest,
+} from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from './adapter.ts'
 import {
   DISPLAY_NAME,
   PROVIDER_ID,
   discoverCatalogModels,
+  GoModelsService,
+  GoCatalogManager,
 } from './catalog.ts'
-import { Config, readConfig } from './config.ts'
-import type { LiveConfig, OpencodeGoConfig } from './config.ts'
-import { GoUsageService } from './usage.ts'
-import { GoModelsService } from './models.ts'
 import {
-  GoAnalyticsService,
-  analyticsPriceBook,
-  type AnalyticsPersistence,
-  type AnalyticsSessionQuery,
-} from './analytics.ts'
-import { registerGoRemotes } from './remotes.ts'
-import { accountsOf, accountRefOf } from './accounts.ts'
-import { GoAccountSelection, type AccountSettingsWriter } from './account-selection.ts'
-import { GoAccountManager } from './account-manager.ts'
-import { GoAccountsService } from './account-service.ts'
-import { ProxyTransport } from './proxy.ts'
-import { GoCatalogManager } from './catalog-manager.ts'
-import { SETTINGS_NAMESPACE } from './config-contract.ts'
-import { installHostSettings, validateGoConfig } from './host-settings.ts'
+  Config,
+  readConfig,
+  type LiveConfig,
+  type OpencodeGoConfig,
+  installHostSettings,
+  validateGoConfig,
+} from './config.ts'
+import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
+import { GoAnalyticsService, analyticsPriceBook, type AnalyticsSessionQuery } from './analytics.ts'
+import { accountsOf, accountRefOf, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
+import { ProxyTransport } from './transport.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -71,7 +40,9 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export { OpencodeGoAdapter } from './adapter.ts'
-export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement, GoCallTrace } from './adapter.ts'
+
+export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement } from './adapter.ts'
+
 export {
   DEFAULT_BASE_URL,
   DISPLAY_NAME,
@@ -80,22 +51,23 @@ export {
   discoverCatalogModels,
   readLiveModelIds,
 } from './catalog.ts'
+
 export { Config, PlainConfig, assertBaseURL } from './config.ts'
-export { assertProxyURL } from './proxy-url.ts'
+
+export { assertProxyURL } from './contracts.ts'
+
 export type { OpencodeGoConfig } from './config.ts'
-export type { CatalogDiagnostic } from './catalog.ts'
 
 export const name = 'llm-opencode-go'
+
 export const inject = ['llm']
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const NS = SETTINGS_NAMESPACE
 
 /**
- * Register the route, its discovery, the settings section, and their
- * teardown for one mount. Configuration starts as the cordis.yml entry and is
- * replaced by the settings section's resolved value once the settings
- * provider attaches; the adapter re-reads it at every operation.
+ * Register the route, model discovery and settings presentation for one mount.
+ * The adapter re-reads live profile fields at every operation.
  */
 export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const config = raw && typeof raw.enabled === 'object' ? raw as LiveConfig : Config(raw)
@@ -103,7 +75,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   // Self-contained misconfiguration fails at load; a bad stored value instead
   // refuses the write through the section's validate hook.
   validateGoConfig(entry)
-  let current: () => OpencodeGoConfig = () => readConfig(config)
+  const current = (): OpencodeGoConfig => readConfig(config)
 
   const resolveApiKey = async (config: OpencodeGoConfig = current()): Promise<string | undefined> => {
     // Compare through accountRefOf so a stray empty string keeps the default
@@ -125,11 +97,10 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     )
   }
   registerGoRemotes(ctx)
-  const selection = new GoAccountSelection(() => current(), ctx.logger)
-  const accountManager = new GoAccountManager(ctx.logger)
+  const accountManager = new GoAccountManager(current, ctx.logger)
   ctx.plugin(GoAccountsService, { manager: accountManager })
   ctx.inject(['settings', 'credentials'], ready => {
-    ready.effect(() => accountManager.connect(ready.settings as unknown as AccountSettingsWriter, ready.credentials))
+    ready.effect(() => accountManager.connect(ready.settings, ready.credentials))
   })
   const transport = new ProxyTransport()
   ctx.effect(() => () => transport.dispose())
@@ -140,7 +111,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     resolveApiKey: (ref?: string) => resolveApiKey({ ...current(), apiKeyEnv: ref ?? current().apiKeyEnv }),
     activeRef: () => accountRefOf(current()),
     accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
-    lastSwitch: () => selection.lastSwitch(),
+    lastSwitch: () => accountManager.lastSwitch(),
   })
   const logger = {
     fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {
@@ -154,18 +125,15 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const catalogs = new GoCatalogManager({
     transport, onFallback: logger.fallback, onOmitted: logger.omitted,
     onWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
-    onDiagnostic: event => { ctx.logger.info(`llm-opencode-go: catalog ${JSON.stringify(event)}`) },
     onRefresh: () => { registration?.replace([PROVIDER_ID]) },
   })
   const adapter = new OpencodeGoAdapter({
     transport,
     catalog: config => catalogs.forConfig(config),
-    debugDirectory: () => launchEnvironmentOf(ctx).get('DSH_OPENCODE_GO_DEBUG_DIR')?.value,
     config: () => current(),
     resolveApiKey,
-    onCallTrace: trace => { ctx.logger.debug(`llm-opencode-go call: ${JSON.stringify(trace)}`) },
-    accountGeneration: () => selection.capture(),
-    onAccountSettled: event => { selection.settle(event) },
+    accountGeneration: () => accountManager.capture(),
+    onAccountSettled: event => { accountManager.settle(event) },
     imageAccess: {
       resolveAttachments: () => ctx.get('attachments'),
       resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(
@@ -184,13 +152,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   })
   const sessionQueryOf = (): AnalyticsSessionQuery | undefined =>
     (ctx as unknown as { get(name: string): unknown }).get('sessionQuery') as AnalyticsSessionQuery | undefined
-  // The durable session index is optional: a Host without it leaves the
-  // analytics service on the in-process cache and re-reads after a restart.
-  const sessionPersistenceOf = (): AnalyticsPersistence | undefined =>
-    (ctx as unknown as { get(name: string): unknown }).get('sessionPersistence') as AnalyticsPersistence | undefined
   ctx.plugin(GoAnalyticsService, {
     query: sessionQueryOf,
-    persistence: sessionPersistenceOf,
     // Review P14 (core half): the price book omits cost for models whose
     // upstream cost block is missing or malformed (ModelDetails.costKnown ===
     // false), so their requests are reported unpriced instead of silently
@@ -234,10 +197,9 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   let routeCheck = 0
   let selectedRef = accountRefOf(current())
   const syncRoute = (): void => {
-    accountManager.trigger()
     const check = ++routeCheck
     const config = current()
-    selection.capture()
+    accountManager.capture()
     const visibility = pickerVisibilityOf()
     if (pickerVisibility !== visibility) {
       pickerVisibility = visibility
@@ -290,22 +252,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     undiscover()
     /* v8 ignore stop */
   })
-  installHostSettings(ctx, entry, {
-    connect: settings => selection.connect(settings),
-    setSource: source => { current = source },
-    onChange: syncRoute, recover: () => accountManager.trigger(),
-  })
-  // The event is absent on older Loaders; registering it is harmless there.
+  installHostSettings(ctx)
   ctx.on('loader/volatile-update', syncRoute)
   // A key stored or removed anywhere — the settings page's write-only control
   // included — flips the route's presence; the event names the reference.
   ctx.inject(['credentials'], (credentialsCtx) => {
     credentialsCtx.on('credentials/reference-updated', (ref) => {
-      accountManager.trigger()
       // A stored change to a reference outranks the gateway's last rejection
       // of it, so the very next request re-checks the new key.
       adapter.forgetRejectedKey(ref)
-      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { selection.credentialChanged(); syncRoute() }
+      if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { accountManager.credentialChanged(); syncRoute() }
     })
     // The seam becomes visible only once its provider is active, which can be
     // after this plugin applied: the boot-time call above then found no seam
@@ -313,5 +269,13 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     // already stored in the seam registers the route at boot instead of
     // waiting for its next write.
     syncRoute()
+  })
+}
+
+/** Register once per plugin mount, after either registry activation order. */
+export function registerGoRemotes(ctx: Context): void {
+  ctx.inject(['typert'], scope => {
+    scope.effect(() => scope.typert.register({ package: goRemote.package, face: 'host', schemas: [],
+      model: { services: [], events: [], objects: [] }, invocations: goRemote.descriptors }))
   })
 }

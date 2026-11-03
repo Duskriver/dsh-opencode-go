@@ -2,7 +2,9 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 
@@ -33,8 +35,22 @@ const server = createServer((request, response) => {
   })
 })
 const ctx = new Context()
-const previous = process.env.OPENCODE_GO_INSTALL_TEST_KEY
+const previous = { key: process.env.OPENCODE_GO_INSTALL_TEST_KEY, home: process.env.DSH_HOME, fetch: globalThis.fetch }
+const smokeHome = await mkdtemp(join(tmpdir(), 'dsh-go-installed-'))
+process.env.DSH_HOME = smokeHome
 process.env.OPENCODE_GO_INSTALL_TEST_KEY = 'fixture-key'
+// Model metadata is synthetic too: this check must work without public network or user caches.
+globalThis.fetch = (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : String(input))
+  if (url.href === 'https://models.dev/api.json') return Promise.resolve(Response.json({
+    'opencode-go': { npm: '@ai-sdk/openai-compatible', models: {
+      'deepseek-v4.1-flash': { name: 'DeepSeek V4.1 Flash', reasoning: false, modalities: { input: ['text'], output: ['text'] },
+        limit: { context: 262144, output: 131072 }, cost: { input: 0, output: 0, cache_read: 0 } },
+    } },
+  }))
+  if (url.hostname !== '127.0.0.1') throw new Error(`Unexpected smoke request: ${url.origin}`)
+  return previous.fetch(input, init)
+}
 try {
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
@@ -65,8 +81,12 @@ try {
   console.log('PASS: installed package resolution, catalog, streamed text, session headers, attribution, authorization, unload')
 } finally {
   await ctx.fiber.dispose()
-  if (previous === undefined) delete process.env.OPENCODE_GO_INSTALL_TEST_KEY
-  else process.env.OPENCODE_GO_INSTALL_TEST_KEY = previous
+  globalThis.fetch = previous.fetch
+  if (previous.key === undefined) delete process.env.OPENCODE_GO_INSTALL_TEST_KEY
+  else process.env.OPENCODE_GO_INSTALL_TEST_KEY = previous.key
+  if (previous.home === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = previous.home
+  await rm(smokeHome, { recursive: true, force: true })
   server.closeAllConnections()
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
 }

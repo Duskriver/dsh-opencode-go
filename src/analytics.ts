@@ -1,48 +1,500 @@
-/**
- * Host-side usage analytics: scan the live-preferred session corpus through
- * ctx.sessionQuery, fold each log into request facts, price them with the
- * catalog's rates, and return aggregate numbers only.
- *
- * Closed sessions are cached by durable revision under an LRU policy
- * whose eviction runs once, at the end of a scan (review P2/M2/S1); live
- * or unversioned folds are reused only inside a short window, and a
- * session that closes is re-read once before its closed cache entry takes
- * over (review P9/S2). When the Host mounts ctx.sessionPersistence, a closed
- * session's fold is also keyed by the log's durable revision in an on-disk
- * cache, so a later process skips every session whose revision did not
- * change; live folds are never written. Aggregation consumes run-local fold
- * results, so a mid-scan eviction can never subtract a session from the
- * report it was read for (review P3/C3/S1). Reads run through a bounded,
- * configurable pool
- * (review P1/S3), each read carrying its own share of the time budget
- * (review P18/C2), and pricing is fetched in parallel with the scan with a
- * stale-on-error fallback to the last successful table (review P4/S4).
- * A scan stops at a session/event/time budget and says so rather than
- * silently reporting a partial total as complete.
- *
- * @module dsh-opencode-go/analytics
- */
-
+/** Local session scanning, in-memory reuse and Go plan cost estimates. */
+import { PROVIDER_ID, parseAnalyticsQuery } from './contracts.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import {
-  parseAnalyticsQuery,
-  type AnalyticsDayRow,
-  type AnalyticsModelRow,
-  type AnalyticsQuery,
-  type AnalyticsReport,
-  type AnalyticsTotals,
-} from './analytics-contract.ts'
-import { foldSession, type AnalyticsSnapshotLike, type FoldedSession, type RequestFact } from './analytics-scan.ts'
-import {
-  ANALYTICS_FOLD_CACHE_MAX_AGE_MS,
-  analyticsFoldCachePath,
-  loadFoldCache,
-  saveFoldCache,
-  type AnalyticsFoldEntry,
-} from './analytics-fold-cache.ts'
-import { isFreeCost, priceUsage, type ModelCostLike, type UsageCounts } from './analytics-pricing.ts'
-import { goMonthlyLimit } from './go-plan.ts'
+
+/**
+ * OpenCode Go plan snapshot: monthly limits and the one peak-pricing window the
+ * official tariff defines. Prices themselves stay on models.dev (the catalog's
+ * model.cost); this file only carries what models.dev does not publish.
+ *
+ * Source: https://opencode.ai/v2/docs/console/go/ (Go and Go Plus tables).
+ * The snapshot is reviewed when the model list or the plan changes; the report
+ * shows {@link GO_PLAN_AS_OF}, so a stale table is visible rather than silent.
+ *
+ */
+
+/** Date the limits below were read from the official plan page. */
+export const GO_PLAN_AS_OF = '2026-10-18'
+
+/** Human-readable source for the limit snapshot. */
+export const GO_PLAN_SOURCE = 'https://opencode.ai/v2/docs/console/go/'
+
+/** Why a row has no numeric limit. */
+export type GoLimitNote = 'unlimited' | 'limited-time'
+
+/** One model's monthly allowance on each plan (USD), or a note instead. */
+export interface GoMonthlyLimit {
+  /** Go plan monthly limit in USD; null when the row is unlimited. */
+  readonly go: number | null
+  /** Go Plus plan monthly limit in USD; null when the row is unlimited. */
+  readonly goPlus: number | null
+  readonly note?: GoLimitNote
+}
+
+const UNLIMITED: GoMonthlyLimit = { go: null, goPlus: null, note: 'unlimited' }
+
+/**
+ * Monthly limits by model id. Promo rows use the effective (post-strike-through)
+ * value and carry {@link GoLimitNote} 'limited-time'; free rows are unlimited.
+ */
+export const GO_MONTHLY_LIMITS: Readonly<Record<string, GoMonthlyLimit>> = {
+  'glm-5.3-flash': { go: 60, goPlus: 180 },
+  'glm-5.3': { go: 15, goPlus: 120 },
+  'glm-5.2': { go: 60, goPlus: 180 },
+  'kimi-k3': { go: 15, goPlus: 60 },
+  'kimi-k2.7-code': { go: 60, goPlus: 180 },
+  'longcat-2.0': { go: 60, goPlus: 240 },
+  'longcat-2.5-preview-free': UNLIMITED,
+  'step-5-preview': { go: 60, goPlus: 240, note: 'limited-time' },
+  'beam-free': UNLIMITED,
+  'mimo-v2.6-flash': { go: 60, goPlus: 120 },
+  'mimo-v2.6-pro': { go: 15, goPlus: 60 },
+  'mimo-v2.5': { go: 60, goPlus: 120 },
+  'mimo-v2.5-pro': { go: 15, goPlus: 60 },
+  'minimax-m3': { go: 60, goPlus: 180 },
+  'muse-spark-1.3-contributor': { go: 60, goPlus: 120 },
+  'muse-spark-1.2-contributor': { go: 60, goPlus: 120 },
+  'qwen3.8-max': { go: 15, goPlus: 60 },
+  'qwen3.8-flash': { go: 30, goPlus: 90 },
+  'qwen3.7-plus': { go: 60, goPlus: 180 },
+  'deepseek-v4.1-flash': { go: 80, goPlus: 160 },
+  'deepseek-v4-pro': { go: 15, goPlus: 60 },
+  'hy4-preview': { go: 30, goPlus: 120 },
+  'hy3': { go: 60, goPlus: 240 },
+  'space-bunny': { go: 30, goPlus: 120 },
+  'grok-4.7': { go: 15, goPlus: 60 },
+  'gpt-6-luna': { go: 15, goPlus: 60 },
+  'gpt-5.6-luna': { go: 15, goPlus: 60 },
+  'claude-haiku-5-5': { go: 15, goPlus: 60 },
+  'gemini-4-argon-contributor': { go: 60, goPlus: 240, note: 'limited-time' },
+}
+
+/**
+ * Read one model's limit snapshot.
+ * @param model - catalog model id.
+ * @returns the row, or undefined when the plan page lists no such model.
+ */
+export function goMonthlyLimit(model: string): GoMonthlyLimit | undefined {
+  return Object.hasOwn(GO_MONTHLY_LIMITS, model) ? GO_MONTHLY_LIMITS[model] : undefined
+}
+
+/** Models with a documented peak/off-peak tariff (DeepSeek V4.1 Flash and V4 Pro). */
+export const PEAK_PRICED_MODELS: ReadonlySet<string> = new Set(['deepseek-v4.1-flash', 'deepseek-v4-pro'])
+
+/**
+ * Whether a request started inside the documented DeepSeek peak window:
+ * 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday. All other hours,
+ * including weekends, are off-peak.
+ * @param at - request start time in Unix epoch milliseconds.
+ * @returns true when the peak multiplier applies.
+ */
+export function isPeakPricedAt(at: number): boolean {
+  if (!Number.isFinite(at)) return false
+  const date = new Date(at)
+  const day = date.getUTCDay()
+  if (day === 0 || day === 6) return false
+  const hour = date.getUTCHours()
+  return hour >= 1 && hour < 4 || hour >= 6 && hour < 10
+}
+
+/** The four billable rates, in USD per one million tokens. */
+export interface CostRates {
+  readonly input: number
+  readonly output: number
+  readonly cacheRead: number
+  readonly cacheWrite: number
+}
+
+/** One context-length tier; the highest matching threshold prices the attempt. */
+export interface CostTier extends CostRates {
+  readonly inputTokensAbove: number
+}
+
+/** Structural face of the catalog's ModelCost. */
+export interface ModelCostLike extends CostRates {
+  readonly tiers?: readonly CostTier[]
+}
+
+/** The token components one request reported. */
+export interface UsageCounts {
+  readonly input: number
+  readonly output: number
+  readonly cacheRead: number
+  readonly cacheWrite: number
+}
+
+/**
+ * Billed input tokens: reported input plus cache reads and writes.
+ * @param usage - one request's token components.
+ * @returns the total the tier threshold is compared against.
+ */
+export function billedInput(usage: UsageCounts): number {
+  return usage.input + usage.cacheRead + usage.cacheWrite
+}
+
+/**
+ * Whether every rate of a model is zero (a free row).
+ * @param cost - the model's catalog cost.
+ * @returns true when no component could ever charge.
+ */
+export function isFreeCost(cost: ModelCostLike): boolean {
+  const free = (rates: CostRates): boolean =>
+    rates.input === 0 && rates.output === 0 && rates.cacheRead === 0 && rates.cacheWrite === 0
+  return free(cost) && (cost.tiers === undefined || cost.tiers.every(free))
+}
+
+function tierOf(cost: ModelCostLike, billed: number): CostRates {
+  let chosen: CostRates = cost
+  let threshold = -1
+  for (const tier of cost.tiers ?? []) {
+    if (billed > tier.inputTokensAbove && tier.inputTokensAbove >= threshold) {
+      chosen = tier
+      threshold = tier.inputTokensAbove
+    }
+  }
+  return chosen
+}
+
+/**
+ * Price one settled request.
+ * @param model - the model id that served the request.
+ * @param usage - its token components.
+ * @param cost - the catalog cost for that model.
+ * @param at - request start time, used for the DeepSeek peak window.
+ * @returns the estimated cost in integer micro-USD.
+ */
+export function priceUsage(model: string, usage: UsageCounts, cost: ModelCostLike, at: number): number {
+  const rates = tierOf(cost, billedInput(usage))
+  const micro = Math.round(usage.input * rates.input)
+    + Math.round(usage.output * rates.output)
+    + Math.round(usage.cacheRead * rates.cacheRead)
+    + Math.round(usage.cacheWrite * rates.cacheWrite)
+  return PEAK_PRICED_MODELS.has(model) && isPeakPricedAt(at) ? micro * 2 : micro
+}
+
+/** Route id used by this plugin before 0.1.16. */
+export const LEGACY_PROVIDER_ID = 'opencode-go'
+
+/** 0.1.16 isolated the plugin route; later legacy-id records belong to DSH native. */
+export const LEGACY_ROUTE_CUTOFF_MS = Date.parse('2026-09-30T00:00:00Z')
+
+/** Minimal structural event face; the Host owns the real session types. */
+export interface AnalyticsEventLike {
+  readonly type: string
+  readonly seq: number
+  readonly time: number
+  readonly data?: unknown
+}
+
+/** Minimal structural snapshot returned by readSession. */
+export interface AnalyticsSnapshotLike {
+  readonly inheritedEventCount: number
+  readonly events: readonly AnalyticsEventLike[]
+}
+
+/** One model request that the dashboard can price. */
+export interface RequestFact {
+  /** Request start, Unix epoch milliseconds. */
+  readonly at: number
+  readonly model: string
+  readonly input: number
+  readonly output: number
+  readonly cacheRead: number
+  readonly cacheWrite: number
+  /** The request was recorded under the pre-0.1.16 route id. */
+  readonly legacy: boolean
+  readonly kind: 'message' | 'summary'
+  /** The request settled without a usable usage report. */
+  readonly missingUsage: boolean
+}
+
+/** Everything one session contributes, before date filtering. */
+export interface FoldedSession {
+  readonly facts: RequestFact[]
+  /** Start times of attempts that committed no surface message. */
+  readonly attempts: number[]
+  /** Model calls with no usable routing header or model id. */
+  readonly unattributed: number[]
+  /** Events that passed the fork-prefix filter — never the inherited prefix (review P11). */
+  readonly events: number
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined
+}
+
+function count(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+function usageOf(value: unknown): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
+  const usage = record(value)
+  if (usage === undefined) return undefined
+  const input = count(usage.inputTokens)
+  const output = count(usage.outputTokens)
+  // Field-level degradation (review P8): a present-but-malformed component only
+  // degrades that component to 0 so partially valid tokens still reach the
+  // report; the whole usage counts as missing when input AND output are both
+  // missing or malformed. The safe-integer sum check runs on the degraded
+  // values and still rejects the report when they could overflow.
+  if (input === undefined && output === undefined) return undefined
+  const cacheRead = (usage.cacheReadTokens === undefined ? 0 : count(usage.cacheReadTokens)) ?? 0
+  const cacheWrite = (usage.cacheWriteTokens === undefined ? 0 : count(usage.cacheWriteTokens)) ?? 0
+  const sum = (input ?? 0) + (output ?? 0) + cacheRead + cacheWrite
+  if (!Number.isSafeInteger(sum)) return undefined
+  return { input: input ?? 0, output: output ?? 0, cacheRead, cacheWrite }
+}
+
+function stepKey(data: Record<string, unknown> | undefined): string | undefined {
+  const turn = count(data?.turn)
+  const step = count(data?.step)
+  return turn === undefined || step === undefined ? undefined : turn + ':' + step
+}
+
+/**
+ * Whether a recorded provider id belongs to this plugin.
+ * @param provider - the provider id in a request header or summary event.
+ * @param at - the request start time.
+ * @param cutoff - legacy route cutoff, overridable in tests.
+ * @returns true when the request is this plugin's.
+ */
+export function isPluginRoute(provider: unknown, at: number, cutoff = LEGACY_ROUTE_CUTOFF_MS): boolean {
+  return provider === PROVIDER_ID || provider === LEGACY_PROVIDER_ID && at < cutoff
+}
+
+/**
+ * Fold one session snapshot.
+ * @param snapshot - complete raw event log plus its fork-inherited prefix length.
+ * @param options - test seams; the cutoff defaults to the 0.1.16 release.
+ * @returns the session's priceable facts and counters.
+ */
+export function foldSession(
+  snapshot: AnalyticsSnapshotLike,
+  options: { cutoff?: number } = {},
+): FoldedSession {
+  const inherited = count(snapshot.inheritedEventCount) ?? 0
+  const cutoff = options.cutoff ?? LEGACY_ROUTE_CUTOFF_MS
+  const facts: RequestFact[] = []
+  const attempts: number[] = []
+  const unattributed: number[] = []
+  const stepStarts = new Map<string, number>()
+  let lastStart: number | undefined
+  let header: { provider: string; model?: string } | undefined
+  let ownEvents = 0
+
+  // Half-open ownership, matching the host's isOwnSeq (dsh-session
+  // lib/index.js:1192-1194: `seq >= this.inheritedEventCount && seq < this.seq`):
+  // the boundary slot seq === inheritedEventCount belongs to this session, and
+  // only the prefix strictly below it is inherited. Skipping `seq <= inherited`
+  // here would drop the session's first own event.
+  for (const event of snapshot.events) {
+    const seq = count(event.seq)
+    if (seq === undefined || seq < inherited) continue
+    ownEvents++
+    const eventTime = count(event.time)
+    const data = record(event.data)
+
+    if (event.type === 'request/header') {
+      const config = record(record(data?.header)?.config)
+      const provider = typeof config?.provider === 'string' ? config.provider : undefined
+      const model = typeof config?.model === 'string' && config.model ? config.model : undefined
+      header = provider === undefined ? undefined : { provider, ...(model === undefined ? {} : { model }) }
+      continue
+    }
+
+    if (event.type === 'step/start' || event.type === 'step/end') {
+      const key = stepKey(data)
+      if (event.type === 'step/start') {
+        if (eventTime === undefined) continue
+        if (key !== undefined) stepStarts.set(key, eventTime)
+        // Track the latest start even when the key is malformed (review P10):
+        // legacy, damaged and truncated logs omit turn/step, and falling back
+        // to the completion time double-counts peak pricing, shifts day
+        // buckets and flips the legacy-route cutoff.
+        lastStart = eventTime
+      } else if (key !== undefined) {
+        stepStarts.delete(key)
+      }
+      continue
+    }
+
+    if (event.type === 'assistant/message') {
+      const at = stepStarts.get(stepKey(data) ?? '') ?? lastStart ?? eventTime
+      if (at === undefined) continue
+      if (header === undefined) { unattributed.push(at); continue }
+      if (!isPluginRoute(header.provider, at, cutoff)) continue
+      const messageModel = record(data?.message)?.model
+      const model = typeof messageModel === 'string' && messageModel ? messageModel : header.model
+      if (model === undefined) { unattributed.push(at); continue }
+      const usage = usageOf(data?.usage)
+      facts.push({
+        at, model, kind: 'message', legacy: header.provider === LEGACY_PROVIDER_ID,
+        missingUsage: usage === undefined,
+        input: usage?.input ?? 0, output: usage?.output ?? 0,
+        cacheRead: usage?.cacheRead ?? 0, cacheWrite: usage?.cacheWrite ?? 0,
+      })
+      continue
+    }
+
+    if (event.type === 'compaction/summary') {
+      if (eventTime === undefined) continue
+      const provider = data?.provider
+      if (typeof provider !== 'string' || !isPluginRoute(provider, eventTime, cutoff)) continue
+      const model = typeof data?.model === 'string' && data.model ? data.model : undefined
+      if (model === undefined) { unattributed.push(eventTime); continue }
+      const usage = usageOf(data?.usage)
+      facts.push({
+        at: eventTime, model, kind: 'summary', legacy: provider === LEGACY_PROVIDER_ID,
+        missingUsage: usage === undefined,
+        input: usage?.input ?? 0, output: usage?.output ?? 0,
+        cacheRead: usage?.cacheRead ?? 0, cacheWrite: usage?.cacheWrite ?? 0,
+      })
+      continue
+    }
+
+    if (event.type === 'assistant/attempt') {
+      // Contract: the host defines assistant/attempt as one model attempt that
+      // "committed no surface message" (dsh-session lib/types/types.d.ts:318-327;
+      // shape {turn, step, stream} — no usage, no message), so every settled
+      // model call surfaces as either an assistant/message or an
+      // assistant/attempt, never both. We collect unconditionally and do not
+      // de-duplicate against facts: a double count would require the host to
+      // violate its own contract, and silently dropping one side would hide
+      // exactly that violation.
+      const at = stepStarts.get(stepKey(data) ?? '') ?? lastStart ?? eventTime
+      if (at === undefined) continue
+      // A headless attempt cannot be attributed to a route, but it must not
+      // vanish without a trace (review U14 / P12 scan half): record its time
+      // as unattributed instead of an attempt.
+      if (header === undefined) { unattributed.push(at); continue }
+      if (isPluginRoute(header.provider, at, cutoff)) attempts.push(at)
+    }
+  }
+
+  return { facts, attempts, unattributed, events: ownEvents }
+}
+
+/** Why an analytics read failed. */
+export type AnalyticsFailureReason = 'no-session-query' | 'invalid-range' | 'scan-failed'
+
+/** One dashboard read. Dates are Unix epoch milliseconds. */
+export interface AnalyticsQuery {
+  /** Inclusive start. */
+  from: number
+  /** Exclusive end. */
+  to: number
+  /** IANA timezone used to bucket days. */
+  timeZone: string
+  /** Session scan cap, 1..2000; the Host default applies when absent. */
+  maxSessions?: number
+}
+
+/** Totals over the requested range. */
+export interface AnalyticsTotals {
+  requests: number
+  unsettledAttempts: number
+  summaries: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  estimatedMicroUsd: number
+  pricedRequests: number
+  unpricedRequests: number
+  missingUsage: number
+}
+
+/** One model's share of the range. */
+export interface AnalyticsModelRow {
+  model: string
+  name?: string
+  requests: number
+  missingUsage: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  estimatedMicroUsd: number
+  pricedRequests: number
+  unpricedRequests: number
+  /** Go monthly limit in USD; null when unlimited or unknown. */
+  limitGoUsd: number | null
+  /** Go Plus monthly limit in USD; null when unlimited or unknown. */
+  limitGoPlusUsd: number | null
+  limitNote?: 'unlimited' | 'limited-time' | 'unknown'
+}
+
+/** One local calendar day. */
+export interface AnalyticsDayRow {
+  /** YYYY-MM-DD in the query timezone. */
+  day: string
+  requests: number
+  tokens: number
+  estimatedMicroUsd: number
+}
+
+/** Coverage and budget limits for this report. */
+export interface AnalyticsCoverage {
+  listedSessions: number
+  scannedSessions: number
+  matchedSessions: number
+  failedSessions: number
+  eventsScanned: number
+  summaries: number
+  legacyRequests: number
+  missingUsage: number
+  truncated: boolean
+  truncation?: 'sessions' | 'events' | 'time'
+  scanMs: number
+  timeZoneFallback?: true
+  /**
+   * Sessions listed but never scanned because the slice cap or a budget
+   * stopped first (review P16/P18/M1). Observability only — this never
+   * implies the requested range was fully covered.
+   */
+  unreadSessions?: number
+  /**
+   * Cache entries the end-of-run trim dropped after this report was computed
+   * from run-local results; the next run re-reads them (review P3/S1).
+   */
+  evictedSessions?: number
+  /**
+   * Model calls in range with no usable routing header or model id, counted
+   * for visibility only — never in tokens or cost (review P12).
+   */
+  unattributedRequests?: number
+  /** Session listing wall time; scanMs excludes it (review S6). */
+  listMs?: number
+  /** Pricing harvest wall time; scanMs excludes it (review S6/P4). */
+  pricingMs?: number
+}
+
+/** Where the prices came from. */
+export interface AnalyticsPricing {
+  source: 'models.dev'
+  updatedAt?: number
+  /**
+   * True only when the whole price table was unavailable; unpricedModels then
+   * lists every model that actually appeared in the range (review P15). A
+   * table that loaded but lacks a model leaves this unset and lists the model.
+   */
+  unavailable?: true
+  unpricedModels: string[]
+}
+
+/** One complete dashboard response. */
+export interface AnalyticsReport {
+  generatedAt: number
+  range: { from: number; to: number }
+  timeZone: string
+  totals: AnalyticsTotals
+  byModel: AnalyticsModelRow[]
+  byDay: AnalyticsDayRow[]
+  coverage: AnalyticsCoverage
+  pricing: AnalyticsPricing
+}
 
 /** Structural face of one sessionQuery record. */
 export interface AnalyticsSessionRecord {
@@ -55,22 +507,6 @@ export interface AnalyticsSessionRecord {
 export interface AnalyticsSessionQuery {
   listSessions(signal?: AbortSignal): Promise<readonly AnalyticsSessionRecord[]>
   readSession(id: string): Promise<AnalyticsSnapshotLike>
-}
-
-/** Structural face of one ctx.sessionPersistence record. */
-export interface AnalyticsPersistenceRecord {
-  readonly header?: { readonly id?: string }
-  readonly revision?: string
-}
-
-/**
- * The subset of ctx.sessionPersistence this service needs. A durable revision
- * changes if and only if the session log changes, so it can validate a fold
- * that was written by an earlier process. The service is optional on the Host:
- * without it, only the in-process cache survives between runs.
- */
-export interface AnalyticsPersistence {
-  list(options?: { signal?: AbortSignal }): Promise<readonly AnalyticsPersistenceRecord[]>
 }
 
 /** Structural face of one catalog model. */
@@ -108,31 +544,29 @@ export interface AnalyticsOptions {
    * concurrently.
    */
   maxConcurrency?: number
-  /**
-   * Durable session index, when the Host mounts ctx.sessionPersistence. Its
-   * revisions validate on-disk folds across restarts; without it the scan
-   * behaves exactly as before.
-   */
-  persistence?: () => AnalyticsPersistence | undefined
-  /** Overrides the default analytics fold cache path (tests). */
-  foldCachePath?: string
+
 }
 
 const DEFAULT_BUDGET_MS = 12_000
+
 const DEFAULT_MAX_SESSIONS = 500
+
 const DEFAULT_MAX_EVENTS = 500_000
+
 const DEFAULT_MAX_FACTS = 200_000
+
 const DEFAULT_MAX_CONCURRENCY = 8
+
 const MAX_CACHE_SESSIONS = 2000
+
 const PRICING_TIMEOUT_MS = 4000
+
 /** Bound reuse when a live or closed log has no durable freshness token. */
 const UNVERSIONED_REUSE_MS = 5000
 
 interface CachedSession {
-  readonly createdAt: number
   readonly facts: FoldedSession
   readonly live: boolean
-  readonly revision?: string
   /** When the fold was stored; bounds reuse without a durable revision. */
   readonly storedAt: number
 }
@@ -311,7 +745,7 @@ function lowerBound(facts: readonly RequestFact[], from: number): number {
   return low
 }
 
-function usageOf(fact: RequestFact): UsageCounts {
+function factUsage(fact: RequestFact): UsageCounts {
   return { input: fact.input, output: fact.output, cacheRead: fact.cacheRead, cacheWrite: fact.cacheWrite }
 }
 
@@ -345,12 +779,6 @@ export class GoAnalyticsService extends TypertRemoteService {
   /** The most recent successful price table; stale-on-error fallback (review P4/S4). */
   private lastPriceBook: AnalyticsPriceBook | undefined
   private factTotal = 0
-  /**
-   * The on-disk fold cache, loaded lazily once per service. The promise is
-   * memoized even when loading fails, because a missing or corrupt file is an
-   * empty cache and retrying it on every run would only add latency.
-   */
-  private folds: Promise<Map<string, AnalyticsFoldEntry>> | undefined
 
   constructor(ctx: Context, private readonly options: AnalyticsOptions) {
     super(ctx, 'opencodeGoAnalytics')
@@ -386,43 +814,6 @@ export class GoAnalyticsService extends TypertRemoteService {
     return this.options.now?.() ?? Date.now()
   }
 
-  private foldPath(): string {
-    return this.options.foldCachePath ?? analyticsFoldCachePath()
-  }
-
-  /** Load the persistent folds once; later runs share the same map. */
-  private diskFolds(): Promise<Map<string, AnalyticsFoldEntry>> {
-    this.folds ??= loadFoldCache(this.foldPath())
-    return this.folds
-  }
-
-  /**
-   * Ask the durable index for the current revisions. Any failure — the service
-   * is absent, rejects, or the caller aborts — yields an empty table, which
-   * disables disk reuse for this run without touching the scan.
-   */
-  private async revisionTable(
-    persistence: AnalyticsPersistence | undefined,
-    signal?: AbortSignal,
-  ): Promise<Map<string, string>> {
-    if (persistence === undefined) return new Map()
-    try {
-      const listed = await persistence.list({ signal })
-      const revisions = new Map<string, string>()
-      for (const record of listed) {
-        const id = record.header?.id
-        const revision = record.revision
-        if (typeof id === 'string' && id.length > 0
-          && typeof revision === 'string' && revision.length > 0) {
-          revisions.set(id, revision)
-        }
-      }
-      return revisions
-    } catch {
-      return new Map()
-    }
-  }
-
   private limitOf(name: 'budgetMs' | 'maxSessions' | 'maxEvents' | 'maxFacts' | 'maxConcurrency', fallback: number): number {
     const value = this.options[name]
     return value === undefined ? fallback : value
@@ -435,15 +826,6 @@ export class GoAnalyticsService extends TypertRemoteService {
         reason: 'no-session-query', retryable: false,
       })
     }
-    // The durable revision table and the on-disk folds load alongside the
-    // session listing, so a warm restart adds no round trip before the scan.
-    // Without the persistence service there are no revisions to validate
-    // against, so the disk file is not even read.
-    const persistence = this.options.persistence?.()
-    const revisionsPromise = this.revisionTable(persistence, signal)
-    const foldsPromise = persistence === undefined
-      ? Promise.resolve(new Map<string, AnalyticsFoldEntry>())
-      : this.diskFolds()
     const listStarted = this.now()
     let listed: readonly AnalyticsSessionRecord[]
     try {
@@ -455,8 +837,6 @@ export class GoAnalyticsService extends TypertRemoteService {
       }, { cause: error })
     }
     const listMs = Math.max(0, this.now() - listStarted)
-    const revisions = await revisionsPromise
-    const cachedFolds = await foldsPromise
 
     const zone = resolveTimeZone(query.timeZone)
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -477,10 +857,6 @@ export class GoAnalyticsService extends TypertRemoteService {
     // concurrent run's remember()/trim() cannot subtract a session from this
     // report. Keys are unique, which also folds any duplicate host ids (U10).
     const local = new Map<string, FoldedSession>()
-    // Folds read this run from sessions that have a durable revision; they are
-    // merged into the on-disk cache when the scan ends. Live entries are never
-    // added (P9/S2), and a partial scan never deletes unseen entries.
-    const readFolds = new Map<string, AnalyticsFoldEntry>()
     let scanned = 0
     let events = 0
     let newEvents = 0
@@ -499,16 +875,9 @@ export class GoAnalyticsService extends TypertRemoteService {
       const id = idOf(record)
       if (id === undefined) { scanned++; failed++; return }
       const live = record.live === true
-      const revision = live ? undefined : revisions.get(id)
       const cached = this.cache.get(id)
-      // A session can resume and close between dashboard opens. Both memory
-      // and disk folds must match its current revision, even if neither scan
-      // saw it live. Without a revision, reuse is bounded like live folds.
-      const reusable = cached !== undefined
-        && live === cached.live
-        && (!live && revision !== undefined
-          ? cached.revision === revision
-          : this.now() - cached.storedAt < UNVERSIONED_REUSE_MS)
+      const reusable = cached !== undefined && live === cached.live
+        && this.now() - cached.storedAt < UNVERSIONED_REUSE_MS
       if (reusable && cached !== undefined) {
         // LRU touch (P2/M2): a hit moves the entry to the tail.
         this.cache.delete(id)
@@ -517,24 +886,6 @@ export class GoAnalyticsService extends TypertRemoteService {
         events += cached.facts.events
         local.set(id, sortedFacts(cached.facts))
         return
-      }
-      // Reuse a fold persisted by an earlier process only when all three hold:
-      // the record is not live, an entry exists, and its revision is exactly
-      // the current one. Revision equality proves the log did not change, so
-      // the fold is what a fresh read would produce; anything else re-reads.
-      if (revision !== undefined) {
-        const stored = cachedFolds.get(id)
-        if (stored !== undefined && stored.revision === revision) {
-          scanned++
-          events += stored.events
-          local.set(id, sortedFacts({
-            facts: stored.facts,
-            attempts: stored.attempts,
-            unattributed: stored.unattributed,
-            events: stored.events,
-          }))
-          return
-        }
       }
       if (this.now() - started > budgetMs) { stopped = 'time'; return }
       if (newEvents > maxEvents) { stopped = 'events'; return }
@@ -548,21 +899,8 @@ export class GoAnalyticsService extends TypertRemoteService {
         scanned++
         events += facts.events
         newEvents += facts.events
-        this.remember(id, createdAtOf(record), facts, live, this.now(), revision)
+        this.remember(id, facts, live, this.now())
         local.set(id, sortedFacts(facts))
-        // Only a closed session with a known revision can be validated by a
-        // later process; live folds are deliberately never persisted.
-        if (revision !== undefined) {
-          readFolds.set(id, {
-            revision,
-            storedAt: this.now(),
-            createdAt: createdAtOf(record),
-            events: facts.events,
-            facts: facts.facts,
-            attempts: facts.attempts,
-            unattributed: facts.unattributed,
-          })
-        }
       } catch (error: unknown) {
         // Aborted in flight: neither scanned nor failed — the session lands in
         // unreadSessions, and the run rethrows once the pool drains.
@@ -599,12 +937,6 @@ export class GoAnalyticsService extends TypertRemoteService {
     // S6/U2/P4: scanMs measures the scan loop only — the pricing wait and the
     // listing are reported separately.
     const scanMs = Math.max(0, this.now() - started)
-    // A cancelled run persists nothing; a partial run merges what it did read
-    // and leaves the rest of the file alone. Failure is silent by contract.
-    if (readFolds.size > 0 && signal?.aborted !== true) {
-      await this.persistFolds(cachedFolds, readFolds)
-    }
-
     let priceBook: AnalyticsPriceBook | undefined
     let pricingUnavailable = false
     try {
@@ -685,7 +1017,7 @@ export class GoAnalyticsService extends TypertRemoteService {
             // unpricedRequests > 0 must mean "everything was priced or free".
             unpriced.add(model)
           } else {
-            micro = priceUsage(model, usageOf(fact), cost, fact.at)
+            micro = priceUsage(model, factUsage(fact), cost, fact.at)
             totals.estimatedMicroUsd += micro
             totals.pricedRequests++
             row.estimatedMicroUsd += micro
@@ -793,31 +1125,13 @@ export class GoAnalyticsService extends TypertRemoteService {
     return report
   }
 
-  /**
-   * Merge this run's newly read folds into the persistent cache. Entries the
-   * run never looked at are kept, entries past the age limit are dropped, and
-   * saveFoldCache applies the byte cap by storedAt. The write is best-effort:
-   * a failed save leaves the previous file and never fails the report.
-   */
-  private async persistFolds(
-    cached: Map<string, AnalyticsFoldEntry>,
-    read: ReadonlyMap<string, AnalyticsFoldEntry>,
-  ): Promise<void> {
-    const oldest = this.now() - ANALYTICS_FOLD_CACHE_MAX_AGE_MS
-    for (const [id, entry] of cached) {
-      if (entry.storedAt < oldest) cached.delete(id)
-    }
-    for (const [id, entry] of read) cached.set(id, entry)
-    await saveFoldCache(this.foldPath(), cached)
-  }
-
-  private remember(id: string, createdAt: number, facts: FoldedSession, live: boolean, storedAt: number, revision?: string): void {
+  private remember(id: string, facts: FoldedSession, live: boolean, storedAt: number): void {
     const previous = this.cache.get(id)
     if (previous !== undefined) this.factTotal -= previous.facts.facts.length
     // Delete-then-set moves an updated entry to the tail: the cache is LRU
     // (review P2/M2), and eviction is deferred to trim() at the end of a run.
     this.cache.delete(id)
-    this.cache.set(id, { createdAt, facts, live, storedAt, revision })
+    this.cache.set(id, { facts, live, storedAt })
     this.factTotal += facts.facts.length
   }
 

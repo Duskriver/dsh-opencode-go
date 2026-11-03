@@ -1,20 +1,29 @@
+/** Conversation quota indicator, account selection and analytics entry. */
+import css from './UsagePill.module.css'
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import { parseAccountSwitch, type GoUsage, type UsageWindow } from '../usage-contract.ts'
-import { PROVIDER_ID } from '../provider-identity.ts'
-import { DEFAULT_USAGE_DISPLAY } from '../usage-display.ts'
-import type { SettingsScope } from './settings.ts'
-import type { OpencodeGoSettings } from './section-controller.ts'
-import { accountsOf, accountRefOf, type GoAccount, type GoAccountSwitch } from '../accounts.ts'
-import type { AnalyticsQuery, AnalyticsReport } from '../analytics-contract.ts'
+import {
+  parseAccountSwitch,
+  type GoUsage,
+  type UsageWindow,
+  PROVIDER_ID,
+  DEFAULT_USAGE_DISPLAY,
+  accountsOf,
+  accountRefOf,
+  type GoAccount,
+  type GoAccountSwitch,
+  type AnalyticsQuery,
+  type AnalyticsReport,
+} from '../contracts.ts'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { OpencodeGoSettings } from './controller.ts'
 import { AnalyticsDialog } from './AnalyticsDialog.tsx'
-import { themeStyle, useGoThemeTokens } from './theme.ts'
-import css from './UsagePill.module.css'
+import { themeStyle, useGoThemeTokens } from './presentation.ts'
 
 export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
-  settings: SettingsScope<OpencodeGoSettings>
+  settings: ConfigForm<OpencodeGoSettings>
   readUsage: () => Promise<GoUsage>
   /** Optional so an embedded/test render can omit the dashboard. */
   readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
@@ -25,6 +34,7 @@ export interface UsagePillProps {
 }
 
 const unchanged = () => 0
+
 const noSubscription = () => () => {}
 
 interface UsageFailure {
@@ -55,6 +65,7 @@ function usageFailure(error: unknown): UsageFailure {
  *  cycle gives up silently, leaving the displayed state untouched so the minute
  *  timer and visibility refreshes regain their turn. */
 const usageRefreshTimeoutMs = 30_000
+
 const refreshTimedOut = Symbol('usage-refresh-timed-out')
 
 function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
