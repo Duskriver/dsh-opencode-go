@@ -294,7 +294,8 @@ describe('persistent source caches', () => {
     expect(requests[0].has('authorization')).toBe(false)
     expect(requests[1].get('if-none-match')).toBe('"v1"')
     expect(requests[0].get('user-agent')).toMatch(/^deepseek-harness\//)
-    expect((await stat(catalogCachePath())).mode & 0o777).toBe(0o600)
+    // Windows reports compatibility mode bits, not POSIX file permissions.
+    if (process.platform !== 'win32') expect((await stat(catalogCachePath())).mode & 0o777).toBe(0o600)
     vi.setSystemTime(Date.now() + 1000)
     expect((await instance.snapshot(true)).updatedAtMs).toBe(verified.updatedAtMs)
     expect((await readCatalogCache(catalogCachePath(), `${url}/models`))?.savedAtMs).toBe(saved?.savedAtMs)
