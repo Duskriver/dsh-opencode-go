@@ -2,10 +2,10 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import { type SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
-import { type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AnalyticsQuery, type AnalyticsReport, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
+import { type ModelSource, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AnalyticsQuery, type AnalyticsReport, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "protocolOverrides", "baseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
 export type EditableField = TextField | 'modelLimits';
 export interface FieldState {
@@ -58,6 +58,8 @@ export type OpencodeGoModels =
     readonly message?: string;
     readonly sources?: GoModelCatalog['sources'];
 };
+/** A failure on one source must not hide the other source's usable models. */
+export declare function modelsForSource(models: OpencodeGoModels, source: ModelSource): OpencodeGoModels;
 export type ExecuteAccountCommand = (command: AccountCommand) => Promise<SettingsWriteResult>;
 export interface GoAccountView extends GoAccount {
     configured?: boolean;
@@ -96,11 +98,11 @@ export interface OpencodeGoSectionState extends FormShell {
     accounts: GoAccountsState;
     enabled: boolean;
     usageDisplay: FieldState;
-    protocolOverrides: FieldState;
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;
     pickerFailed: boolean;
     baseURL: FieldState;
+    freeBaseURL: FieldState;
     proxyURL: FieldState;
     refreshMinutes: FieldState;
     streamIdleTimeoutMs: FieldState;

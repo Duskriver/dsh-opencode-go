@@ -1,417 +1,240 @@
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import {
-  createUserMessage,
-  ReasoningEffortId,
-  userAgent,
-  type GenerateOptions,
-  type StreamChunk,
-  BlockAssembler,
-} from '@deepseek-ai/dsh-llm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import LlmRuntime, { createUserMessage, ReasoningEffortId, type GenerateOptions, type StreamChunk, BlockAssembler, userAgent } from '@deepseek-ai/dsh-llm'
 import { Context } from '@deepseek-ai/cordis'
-import { getSupportedThinkingLevels, type Api, normalizeContext } from 'opencode-go-pi-ai'
-import { getBuiltinModels } from 'opencode-go-pi-ai/providers/all'
-import { OpencodeGoAdapter } from '../src/adapter.ts'
-import {
-  readModelMetadata,
-  reasoningBudgetRange,
-  reasoningChoices,
-  reasoningIntent,
-  reasoningRequest,
-  withGatewayReasoning,
-  discoverSettingsModels,
-  withProtocolOverride,
-  modelBaseURL,
-} from '../src/catalog.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { getSupportedThinkingLevels, normalizeContext } from 'opencode-go-pi-ai'
 import { streamSimple as streamChat } from 'opencode-go-pi-ai/api/openai-completions'
-import { PlainConfig, validateGoConfig } from '../src/config.ts'
-import { configOf } from './support/host.ts'
-import { closeMockGateways, listingBody, mockGateway, textEvents, googleTextEvents } from './support/gateway.ts'
-import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/data.ts'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { RESPONSES_OVERRIDE_MODEL as MODEL } from '../src/contracts.ts'
 import { GoogleGenAI } from '@google/genai'
+import { OpencodeGoAdapter } from '../src/adapter.ts'
+import { readModelDirectory, reasoningBudgetRange, reasoningChoices, reasoningIntent, reasoningRequest, discoverSettingsModels, modelBaseURL } from '../src/catalog.ts'
+import { PlainConfig } from '../src/config.ts'
 import { streamSimple } from '../src/google.ts'
 import type { Model } from '../src/sdk-types.ts'
+import { configOf, drain, requestOf } from './support/host.ts'
+import { closeMockGateways, listingBody, mockGateway, textEvents, googleTextEvents } from './support/gateway.ts'
+import { modelsDocument, modelEntry, protocolEntry } from './support/data.ts'
 
-describe("reasoning controls", () => {
-  const id = 'mimo-v2.6-flash'
+const parsed = (entry: Record<string, unknown>) => readModelDirectory(modelsDocument({ future: entry }), 'https://gateway.example/v1').models.get('future')!
+const anthropicEvents = (id: string) => [
+  { type: 'message_start', message: { id: 'msg_fixture', type: 'message', role: 'assistant', model: id,
+    content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
+  { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello' } },
+  { type: 'content_block_stop', index: 0 },
+  { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
+  { type: 'message_stop' },
+].map(event => JSON.stringify(event))
 
-  const builtin = new Map<string, Model<Api>>(getBuiltinModels('opencode-go').map(model => [model.id, model]))
-
-  const levels = (model: Model<Api>) => getSupportedThinkingLevels(model)
-
-  afterEach(closeMockGateways)
-
-  describe('gateway reasoning metadata', () => {
-    it('fills MiMo Flash controls from its verified gateway rule despite an empty online list', () => {
-      const model = readModelMetadata(metadataDocument({ [id]: modelMetadata({ reasoning_options: [] }) }),
-        'https://gateway.example/v1', builtin).models.get(id)!
-      expect(model.reasoning).toBe(true)
-      expect(levels(model)).toEqual(['off', 'low', 'medium', 'high'])
-      expect(model.thinkingLevelMap).toEqual({
-        off: 'none', minimal: null, low: 'low', medium: 'medium', high: 'high', xhigh: null, max: null,
-      })
-    })
-
-    it.each(['mimo-v2.6-pro', 'mimo-v2.5', 'kimi-k2.6'])('does not synthesize an Off for intrinsic reasoning in %s', modelId => {
-      const model = readModelMetadata(metadataDocument({ [modelId]: modelMetadata({ reasoning_options: [] }) }),
-        'https://gateway.example/v1', builtin).models.get(modelId)!
-      expect(model.reasoning).toBe(true)
-      expect(levels(model)).toEqual([])
-      expect(model.thinkingLevelMap?.off).toBeNull()
-    })
-
-    it('does not inherit a verified model rule through the family or a different protocol', () => {
-      const verifiedBuiltin = new Map([[id, withGatewayReasoning(builtin.get(id)!)]])
-      const sibling = { ...modelMetadata({ family: 'mimo' }) }
-      delete sibling.reasoning_options
-      const result = readModelMetadata(metadataDocument({
-        [id]: modelMetadata({ family: 'mimo', reasoning_options: [] }),
-        'future-mimo': sibling,
-        'mimo-v2.6-pro': modelMetadata({ family: 'mimo', reasoning_options: [] }),
-      }), 'https://gateway.example/v1', verifiedBuiltin)
-      expect(levels(result.models.get('future-mimo')!)).toEqual([])
-      expect(levels(result.models.get('mimo-v2.6-pro')!)).toEqual([])
-      const otherProtocol = readModelMetadata(metadataDocument({
-        [id]: modelMetadata({ provider: { npm: '@ai-sdk/anthropic' }, reasoning_options: [] }),
-      }), 'https://gateway.example/v1', builtin).models.get(id)!
-      expect(levels(otherProtocol)).toEqual([])
-      expect(otherProtocol.thinkingLevelMap?.off).toBeNull()
-    })
-
-    it.each(['toggle', 'budget_tokens'])('does not turn an OpenAI %s into invented effort parameters', type => {
-      const model = readModelMetadata(metadataDocument({
-        'qwen3.7-max': modelMetadata({ reasoning_options: [{ type }] }),
-      }), 'https://gateway.example/v1', builtin).models.get('qwen3.7-max')!
-      expect(levels(model)).toEqual([])
-    })
-
-    it('offers only declared efforts when a generic model also advertises a toggle and budget', () => {
-      const model = readModelMetadata(metadataDocument({
-        'qwen3.8-max': modelMetadata({ reasoning_options: [
-          { type: 'toggle' }, { type: 'effort', values: ['low', 'medium', 'xhigh'] }, { type: 'budget_tokens' },
-        ] }),
-      }), 'https://gateway.example/v1', builtin).models.get('qwen3.8-max')!
-      expect(levels(model)).toEqual(['low', 'medium', 'xhigh'])
-      expect(model.thinkingLevelMap?.off).toBeNull()
-      expect(model.thinkingLevelMap?.high).toBeNull()
-    })
-
-    it('retains native switches without inventing a wire effort for Off', () => {
-      const result = readModelMetadata(metadataDocument({
-        'deepseek-v4-flash': modelMetadata(),
-        'deepseek-v4-pro': modelMetadata({ reasoning_options: [{ type: 'toggle' }] }),
-        'minimax-m3': modelMetadata({ provider: { npm: '@ai-sdk/anthropic' }, reasoning_options: [{ type: 'toggle' }] }),
-      }), 'https://gateway.example/v1', builtin)
-      expect(levels(result.models.get('deepseek-v4-flash')!)).toEqual(['off', 'low', 'high', 'max'])
-      for (const modelId of ['deepseek-v4-pro', 'minimax-m3']) {
-        expect(levels(result.models.get(modelId)!)).toEqual(['off', 'high'])
-        expect(result.models.get(modelId)!.thinkingLevelMap).not.toHaveProperty('off')
-        expect(reasoningChoices(result.models.get(modelId)!)).toEqual([{ id: 'off', name: 'Off' }, { id: 'high', name: 'On' }])
-      }
-    })
-
-    it('does not add High beside explicit efforts for a native toggle', () => {
-      const model = readModelMetadata(metadataDocument({
-        'deepseek-v4-pro': modelMetadata({ reasoning_options: [
-          { type: 'toggle' }, { type: 'effort', values: ['low', 'medium'] },
-        ] }),
-      }), 'https://gateway.example/v1', builtin).models.get('deepseek-v4-pro')!
-      expect(levels(model)).toEqual(['off', 'low', 'medium'])
-    })
-
-    it('maps advertised none to Off without inventing other levels', () => {
-      const model = readModelMetadata(metadataDocument({
-        future: modelMetadata({ reasoning_options: [{ type: 'effort', values: ['none', 'low'] }] }),
-      }), 'https://gateway.example/v1', builtin).models.get('future')!
-      expect(levels(model)).toEqual(['off', 'low'])
-      expect(model.thinkingLevelMap?.off).toBe('none')
-    })
+describe('reasoning declarations', () => {
+  it.each(['mimo-v2.6-flash', 'future-model'])('offers no invented levels for intrinsically reasoning %s', id => {
+    const model = readModelDirectory(modelsDocument({ [id]: modelEntry({ capabilities: { reasoning: { supported: true } } }) }), 'https://gateway.example/v1').models.get(id)!
+    expect(model.reasoning).toBe(true)
+    expect(getSupportedThinkingLevels(model)).toEqual([])
+    expect(reasoningChoices(model)).toEqual([])
+    expect(model.thinkingLevelMap?.off).toBeNull()
   })
-
-  describe('reasoning through the Harness and SDK', () => {
-    it.each([{ outage: false, efforts: false }, { outage: true, efforts: false }, { outage: false, efforts: true }])(
-      'sends token budgets and restored selections with metadata outage=$outage, efforts=$efforts', async ({ outage, efforts }) => {
-      const modelId = 'qwen3.7-plus'
-      const original = globalThis.fetch
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-        ? Promise.resolve(outage ? new Response('', { status: 503 }) : Response.json(metadataDocument({
-            [modelId]: modelMetadata({ provider: { npm: '@ai-sdk/anthropic' }, limit: { context: 100000, output: 32768 },
-              reasoning_options: [{ type: 'toggle' }, { type: 'budget_tokens', min: 1024, max: 20000 },
-                ...efforts ? [{ type: 'effort', values: ['minimal', 'low', 'medium', 'high'] }] : []] }),
-          }))) : original(input, init))
-      const gateway = await mockGateway({ status: 200, body: listingBody([modelId]) })
-      let config = configOf(gateway.url, { modelLimits: { [modelId]: { thinkingBudgets: [4096, 4096] } } })
-      const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-      const ctx = new Context()
-      await ctx.plugin(LlmRuntime)
-      ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
-      const events = [
-        { type: 'message_start', message: { id: 'msg_budget', type: 'message', role: 'assistant', model: modelId,
-          content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
-        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello' } },
-        { type: 'content_block_stop', index: 0 },
-        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
-        { type: 'message_stop' },
-      ].map(event => JSON.stringify(event))
-      try {
-        const info = await ctx.llm.resolveModelInfo('dsh-opencode-go', modelId)
-        expect(info.reasoning?.defaultEffort).toBeUndefined()
-        expect(info.reasoning?.efforts).toEqual(efforts ? [
-          { id: 'off', name: 'Off' }, { id: 'minimal', name: 'Minimal' }, { id: 'low', name: 'Low' },
-          { id: 'medium', name: 'Medium' }, { id: 'high', name: 'High' }, { id: 'budget:4096', name: '4,096 tokens' },
-        ] : [
-          { id: 'off', name: 'Off' }, { id: 'minimal', name: '1,024 tokens' }, { id: 'low', name: '2,048 tokens' },
-          { id: 'budget:4096', name: '4,096 tokens' }, { id: 'medium', name: '8,192 tokens' }, { id: 'high', name: '16,384 tokens' },
-        ])
-        const catalog = await discoverSettingsModels(adapter.catalogOf(config))
-        expect(catalog.models[0]?.reasoningBudget).toEqual({ min: 1024, max: outage ? 64512 : 20000 })
-        for (const [selection, budget] of [[undefined, undefined], ['off', undefined], ['minimal', 1024], ['low', 2048],
-          ['medium', 8192], ['high', 16384], ['budget:4096', 4096]] as const) {
-          gateway.pushCompletions({ events, namedEvents: true })
-          const restored = JSON.parse(JSON.stringify({ provider: 'dsh-opencode-go', model: modelId,
-            ...selection === undefined ? {} : { reasoningEffort: selection }, maxTokens: 2048,
-            messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
-          }))
-          const chunks = []
-          for await (const chunk of ctx.llm.stream(restored)) chunks.push(chunk)
-          expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
-          const body = gateway.bodies.at(-1)
-          if (selection === undefined) expect(body).not.toHaveProperty('thinking')
-          else if (selection === 'off') expect(body).toHaveProperty('thinking.type', 'disabled')
-          else expect(body).toMatchObject({ thinking: { type: 'enabled', budget_tokens: budget }, max_tokens: budget! + 2048 })
-          expect(body).not.toHaveProperty('reasoning_effort')
-          expect(body).not.toHaveProperty('output_config')
-        }
-        const snapshot = await adapter.catalogOf(config).snapshot()
-        expect(snapshot.models.get(modelId)).not.toHaveProperty('reasoningBudgetPresets')
-        const prepared = await adapter.prepareCall('dsh-opencode-go', modelId)
-        config = { ...config, modelLimits: { [modelId]: { thinkingBudgets: [6000] } } }
-        gateway.pushCompletions({ events, namedEvents: true })
-        for await (const _chunk of prepared.stream({ provider: 'dsh-opencode-go', model: modelId,
-          reasoningEffort: ReasoningEffortId('budget:4096'), messages: [], maxTokens: 2048 })) { /* Captured settings stay stable. */ }
-        expect(gateway.bodies.at(-1)).toHaveProperty('thinking.budget_tokens', 4096)
-        expect((await adapter.resolveModel('dsh-opencode-go', modelId)).reasoning?.efforts).toContainEqual({ id: 'budget:6000', name: '6,000 tokens' })
-        const count = gateway.bodies.length
-        await expect(adapter.stream({ provider: 'dsh-opencode-go', model: modelId,
-          reasoningEffort: ReasoningEffortId('budget:4096'), messages: [] })[Symbol.asyncIterator]().next())
-          .rejects.toMatchObject({ code: 'UNSUPPORTED_REASONING_EFFORT' })
-        expect(gateway.bodies).toHaveLength(count)
-        config = { ...config, modelLimits: { [modelId]: { contextWindow: 8192, thinkingBudgets: [6000] } } }
-        gateway.pushCompletions({ events, namedEvents: true })
-        for await (const _chunk of adapter.stream({ provider: 'dsh-opencode-go', model: modelId,
-          reasoningEffort: ReasoningEffortId('budget:6000'), messages: [], maxTokens: 2048 })) { /* SDK shrinks to the context room. */ }
-        const clamped = gateway.bodies.at(-1) as { max_tokens: number; thinking: { budget_tokens: number } }
-        expect(clamped.thinking.budget_tokens).toBeLessThan(6000)
-        expect(clamped.thinking.budget_tokens).toBeGreaterThanOrEqual(1024)
-        expect(clamped.max_tokens - clamped.thinking.budget_tokens).toBeGreaterThanOrEqual(1024)
-      } finally { await ctx.fiber.dispose() }
-    })
-
-    it.each([false, true])('uses adaptive Haiku thinking with metadata outage=%s', async outage => {
-      const modelId = 'claude-haiku-5-5'
-      const original = globalThis.fetch
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
-        String(input) === MODELS_METADATA_URL
-          ? Promise.resolve(outage ? new Response('', { status: 503 }) : Response.json(metadataDocument({
-              [modelId]: modelMetadata({ provider: { npm: '@ai-sdk/anthropic' },
-                reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['low', 'medium', 'high', 'xhigh', 'max'] }, { type: 'budget_tokens' }],
-              }),
-            }))) : original(input, init))
-      const gateway = await mockGateway({ status: 200, body: listingBody([modelId]) })
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
-      const events = [
-        { type: 'message_start', message: { id: 'msg_haiku', type: 'message', role: 'assistant', model: modelId,
-          content: [], stop_reason: null, usage: { input_tokens: 3, output_tokens: 0 } } },
-        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hello' } },
-        { type: 'content_block_stop', index: 0 },
-        { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } },
-        { type: 'message_stop' },
-      ].map(event => JSON.stringify(event))
-      for (const effort of [undefined, 'low', 'medium', 'high', 'xhigh', 'max', 'off']) {
-        gateway.pushCompletions({ events, namedEvents: true })
-        const chunks = []
-        for await (const chunk of adapter.stream({
-          provider: 'dsh-opencode-go', model: modelId, ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
-          messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
-        })) chunks.push(chunk)
-        expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
-        const body = gateway.bodies.at(-1)
-        if (effort === undefined) expect(body).not.toHaveProperty('thinking')
-        else expect(body).toMatchObject({ model: modelId, thinking: { type: effort === 'off' ? 'disabled' : 'adaptive' } })
-        expect(body).not.toHaveProperty('thinking.budget_tokens')
-        if (effort === undefined || effort === 'off') expect(body).not.toHaveProperty('output_config')
-        else expect(body).toMatchObject({ output_config: { effort } })
-      }
-    })
-
-    it.each([false, true])('keeps MiMo Default separate from Off with metadata outage=%s', async outage => {
-      const original = globalThis.fetch
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
-        String(input) === MODELS_METADATA_URL
-          ? Promise.resolve(outage ? new Response('', { status: 503 }) : Response.json(metadataDocument({
-              [id]: modelMetadata({ reasoning_options: [] }),
-            })))
-          : original(input, init))
-      const gateway = await mockGateway({ status: 200, body: listingBody([id]) })
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
-      const ctx = new Context()
-      await ctx.plugin(LlmRuntime)
-      ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
-      try {
-        const info = await ctx.llm.resolveModelInfo('dsh-opencode-go', id)
-        expect(info.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', 'low', 'medium', 'high'])
-        expect(info.reasoning?.defaultEffort).toBeUndefined()
-        const snapshot = await adapter.catalogOf(configOf(gateway.url)).snapshot()
-        const sharedMap = snapshot.models.get(id)!.thinkingLevelMap
-        for (const effort of [undefined, 'off', 'low', 'medium', 'high', 'off', undefined]) {
-          gateway.pushCompletions({ events: textEvents })
-          const chunks = []
-          for await (const chunk of ctx.llm.stream({
-            provider: 'dsh-opencode-go', model: id,
-            ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
-            messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
-          })) chunks.push(chunk)
-          expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
-          const body = gateway.bodies.at(-1)
-          if (effort === undefined) expect(body).not.toHaveProperty('reasoning_effort')
-          else expect(body).toMatchObject({ reasoning_effort: effort === 'off' ? 'none' : effort })
-          expect(body).not.toHaveProperty('thinking')
-          expect(body).not.toHaveProperty('enable_thinking')
-          expect(snapshot.models.get(id)!.thinkingLevelMap).toBe(sharedMap)
-          expect(sharedMap?.off).toBe('none')
-        }
-        const requests = gateway.bodies.length
-        for (const effort of ['minimal', 'xhigh', 'max']) {
-          await expect(adapter.stream({ provider: 'dsh-opencode-go', model: id, messages: [],
-            reasoningEffort: ReasoningEffortId(effort) })[Symbol.asyncIterator]().next())
-            .rejects.toMatchObject({ code: 'UNSUPPORTED_REASONING_EFFORT' })
-        }
-        expect(gateway.bodies).toHaveLength(requests)
-      } finally {
-        await ctx.fiber.dispose()
-      }
-    })
-
-    it('distinguishes Default from an advertised none mapping on a future model', async () => {
-      const original = globalThis.fetch
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
-        String(input) === MODELS_METADATA_URL
-          ? Promise.resolve(Response.json(metadataDocument({
-              future: modelMetadata({ reasoning_options: [{ type: 'effort', values: ['none', 'low'] }] }),
-            }))) : original(input, init))
-      const gateway = await mockGateway({ status: 200, body: listingBody(['future']) })
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
-      for (const effort of [undefined, 'off']) {
-        gateway.pushCompletions({ events: textEvents })
-        for await (const _chunk of adapter.stream({ provider: 'dsh-opencode-go', model: 'future', messages: [],
-          ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
-        })) { /* Inspect each emitted request. */ }
-      }
-      expect(gateway.bodies[0]).not.toHaveProperty('reasoning_effort')
-      expect(gateway.bodies[1]).toMatchObject({ reasoning_effort: 'none' })
-    })
+  it('maps only advertised efforts, including none, and does not inherit levels from family siblings', () => {
+    const result = readModelDirectory(modelsDocument({
+      full: modelEntry({ family: 'mimo', capabilities: { reasoning: { supported: true, effort: ['none', 'low', 'medium', 'high'] } } }),
+      empty: modelEntry({ family: 'mimo', capabilities: { reasoning: { supported: true } } }),
+    }), 'https://gateway.example/v1')
+    expect(getSupportedThinkingLevels(result.models.get('full')!)).toEqual(['off', 'low', 'medium', 'high'])
+    expect(result.models.get('full')?.thinkingLevelMap?.off).toBe('none')
+    expect(getSupportedThinkingLevels(result.models.get('empty')!)).toEqual([])
   })
-
-  describe('reasoning intent at the SDK boundary', () => {
-    it('uses native completion budget fields without an invented effort', async () => {
-      const modelId = 'numeric-thinking'
-      const known: Model<Api> = { ...builtin.get('deepseek-v4-flash')!, id: modelId,
-        compat: { thinkingFormat: 'qwen', thinkingTokenBudgetField: 'thinking_budget', supportsReasoningEffort: true } }
-      const gateway = await mockGateway({ status: 200, body: listingBody([]) })
-      const model = readModelMetadata(metadataDocument({
-        [modelId]: modelMetadata({ reasoning_options: [{ type: 'toggle' }, { type: 'budget_tokens', min: 512, max: 10000 }] }),
-      }), gateway.url, new Map([[modelId, known]])).models.get(modelId)!
-      for (const [selection, budget] of [[undefined, undefined], ['off', undefined], ['low', 2048], ['medium', 8192]] as const) {
-        gateway.pushCompletions({ events: textEvents })
-        const stream = streamChat(model, { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }, {
-          apiKey: 'test-key', maxTokens: 10000, maxRetries: 0, ...reasoningRequest(reasoningIntent(model, selection)),
-        })
-        for await (const _event of stream) { /* Inspect the actual serialized SDK payload. */ }
-        const body = gateway.bodies.at(-1)
-        expect(body).not.toHaveProperty('reasoning_effort')
-        if (selection === undefined || selection === 'off') expect(body).not.toHaveProperty('thinking_budget')
-        else expect(body).toMatchObject({ enable_thinking: true, thinking_budget: budget })
-      }
-    })
-
-    it('rejects invalid budgets and preserves answer room at the SDK boundary', () => {
-      const model = readModelMetadata(metadataDocument({
-        budget: modelMetadata({ provider: { npm: '@ai-sdk/anthropic' }, limit: { context: 10000, output: 5000 },
-          reasoning_options: [{ type: 'toggle' }, { type: 'budget_tokens', min: 1500, max: 4500 }] }),
-      }), 'https://gateway.example/v1', builtin).models.get('budget')!
-      expect(reasoningBudgetRange(model)).toEqual({ min: 1500, max: 3976 })
-      expect(reasoningChoices(model).map(choice => choice.name)).toEqual(['Off', '2,048 tokens'])
-      for (const tokens of [1, 1024, 3977, 6000, 1.5, NaN]) {
-        expect(() => reasoningChoices({ ...model, reasoningBudgetPresets: [tokens] })).toThrow(/between 1500 and 3976/)
-      }
-      for (const tokens of [0, -1, 1.5, NaN]) {
-        expect(() => PlainConfig({ modelLimits: { budget: { thinkingBudgets: [tokens] } } })).toThrow()
-      }
-      const request = reasoningRequest({ kind: 'budget', tokens: 3000, min: 1500 })
-      expect(request.onPayload({ thinking: { type: 'enabled', budget_tokens: 2000 }, max_tokens: 3500 }))
-        .toMatchObject({ thinking: { budget_tokens: 2000 } })
-      expect(() => request.onPayload({ thinking: { budget_tokens: 1024 }, max_tokens: 1500 })).toThrow(/at least 1500/)
-      expect(() => request.onPayload({ thinking: { budget_tokens: 1500 }, max_tokens: 1500 })).toThrow(/at least 1500/)
-    })
-
-    it.each(['deepseek', 'qwen', 'qwen-chat-template', 'zai'] as const)(
-      'preserves Default, native On, and Off separately for %s', async format => {
-        const gateway = await mockGateway({ status: 200, body: listingBody([]) })
-        const modelId = 'native-switch'
-        const known: Model<Api> = { ...builtin.get('deepseek-v4-flash')!, id: modelId,
-          compat: { thinkingFormat: format, supportsReasoningEffort: true } }
-        const model = readModelMetadata(metadataDocument({
-          [modelId]: modelMetadata({ reasoning_options: [{ type: 'toggle' }] }),
-        }), gateway.url, new Map([[modelId, known]])).models.get(modelId)!
-        for (const level of [undefined, 'high', 'off'] as const) {
-          gateway.pushCompletions({ events: textEvents })
-          const stream = streamChat(model, { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }, {
-            apiKey: 'test-key', maxRetries: 0, ...reasoningRequest(reasoningIntent(model, level)),
-          })
-          for await (const _event of stream) { /* Check what the real SDK sends. */ }
-          const body = gateway.bodies.at(-1)
-          expect(body).not.toHaveProperty('reasoning_effort')
-          if (level === undefined) {
-            expect(body).not.toHaveProperty('thinking')
-            expect(body).not.toHaveProperty('enable_thinking')
-            expect(body).not.toHaveProperty('chat_template_kwargs.enable_thinking')
-          } else if (format === 'qwen') {
-            expect(body).toMatchObject({ enable_thinking: level !== 'off' })
-          } else if (format === 'qwen-chat-template') {
-            expect(body).toMatchObject({ chat_template_kwargs: { enable_thinking: level !== 'off', preserve_thinking: true } })
-          } else {
-            expect(body).toMatchObject({ thinking: { type: level === 'off' ? 'disabled' : 'enabled' } })
-          }
-        }
-      },
-    )
-
-    it('keeps non-policy payload fields and the shared SDK payload intact', () => {
-      const source = { model: 'future', thinking: { type: 'disabled' }, reasoning_effort: 'none',
-        reasoning: { effort: 'none', summary: 'auto' }, output_config: { effort: 'high', format: { type: 'json_schema' } },
-        chat_template_kwargs: { enable_thinking: false, preserve_thinking: true }, tools: [{ name: 'probe' }] }
-      const original = structuredClone(source)
-      expect(reasoningRequest({ kind: 'default' }).onPayload(source)).toEqual({ model: 'future',
-        reasoning: { summary: 'auto' }, output_config: { format: { type: 'json_schema' } },
-        chat_template_kwargs: { preserve_thinking: true }, tools: [{ name: 'probe' }] })
-      expect(source).toEqual(original)
-    })
+  it('ignores unknown effort spellings and unsupported reasoning', () => {
+    expect(getSupportedThinkingLevels(parsed(modelEntry({ capabilities: { reasoning: { supported: true, effort: ['future', null, 'low'] } } })))).toEqual(['low'])
+    expect(reasoningChoices(parsed(modelEntry({ capabilities: { reasoning: { supported: false, effort: ['low'] } } })))).toEqual([])
+  })
+  it.each(['deepseek', 'qwen', 'glm'])('offers declared native On/Off for family %s without inventing efforts', family => {
+    const model = parsed(modelEntry({ family, capabilities: { reasoning: { supported: true, toggle: true } } }))
+    expect(model.reasoningControl).toBe('toggle')
+    expect(model.thinkingLevelMap).not.toHaveProperty('off')
+    expect(reasoningChoices(model)).toEqual([{ id: 'off', name: 'Off' }, { id: 'high', name: 'On' }])
+  })
+  it('does not synthesize high alongside declared efforts on native toggles', () => {
+    const model = parsed(modelEntry({ family: 'deepseek', capabilities: { reasoning: { supported: true, toggle: true, effort: ['low', 'medium'] } } }))
+    expect(getSupportedThinkingLevels(model)).toEqual(['off', 'low', 'medium'])
+  })
+  it('does not offer a generic toggle without a known wire format', () => {
+    expect(getSupportedThinkingLevels(parsed(modelEntry({ capabilities: { reasoning: { supported: true, toggle: true } } })))).toEqual([])
+  })
+  it('uses adaptive Anthropic thinking for effort controls and token budgets for budget declarations', () => {
+    const adaptive = parsed(modelEntry({ api: protocolEntry('messages'), capabilities: { reasoning: { supported: true, toggle: true, effort: ['low', 'xhigh'] }, temperature: false } }))
+    expect(adaptive.compat).toMatchObject({ forceAdaptiveThinking: true, supportsTemperature: false })
+    expect(adaptive.reasoningBudget).toBeUndefined()
+    const budget = parsed(modelEntry({ api: protocolEntry('messages'), capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 512, max: 10000 } } } }))
+    expect(budget.compat).toMatchObject({ forceAdaptiveThinking: false })
+    expect(budget.reasoningBudget).toEqual({ min: 1024, max: 10000 })
+    expect(budget.reasoningControl).toBe('budget')
   })
 })
 
-describe("Responses routing", () => {
-  const override = { [MODEL]: 'openai-responses' as const }
+describe('reasoning through Harness and SDK', () => {
+  it.each(['chat-completions', 'messages'])('serializes inherited effort with partial %s reasoning capabilities', async protocol => {
+    const id = 'partial-reasoning'
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ [id]: modelEntry({
+      capabilities: { reasoning: { supported: true, effort: ['low', 'high'] } },
+      api: protocolEntry(protocol, { capabilities: { reasoning: { toggle: true } } }),
+    }) }) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'key' })
+    expect((await adapter.resolveModel('dsh-opencode-go', id)).reasoning?.efforts).toContainEqual({ id: 'high', name: 'High' })
+    gateway.pushCompletions({ events: protocol === 'messages' ? anthropicEvents(id) : textEvents, namedEvents: protocol === 'messages' })
+    expect((await drain(adapter.stream(requestOf({ model: id, reasoningEffort: ReasoningEffortId('high') })))).at(-1))
+      .toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+    const body = gateway.bodies.at(-1)
+    if (protocol === 'messages') {
+      expect(body).toMatchObject({ thinking: { type: 'adaptive' }, output_config: { effort: 'high' } })
+      expect(body).not.toHaveProperty('thinking.budget_tokens')
+    } else expect(body).toHaveProperty('reasoning_effort', 'high')
+  })
+  it.each([false, true])('serializes declared budgets, including persisted selections, with cached outage=%s', async outage => {
+    const id = 'future-budget'
+    const body = modelsDocument({ [id]: modelEntry({ api: protocolEntry('messages'), limit: { context: 100000, output: 32768 },
+      capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1024, max: 20000 } } } }) })
+    const gateway = await mockGateway({ status: 200, body })
+    let config = configOf(gateway.url, { modelLimits: { [id]: { thinkingBudgets: [4096, 4096] } } })
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'key' })
+    const ctx = new Context(); await ctx.plugin(LlmRuntime); ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
+    try {
+      await adapter.catalogOf(config).snapshot(true)
+      if (outage) { gateway.setModelListing(503, {}); await adapter.catalogOf(config).snapshot(true) }
+      const info = await ctx.llm.resolveModelInfo('dsh-opencode-go', id)
+      expect(info.reasoning?.defaultEffort).toBeUndefined()
+      expect(info.reasoning?.efforts).toEqual([
+        { id: 'off', name: 'Off' }, { id: 'minimal', name: '1,024 tokens' }, { id: 'low', name: '2,048 tokens' },
+        { id: 'budget:4096', name: '4,096 tokens' }, { id: 'medium', name: '8,192 tokens' }, { id: 'high', name: '16,384 tokens' },
+      ])
+      for (const [selection, budget] of [[undefined, undefined], ['off', undefined], ['minimal', 1024], ['low', 2048], ['medium', 8192], ['high', 16384], ['budget:4096', 4096]] as const) {
+        gateway.pushCompletions({ events: anthropicEvents(id), namedEvents: true })
+        const restored = JSON.parse(JSON.stringify(requestOf({ model: id, maxTokens: 2048, ...selection === undefined ? {} : { reasoningEffort: ReasoningEffortId(selection) } })))
+        expect((await drain(ctx.llm.stream(restored))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+        const sent = gateway.bodies.at(-1)
+        if (selection === undefined) expect(sent).not.toHaveProperty('thinking')
+        else if (selection === 'off') expect(sent).toHaveProperty('thinking.type', 'disabled')
+        else expect(sent).toMatchObject({ thinking: { type: 'enabled', budget_tokens: budget }, max_tokens: budget! + 2048 })
+        expect(sent).not.toHaveProperty('reasoning_effort')
+        expect(sent).not.toHaveProperty('output_config')
+      }
+      const shared = (await adapter.catalogOf(config).snapshot()).models.get(id)!
+      expect(shared).not.toHaveProperty('reasoningBudgetPresets')
+      const prepared = await adapter.prepareCall('dsh-opencode-go', id)
+      config = { ...config, modelLimits: { [id]: { thinkingBudgets: [6000] } } }
+      gateway.pushCompletions({ events: anthropicEvents(id), namedEvents: true })
+      await drain(prepared.stream(requestOf({ model: id, maxTokens: 2048, reasoningEffort: ReasoningEffortId('budget:4096') })))
+      expect(gateway.bodies.at(-1)).toHaveProperty('thinking.budget_tokens', 4096)
+      expect((await adapter.resolveModel('dsh-opencode-go', id)).reasoning?.efforts).toContainEqual({ id: 'budget:6000', name: '6,000 tokens' })
+      const count = gateway.bodies.length
+      await expect(drain(adapter.stream(requestOf({ model: id, reasoningEffort: ReasoningEffortId('budget:4096') })))).rejects.toMatchObject({ code: 'UNSUPPORTED_REASONING_EFFORT' })
+      expect(gateway.bodies).toHaveLength(count)
+      config = { ...config, modelLimits: { [id]: { contextWindow: 8192, thinkingBudgets: [6000] } } }
+      gateway.pushCompletions({ events: anthropicEvents(id), namedEvents: true })
+      await drain(adapter.stream(requestOf({ model: id, maxTokens: 2048, reasoningEffort: ReasoningEffortId('budget:6000') })))
+      const clamped = gateway.bodies.at(-1) as { max_tokens: number; thinking: { budget_tokens: number } }
+      expect(clamped.thinking.budget_tokens).toBeLessThan(6000)
+      expect(clamped.thinking.budget_tokens).toBeGreaterThanOrEqual(1024)
+      expect(clamped.max_tokens - clamped.thinking.budget_tokens).toBeGreaterThanOrEqual(1024)
+    } finally { await ctx.fiber.dispose() }
+  })
+  it.each([false, true])('serializes adaptive thinking for any Anthropic effort model with cached outage=%s', async outage => {
+    const id = 'future-anthropic'
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ [id]: modelEntry({ api: protocolEntry('messages'),
+      capabilities: { reasoning: { supported: true, toggle: true, effort: ['low', 'medium', 'high', 'xhigh', 'max'] }, temperature: false } }) }) })
+    const config = configOf(gateway.url), adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'key' })
+    await adapter.catalogOf(config).snapshot(true)
+    if (outage) { gateway.setModelListing(503, {}); await adapter.catalogOf(config).snapshot(true) }
+    for (const effort of [undefined, 'low', 'medium', 'high', 'xhigh', 'max', 'off']) {
+      gateway.pushCompletions({ events: anthropicEvents(id), namedEvents: true })
+      const chunks = await drain(adapter.stream(requestOf({ model: id, temperature: 0.5, ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) } })))
+      expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+      const body = gateway.bodies.at(-1)
+      if (effort === undefined) expect(body).not.toHaveProperty('thinking')
+      else expect(body).toMatchObject({ thinking: { type: effort === 'off' ? 'disabled' : 'adaptive' } })
+      expect(body).not.toHaveProperty('thinking.budget_tokens')
+      expect(body).not.toHaveProperty('temperature')
+      if (effort === undefined || effort === 'off') expect(body).not.toHaveProperty('output_config')
+      else expect(body).toMatchObject({ output_config: { effort } })
+    }
+  })
+  it.each(['mimo-v2.6-flash', 'future-effort'])('keeps Default separate from declared none for %s and refuses unadvertised levels', async id => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ [id]: modelEntry({ capabilities: { reasoning: { supported: true, effort: ['none', 'low', 'medium', 'high'] } } }) }) })
+    const config = configOf(gateway.url), adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'key' })
+    const shared = (await adapter.catalogOf(config).snapshot()).models.get(id)!
+    const map = shared.thinkingLevelMap
+    for (const effort of [undefined, 'off', 'low', 'medium', 'high', 'off', undefined]) {
+      gateway.pushCompletions({ events: textEvents })
+      expect((await drain(adapter.stream(requestOf({ model: id, ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) } })))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+      const body = gateway.bodies.at(-1)
+      if (effort === undefined) expect(body).not.toHaveProperty('reasoning_effort')
+      else expect(body).toHaveProperty('reasoning_effort', effort === 'off' ? 'none' : effort)
+      expect(body).not.toHaveProperty('thinking'); expect(body).not.toHaveProperty('enable_thinking')
+      expect(shared.thinkingLevelMap).toBe(map)
+    }
+    const count = gateway.bodies.length
+    for (const level of ['minimal', 'xhigh', 'max']) await expect(drain(adapter.stream(requestOf({ model: id, reasoningEffort: ReasoningEffortId(level) })))).rejects.toMatchObject({ code: 'UNSUPPORTED_REASONING_EFFORT' })
+    expect(gateway.bodies).toHaveLength(count)
+  })
+  it('uses declared completion budget fields without an invented effort', async () => {
+    const gateway = await mockGateway({ status: 200, body: { data: [] } })
+    const model = readModelDirectory(modelsDocument({ budget: modelEntry({ family: 'qwen',
+      capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 512, max: 10000 } } },
+      api: protocolEntry('chat-completions', { compatibility: { thinking_budget_field: 'thinking_budget' } }) }) }), gateway.url).models.get('budget')!
+    for (const [selection, budget] of [[undefined, undefined], ['off', undefined], ['low', 2048], ['medium', 8192]] as const) {
+      gateway.pushCompletions({ events: textEvents })
+      await Array.fromAsync(streamChat(model, { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }, {
+        apiKey: 'key', maxTokens: 10000, maxRetries: 0, ...reasoningRequest(reasoningIntent(model, selection)),
+      }))
+      const body = gateway.bodies.at(-1)
+      expect(body).not.toHaveProperty('reasoning_effort')
+      if (selection === undefined || selection === 'off') expect(body).not.toHaveProperty('thinking_budget')
+      else expect(body).toMatchObject({ enable_thinking: true, thinking_budget: budget })
+    }
+  })
+  it('rejects invalid budgets and preserves answer room at the SDK boundary', () => {
+    const model = parsed(modelEntry({ api: protocolEntry('messages'), limit: { context: 10000, output: 5000 },
+      capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1500, max: 4500 } } } }))
+    expect(reasoningBudgetRange(model)).toEqual({ min: 1500, max: 3976 })
+    expect(reasoningChoices(model).map(choice => choice.name)).toEqual(['Off', '2,048 tokens'])
+    for (const tokens of [1, 1024, 3977, 6000, 1.5, NaN]) expect(() => reasoningChoices({ ...model, reasoningBudgetPresets: [tokens] })).toThrow(/between 1500 and 3976/)
+    for (const tokens of [0, -1, 1.5, NaN]) expect(() => PlainConfig({ modelLimits: { budget: { thinkingBudgets: [tokens] } } })).toThrow()
+    const request = reasoningRequest({ kind: 'budget', tokens: 3000, min: 1500 })
+    expect(request.onPayload({ thinking: { type: 'enabled', budget_tokens: 2000 }, max_tokens: 3500 })).toMatchObject({ thinking: { budget_tokens: 2000 } })
+    expect(() => request.onPayload({ thinking: { budget_tokens: 1024 }, max_tokens: 1500 })).toThrow(/at least 1500/)
+    expect(() => request.onPayload({ thinking: { budget_tokens: 1500 }, max_tokens: 1500 })).toThrow(/at least 1500/)
+  })
+  it.each(['deepseek', 'qwen', 'qwen-chat-template', 'zai'] as const)('preserves Default, native On and Off separately with SDK format %s', async format => {
+    const gateway = await mockGateway({ status: 200, body: { data: [] } })
+    const model = { ...readModelDirectory(modelsDocument({ toggle: modelEntry({ family: 'deepseek', capabilities: { reasoning: { supported: true, toggle: true } } }) }), gateway.url).models.get('toggle')!,
+      compat: { thinkingFormat: format, supportsReasoningEffort: true } }
+    for (const level of [undefined, 'high', 'off'] as const) {
+      gateway.pushCompletions({ events: textEvents })
+      await Array.fromAsync(streamChat(model, { messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }, { apiKey: 'key', maxRetries: 0, ...reasoningRequest(reasoningIntent(model, level)) }))
+      const body = gateway.bodies.at(-1)
+      expect(body).not.toHaveProperty('reasoning_effort')
+      if (level === undefined) {
+        expect(body).not.toHaveProperty('thinking'); expect(body).not.toHaveProperty('enable_thinking'); expect(body).not.toHaveProperty('chat_template_kwargs.enable_thinking')
+      } else if (format === 'qwen') expect(body).toHaveProperty('enable_thinking', level !== 'off')
+      else if (format === 'qwen-chat-template') expect(body).toMatchObject({ chat_template_kwargs: { enable_thinking: level !== 'off', preserve_thinking: true } })
+      else expect(body).toHaveProperty('thinking.type', level === 'off' ? 'disabled' : 'enabled')
+    }
+  })
+  it('preserves non-policy fields and leaves shared payloads intact', () => {
+    const source = { model: 'future', thinking: { type: 'disabled' }, reasoning_effort: 'none', reasoning: { effort: 'none', summary: 'auto' },
+      output_config: { effort: 'high', format: { type: 'json_schema' } }, chat_template_kwargs: { enable_thinking: false, preserve_thinking: true }, tools: [{ name: 'probe' }] }
+    const original = structuredClone(source)
+    expect(reasoningRequest({ kind: 'default' }).onPayload(source)).toEqual({ model: 'future', reasoning: { summary: 'auto' },
+      output_config: { format: { type: 'json_schema' } }, chat_template_kwargs: { preserve_thinking: true }, tools: [{ name: 'probe' }] })
+    expect(source).toEqual(original)
+  })
+})
 
+describe('declared Responses routing', () => {
   const tool = { name: 'probe', description: 'Probe', parameters: { type: 'object', properties: {} } }
 
   const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'test' } })
 
   const request = (extra: Partial<GenerateOptions> = {}): GenerateOptions => ({
-    provider: 'dsh-opencode-go', model: MODEL, messages: [user('hello')], sessionId: 'override-session' as never, ...extra,
+    provider: 'dsh-opencode-go', model: 'future-responses', messages: [user('hello')], sessionId: 'declared-session' as never, ...extra,
   })
 
   async function drain(stream: AsyncIterable<StreamChunk>) {
@@ -449,134 +272,100 @@ describe("Responses routing", () => {
 
   afterEach(closeMockGateways)
 
-  describe('experimental protocol override', () => {
-    it.each([undefined, {}, { [MODEL]: null }])('keeps automatic routing for %j', async protocolOverrides => {
-      const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
-      gateway.pushCompletions({ events: textEvents })
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { protocolOverrides }), resolveApiKey: async () => 'fixture-key' })
-      expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-      expect(gateway.paths).toEqual(['/models', '/chat/completions'])
-    })
+  it.each([false, true])('uses declared Responses for text/tools=%s with replay and session affinity', async callingTool => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ 'future-responses': modelEntry({ api: protocolEntry('responses') }) }) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key' })
+    gateway.pushCompletions({ events: responsesEvents(callingTool) })
+    const assembler = new BlockAssembler()
+    for await (const chunk of adapter.stream(request({ tools: [tool], maxTokens: 1234, reasoningEffort: ReasoningEffortId('high') }))) assembler.push(chunk)
+    expect(assembler.finish.kind).toBe(callingTool ? 'tool-calls' : 'stop')
+    expect(gateway.paths.at(-1)).toBe('/responses')
+    expect(gateway.bodies[0]).toMatchObject({ model: 'future-responses', max_output_tokens: 1234, reasoning: { effort: 'high' } })
+    expect(gateway.bodies[0]).not.toHaveProperty('max_tokens')
+    expect(gateway.headers.at(-1)?.['x-opencode-session']).toBe('declared-session')
+    expect(gateway.headers.at(-1)?.authorization).toBe('Bearer fixture-key')
+    expect(assembler.replayState).toBeDefined()
+    const replay = JSON.parse(JSON.stringify(assembler.replayState))
+    expect(JSON.stringify(replay)).toContain('OPAQUE_REASONING')
+  })
+  it.each([undefined, 'low', 'high', 'max'])('serializes declared Responses effort=%s with limits, usage and private replay', async effort => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ 'future-responses': modelEntry({ api: protocolEntry('responses') }) }) })
+    gateway.pushCompletions({ events: responsesEvents() })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { modelLimits: { 'future-responses': { maxTokens: 1234 } } }), resolveApiKey: async () => 'fixture-key' })
+    expect((await adapter.resolveModel('dsh-opencode-go', 'future-responses')).reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'high', 'max'])
+    const chunks = await drain(adapter.stream(request({ ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) } })))
+    expect(gateway.paths).toEqual(['/models', '/responses'])
+    expect(gateway.headers[1]).toMatchObject({ 'x-opencode-session': 'declared-session', 'user-agent': userAgent(), authorization: 'Bearer fixture-key' })
+    expect(gateway.headers[1]?.session_id).toBeUndefined()
+    const body = gateway.bodies[0] as Record<string, unknown>
+    expect(body).toMatchObject({ model: 'future-responses', stream: true, store: false, max_output_tokens: 1234, prompt_cache_key: 'declared-session' })
+    if (effort === undefined) expect(body.reasoning).toBeUndefined()
+    else expect(body).toMatchObject({ reasoning: { effort, summary: 'auto' }, include: ['reasoning.encrypted_content'] })
+    expect(body).not.toHaveProperty('max_tokens')
+    expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'hello' }))
+    expect(chunks.find(chunk => chunk.type === 'usage')).toMatchObject({ usage: { inputTokens: 6, cacheReadTokens: 4, outputTokens: 3, totalTokens: 13 } })
+    expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'stop' }, replayState: { response: { api: 'openai-responses' } } })
+  })
+  it.each([undefined, '', '会话\r\n-a', '   '])('shares a safe Responses cache key across account retry, session=%j', async sessionId => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ 'future-responses': modelEntry({ api: protocolEntry('responses') }) }) })
+    gateway.pushCompletions({ status: 401, body: '{"error":{"message":"Invalid API key"}}' }); gateway.pushCompletions({ events: responsesEvents() })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { apiKeyEnv: 'A', autoSwitch: true, accounts: [
+      { id: 'a', name: 'A', apiKeyEnv: 'A' }, { id: 'b', name: 'B', apiKeyEnv: 'B' },
+    ] }), resolveApiKey: async config => `${config.apiKeyEnv}-fixture` })
+    const input = Object.freeze(request({ sessionId: sessionId as GenerateOptions['sessionId'] }))
+    expect((await drain(adapter.stream(input))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+    expect(gateway.paths).toEqual(['/models', '/responses', '/responses'])
+    const attempts = gateway.headers.filter(header => header.authorization), identity = attempts[0]?.['x-opencode-session']
+    expect(identity).toMatch(/^[\x21-\x7e]+$/)
+    expect(attempts[1]?.['x-opencode-session']).toBe(identity)
+    for (const body of gateway.bodies) expect(body).toHaveProperty('prompt_cache_key', identity)
+    expect(input.sessionId).toBe(sessionId)
+  })
+  it('normalizes durable image attachments for declared Responses models', async () => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ 'future-responses': modelEntry({ api: protocolEntry('responses') }) }) })
+    gateway.pushCompletions({ events: responsesEvents() })
+    const attachment = { attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`), mediaType: 'image/png', bytes: 1, width: 1, height: 1 }
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'fixture-key',
+      imageAccess: { resolveImageAccess: () => undefined, resolveAttachments: () => ({ readImageRequest: async () => ({
+        variantId: `sha256:${'b'.repeat(64)}`, attachment, data: Uint8Array.of(1), mediaType: 'image/png', bytes: 1,
+        width: 1, height: 1, depth: 'uchar', space: 'srgb', hasAlpha: true,
+      }) }) as never } })
+    await drain(adapter.stream(request({ messages: [createUserMessage({ content: [{ type: 'image', attachment }], source: { kind: 'plugin', plugin: 'test' } })] })))
+    expect(gateway.bodies[0]).toMatchObject({ input: [expect.objectContaining({ role: 'user', content: expect.arrayContaining([
+      expect.objectContaining({ type: 'input_image', image_url: 'data:image/png;base64,AQ==' }),
+    ]) })] })
+  })
 
-    it.each([undefined, 'low', 'high', 'max'])('serializes Responses reasoning %s, headers, limits and usage', async effort => {
-      const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
-      gateway.pushCompletions({ events: responsesEvents() })
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { protocolOverrides: override, modelLimits: { [MODEL]: { maxTokens: 1234 } } }), resolveApiKey: async () => 'fixture-key' })
-      const model = await adapter.resolveModel('dsh-opencode-go', MODEL)
-      expect(model.reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'high', 'max'])
-      const chunks = await drain(adapter.stream(request({ ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }) })))
-      expect(gateway.paths).toEqual(['/models', '/responses'])
-      expect(gateway.headers[1]).toMatchObject({ 'x-opencode-session': 'override-session', 'user-agent': userAgent(), authorization: 'Bearer fixture-key' })
-      expect(gateway.headers[1]?.session_id).toBeUndefined()
-      const body = gateway.bodies[0] as Record<string, unknown>
-      expect(body).toMatchObject({ model: MODEL, stream: true, store: false, max_output_tokens: 1234, prompt_cache_key: 'override-session' })
-      if (effort === undefined) expect(body.reasoning).toBeUndefined()
-      else expect(body).toMatchObject({ reasoning: { effort, summary: 'auto' }, include: ['reasoning.encrypted_content'] })
-      expect(body).not.toHaveProperty('max_tokens')
-      expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'hello' }))
-      expect(chunks.find(chunk => chunk.type === 'usage')).toMatchObject({ usage: { inputTokens: 6, cacheReadTokens: 4, outputTokens: 3, totalTokens: 13 } })
-      expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'stop' }, replayState: { response: { api: 'openai-responses' } } })
-    })
-
-    it.each([undefined, '', '会话\r\n-a', '   '])('shares a safe Responses cache key and header across account retry with sessionId=%s', async sessionId => {
-      const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
-      gateway.pushCompletions({ status: 401, body: JSON.stringify({ error: { message: 'Invalid API key' } }) })
-      gateway.pushCompletions({ events: responsesEvents() })
-      const config = configOf(gateway.url, { protocolOverrides: override, apiKeyEnv: 'ACCOUNT_A', autoSwitch: true,
-        accounts: [{ id: 'a', name: 'A', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'B', apiKeyEnv: 'ACCOUNT_B' }] })
-      const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => `${config.apiKeyEnv}-fixture` })
-      const input = Object.freeze(request({ sessionId: sessionId as GenerateOptions['sessionId'] }))
-      try {
-        expect((await drain(adapter.stream(input))).at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-        expect(gateway.paths).toEqual(['/models', '/responses', '/responses'])
-        const attempts = gateway.headers.filter(header => header.authorization)
-        const identity = attempts[0]?.['x-opencode-session']
-        expect(identity).toMatch(/^[\x21-\x7e]+$/)
-        expect(attempts[1]?.['x-opencode-session']).toBe(identity)
-        for (const body of gateway.bodies) expect(body).toMatchObject({ prompt_cache_key: identity })
-        expect(input.sessionId).toBe(sessionId)
-      } finally { await adapter.dispose() }
-    })
-
-    it('captures prepared routing and switches new calls without refetching or mutating the catalog', async () => {
-      const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
-      const config = configOf(gateway.url)
-      const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'fixture-key' })
-      const prepared = await adapter.prepareCall('dsh-opencode-go', MODEL)
-      config.protocolOverrides = override
-      gateway.pushCompletions({ events: textEvents })
-      await drain(prepared.stream(request()))
-      gateway.pushCompletions({ events: responsesEvents() })
-      await drain(adapter.stream(request()))
-      config.protocolOverrides = { [MODEL]: null }
-      gateway.pushCompletions({ events: textEvents })
-      await drain(adapter.stream(request()))
-      expect(gateway.paths).toEqual(['/models', '/chat/completions', '/responses', '/chat/completions'])
-      expect(gateway.modelListings).toBe(1)
-    })
-
-    it('keeps the attachment normalization path for Responses image inputs', async () => {
-      const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
-      gateway.pushCompletions({ events: responsesEvents() })
-      const attachment = { attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`), mediaType: 'image/png', bytes: 1, width: 1, height: 1 }
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { protocolOverrides: override }), resolveApiKey: async () => 'fixture-key',
-        imageAccess: { resolveImageAccess: () => undefined, resolveAttachments: () => ({ readImageRequest: async () => ({
-          variantId: `sha256:${'b'.repeat(64)}`, attachment, data: Uint8Array.of(1), mediaType: 'image/png', bytes: 1,
-          width: 1, height: 1, depth: 'uchar', space: 'srgb', hasAlpha: true,
-        }) }) as never } })
-      await drain(adapter.stream(request({ messages: [createUserMessage({ content: [{ type: 'image', attachment }], source: { kind: 'plugin', plugin: 'test' } })] })))
-      expect(gateway.bodies[0]).toMatchObject({ input: [expect.objectContaining({ role: 'user', content: expect.arrayContaining([
-        expect.objectContaining({ type: 'input_image', image_url: 'data:image/png;base64,AQ==' }),
-      ]) })] })
-    })
-
-    it('surfaces an unsupported-protocol rejection without retrying another protocol or account', async () => {
-      const gateway = await mockGateway({ status: 200, body: listingBody([MODEL]) })
-      gateway.pushCompletions({ status: 400, body: JSON.stringify({ error: { code: 'ModelProtocolUnsupported', message: 'ModelProtocolUnsupported' } }) })
-      const resolveApiKey = vi.fn(async () => 'fixture-key')
-      const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { protocolOverrides: override, autoSwitch: true,
-        accounts: [{ id: 'first', name: 'First', apiKeyEnv: 'FIRST_KEY' }, { id: 'second', name: 'Second', apiKeyEnv: 'SECOND_KEY' }], apiKeyEnv: 'FIRST_KEY',
-      }), resolveApiKey })
-      expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ reason: { kind: 'error' } })
-      expect(gateway.paths).toEqual(['/models', '/responses'])
-      expect(resolveApiKey).toHaveBeenCalledTimes(1)
-    })
-
-    it('isolates the wire profile and leaves other model routing intact', () => {
-      const models = readModelMetadata(metadataDocument(), 'https://gateway.test/v1/', new Map()).models
-      const config = configOf('https://gateway.test/v1/', { protocolOverrides: override })
-      const raw = models.get(MODEL)!
-      expect(raw.compat).toMatchObject({ maxTokensField: 'max_tokens', supportsDeveloperRole: false })
-      expect(withProtocolOverride(raw, config)).toMatchObject({ api: 'openai-responses', baseUrl: 'https://gateway.test/v1', compat: { sessionAffinityFormat: 'openai-nosession' } })
-      expect(withProtocolOverride(raw, config).compat).not.toHaveProperty('maxTokensField')
-      expect(raw.api).toBe('openai-completions')
-      const other = models.get('kimi-k3')!
-      expect(withProtocolOverride(other, config)).toBe(other)
-      expect(() => withProtocolOverride({ ...raw, api: 'anthropic-messages' }, config)).toThrow(/current protocol/)
-      expect(() => withProtocolOverride({ ...raw, reasoningControl: 'toggle' }, config)).toThrow(/current protocol/)
-      const declared = { ...raw, api: 'openai-responses' as const }
-      expect(withProtocolOverride(declared, config)).toBe(declared)
-    })
-
-    it.each(['https://opencode.ai/zen/go/v1/', 'https://opencode.ai/inference/go/v1'])('keeps experimental Responses on the official OpenAI endpoint for %s', base => {
-      const raw = readModelMetadata(metadataDocument(), base, new Map()).models.get(MODEL)!
-      expect(withProtocolOverride(raw, configOf(base, { protocolOverrides: override })))
-        .toMatchObject({ api: 'openai-responses', baseUrl: 'https://opencode.ai/inference/go/openai/v1' })
-      expect(raw.api).toBe('openai-completions')
-    })
-
-    it.each([[], 'openai-responses', { 'kimi-k3': 'openai-responses' }, { [MODEL]: 'anthropic-messages' }])('refuses unsupported override configuration %j', value => {
-      expect(() => validateGoConfig(PlainConfig({ protocolOverrides: value }))).toThrow()
-    })
+  it('captures prepared protocols while refreshing the next call from a changed directory', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(['future-responses']) })
+    const config = configOf(gateway.url), adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'fixture-key' })
+    const prepared = await adapter.prepareCall('dsh-opencode-go', 'future-responses')
+    const raw = (await adapter.catalogOf(config).snapshot()).models.get('future-responses')!
+    gateway.setModelListing(200, modelsDocument({ 'future-responses': modelEntry({ api: protocolEntry('responses') }) }))
+    await adapter.catalogOf(config).snapshot(true)
+    gateway.pushCompletions({ events: textEvents }); await drain(prepared.stream(request()))
+    expect(gateway.paths.at(-1)).toBe('/chat/completions')
+    gateway.pushCompletions({ events: responsesEvents() }); await drain(adapter.stream(request()))
+    expect(gateway.paths.at(-1)).toBe('/responses')
+    expect(raw.api).toBe('openai-completions')
+  })
+  it('surfaces an unsupported-protocol rejection without trying another protocol or account', async () => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ 'future-responses': modelEntry({ api: protocolEntry('responses') }) }) })
+    gateway.pushCompletions({ status: 400, body: '{"error":{"message":"unsupported protocol"}}' })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, { autoSwitch: true, apiKeyEnv: 'A', accounts: [
+      { id: 'a', name: 'A', apiKeyEnv: 'A' }, { id: 'b', name: 'B', apiKeyEnv: 'B' },
+    ] }), resolveApiKey: async () => 'fixture-key' })
+    expect((await drain(adapter.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error' } })
+    expect(gateway.bodies).toHaveLength(1)
+    expect(gateway.paths.at(-1)).toBe('/responses')
   })
 })
-
 describe("Google transport and replay", () => {
-  const id = 'gemini-4-argon-contributor'
+  const id = 'gemini-4-argon'
 
-  const metadata = metadataDocument({ [id]: modelMetadata({
-    name: 'Gemini 4 Argon Contributor', provider: { npm: '@ai-sdk/google' },
-    reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'high'] }],
+  const metadata = modelsDocument({ [id]: modelEntry({
+    name: 'Gemini 4 Argon', api: protocolEntry('generate-content'),
+    capabilities: { reasoning: { supported: true, effort: ['low', 'medium', 'high'] } },
     limit: { context: 1048576, output: 65536 }, release_date: '2026-10-13',
   }) })
 
@@ -591,7 +380,7 @@ describe("Google transport and replay", () => {
     'https://opencode.ai/zen/go/v1', 'https://opencode.ai/zen/go/v1/',
     'https://opencode.ai/inference/go/v1', 'https://opencode.ai/inference/go/v1/',
   ])('selects the documented protocol base from the official gateway %s', base => {
-    expect(readModelMetadata(metadata, base, new Map()).models.get(id)?.baseUrl)
+    expect(readModelDirectory(metadata, base).models.get(id)?.baseUrl)
       .toBe('https://opencode.ai/inference/go/google/v1beta')
     expect(modelBaseURL('google-generative-ai', base)).toBe('https://opencode.ai/inference/go/google/v1beta')
     expect(modelBaseURL('openai-completions', base)).toBe('https://opencode.ai/inference/go/openai/v1')
@@ -609,10 +398,7 @@ describe("Google transport and replay", () => {
   })
 
   async function setup(overrides: Parameters<typeof configOf>[1] = {}) {
-    const network = globalThis.fetch
-    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-      ? Promise.resolve(Response.json(metadata)) : network(input, init))
-    const gateway = await mockGateway({ status: 200, body: listingBody([id]) })
+    const gateway = await mockGateway({ status: 200, body: metadata })
     const config = configOf(`${gateway.url}/v1`, overrides)
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'go-key' })
     adapters.push(adapter)
@@ -630,7 +416,7 @@ describe("Google transport and replay", () => {
   it('enables the advertised Gemini model and offers only its declared thinking levels', async () => {
     const { adapter, config } = await setup()
     const catalog = await discoverSettingsModels(adapter.catalogOf(config))
-    expect(catalog.models).toContainEqual(expect.objectContaining({ id, name: 'Gemini 4 Argon Contributor', releaseDate: '2026-10-13' }))
+    expect(catalog.models).toContainEqual(expect.objectContaining({ id, name: 'Gemini 4 Argon', releaseDate: '2026-10-13' }))
     expect(catalog.models[0]?.configurationMissing).not.toBe(true)
     const info = await adapter.resolveModel('dsh-opencode-go', id)
     expect(info.reasoning?.efforts.map(effort => effort.id)).toEqual(['low', 'medium', 'high'])
@@ -698,7 +484,7 @@ describe("Google transport and replay", () => {
   })
 
   it('keeps simultaneous Google requests on their own fetch binding without replacing global fetch', async () => {
-    const model = readModelMetadata(metadata, 'https://gateway.invalid/v1', new Map()).models.get(id)! as Model<'google-generative-ai'>
+    const model = readModelDirectory(metadata, 'https://gateway.invalid/v1').models.get(id)! as Model<'google-generative-ai'>
     const context = normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: Date.now() }] })
     const entered = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
@@ -715,6 +501,50 @@ describe("Google transport and replay", () => {
     expect(first).toHaveBeenCalledTimes(1)
     expect(second).toHaveBeenCalledTimes(1)
     expect(globalThis.fetch).toBe(globalFetch)
+  })
+
+  it.each(['unrecognized-google-alias', 'gemini-4-budget-alias'])('uses declared numeric budgets independently of the Google model name: %s', async modelId => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ [modelId]: modelEntry({ api: protocolEntry('generate-content'),
+      limit: { context: 100000, output: 20000 }, capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 512, max: 10000 } } } }) }) })
+    const config = configOf(gateway.url, { modelLimits: { [modelId]: { thinkingBudgets: [4096] } } })
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'key' }); adapters.push(adapter)
+    expect((await adapter.resolveModel('dsh-opencode-go', modelId)).reasoning?.efforts).toContainEqual({ id: 'budget:4096', name: '4,096 tokens' })
+    for (const [selection, budget] of [[undefined, undefined], ['off', 0], ['low', 2048], ['medium', 8192], ['budget:4096', 4096]] as const) {
+      gateway.pushCompletions({ events: googleTextEvents })
+      const chunks = await drain(adapter.stream(requestOf({ model: modelId, maxTokens: 10000,
+        ...selection === undefined ? {} : { reasoningEffort: ReasoningEffortId(selection) } })))
+      expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+      const body = gateway.bodies.at(-1)
+      if (selection === undefined) expect(body).not.toHaveProperty('generationConfig.thinkingConfig')
+      else expect(body).toHaveProperty('generationConfig.thinkingConfig.thinkingBudget', budget)
+      expect(body).not.toHaveProperty('generationConfig.thinkingConfig.thinkingLevel')
+    }
+  })
+
+  it('uses declared Google effort levels for a new alias instead of an SDK-invented token budget', async () => {
+    const modelId = 'new-google-effort-alias'
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ [modelId]: modelEntry({ api: protocolEntry('generate-content'),
+      capabilities: { reasoning: { supported: true, effort: ['low', 'medium', 'high'] } } }) }) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'key' }); adapters.push(adapter)
+    gateway.pushCompletions({ events: googleTextEvents })
+    expect((await drain(adapter.stream(requestOf({ model: modelId, reasoningEffort: ReasoningEffortId('medium') })))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+    expect(gateway.bodies[0]).toHaveProperty('generationConfig.thinkingConfig.thinkingLevel', 'MEDIUM')
+    expect(gateway.bodies[0]).not.toHaveProperty('generationConfig.thinkingConfig.thinkingBudget')
+  })
+
+  it('honors declared Google toggles without inventing an effort level', async () => {
+    const modelId = 'new-google-toggle-alias'
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ [modelId]: modelEntry({ api: protocolEntry('generate-content'),
+      capabilities: { reasoning: { supported: true, toggle: true } } }) }) })
+    const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'key' }); adapters.push(adapter)
+    expect((await adapter.resolveModel('dsh-opencode-go', modelId)).reasoning?.efforts).toEqual([{ id: 'off', name: 'Off' }, { id: 'high', name: 'On' }])
+    for (const selection of [undefined, 'off', 'high']) {
+      gateway.pushCompletions({ events: googleTextEvents })
+      expect((await drain(adapter.stream(requestOf({ model: modelId, ...selection === undefined ? {} : { reasoningEffort: ReasoningEffortId(selection) } })))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+      const body = gateway.bodies.at(-1)
+      if (selection === undefined) expect(body).not.toHaveProperty('generationConfig.thinkingConfig')
+      else expect(body).toHaveProperty('generationConfig.thinkingConfig', selection === 'off' ? { thinkingBudget: 0 } : { includeThoughts: true })
+    }
   })
 
   const signatureA = Buffer.from('first-signature').toString('base64')

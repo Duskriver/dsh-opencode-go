@@ -1,5 +1,5 @@
 /** Request snapshots, SDK dispatch, deadlines and seamless account fallback. */
-import { type OpencodeGoModelLimits, type GoAccountSwitch } from './contracts.ts';
+import { type OpencodeGoModelLimits, type GoAccountSwitch, type ModelSource } from './contracts.ts';
 import { type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
 import type { Api, Model, Provider } from './sdk-types.ts';
@@ -7,14 +7,13 @@ import { type OpencodeGoConfig } from './config.ts';
 import { ProxyTransport } from './transport.ts';
 import { OpencodeGoCatalog } from './catalog.ts';
 /**
- * Reserve 64k by default only for deepseek-v4.1-flash. Other models retain the
- * SDK's default when neither the caller nor settings specify an allowance.
- * Per-model settings continue to cap caller values for every model. The model
- * has already had capacity overrides applied.
+ * Cap large models at 64k unless the caller or settings specify an allowance.
+ * Per-model settings continue to cap explicit caller values.
  */
 export declare function requestMaxTokens(model: {
     id: string;
     maxTokens: number;
+    source?: ModelSource;
 }, limits: OpencodeGoModelLimits, requested?: number): number | undefined;
 /**
  * The attachment-service bridges one image request reads. Construction-time
@@ -45,6 +44,7 @@ export interface OpencodeGoRequestSnapshot {
     model: Model<Api>;
     provider: Provider;
     sessionId: string;
+    apiKey?: string;
 }
 /** Shares the adapter's transport without owning its lifetime or retrying accounts. */
 export declare class OpencodeGoRequestExecutor {
@@ -64,6 +64,7 @@ export interface GoAccountSettlement {
 }
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptions {
+    source?: ModelSource;
     /** Shared with Host usage reads for this plugin mount. */
     transport?: ProxyTransport;
     /** Mount-owned discovery; direct construction supplies its own manager. */
@@ -74,31 +75,34 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
      * two configuration generations.
      */
     config: () => OpencodeGoConfig;
-    /** Observe the catalog falling back to the curated table. */
+    /** Observe discovery retaining its last successful directory. */
     onFallback?: (detail: {
         url: string;
         error: unknown;
         kept: number;
     }) => void;
-    /** Observe live ids the curated table cannot route. */
+    /** Observe chat rows with invalid or unsupported declarations. */
     onOmitted?: (ids: readonly string[]) => void;
     onCatalogWarning?: (warning: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
     /** Host account-state version for actual requests, captured before asynchronous model discovery. */
     accountGeneration?: () => number;
+    /** Shared by both adapters so account settlement ordering spans both routes. */
+    nextCallSequence?: () => number;
     /** One outcome for both the displayed notice and the persisted selection. */
     onAccountSettled?: (event: GoAccountSettlement) => void;
     /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
     onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void;
 }
 /**
- * The single route's adapter. The catalog snapshot freezes at each operation,
+ * One source's route adapter. The catalog snapshot freezes at each operation,
  * so a refresh between two requests never mixes model generations inside one
  * call.
  */
 export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly options;
+    private readonly source;
     private readonly resolveCatalog;
     private readonly transport;
     private readonly requestExecutor;
@@ -108,6 +112,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly credentialVersions;
     /** Monotonic sequence of the latest request this adapter started. */
     private callSeq;
+    private nextCallSequence;
     constructor(options: OpencodeGoAdapterOptions);
     dispose(): Promise<void>;
     /**
@@ -137,6 +142,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private streamWithSnapshot;
     private dispatch;
     private streamAccounts;
+    /** Resolve Free keys only when selecting an account or retrying a failed attempt. */
+    private accountCandidates;
     private rememberRejectedKey;
     /** A stored change to a reference outranks the gateway's last rejection of it. */
     forgetRejectedKey(ref: string): void;

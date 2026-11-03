@@ -1,9 +1,11 @@
+/** Local session scanning, in-memory reuse and Go plan cost estimates. */
+import { type ModelSource } from './contracts.ts';
+import { type PriceMultiplier } from './pricing.ts';
 import type { Context } from '@deepseek-ai/cordis';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 /**
- * OpenCode Go plan snapshot: monthly limits and the one peak-pricing window the
- * official tariff defines. Prices themselves stay on models.dev (the catalog's
- * model.cost); this file only carries what models.dev does not publish.
+ * OpenCode Go plan snapshot: monthly limits. Text tariffs and UTC multipliers
+ * come from each gateway model directory.
  *
  * Source: https://opencode.ai/v2/docs/console/go/ (Go and Go Plus tables).
  * The snapshot is reviewed when the model list or the plan changes; the report
@@ -11,7 +13,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
  *
  */
 /** Date the limits below were read from the official plan page. */
-export declare const GO_PLAN_AS_OF = "2026-10-18";
+export declare const GO_PLAN_AS_OF = "2026-11-02";
 /** Human-readable source for the limit snapshot. */
 export declare const GO_PLAN_SOURCE = "https://opencode.ai/v2/docs/console/go/";
 /** Why a row has no numeric limit. */
@@ -35,16 +37,6 @@ export declare const GO_MONTHLY_LIMITS: Readonly<Record<string, GoMonthlyLimit>>
  * @returns the row, or undefined when the plan page lists no such model.
  */
 export declare function goMonthlyLimit(model: string): GoMonthlyLimit | undefined;
-/** Models with a documented peak/off-peak tariff (DeepSeek V4.1 Flash and V4 Pro). */
-export declare const PEAK_PRICED_MODELS: ReadonlySet<string>;
-/**
- * Whether a request started inside the documented DeepSeek peak window:
- * 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday. All other hours,
- * including weekends, are off-peak.
- * @param at - request start time in Unix epoch milliseconds.
- * @returns true when the peak multiplier applies.
- */
-export declare function isPeakPricedAt(at: number): boolean;
 /** The four billable rates, in USD per one million tokens. */
 export interface CostRates {
     readonly input: number;
@@ -59,6 +51,7 @@ export interface CostTier extends CostRates {
 /** Structural face of the catalog's ModelCost. */
 export interface ModelCostLike extends CostRates {
     readonly tiers?: readonly CostTier[];
+    readonly multipliers?: readonly PriceMultiplier[];
 }
 /** The token components one request reported. */
 export interface UsageCounts {
@@ -84,10 +77,10 @@ export declare function isFreeCost(cost: ModelCostLike): boolean;
  * @param model - the model id that served the request.
  * @param usage - its token components.
  * @param cost - the catalog cost for that model.
- * @param at - request start time, used for the DeepSeek peak window.
+ * @param at - request start time, used to evaluate gateway multiplier conditions.
  * @returns the estimated cost in integer micro-USD.
  */
-export declare function priceUsage(model: string, usage: UsageCounts, cost: ModelCostLike, at: number): number;
+export declare function priceUsage(_model: string, usage: UsageCounts, cost: ModelCostLike, at: number): number;
 /** Route id used by this plugin before 0.1.16. */
 export declare const LEGACY_PROVIDER_ID = "opencode-go";
 /** 0.1.16 isolated the plugin route; later legacy-id records belong to DSH native. */
@@ -115,6 +108,7 @@ export interface RequestFact {
     readonly cacheWrite: number;
     /** The request was recorded under the pre-0.1.16 route id. */
     readonly legacy: boolean;
+    readonly source?: ModelSource;
     readonly kind: 'message' | 'summary';
     /** The request settled without a usable usage report. */
     readonly missingUsage: boolean;
@@ -237,7 +231,7 @@ export interface AnalyticsCoverage {
 }
 /** Where the prices came from. */
 export interface AnalyticsPricing {
-    source: 'models.dev';
+    source: 'OpenCode /models';
     updatedAt?: number;
     /**
      * True only when the whole price table was unavailable; unpricedModels then
@@ -277,6 +271,7 @@ export interface AnalyticsSessionQuery {
 }
 /** Structural face of one catalog model. */
 export interface AnalyticsPricingModel {
+    readonly multipliers?: readonly PriceMultiplier[];
     readonly id?: string;
     readonly name?: string;
     readonly cost?: ModelCostLike;
@@ -288,11 +283,12 @@ export interface AnalyticsPriceBook {
 }
 /** Structural face of the catalog data the price book builder consumes. */
 export interface AnalyticsCatalogSnapshotLike {
+    readonly source?: ModelSource;
     readonly models: ReadonlyMap<string, AnalyticsPricingModel>;
     readonly details?: ReadonlyMap<string, {
         readonly costKnown?: false;
     }>;
-    readonly metadataUpdatedAtMs?: number;
+    readonly updatedAtMs?: number;
 }
 /** Construction options; tests inject fakes for every seam. */
 export interface AnalyticsOptions {
@@ -318,7 +314,7 @@ export interface AnalyticsOptions {
  * so its requests land in the unpriced bucket instead of being priced at 0.
  * A published block with legal components stays priced even when all zero.
  */
-export declare function analyticsPriceBook(snapshot: AnalyticsCatalogSnapshotLike): AnalyticsPriceBook;
+export declare function analyticsPriceBook(...snapshots: AnalyticsCatalogSnapshotLike[]): AnalyticsPriceBook;
 /** One mount owns the scan cache; multiple dashboard opens share it. */
 export declare class GoAnalyticsService extends TypertRemoteService {
     private readonly options;

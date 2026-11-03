@@ -19,7 +19,7 @@ import { GoUsageService } from '../src/accounts.ts'
 import { configOf } from './support/host.ts'
 import { mockProxy } from './support/proxy.ts'
 import { closeMockGateways, googleTextEvents, listingBody, mockGateway, textEvents } from './support/gateway.ts'
-import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/data.ts'
+import { modelsDocument, modelEntry, protocolEntry } from './support/data.ts'
 import { matchesGoogleModuleId } from '../scripts/google-fetch-bridge.mjs'
 
 describe("bounded HTTP", () => {
@@ -502,11 +502,8 @@ describe("proxy dispatch", () => {
       { npm: '@ai-sdk/openai', path: '/v1/responses', events: responseEvents, namedEvents: false },
       { npm: '@ai-sdk/google', path: '/v1/models/future:streamGenerateContent', events: googleTextEvents, namedEvents: false },
     ])('streams $path and discovers models through an authenticated proxy', async ({ npm, path, events, namedEvents }) => {
-      const original = globalThis.fetch
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-        ? Promise.resolve(Response.json(metadataDocument({ future: modelMetadata({ provider: { npm }, reasoning_options: [] }) })))
-        : original(input, init))
-      const gateway = await mockGateway({ status: 200, body: listingBody(['future']) })
+      const wire = npm === '@ai-sdk/anthropic' ? 'messages' : npm === '@ai-sdk/openai' ? 'responses' : npm === '@ai-sdk/google' ? 'generate-content' : 'chat-completions'
+      const gateway = await mockGateway({ status: 200, body: modelsDocument({ future: modelEntry({ api: protocolEntry(wire), capabilities: { reasoning: { supported: false } } }) }) })
       gateway.pushCompletions({ events, namedEvents })
       const proxy = await mockProxy(protocol, { target: gateway.url, username: 'user', password: 'p@ss' })
       cleanups.push(proxy.close)
@@ -534,7 +531,7 @@ describe("proxy dispatch", () => {
       const server = createServer((req, res) => {
         paths.push(req.url!)
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(req.url === '/api.json' ? metadataDocument() : { usage }))
+        res.end(JSON.stringify(req.url === '/v1/models' ? modelsDocument() : { usage }))
       })
       await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
       cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
@@ -543,10 +540,6 @@ describe("proxy dispatch", () => {
       cleanups.push(proxy.close)
       const transport = new ProxyTransport()
       cleanups.push(() => transport.dispose())
-      const original = globalThis.fetch
-      // A loopback HTTP metadata endpoint keeps the transfer real without an external service.
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
-        original(String(input) === MODELS_METADATA_URL ? 'http://metadata.invalid:4321/api.json' : input, init))
       const ctx = new Context()
       cleanups.push(() => ctx.fiber.dispose())
       let proxyURL = proxy.url
@@ -560,8 +553,8 @@ describe("proxy dispatch", () => {
       const { OpencodeGoCatalog } = await import('../src/catalog.ts')
       await new OpencodeGoCatalog('http://gateway.invalid:4321/v1', 60_000,
         () => {}, () => {}, () => {}, transport.forProxy(proxyURL)).snapshot(true)
-      expect(paths).toContain('/api.json')
-      expect(proxy.destinations).toContain('metadata.invalid:4321')
+      expect(paths).toContain('/v1/models')
+      expect(proxy.destinations).toContain('gateway.invalid:4321')
       const secondProxy = await mockProxy(protocol, { target: `http://127.0.0.1:${address.port}` })
       cleanups.push(secondProxy.close)
       proxyURL = secondProxy.url
@@ -605,10 +598,6 @@ describe("proxy dispatch", () => {
   })
 
   it('switches proxies and clears the address without a restart, while preserving captured calls', async () => {
-    const original = globalThis.fetch
-    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-      ? Promise.resolve(Response.json(metadataDocument({ future: modelMetadata({ reasoning_options: [] }) })))
-      : original(input, init))
     const gateway = await mockGateway({ status: 200, body: listingBody(['future']) })
     const first = await mockProxy('http')
     const second = await mockProxy('socks5')

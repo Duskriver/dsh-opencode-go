@@ -6,7 +6,8 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
-  PROVIDER_ID,
+  modelSettingsKey,
+  type ModelSource,
   DEFAULT_USAGE_DISPLAY,
   USAGE_DISPLAY_MODES,
   SETTINGS_NAMESPACE,
@@ -14,8 +15,6 @@ import {
   type OpencodeGoSettings,
   type OpencodeGoModelLimit,
   type OpencodeGoModelLimits,
-  RESPONSES_OVERRIDE_MODEL,
-  type GoProtocolOverrides,
   assertProxyURL,
   accountsOf,
   accountRefOf,
@@ -33,7 +32,7 @@ export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } 
 
 export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
-export const TEXT_FIELDS = ['usageDisplay', 'protocolOverrides', 'baseURL', 'proxyURL', 'refreshMinutes',
+export const TEXT_FIELDS = ['usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
   'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes'] as const
 
 export type TextField = typeof TEXT_FIELDS[number]
@@ -59,22 +58,24 @@ interface PlannedWrite { field: EditableField; draft: Draft; write: FieldWrite |
 type FieldWrite = { kind: 'set'; value: OpencodeGoConfig[EditableField] } | { kind: 'clear' }
 
 function formatField(field: TextField, value: unknown): string {
-  if (field === 'protocolOverrides') return (value as GoProtocolOverrides | undefined)?.[RESPONSES_OVERRIDE_MODEL] ?? 'auto'
   if (field === 'usageDisplay') return typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 }
 
 function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'usageDisplay') return USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as OpencodeGoConfig['usageDisplay'] } : undefined
-  if (field === 'protocolOverrides') return text === 'auto' || text === 'openai-responses'
-    ? { kind: 'set', value: { [RESPONSES_OVERRIDE_MODEL]: text === 'auto' ? null : text } } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
     try { assertProxyURL(trimmed); return { kind: 'set', value: trimmed } }
     catch { return undefined }
   }
   if (!trimmed) return { kind: 'clear' }
-  if (field === 'baseURL') return { kind: 'set', value: trimmed }
+  if (field === 'baseURL' || field === 'freeBaseURL') {
+    try {
+      const url = new URL(trimmed)
+      return ['http:', 'https:'].includes(url.protocol) && !url.search && !url.hash ? { kind: 'set', value: trimmed } : undefined
+    } catch { return undefined }
+  }
   const value = Number(trimmed)
   return Number.isFinite(value) && (field !== 'maxImages' || Number.isSafeInteger(value) && value > 0)
     ? { kind: 'set', value } : undefined
@@ -111,6 +112,15 @@ export type OpencodeGoModels =
   }
   /** The listing could not be read; `message` is the Host's own diagnostic. */
   | { readonly status: 'failed'; readonly message?: string; readonly sources?: GoModelCatalog['sources'] }
+
+/** A failure on one source must not hide the other source's usable models. */
+export function modelsForSource(models: OpencodeGoModels, source: ModelSource): OpencodeGoModels {
+  if (models.status !== 'ready') return models
+  const entries = models.entries.filter(model => (model.source ?? 'go') === source)
+  const status = models.sources?.[source]
+  return { ...models, entries, count: entries.length, preview: entries.map(model => model.name ?? model.id),
+    ...(status === undefined ? {} : { stale: status.error !== undefined, message: status.error }) }
+}
 
 export type ExecuteAccountCommand = (command: AccountCommand) => Promise<SettingsWriteResult>
 
@@ -158,11 +168,11 @@ export interface OpencodeGoSectionState extends FormShell {
   accounts: GoAccountsState
   enabled: boolean
   usageDisplay: FieldState
-  protocolOverrides: FieldState
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
   baseURL: FieldState
+  freeBaseURL: FieldState
   proxyURL: FieldState
   refreshMinutes: FieldState
   streamIdleTimeoutMs: FieldState
@@ -210,8 +220,7 @@ export class OpencodeGoSectionController {
     private readonly scope: ConfigForm<OpencodeGoSettings>,
     private readonly ctx: ClientContext,
     private readonly readModels: () => Promise<RemoteResult<GoModelCatalog>> = async () => {
-      const result = await ctx.remote.llm.discoverModels(OPENCODE_GO_NS, { provider: PROVIDER_ID })
-      return result.ok ? { ok: true, value: { models: result.value, stale: false } } : result
+      return ctx.remote.opencodeGoModels.read()
     },
     private readonly readUsage: (ref: string) => Promise<GoUsage> = async ref => {
       const result = await ctx.remote.opencodeGoUsage.readAccount(ref)
@@ -230,7 +239,7 @@ export class OpencodeGoSectionController {
   ) {
     this.syncAccounts()
     this.store = createSnapshotStore(this.projection())
-    const endpoint = () => [scope.getSnapshot().value?.baseURL, scope.getSnapshot().value?.proxyURL]
+    const endpoint = () => [scope.getSnapshot().value?.baseURL, scope.getSnapshot().value?.freeBaseURL, scope.getSnapshot().value?.proxyURL]
     let network = endpoint()
     this.unsubscribe = scope.subscribe(() => {
       this.syncAccounts()
@@ -325,7 +334,7 @@ export class OpencodeGoSectionController {
 
   async setEnabled(next: boolean): Promise<void> { await this.writePickerSetting('enabled', next) }
   async setModelEnabled(id: string, next: boolean): Promise<void> {
-    if (this.models.status === 'ready' && this.models.entries.some(model => model.id === id && model.configurationMissing)) return
+    if (this.models.status === 'ready' && this.models.entries.some(model => modelSettingsKey(model) === id && model.configurationMissing)) return
     await this.writePickerSetting('modelVisibility', { ...this.scope.getSnapshot().value?.modelVisibility, [id]: next })
   }
 

@@ -16,6 +16,8 @@ import { OpencodeGoAdapter } from './adapter.ts'
 import {
   DISPLAY_NAME,
   PROVIDER_ID,
+  FREE_DISPLAY_NAME,
+  FREE_PROVIDER_ID,
   discoverCatalogModels,
   GoModelsService,
   GoCatalogManager,
@@ -45,8 +47,11 @@ export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettleme
 
 export {
   DEFAULT_BASE_URL,
+  DEFAULT_FREE_BASE_URL,
   DISPLAY_NAME,
   PROVIDER_ID,
+  FREE_DISPLAY_NAME,
+  FREE_PROVIDER_ID,
   OpencodeGoCatalog,
   discoverCatalogModels,
   readLiveModelIds,
@@ -118,79 +123,75 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       ctx.logger.warn(`llm-opencode-go: could not refresh ${url}; using last-known model data (${String(error)})`)
     },
     omitted: (ids: readonly string[]): void => {
-      ctx.logger.warn(`llm-opencode-go: gateway models awaiting usable online metadata: ${ids.join(', ')}`)
+      ctx.logger.warn(`llm-opencode-go: gateway models with unusable declarations: ${ids.join(', ')}`)
     },
   }
   let registration: AdapterRegistrationHandle | undefined
+  let freeRegistration: AdapterRegistrationHandle | undefined
+  const refreshPickers = (): void => {
+    registration?.replace([PROVIDER_ID])
+    freeRegistration?.replace([FREE_PROVIDER_ID])
+  }
+  let callSequence = 0
   const catalogs = new GoCatalogManager({
     transport, onFallback: logger.fallback, onOmitted: logger.omitted,
     onWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
-    onRefresh: () => { registration?.replace([PROVIDER_ID]) },
+    onRefresh: refreshPickers,
   })
-  const adapter = new OpencodeGoAdapter({
+  const adapterOptions = {
     transport,
-    catalog: config => catalogs.forConfig(config),
     config: () => current(),
     resolveApiKey,
     accountGeneration: () => accountManager.capture(),
-    onAccountSettled: event => { accountManager.settle(event) },
+    nextCallSequence: () => ++callSequence,
+    onAccountSettled: (event: import('./adapter.ts').GoAccountSettlement) => { accountManager.settle(event) },
     imageAccess: {
       resolveAttachments: () => ctx.get('attachments'),
-      resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(
+      resolveImageAccess: (attachments: import('@deepseek-ai/dsh-attachment').AttachmentStore, ref: import('@deepseek-ai/dsh-attachment').ImageAttachmentRef) => resolveImageAttachmentAccess(
         attachments,
         hostPath => ctx.get('fs')?.processPathFromHostPath(hostPath),
         ref,
       ),
     },
-    onReplayDegrade: (reason) => {
+    onReplayDegrade: (reason: string) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
-  })
+  }
+  const adapter = new OpencodeGoAdapter({ ...adapterOptions, catalog: config => catalogs.forConfig(config) })
+  const freeAdapter = new OpencodeGoAdapter({ ...adapterOptions, source: 'free', catalog: config => catalogs.forConfig(config, 'free') })
   ctx.plugin(GoModelsService, {
     catalog: () => catalogs.forConfig(current()),
-    onRefresh: () => { registration?.replace([PROVIDER_ID]) },
+    freeCatalog: () => catalogs.forConfig(current(), 'free'),
+    onRefresh: refreshPickers,
   })
   const sessionQueryOf = (): AnalyticsSessionQuery | undefined =>
     (ctx as unknown as { get(name: string): unknown }).get('sessionQuery') as AnalyticsSessionQuery | undefined
   ctx.plugin(GoAnalyticsService, {
     query: sessionQueryOf,
-    // Review P14 (core half): the price book omits cost for models whose
-    // upstream cost block is missing or malformed (ModelDetails.costKnown ===
-    // false), so their requests are reported unpriced instead of silently
-    // priced at 0; a published block with legal components stays priced even
-    // when all of its rates are zero.
-    pricing: async () => analyticsPriceBook(await catalogs.forConfig(current()).snapshot()),
+    pricing: async () => analyticsPriceBook(...await Promise.all([
+      catalogs.forConfig(current()).snapshot(), catalogs.forConfig(current(), 'free').snapshot(),
+    ])),
   })
-  const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().protocolOverrides ?? {}])
+  const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().modelLimits ?? {},
+    current().baseURL, current().freeBaseURL, current().proxyURL])
   let pickerVisibility = pickerVisibilityOf()
-  /**
-   * Register the route while the switch is on and its credential resolves, and
-   * drop it when either says no. A route with no key would otherwise sit in
-   * every model picker and read as a usable provider to first-run onboarding —
-   * the dormancy llm-pi-ai keeps by resolving zero routes until configured.
-   * Without the credentials seam the environment answers synchronously, so
-   * registration is too.
-   *
-   * Nothing else is torn down with the route: model discovery, the settings
-   * section, and the credentials listener all stay mounted, so the page that
-   * owns the switch stays reachable to turn it back on.
-   */
+  /** Free follows enabled immediately; Go additionally requires a usable saved key. */
   const applyRoute = (configured: boolean): void => {
-    if (configured && current().enabled && registration === undefined) {
-      try {
-        registration = ctx.llm.registerAdapter([PROVIDER_ID], adapter)
-        ctx.logger.info(`llm-opencode-go: route "${PROVIDER_ID}" registered as ${DISPLAY_NAME}`)
-      } catch (error: unknown) {
-        // A duplicate mount may already own our namespaced route. The refusal names the route;
-        // discovery still registers below, and everything else about the
-        // mount keeps working.
-        ctx.logger.error(`llm-opencode-go: not registering the "${PROVIDER_ID}" route (${String(error)})`)
-      }
-    } else if ((!configured || !current().enabled) && registration !== undefined) {
-      registration()
-      registration = undefined
-      if (!current().enabled) {
-        ctx.logger.info('llm-opencode-go: disabled by configuration; the route and its models are withdrawn')
+    for (const source of ['go', 'free'] as const) {
+      const id = source === 'go' ? PROVIDER_ID : FREE_PROVIDER_ID
+      const handle = source === 'go' ? registration : freeRegistration
+      const active = current().enabled && (source === 'free' || configured)
+      if (active && !handle) {
+        try {
+          const next = ctx.llm.registerAdapter([id], source === 'go' ? adapter : freeAdapter)
+          if (source === 'go') registration = next
+          else freeRegistration = next
+          ctx.logger.info(`llm-opencode-go: route "${id}" registered as ${source === 'go' ? DISPLAY_NAME : FREE_DISPLAY_NAME}`)
+        } catch (error) { ctx.logger.error(`llm-opencode-go: not registering the "${id}" route (${String(error)})`) }
+      } else if (!active && handle) {
+        handle()
+        if (source === 'go') registration = undefined
+        else freeRegistration = undefined
       }
     }
   }
@@ -204,7 +205,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     if (pickerVisibility !== visibility) {
       pickerVisibility = visibility
       // Replacing the owned route notifies every session picker without a restart.
-      registration?.replace([PROVIDER_ID])
+      refreshPickers()
     }
     const credentials = ctx.get('credentials')
     const selected = accountRefOf(config)
@@ -213,31 +214,63 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     if (selected !== selectedRef) {
       selectedRef = selected
       adapter.forgetRejectedKey(selected)
+      freeAdapter.forgetRejectedKey(selected)
     }
-    const refs = accountsOf(config).filter(account => config.autoSwitch || account.apiKeyEnv === selected)
-      .map(account => account.apiKeyEnv)
+    const refs = accountsOf(config).map(account => account.apiKeyEnv)
+    // Free is available immediately, including while credential storage is resolving.
+    if (!config.enabled) { applyRoute(false); return }
+    if (!freeRegistration) {
+      try { freeRegistration = ctx.llm.registerAdapter([FREE_PROVIDER_ID], freeAdapter) }
+      catch (error) { ctx.logger.error(`llm-opencode-go: not registering the "${FREE_PROVIDER_ID}" route (${String(error)})`) }
+    }
     if (credentials === undefined) {
-      applyRoute(refs.some(ref => Boolean(launchEnvironmentOf(ctx).get(ref)?.value)))
+      applyRoute(refs.some(ref => {
+        const value = launchEnvironmentOf(ctx).get(ref)?.value
+        if (!value) return false
+        try { return Boolean(assertUsableApiKey(value, name, ref)) } catch { return false }
+      }))
       return
     }
-    void Promise.all(refs.map(ref => credentials.describe(credentialRef(ref))))
-      .then((infos) => { if (check === routeCheck) applyRoute(infos.some(info => info.configured)) })
-      .catch((error: unknown) => {
-        ctx.logger.error(`llm-opencode-go: credential describe failed; keeping the previous route state (${String(error)})`)
-      })
+    const checkCredential = async (ref: string): Promise<boolean> => {
+      const info = await credentials.describe(credentialRef(ref))
+      if (!info.configured) return false
+      try { return Boolean(await resolveApiKey({ ...config, apiKeyEnv: ref })) }
+      catch (error) {
+        if (error instanceof LlmError && ['MISSING_CREDENTIAL', 'INVALID_CREDENTIAL'].includes(error.code)) return false
+        throw error
+      }
+    }
+    // One pending/unreadable account must not prevent another usable key from
+    // activating Go. Only a completed, successful check of every account can
+    // establish that no key is configured.
+    let remaining = refs.length, usable = false, failed = false
+    if (remaining === 0) applyRoute(false)
+    for (const ref of refs) void checkCredential(ref).then(configured => {
+      if (check !== routeCheck) return
+      usable ||= configured
+      if (usable) applyRoute(true)
+    }).catch((error: unknown) => {
+      failed = true
+      if (check === routeCheck) ctx.logger.error(`llm-opencode-go: credential check failed; keeping the previous route state (${String(error)})`)
+    }).finally(() => {
+      remaining--
+      if (remaining === 0 && check === routeCheck && !usable && !failed) applyRoute(false)
+    })
   }
   syncRoute()
   let undiscover: () => void = () => {}
   try {
     undiscover = ctx.llm.registerModelDiscovery(name, async (request: LlmModelDiscoveryRequest) => {
-      if (request.provider !== PROVIDER_ID
-        && !(request.baseURL ?? '').includes('opencode.ai')) {
+      if (request.provider !== PROVIDER_ID && request.provider !== FREE_PROVIDER_ID
+        && !isOfficialEndpoint(request.baseURL)) {
         throw new LlmError(
-          'llm-opencode-go discovers only OpenCode zen/go endpoints; enter this provider\'s models by hand',
+          'llm-opencode-go discovers only OpenCode Go and Free endpoints; enter this provider\'s models by hand',
           'DISCOVERY_UNSUPPORTED',
         )
       }
-      return discoverCatalogModels(catalogs.forConfig(current()))
+      const source = request.provider === FREE_PROVIDER_ID || request.provider !== PROVIDER_ID
+        && request.baseURL !== undefined && !new URL(request.baseURL).pathname.includes('/go/') ? 'free' : 'go'
+      return discoverCatalogModels(catalogs.forConfig(current(), source))
     })
   } catch (error: unknown) {
     // A duplicate mount may already own our discovery registration — the same
@@ -249,6 +282,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     /* v8 ignore start -- plugin unload never runs in tests: no Context disposal API is exercised */
     registration?.()
     registration = undefined
+    freeRegistration?.()
+    freeRegistration = undefined
     undiscover()
     /* v8 ignore stop */
   })
@@ -261,6 +296,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       // A stored change to a reference outranks the gateway's last rejection
       // of it, so the very next request re-checks the new key.
       adapter.forgetRejectedKey(ref)
+      freeAdapter.forgetRejectedKey(ref)
       if (accountsOf(current()).some(account => account.apiKeyEnv === ref)) { accountManager.credentialChanged(); syncRoute() }
     })
     // The seam becomes visible only once its provider is active, which can be
@@ -278,4 +314,8 @@ export function registerGoRemotes(ctx: Context): void {
     scope.effect(() => scope.typert.register({ package: goRemote.package, face: 'host', schemas: [],
       model: { services: [], events: [], objects: [] }, invocations: goRemote.descriptors }))
   })
+}
+
+function isOfficialEndpoint(raw: string | undefined): boolean {
+  try { return raw !== undefined && new URL(raw).hostname === 'opencode.ai' } catch { return false }
 }

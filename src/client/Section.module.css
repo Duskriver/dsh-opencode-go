@@ -706,3 +706,30 @@
   .segThumb,
   .segOption { transition: none; }
 }
+.modelTabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--dsw-alias-fill-tertiary, #8881);
+}
+
+.modelTab {
+  flex: 1;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.modelTab[aria-selected='true'] {
+  background: var(--dsw-alias-background-primary, #8882);
+  box-shadow: 0 1px 3px #0002;
+  font-weight: 600;
+}
+
+.modelTab:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }

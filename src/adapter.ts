@@ -5,6 +5,10 @@ import {
   accountsOf,
   accountRefOf,
   type GoAccountSwitch,
+  type ModelSource,
+  FREE_PROVIDER_ID,
+  FREE_DISPLAY_NAME,
+  modelSettingsKey,
 } from './contracts.ts'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import {
@@ -39,28 +43,24 @@ import {
   OpencodeGoCatalog,
   type CatalogSnapshot,
   GoCatalogManager,
-  withProtocolOverride,
 } from './catalog.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { accountFallback, isGatewayKeyRejection } from './accounts.ts'
 
-const DEEPSEEK_V41_FLASH_DEFAULT_MAX_TOKENS = 65_536
+const DEFAULT_MAX_TOKENS = 65_536
 
 /**
- * Reserve 64k by default only for deepseek-v4.1-flash. Other models retain the
- * SDK's default when neither the caller nor settings specify an allowance.
- * Per-model settings continue to cap caller values for every model. The model
- * has already had capacity overrides applied.
+ * Cap large models at 64k unless the caller or settings specify an allowance.
+ * Per-model settings continue to cap explicit caller values.
  */
 export function requestMaxTokens(
-  model: { id: string; maxTokens: number },
+  model: { id: string; maxTokens: number; source?: ModelSource },
   limits: OpencodeGoModelLimits,
   requested?: number,
 ): number | undefined {
-  const configured = limits[model.id]?.maxTokens ?? undefined
+  const configured = limits[modelSettingsKey(model)]?.maxTokens ?? undefined
   const allowance = configured === undefined ? requested : Math.min(requested ?? configured, configured)
-  if (model.id !== 'deepseek-v4.1-flash') return allowance
-  return Math.min(allowance ?? DEEPSEEK_V41_FLASH_DEFAULT_MAX_TOKENS, model.maxTokens)
+  return allowance ?? (model.maxTokens > DEFAULT_MAX_TOKENS ? DEFAULT_MAX_TOKENS : undefined)
 }
 
 /**
@@ -94,6 +94,7 @@ export interface OpencodeGoRequestSnapshot {
   model: Model<Api>
   provider: Provider
   sessionId: string
+  apiKey?: string
 }
 
 /** Validate an explicit effort against the model's own levels, without clamping. */
@@ -134,7 +135,7 @@ export class OpencodeGoRequestExecutor {
     using preparation = deadline(watchdog.signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
 
     try {
-      const apiKey = await waitWithSignal(
+      const apiKey = snapshot.apiKey ?? await waitWithSignal(
         () => this.options.resolveApiKey(config, preparation.signal), preparation.signal,
       )
       if (!apiKey) throw new LlmError('llm-opencode-go: no credential resolved for the route', 'MISSING_CREDENTIAL')
@@ -193,6 +194,7 @@ export class OpencodeGoRequestExecutor {
         // attribution merges last in pi-ai's client.
         headers: {
           'x-opencode-session': sessionId,
+          ...model.source === 'free' ? { authorization: `Bearer ${apiKey}` } : {},
           ...attributionHeaders(),
         },
         // The agent recovery layer owns visible attempts; one adapter call is
@@ -258,7 +260,7 @@ const REJECTED_KEY_TTL_MS = 5 * 60_000
 
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
-  const limit = limits[model.id]
+  const limit = limits[modelSettingsKey(model)]
   if (limit == null) return model
   return {
     ...model,
@@ -279,6 +281,7 @@ export interface GoAccountSettlement {
 
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptions {
+  source?: ModelSource
   /** Shared with Host usage reads for this plugin mount. */
   transport?: ProxyTransport
   /** Mount-owned discovery; direct construction supplies its own manager. */
@@ -289,15 +292,17 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
    * two configuration generations.
    */
   config: () => OpencodeGoConfig
-  /** Observe the catalog falling back to the curated table. */
+  /** Observe discovery retaining its last successful directory. */
   onFallback?: (detail: { url: string; error: unknown; kept: number }) => void
-  /** Observe live ids the curated table cannot route. */
+  /** Observe chat rows with invalid or unsupported declarations. */
   onOmitted?: (ids: readonly string[]) => void
   onCatalogWarning?: (warning: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
   /** Host account-state version for actual requests, captured before asynchronous model discovery. */
   accountGeneration?: () => number
+  /** Shared by both adapters so account settlement ordering spans both routes. */
+  nextCallSequence?: () => number
   /** One outcome for both the displayed notice and the persisted selection. */
   onAccountSettled?: (event: GoAccountSettlement) => void
   /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
@@ -321,6 +326,13 @@ interface OpencodeGoDispatchSnapshot extends OpencodeGoCallSnapshot {
   sessionId: string
 }
 
+interface AccountCandidate {
+  ref: string
+  apiKey?: string
+  credentialVersion: number
+  skippedRef?: string
+}
+
 /** Reserved output namespace; literal IDs in this namespace must be mapped too. */
 const SESSION_HEADER_PREFIX = 'dsh-go-session-v1-'
 
@@ -338,11 +350,12 @@ function opencodeSessionValue(sessionId: string | undefined): string {
 }
 
 /**
- * The single route's adapter. The catalog snapshot freezes at each operation,
+ * One source's route adapter. The catalog snapshot freezes at each operation,
  * so a refresh between two requests never mixes model generations inside one
  * call.
  */
 export class OpencodeGoAdapter extends LlmAdapter {
+  private readonly source: ModelSource
   private readonly resolveCatalog: (config: OpencodeGoConfig) => OpencodeGoCatalog
   private readonly transport: ProxyTransport
   private readonly requestExecutor: OpencodeGoRequestExecutor
@@ -355,15 +368,18 @@ export class OpencodeGoAdapter extends LlmAdapter {
   /** Monotonic sequence of the latest request this adapter started. */
   private callSeq = 0
 
+  private nextCallSequence(): number { return this.options.nextCallSequence?.() ?? ++this.callSeq }
+
   constructor(private readonly options: OpencodeGoAdapterOptions) {
     super()
+    this.source = options.source ?? 'go'
     this.transport = options.transport ?? new ProxyTransport()
     this.requestExecutor = new OpencodeGoRequestExecutor(options, this.transport)
     const catalogs = options.catalog ? undefined : new GoCatalogManager({
       transport: this.transport, onFallback: options.onFallback, onOmitted: options.onOmitted,
       onRefresh: options.onCatalogRefresh, onWarning: options.onCatalogWarning,
     })
-    this.resolveCatalog = options.catalog ?? (config => catalogs!.forConfig(config))
+    this.resolveCatalog = options.catalog ?? (config => catalogs!.forConfig(config, this.source))
   }
 
   dispose(): Promise<void> { return this.transport.dispose() }
@@ -380,7 +396,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   override providerInfo(provider: string): { id: string; name: string } {
-    return { id: provider, name: DISPLAY_NAME }
+    return { id: provider, name: this.source === 'go' ? DISPLAY_NAME : FREE_DISPLAY_NAME }
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
@@ -391,9 +407,9 @@ export class OpencodeGoAdapter extends LlmAdapter {
     // DSH resolves every listed model before showing the provider. Unconfigured
     // ids belong in settings discovery diagnostics, not this selectable list.
     return [...snapshot.models.values()]
-      .filter(model => isModelEnabled({ id: model.id, ...snapshot.details.get(model.id) }, config.modelVisibility))
+      .filter(model => isModelEnabled({ id: model.id, source: this.source, ...snapshot.details.get(model.id) }, config.modelVisibility))
       .map(model => ({
-        provider: PROVIDER_ID,
+        provider: this.source === 'go' ? PROVIDER_ID : FREE_PROVIDER_ID,
         id: model.id,
         name: model.name,
         inputModalities: [...model.input],
@@ -424,7 +440,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (resolved === undefined) {
       throw new LlmError(`opencode-go has no model "${model}"`, 'UNKNOWN_MODEL')
     }
-    return { config, catalog, model: withModelLimit(withProtocolOverride(resolved, config), config.modelLimits) }
+    return { config, catalog, model: withModelLimit(resolved, config.modelLimits) }
   }
 
   /** Keep capability resolution and eventual dispatch on the same configuration. */
@@ -432,7 +448,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     model: LlmResolvedModelInfo
     stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>
   }> {
-    const seq = ++this.callSeq
+    const seq = this.nextCallSequence()
     const generation = this.options.accountGeneration?.() ?? 0
     const snapshot = { generation, ...await this.modelSnapshot(model, signal) }
     return {
@@ -452,7 +468,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
       }
     }
     return {
-      provider: PROVIDER_ID,
+      provider: this.source === 'go' ? PROVIDER_ID : FREE_PROVIDER_ID,
       id: model.id,
       name: model.name,
       inputModalities: [...model.input],
@@ -466,7 +482,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     if (options.stop !== undefined) {
       throw new LlmError('llm-opencode-go does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
     }
-    yield* this.dispatch(options, ++this.callSeq)
+    yield* this.dispatch(options, this.nextCallSequence())
   }
 
   private async *streamWithSnapshot(options: GenerateOptions, snapshot: OpencodeGoCallSnapshot, seq: number): AsyncIterable<StreamChunk> {
@@ -499,19 +515,19 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   private async *streamAccounts(options: GenerateOptions, snapshot: OpencodeGoDispatchSnapshot, seq: number): AsyncIterable<StreamChunk> {
     const accounts = accountsOf(snapshot.config)
-    if (accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
+    if (this.source === 'go' && accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
     // The preferred reference resolves through accountRefOf: an empty string
     // keeps the default reference's semantics rather than naming no account.
     const preferred = accountRefOf(snapshot.config)
-    const ordered = snapshot.config.autoSwitch
-      ? [...new Set([preferred, ...accounts.map(account => account.apiKeyEnv)])]
-      : [preferred]
+    const ordered = this.source === 'free' ? accounts.map(account => account.apiKeyEnv)
+      : snapshot.config.autoSwitch ? [...new Set([preferred, ...accounts.map(account => account.apiKeyEnv)])] : [preferred]
     // Keys the gateway rejected lately are skipped for a bounded window:
     // re-sending a full transcript to a rejected key is pure waste. If every
     // candidate is in that window the original order stands, so the gateway's
     // own error — not a synthetic local one — reaches the caller.
     const now = Date.now()
-    const gateway = assertBaseURL(snapshot.config.baseURL)
+    const gateway = assertBaseURL(this.source === 'go' ? snapshot.config.baseURL : snapshot.config.freeBaseURL,
+      this.source === 'go' ? 'baseURL' : 'freeBaseURL')
     const usable = ordered.filter(ref => {
       const rejected = this.rejectedKeys.get(ref)
       const until = rejected?.get(gateway)
@@ -523,28 +539,36 @@ export class OpencodeGoAdapter extends LlmAdapter {
       }
       return false
     })
-    const refs = usable.length > 0 ? usable : ordered
-    const skippedRef = ordered.find(ref => !refs.includes(ref))
+    const candidates = this.accountCandidates(snapshot.config, ordered, usable, options.signal)
+    let candidate = await candidates.next()
+    if (candidate.done) {
+      if (this.source === 'free') yield* this.requestExecutor.stream(options, { config: snapshot.config, model: snapshot.model,
+        provider: snapshot.catalog.provider, sessionId: snapshot.sessionId, apiKey: 'public' })
+      return
+    }
     let switchReason: GoAccountSwitch['reason'] | undefined
     let failedRef: string | undefined
-    for (let attempt = 0; attempt < refs.length; attempt++) {
-      const credentialVersion = this.credentialVersions.get(refs[attempt]!) ?? 0
+    while (!candidate.done) {
+      const { ref, apiKey, credentialVersion, skippedRef } = candidate.value
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
-      const retryFailure = (failure: { code: string } | undefined): boolean => {
+      const retryFailure = async (failure: { code: string } | undefined): Promise<boolean> => {
         const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
-          aborted: options.signal?.aborted === true, hasNext: attempt + 1 < refs.length })
+          aborted: options.signal?.aborted === true, hasNext: snapshot.config.autoSwitch === true })
         if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && failure && isGatewayKeyRejection(failure)
-          && credentialVersion === (this.credentialVersions.get(refs[attempt]!) ?? 0)) this.rememberRejectedKey(refs[attempt]!, gateway)
+          && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway)
         if (!reason || !failure) return false
+        const next = await candidates.next()
+        if (next.done) return false
         switchReason ??= reason
-        failedRef ??= refs[attempt]!
+        failedRef ??= ref
+        candidate = next
         return true
       }
       const announce = (): void => {
         if (emitted) return
-        const serving = refs[attempt]!
+        const serving = ref
         const replaced = failedRef ?? skippedRef ?? preferred
         const notice: GoAccountSwitch | undefined = serving === preferred ? undefined : {
           // The notice names the account the journey left: the first one that
@@ -560,13 +584,14 @@ export class OpencodeGoAdapter extends LlmAdapter {
       }
       try {
         for await (const chunk of this.requestExecutor.stream(options, {
-          config: { ...snapshot.config, apiKeyEnv: refs[attempt]! },
+          config: { ...snapshot.config, apiKeyEnv: ref },
           model: snapshot.model, provider: snapshot.catalog.provider, sessionId: snapshot.sessionId,
+          ...apiKey === undefined ? {} : { apiKey },
         })) {
           if (chunk.type === 'usage') { usage = chunk; continue }
           if (chunk.type === 'finish') {
             const failure = chunk.reason.kind === 'error' ? chunk.reason.failure : undefined
-            if (retryFailure(failure)) { retry = true; break }
+            if (await retryFailure(failure)) { retry = true; break }
             if (chunk.reason.kind === 'stop' || chunk.reason.kind === 'tool-calls' || chunk.reason.kind === 'max-tokens') announce()
             if (usage) yield usage
             yield chunk
@@ -578,8 +603,43 @@ export class OpencodeGoAdapter extends LlmAdapter {
         }
         if (!retry) return
       } catch (error) {
-        if (!retryFailure(error instanceof LlmError ? error : undefined)) throw error
+        if (!await retryFailure(error instanceof LlmError ? error : undefined)) throw error
       }
+    }
+  }
+
+  /** Resolve Free keys only when selecting an account or retrying a failed attempt. */
+  private async *accountCandidates(config: OpencodeGoConfig, ordered: readonly string[], usable: readonly string[], signal?: AbortSignal): AsyncGenerator<AccountCandidate> {
+    if (this.source === 'go') {
+      const refs = usable.length > 0 ? usable : ordered
+      const skippedRef = ordered.find(ref => !refs.includes(ref))
+      for (const ref of refs) yield { ref, skippedRef, credentialVersion: this.credentialVersions.get(ref) ?? 0 }
+      return
+    }
+    const groups = config.autoSwitch ? [usable, ordered.filter(ref => !usable.includes(ref))] : [ordered]
+    for (const refs of groups) {
+      let found = false
+      const skippedRef = refs === usable ? ordered.find(ref => !usable.includes(ref)) : undefined
+      for (const ref of refs) {
+        const credentialVersion = this.credentialVersions.get(ref) ?? 0
+        let apiKey: string | undefined
+        {
+          // Dispose before yielding: inference must not consume a backup's preparation budget.
+          using preparation = deadline(signal, config.requestPreparationTimeoutMs ?? DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS, 'LLM_PREPARATION_TIMEOUT')
+          try {
+            apiKey = await waitWithSignal(() => this.options.resolveApiKey({ ...config, apiKeyEnv: ref }, preparation.signal), preparation.signal)
+          } catch (error) {
+            if (timeoutOf(preparation.signal, 'LLM_PREPARATION_TIMEOUT')) throw new LlmError('opencode-free credential preparation timeout', 'TIMEOUT', { cause: error })
+            if (!(error instanceof LlmError) || !['MISSING_CREDENTIAL', 'INVALID_CREDENTIAL'].includes(error.code)) throw error
+          }
+        }
+        if (!apiKey?.trim()) continue
+        found = true
+        yield { ref, apiKey, credentialVersion, skippedRef }
+        if (!config.autoSwitch) return
+      }
+      // Revisit rejected keys only when every other saved key is unavailable.
+      if (found) return
     }
   }
 

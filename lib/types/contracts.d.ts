@@ -4,9 +4,18 @@ import type { AnalyticsFailureReason, AnalyticsQuery, AnalyticsReport } from './
 /** Public DSH route and the private SDK transport have separate identities. */
 export declare const PROVIDER_ID = "dsh-opencode-go";
 export declare const DISPLAY_NAME = "DSH OpenCode Go";
+export declare const FREE_PROVIDER_ID = "dsh-opencode-free";
+export declare const FREE_DISPLAY_NAME = "DSH OpenCode Free";
+export type ModelSource = 'go' | 'free';
+/** Go keeps its legacy keys; Free owns a separate settings namespace. */
+export declare function modelSettingsKey(model: {
+    id: string;
+    source?: ModelSource;
+}): string;
 export declare const SDK_PROVIDER_ID = "opencode-go";
 /** Public Go discovery/usage base; inference uses the documented protocol-specific siblings. */
 export declare const DEFAULT_BASE_URL = "https://opencode.ai/inference/go/v1";
+export declare const DEFAULT_FREE_BASE_URL = "https://opencode.ai/inference/v1";
 /**
  * Migrate the legacy official address before any request is constructed.
  */
@@ -67,19 +76,15 @@ export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
     /**
-     * Whether this adapter serves its route at all. False withdraws the
-     * `dsh-opencode-go` route and its models from every picker without unloading the
-     * plugin, so the settings page that owns this switch stays reachable to turn
-     * it back on. Independent of the credential: a key present while this is
-     * false registers nothing.
+     * Whether this plugin serves Go and Free. False withdraws both routes and
+     * their models without unloading the settings page. Go additionally requires
+     * a usable configured key; Free supports public access.
      */
     enabled: boolean;
-    /** Usage pill visibility; auto follows this plugin's selected provider. */
+    /** Usage pill visibility; auto follows only the selected Go route. */
     usageDisplay: UsageDisplayMode;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
-    /** Experimental opt-in routing; omitted/null entries follow the catalog. */
-    protocolOverrides?: GoProtocolOverrides;
     /** Legacy credential reference, kept in sync with the first/current account. */
     apiKeyEnv: string;
     /** The first account is current; subsequent accounts are tried in order. */
@@ -88,6 +93,8 @@ export interface OpencodeGoConfig {
     autoSwitch?: boolean;
     /** Discovery/usage base; the official Go gateway selects inference endpoints by protocol. */
     baseURL: string;
+    /** Platform discovery base; only explicitly free chat models are served. */
+    freeBaseURL: string;
     /** Optional HTTP(S) or SOCKS5 proxy; blank uses the default network transport. */
     proxyURL: string;
     /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */
@@ -111,13 +118,9 @@ export interface OpencodeGoConfig {
 }
 /** Settings snapshots may omit fields inherited from their base layer. */
 export type OpencodeGoSettings = Partial<OpencodeGoConfig>;
-/** The supported experimental override surface, shared with the settings UI. */
-export declare const RESPONSES_OVERRIDE_MODEL = "deepseek-v4.1-flash";
-export type GoProtocolOverrides = Partial<Record<typeof RESPONSES_OVERRIDE_MODEL, 'openai-responses' | null>>;
-/** Null selects catalog routing even when a lower settings layer overrides it. */
-export declare function assertProtocolOverrides(value: unknown): asserts value is GoProtocolOverrides | undefined;
 export interface GoModel {
     id: string;
+    source?: ModelSource;
     name?: string;
     contextWindow?: number;
     maxTokens?: number;
@@ -125,7 +128,7 @@ export interface GoModel {
     reasoningBudget?: ThinkingBudgetRange;
     deprecated?: boolean;
     releaseDate?: string;
-    /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
+    /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
     inputModalities?: readonly InputModality[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
@@ -135,14 +138,13 @@ export interface ThinkingBudgetRange {
     max: number;
 }
 /**
- * Input modalities this page can name. models.dev uses these same five tokens, so
- * an unknown token is dropped rather than rendered as an untranslatable chip.
+ * Input modalities this page can name; MIME types are normalized to these tokens.
  */
 export declare const INPUT_MODALITIES: readonly ["text", "image", "audio", "video", "pdf"];
 export type InputModality = typeof INPUT_MODALITIES[number];
 /**
  * Normalize one `modalities.input` array into display order.
- * @param value - the raw declaration read from models.dev or from a Host response.
+ * @param value - the raw gateway declaration or Host response.
  * @returns the declared modalities in {@link INPUT_MODALITIES} order, or
  *   `undefined` when nothing recognizable was declared.
  */
@@ -160,12 +162,12 @@ export interface GoModelCatalog {
     readonly error?: string;
     /** Optional for clients reading an older Host response. Timestamps are Unix milliseconds. */
     readonly sources?: {
-        readonly listing: GoCatalogSourceStatus;
-        readonly metadata: GoCatalogSourceStatus;
+        readonly go: GoCatalogSourceStatus;
+        readonly free: GoCatalogSourceStatus;
     };
 }
 /** Missing configuration cannot be enabled; configured models follow explicit switches or lifecycle defaults. */
-export declare function isModelEnabled(model: Pick<GoModel, 'id' | 'deprecated' | 'configurationMissing'>, modelVisibility?: Readonly<Record<string, boolean>>): boolean;
+export declare function isModelEnabled(model: Pick<GoModel, 'id' | 'source' | 'deprecated' | 'configurationMissing'>, modelVisibility?: Readonly<Record<string, boolean>>): boolean;
 export declare function validReleaseDate(value: unknown): value is string;
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export declare function isNewModel(model: GoModel, now?: number): boolean;

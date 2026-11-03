@@ -148,13 +148,15 @@ export declare const en: {
     keyMissing: string;
     keyNotWritable: string;
     modelsLabel: string;
+    modelSourcesLabel: string;
+    modelsGoTab: string;
+    modelsFreeTab: string;
+    modelsGoSource: string;
+    modelsFreeSource: string;
     modelsRefresh: string;
     modelsLoading: string;
     modelsFailed: string;
     modelsStale: string;
-    modelsMetadataFailed: string;
-    modelsListingSource: string;
-    modelsMetadataSource: string;
     modelsSourceFailed: string;
     modelsSourceCurrent: string;
     modelsSourceNeverFetched: string;
@@ -190,7 +192,6 @@ export declare const en: {
     configurationMissing: string;
     configurationMissingHint: string;
     configurationUnavailable: string;
-    configurationUnavailableHint: string;
     pickerFailed: string;
     deprecatedBadge: string;
     deprecatedHint: string;
@@ -211,7 +212,7 @@ export declare const en: {
     limitsOutputLabel: string;
     advancedResetAll: string;
     advancedLabel: string;
-    groupUsageProtocol: string;
+    groupUsage: string;
     groupConnection: string;
     groupCacheTimeouts: string;
     groupImages: string;
@@ -221,10 +222,8 @@ export declare const en: {
     usageDisplay_auto: string;
     usageDisplay_always: string;
     usageDisplay_off: string;
-    protocolOverridesLabel: string;
-    protocolOverridesHint: string;
-    protocolOverridesAuto: string;
-    protocolOverridesResponses: string;
+    freeBaseURLLabel: string;
+    freeBaseURLHint: string;
     baseURLLabel: string;
     baseURLHint: string;
     proxyURLLabel: string;

@@ -25,7 +25,9 @@ Vitest discovers exactly 12 domain files:
 | --- | --- |
 | `plugin.spec.ts` | Cordis mounting/unloading, native SettingsForms/profile writes, hot configuration, RPC and public exports |
 | `accounts.spec.ts` | Account CRUD, 20-account cap, serial writes, failed-write cleanup, fallback/promotion, stale calls and five-minute cooldown |
-| `catalog.spec.ts` | Discovery, model limits/visibility, online metadata, ETag/disk cache, endpoint isolation and bounded transport |
+| `free.spec.ts` | Dual route lifecycle, public Bearer fallback, saved keys, account retry and credential deadlines |
+| `pricing.spec.ts` | Strict free-price validation, context tiers and dynamic UTC/date multipliers |
+| `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `adapter.spec.ts` | Requests, capacity limits, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |
@@ -38,7 +40,7 @@ Vitest discovers exactly 12 domain files:
 
 All test imports target current modules directly. `vitest.config.ts` has no aliases or compatibility resolver. Its Google SDK loader is the same version-guarded transport patch used by the production build. The UI tests load the published DSH primitives and the installed locale bundle.
 
-`tests/setup.ts` gives each test a temporary `DSH_HOME`, provides synthetic models.dev metadata, allows loopback HTTP fixtures and explicit `.invalid` destinations through the local proxy fixture, and rejects other network requests. `tests/support/` contains five shared helpers: current host/account services, ConfigForm/React fixtures, metadata data, loopback gateways and proxies. Fixtures clean up contexts, sockets, timers and temporary homes.
+`tests/setup.ts` gives each test a temporary `DSH_HOME`, provides complete synthetic `/models` entries, allows loopback HTTP fixtures and explicit `.invalid` destinations through the local proxy fixture, and rejects other network requests. `tests/support/` contains five shared helpers: current host/account services, ConfigForm/React fixtures, metadata data, loopback gateways and proxies. Fixtures clean up contexts, sockets, timers and temporary homes.
 
 ## Modules
 
@@ -65,4 +67,8 @@ Image count limits are checked before reads. Each request prepares up to four im
 
 ## Distribution
 
-The `.` and `./client` exports continue to point to the built host entry and browser factory. Rebuild `lib/` with source changes, then run `npm run check:dist`. Builds do not execute during dependency installation. The Google transport bridge remains pinned to the existing SDK versions; the telemetry dependency is fixed at `1.2.0` to retain the original private SDK behavior and shipped license attribution.
+The `.` and `./client` exports continue to point to the built host entry and browser factory. Rebuild `lib/` with source changes, then run `npm run check:dist`. Builds do not execute during dependency installation. The private `opencode-go-pi-ai` alias uses `@earendil-works/pi-ai@1.5.0`, which pins `@earendil-works/pi-telemetry@1.5.0` and `@earendil-works/pi-schema@1.5.0` exactly; `package.json` no longer needs `overrides`.
+
+The Google transport bridge is version-guarded for pi-ai 1.5.0 and `@google/genai@2.21.0`. `src/google.ts` delegates simple streaming to the upstream adapter through the request-scoped fetch binding; pi-ai now selects discrete thinking levels for Gemini 4 natively.
+
+SDK declarations bundle pi-schema in place of TypeBox. `scripts/licenses/pi-1.5.0-LICENSE` supplies the pi packages' upstream MIT license omitted from their npm distributions. pi-schema's format checks and value conversion rules include code adapted from TypeBox 1.3.27 (MIT); the build appends the package's `LICENSES/typebox-LICENSE` to its pi-schema notice in `lib/vendor-licenses.txt`.

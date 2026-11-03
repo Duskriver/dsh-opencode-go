@@ -1,12 +1,12 @@
 /** Local session scanning, in-memory reuse and Go plan cost estimates. */
-import { PROVIDER_ID, parseAnalyticsQuery } from './contracts.ts'
+import { PROVIDER_ID, FREE_PROVIDER_ID, modelSettingsKey, type ModelSource, parseAnalyticsQuery } from './contracts.ts'
+import { priceMultiplierAt, type PriceMultiplier } from './pricing.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
 /**
- * OpenCode Go plan snapshot: monthly limits and the one peak-pricing window the
- * official tariff defines. Prices themselves stay on models.dev (the catalog's
- * model.cost); this file only carries what models.dev does not publish.
+ * OpenCode Go plan snapshot: monthly limits. Text tariffs and UTC multipliers
+ * come from each gateway model directory.
  *
  * Source: https://opencode.ai/v2/docs/console/go/ (Go and Go Plus tables).
  * The snapshot is reviewed when the model list or the plan changes; the report
@@ -15,7 +15,7 @@ import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protoc
  */
 
 /** Date the limits below were read from the official plan page. */
-export const GO_PLAN_AS_OF = '2026-10-18'
+export const GO_PLAN_AS_OF = '2026-11-02'
 
 /** Human-readable source for the limit snapshot. */
 export const GO_PLAN_SOURCE = 'https://opencode.ai/v2/docs/console/go/'
@@ -42,32 +42,33 @@ export const GO_MONTHLY_LIMITS: Readonly<Record<string, GoMonthlyLimit>> = {
   'glm-5.3-flash': { go: 60, goPlus: 180 },
   'glm-5.3': { go: 15, goPlus: 120 },
   'glm-5.2': { go: 60, goPlus: 180 },
+  'kimi-k3.1-pro': { go: 15, goPlus: 60 },
   'kimi-k3': { go: 15, goPlus: 60 },
   'kimi-k2.7-code': { go: 60, goPlus: 180 },
   'longcat-2.0': { go: 60, goPlus: 240 },
-  'longcat-2.5-preview-free': UNLIMITED,
-  'step-5-preview': { go: 60, goPlus: 240, note: 'limited-time' },
+  'step-5-preview': { go: 15, goPlus: 60 },
   'beam-free': UNLIMITED,
+  'iceman-contributor-free': UNLIMITED,
   'mimo-v2.6-flash': { go: 60, goPlus: 120 },
   'mimo-v2.6-pro': { go: 15, goPlus: 60 },
   'mimo-v2.5': { go: 60, goPlus: 120 },
   'mimo-v2.5-pro': { go: 15, goPlus: 60 },
+  'minimax-m3.1-flash': { go: 20, goPlus: 80 },
   'minimax-m3': { go: 60, goPlus: 180 },
   'muse-spark-1.3-contributor': { go: 60, goPlus: 120 },
   'muse-spark-1.2-contributor': { go: 60, goPlus: 120 },
   'qwen3.8-max': { go: 15, goPlus: 60 },
   'qwen3.8-flash': { go: 30, goPlus: 90 },
   'qwen3.7-plus': { go: 60, goPlus: 180 },
-  'deepseek-v4.1-flash': { go: 80, goPlus: 160 },
+  'deepseek-v4.1-flash': { go: 100, goPlus: 200 },
   'deepseek-v4-pro': { go: 15, goPlus: 60 },
   'hy4-preview': { go: 30, goPlus: 120 },
   'hy3': { go: 60, goPlus: 240 },
-  'space-bunny': { go: 30, goPlus: 120 },
   'grok-4.7': { go: 15, goPlus: 60 },
   'gpt-6-luna': { go: 15, goPlus: 60 },
   'gpt-5.6-luna': { go: 15, goPlus: 60 },
   'claude-haiku-5-5': { go: 15, goPlus: 60 },
-  'gemini-4-argon-contributor': { go: 60, goPlus: 240, note: 'limited-time' },
+  'gemini-4-argon': { go: 30, goPlus: 120, note: 'limited-time' },
 }
 
 /**
@@ -77,25 +78,6 @@ export const GO_MONTHLY_LIMITS: Readonly<Record<string, GoMonthlyLimit>> = {
  */
 export function goMonthlyLimit(model: string): GoMonthlyLimit | undefined {
   return Object.hasOwn(GO_MONTHLY_LIMITS, model) ? GO_MONTHLY_LIMITS[model] : undefined
-}
-
-/** Models with a documented peak/off-peak tariff (DeepSeek V4.1 Flash and V4 Pro). */
-export const PEAK_PRICED_MODELS: ReadonlySet<string> = new Set(['deepseek-v4.1-flash', 'deepseek-v4-pro'])
-
-/**
- * Whether a request started inside the documented DeepSeek peak window:
- * 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday. All other hours,
- * including weekends, are off-peak.
- * @param at - request start time in Unix epoch milliseconds.
- * @returns true when the peak multiplier applies.
- */
-export function isPeakPricedAt(at: number): boolean {
-  if (!Number.isFinite(at)) return false
-  const date = new Date(at)
-  const day = date.getUTCDay()
-  if (day === 0 || day === 6) return false
-  const hour = date.getUTCHours()
-  return hour >= 1 && hour < 4 || hour >= 6 && hour < 10
 }
 
 /** The four billable rates, in USD per one million tokens. */
@@ -114,6 +96,7 @@ export interface CostTier extends CostRates {
 /** Structural face of the catalog's ModelCost. */
 export interface ModelCostLike extends CostRates {
   readonly tiers?: readonly CostTier[]
+  readonly multipliers?: readonly PriceMultiplier[]
 }
 
 /** The token components one request reported. */
@@ -161,16 +144,16 @@ function tierOf(cost: ModelCostLike, billed: number): CostRates {
  * @param model - the model id that served the request.
  * @param usage - its token components.
  * @param cost - the catalog cost for that model.
- * @param at - request start time, used for the DeepSeek peak window.
+ * @param at - request start time, used to evaluate gateway multiplier conditions.
  * @returns the estimated cost in integer micro-USD.
  */
-export function priceUsage(model: string, usage: UsageCounts, cost: ModelCostLike, at: number): number {
+export function priceUsage(_model: string, usage: UsageCounts, cost: ModelCostLike, at: number): number {
   const rates = tierOf(cost, billedInput(usage))
   const micro = Math.round(usage.input * rates.input)
     + Math.round(usage.output * rates.output)
     + Math.round(usage.cacheRead * rates.cacheRead)
     + Math.round(usage.cacheWrite * rates.cacheWrite)
-  return PEAK_PRICED_MODELS.has(model) && isPeakPricedAt(at) ? micro * 2 : micro
+  return Math.round(micro * priceMultiplierAt(cost.multipliers, at))
 }
 
 /** Route id used by this plugin before 0.1.16. */
@@ -204,6 +187,7 @@ export interface RequestFact {
   readonly cacheWrite: number
   /** The request was recorded under the pre-0.1.16 route id. */
   readonly legacy: boolean
+  readonly source?: ModelSource
   readonly kind: 'message' | 'summary'
   /** The request settled without a usable usage report. */
   readonly missingUsage: boolean
@@ -261,7 +245,7 @@ function stepKey(data: Record<string, unknown> | undefined): string | undefined 
  * @returns true when the request is this plugin's.
  */
 export function isPluginRoute(provider: unknown, at: number, cutoff = LEGACY_ROUTE_CUTOFF_MS): boolean {
-  return provider === PROVIDER_ID || provider === LEGACY_PROVIDER_ID && at < cutoff
+  return provider === PROVIDER_ID || provider === FREE_PROVIDER_ID || provider === LEGACY_PROVIDER_ID && at < cutoff
 }
 
 /**
@@ -331,6 +315,7 @@ export function foldSession(
       const usage = usageOf(data?.usage)
       facts.push({
         at, model, kind: 'message', legacy: header.provider === LEGACY_PROVIDER_ID,
+        ...header.provider === FREE_PROVIDER_ID ? { source: 'free' as const } : {},
         missingUsage: usage === undefined,
         input: usage?.input ?? 0, output: usage?.output ?? 0,
         cacheRead: usage?.cacheRead ?? 0, cacheWrite: usage?.cacheWrite ?? 0,
@@ -347,6 +332,7 @@ export function foldSession(
       const usage = usageOf(data?.usage)
       facts.push({
         at: eventTime, model, kind: 'summary', legacy: provider === LEGACY_PROVIDER_ID,
+        ...provider === FREE_PROVIDER_ID ? { source: 'free' as const } : {},
         missingUsage: usage === undefined,
         input: usage?.input ?? 0, output: usage?.output ?? 0,
         cacheRead: usage?.cacheRead ?? 0, cacheWrite: usage?.cacheWrite ?? 0,
@@ -473,7 +459,7 @@ export interface AnalyticsCoverage {
 
 /** Where the prices came from. */
 export interface AnalyticsPricing {
-  source: 'models.dev'
+  source: 'OpenCode /models'
   updatedAt?: number
   /**
    * True only when the whole price table was unavailable; unpricedModels then
@@ -511,6 +497,7 @@ export interface AnalyticsSessionQuery {
 
 /** Structural face of one catalog model. */
 export interface AnalyticsPricingModel {
+  readonly multipliers?: readonly PriceMultiplier[]
   readonly id?: string
   readonly name?: string
   readonly cost?: ModelCostLike
@@ -524,9 +511,10 @@ export interface AnalyticsPriceBook {
 
 /** Structural face of the catalog data the price book builder consumes. */
 export interface AnalyticsCatalogSnapshotLike {
+  readonly source?: ModelSource
   readonly models: ReadonlyMap<string, AnalyticsPricingModel>
   readonly details?: ReadonlyMap<string, { readonly costKnown?: false }>
-  readonly metadataUpdatedAtMs?: number
+  readonly updatedAtMs?: number
 }
 
 /** Construction options; tests inject fakes for every seam. */
@@ -757,19 +745,18 @@ function factUsage(fact: RequestFact): UsageCounts {
  * so its requests land in the unpriced bucket instead of being priced at 0.
  * A published block with legal components stays priced even when all zero.
  */
-export function analyticsPriceBook(snapshot: AnalyticsCatalogSnapshotLike): AnalyticsPriceBook {
+export function analyticsPriceBook(...snapshots: AnalyticsCatalogSnapshotLike[]): AnalyticsPriceBook {
   const models = new Map<string, AnalyticsPricingModel>()
-  for (const [id, model] of snapshot.models) {
-    models.set(id, {
+  for (const snapshot of snapshots) for (const [id, model] of snapshot.models) {
+    models.set(modelSettingsKey({ id, source: snapshot.source }), {
       ...(model.id === undefined ? {} : { id: model.id }),
-      ...(model.name === undefined ? {} : { name: model.name }),
-      ...(snapshot.details?.get(id)?.costKnown === false ? {} : { cost: model.cost }),
+      ...(model.name === undefined ? {} : { name: snapshot.source === 'free' ? `${model.name} · OpenCode Free` : model.name }),
+      ...(snapshot.details?.get(id)?.costKnown === false || model.cost === undefined ? {}
+        : { cost: { ...model.cost, ...model.multipliers === undefined ? {} : { multipliers: model.multipliers } } }),
     })
   }
-  return {
-    models,
-    ...(snapshot.metadataUpdatedAtMs === undefined ? {} : { updatedAt: snapshot.metadataUpdatedAtMs }),
-  }
+  const times = snapshots.flatMap(snapshot => snapshot.updatedAtMs === undefined ? [] : [snapshot.updatedAtMs])
+  return { models, ...times.length === 0 ? {} : { updatedAt: Math.min(...times) } }
 }
 
 /** One mount owns the scan cache; multiple dashboard opens share it. */
@@ -979,7 +966,7 @@ export class GoAnalyticsService extends TypertRemoteService {
         const fact = facts[index]
         if (fact.at >= query.to) break
         matched = true
-        const model = fact.model
+        const model = modelSettingsKey({ id: fact.model, source: fact.source })
         let row = models.get(model)
         if (row === undefined) {
           row = {
@@ -1116,7 +1103,7 @@ export class GoAnalyticsService extends TypertRemoteService {
         pricingMs,
       },
       pricing: {
-        source: 'models.dev',
+        source: 'OpenCode /models',
         ...(priceBook?.updatedAt === undefined ? {} : { updatedAt: priceBook.updatedAt }),
         ...(pricingUnavailable ? { unavailable: true as const } : {}),
         unpricedModels: [...unpriced].sort().slice(0, 64),

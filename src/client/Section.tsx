@@ -31,8 +31,12 @@ import type {
   OpencodeGoSectionFace,
   OpencodeGoSectionState,
 } from './controller.ts'
+import { modelsForSource } from './controller.ts'
 import {
   MAX_ACCOUNTS,
+  modelSettingsKey,
+  FREE_PROVIDER_ID,
+  type ModelSource,
   INPUT_MODALITIES,
   isModelEnabled,
   isNewModel,
@@ -446,7 +450,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
 
 type ModelTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string
 
-/** Chip copy for each token models.dev can declare. */
+/** Chip copy for each token the gateway can declare. */
 const MODALITY_COPY = {
   text: 'modalityText', image: 'modalityImage', audio: 'modalityAudio',
   video: 'modalityVideo', pdf: 'modalityPdf',
@@ -457,7 +461,8 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
 }
 
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
-export function ModelEditor({ models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
+export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
+  source?: ModelSource
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
   modelVisibility: Readonly<Record<string, boolean>>
@@ -483,11 +488,11 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
   const normalized = query.trim().toLocaleLowerCase()
   const entries = all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
     && (filter === 'all' || filter === 'new' && isNewModel(model, now)
-      || filter === 'custom' && hasCapacityOverride(draft[model.id]) || filter === 'deprecated' && model.deprecated))
+      || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)]) || filter === 'deprecated' && model.deprecated))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
   const visibilityDisabled = disabled || visibilitySaving
-  const metadataUnavailable = models.status === 'ready' && models.sources?.metadata.error !== undefined
-  const customized = all.filter(entry => hasCapacityOverride(draft[entry.id])).length
+  const customized = all.filter(entry => hasCapacityOverride(draft[modelSettingsKey(entry)])).length
+  const ownKeys = Object.keys(draft).filter(key => key.startsWith(`${FREE_PROVIDER_ID}/`) === (source === 'free'))
   const filters = [
     ['all', 'filterAll', all.length],
     ['new', 'filterNew', all.filter(entry => isNewModel(entry, now)).length],
@@ -499,7 +504,7 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
     onEdit({ ...draft, [id]: { ...current, [field]: value ?? null } })
   }
   const badges = (entry: GoModel) => <>
-    {entry.configurationMissing ? <Tag tone="warning">{t(metadataUnavailable ? 'configurationUnavailable' : 'configurationMissing')}</Tag> : null}
+    {entry.configurationMissing ? <Tag tone="warning">{t('configurationMissing')}</Tag> : null}
     {isNewModel(entry, now) ? <span className={css.newBadge} title={t('newHint')}>{t('newBadge')}</span> : null}
     {entry.deprecated ? <Tag tone="warning">{t('deprecatedBadge')}</Tag> : null}
   </>
@@ -525,12 +530,12 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
                     the release date belong to the parameter card. */}
                 <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
               </button>
-              {hasCapacityOverride(draft[entry.id])
+              {hasCapacityOverride(draft[modelSettingsKey(entry)])
                 ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
                 : null}
               <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
-                onChange={enabled => { onModelEnabled(entry.id, enabled) }} />
+                onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
             </div>)}
           </nav>
           <section className={css.modelDetails} aria-label={t('modelDetails')}>
@@ -546,20 +551,20 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
                 ? <span className={css.releaseDate} title={t('releaseSource', { date: model.releaseDate })}>{model.releaseDate}</span>
                 : null}
             </div>
-            {model.configurationMissing ? <p className={css.hint}>{t(metadataUnavailable ? 'configurationUnavailableHint' : 'configurationMissingHint')}</p> : <>
+            {model.configurationMissing ? <p className={css.hint}>{t('configurationMissingHint')}</p> : <>
               {model.deprecated ? <p className={css.hint}>{t('deprecatedHint')}</p> : null}
               <div className={css.stats}>
-                <Capacity model={model} field="contextWindow" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
-                <Capacity model={model} field="maxTokens" limit={draft[model.id]} t={t} locale={locale} disabled={disabled} onChange={write} />
+                <Capacity model={model} field="contextWindow" limit={draft[modelSettingsKey(model)]} t={t} locale={locale} disabled={disabled} onChange={write} />
+                <Capacity model={model} field="maxTokens" limit={draft[modelSettingsKey(model)]} t={t} locale={locale} disabled={disabled} onChange={write} />
                 <div className={css.stat}>
                   <span className={css.statLabel}>{t('modalityLabel')}</span>
                   <Modalities model={model} t={t} />
                 </div>
               </div>
-              {model.reasoningBudget ? <BudgetPresets key={model.id} model={model} limit={draft[model.id]}
-                t={t} locale={locale} disabled={disabled} onChange={values => { write(model.id, 'thinkingBudgets', values) }} /> : null}
-              {hasCapacityOverride(draft[model.id]) ? <button type="button" className={css.reset} disabled={disabled}
-                onClick={() => { onEdit({ ...draft, [model.id]: null }) }}>{t('limitsResetModel')}</button> : null}
+              {model.reasoningBudget ? <BudgetPresets key={model.id} model={model} limit={draft[modelSettingsKey(model)]}
+                t={t} locale={locale} disabled={disabled} onChange={values => { write(modelSettingsKey(model), 'thinkingBudgets', values) }} /> : null}
+              {hasCapacityOverride(draft[modelSettingsKey(model)]) ? <button type="button" className={css.reset} disabled={disabled}
+                onClick={() => { onEdit({ ...draft, [modelSettingsKey(model)]: null }) }}>{t('limitsResetModel')}</button> : null}
               <p className={css.paneFoot}>
                 {t('limitsHint')} {t('modalitiesSource')}
                 {/* Only models declaring more than text and images need the caveat. */}
@@ -574,8 +579,8 @@ export function ModelEditor({ models, draft, modelVisibility, t, locale, disable
           of its own, with the one action that clears the overrides beside it. */}
       <div className={css.limitsFoot}>
         <span className={css.limitsSummary}>{t('limitsSummary', { count: customized })}</span>
-        {Object.values(draft).some(hasCapacityOverride) ? <Button variant="outline" size="sm" disabled={disabled}
-          onClick={() => { onEdit(Object.fromEntries(Object.keys(draft).map(id => [id, null]))) }}>{t('limitsResetAll')}</Button> : null}
+        {ownKeys.some(key => hasCapacityOverride(draft[key])) ? <Button variant="outline" size="sm" disabled={disabled}
+          onClick={() => { onEdit({ ...draft, ...Object.fromEntries(ownKeys.map(id => [id, null])) }) }}>{t('limitsResetAll')}</Button> : null}
       </div>
     </div>
   )
@@ -616,8 +621,8 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
       onChange={event => {
         const text = event.target.value.trim()
         const value = Number(text)
-        if (text === '') onChange(model.id, field, undefined)
-        else if (Number.isSafeInteger(value) && value > 0) onChange(model.id, field, value)
+        if (text === '') onChange(modelSettingsKey(model), field, undefined)
+        else if (Number.isSafeInteger(value) && value > 0) onChange(modelSettingsKey(model), field, value)
       }} />
     <span id={`${id}-default`} className={css.hint}>
       {t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString(locale) })}
@@ -664,7 +669,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 
 /** The tuning fields the advanced card owns, in the order it renders them. */
 const ADVANCED_FIELDS = [
-  'usageDisplay', 'protocolOverrides', 'baseURL', 'proxyURL',
+  'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
   'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
@@ -785,18 +790,18 @@ function ValueField(props: ValueFieldProps) {
  * @returns the listing body: a progress line, the Host diagnostic, or an empty
  *   body once the capacity table can show the complete model list.
  */
-function ModelsBody({ models, t, locale }: {
+function ModelsBody({ models, t, locale, source }: {
   models: OpencodeGoModels
+  source: ModelSource
   t: SectionTranslate
   locale?: string
 }) {
   const sources = models.status === 'ready' || models.status === 'failed' ? models.sources : undefined
-  const metadataOnlyFailure = sources?.metadata.error !== undefined && sources.listing.error === undefined
   const sourceStatus = sources
-    ? (['listing', 'metadata'] as const).map(source => {
+    ? (['go', 'free'] as const).map(source => {
       const status = sources[source]
       return <p className={css.hint} key={source}>
-        {t(source === 'listing' ? 'modelsListingSource' : 'modelsMetadataSource')}: {' '}
+        {t(source === 'go' ? 'modelsGoSource' : 'modelsFreeSource')}: {' '}
         {status.error ? t('modelsSourceFailed') : t('modelsSourceCurrent')}. {' '}
         {status.updatedAt === undefined ? t('modelsSourceNeverFetched')
           : t('modelsSourceUpdated', { time: new Date(status.updatedAt).toLocaleString(locale) })}
@@ -806,7 +811,7 @@ function ModelsBody({ models, t, locale }: {
   if (models.status === 'failed') {
     return (
       <>
-        <p className={css.failedNote} role="alert">{t(metadataOnlyFailure ? 'modelsMetadataFailed' : 'modelsFailed')}</p>
+        <p className={css.failedNote} role="alert">{t('modelsFailed')}</p>
         {models.message ? <p className={css.hint}>{models.message}</p> : null}
         {sourceStatus}
       </>
@@ -816,13 +821,13 @@ function ModelsBody({ models, t, locale }: {
   const progress = models.refreshing ? <p className={css.hint} role="status">{t('modelsRefreshing')}</p> : null
   if (models.stale) return <>
     {progress}
-    <p className={css.failedNote} role="alert">{t(metadataOnlyFailure ? 'modelsMetadataFailed' : 'modelsStale')}</p>
+    <p className={css.failedNote} role="alert">{t('modelsStale')}</p>
     {models.message ? <p className={css.hint}>{models.message}</p> : null}
     {sourceStatus}
   </>
-  const warning = sources?.listing.warning
-    ? <p className={css.failedNote} role="alert">{sources.listing.warning}</p> : null
-  return <>{progress}{warning}{models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
+  const warning = sources?.[source].warning
+    ? <p className={css.failedNote} role="alert">{sources[source].warning}</p> : null
+  return <>{progress}{warning}{sourceStatus}{models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
 }
 
 /**
@@ -885,6 +890,8 @@ function Loaded(props: {
   // The list is the page's largest block and the tuning fields sit under it, so
   // it ships folded: a reader opens it when they came to change models.
   const [modelsOpen, setModelsOpen] = useState(false)
+  const [modelSource, setModelSource] = useState<ModelSource>('go')
+  const models = modelsForSource(state.models, modelSource)
   // The analytics card unfolds into two rows — the dashboard entry and the only
   // place a style is chosen — and the dialog is its own modal on top of that.
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
@@ -896,7 +903,7 @@ function Loaded(props: {
   // the card above, so the notices render under the header either way.
   const modelNotices = (
     <>
-      <ModelsBody models={state.models} t={t} locale={props.locale} />
+      <ModelsBody models={models} source={modelSource} t={t} locale={props.locale} />
       {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
     </>
   )
@@ -1002,8 +1009,23 @@ function Loaded(props: {
         {modelsOpen
           ? (
             <div id="opencode-go-models" className={css.cardBody}>
+              <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
+                {(['go', 'free'] as const).map(source => <button key={source} type="button" role="tab"
+                  id={`opencode-model-tab-${source}`} aria-selected={modelSource === source}
+                  tabIndex={modelSource === source ? 0 : -1}
+                  aria-controls="opencode-model-panel" className={css.modelTab}
+                  onKeyDown={event => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                    event.preventDefault()
+                    const next = event.key === 'Home' ? 'go' : event.key === 'End' ? 'free' : source === 'go' ? 'free' : 'go'
+                    setModelSource(next)
+                    document.getElementById(`opencode-model-tab-${next}`)?.focus()
+                  }}
+                  onClick={() => { setModelSource(source) }}>{t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')}</button>)}
+              </div>
+              <div role="tabpanel" id="opencode-model-panel" aria-labelledby={`opencode-model-tab-${modelSource}`}>
               {modelNotices}
-              <ModelEditor models={state.models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
+              <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
                 modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
                 filterAction={(
                   <Button
@@ -1017,6 +1039,7 @@ function Loaded(props: {
                 )}
                 onModelEnabled={props.setModelEnabled}
                 onEdit={props.editModelLimits} />
+              </div>
             </div>
           )
           : <div className={css.cardNotes}>{modelNotices}</div>}
@@ -1056,7 +1079,7 @@ function Loaded(props: {
                 </button>
               </div>
               <div className={css.rows}>
-                <div className={css.groupHead}>{t('groupUsageProtocol')}</div>
+                <div className={css.groupHead}>{t('groupUsage')}</div>
                 <ValueField
                   id="opencode-go-usage-display"
                   label={t('usageDisplayLabel')}
@@ -1066,18 +1089,6 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={text => { props.edit('usageDisplay', text) }}
                 />
-                <ValueField
-                  id="opencode-go-protocol-overrides"
-                  label={t('protocolOverridesLabel')}
-                  hint={t('protocolOverridesHint')}
-                  field={state.protocolOverrides}
-                  options={[
-                    { value: 'auto', label: t('protocolOverridesAuto') },
-                    { value: 'openai-responses', label: t('protocolOverridesResponses') },
-                  ]}
-                  {...fieldProps}
-                  onEdit={text => { props.edit('protocolOverrides', text) }}
-                />
                 <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-base-url"
@@ -1086,6 +1097,14 @@ function Loaded(props: {
                   field={state.baseURL}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('baseURL', text) }}
+                />
+                <ValueField
+                  id="opencode-go-free-base-url"
+                  label={t('freeBaseURLLabel')}
+                  hint={t('freeBaseURLHint')}
+                  field={state.freeBaseURL}
+                  {...fieldProps}
+                  onEdit={text => { props.edit('freeBaseURL', text) }}
                 />
                 <ValueField
                   id="opencode-go-proxy-url"

@@ -19,7 +19,7 @@ The Host reads DSH's `ctx.sessionQuery`:
 
 The browser receives aggregate numbers only: no session ids, titles, content, working directories, or credentials.
 
-Session scanning and aggregation run locally, but model and pricing metadata may refresh from `https://models.dev/api.json`. That request carries no conversation content, account keys or per-request analytics. Normal inference and quota requests still reach your configured model gateway; there is no additional telemetry or analytics service.
+Session scanning and aggregation run locally, but model and pricing metadata may refresh from each gateway’s `/models` endpoint. That request carries no conversation content, account keys or per-request analytics. Normal inference and quota requests still reach your configured model gateway; there is no additional telemetry or analytics service.
 
 ## What is counted
 
@@ -50,9 +50,9 @@ The request start comes from the matching `step/start` event; when that key is a
 
 ### Estimate
 
-- current models.dev rates for `opencode-go` (USD per 1M tokens) — all history is estimated at the rates in force at query time (models.dev publishes no historical rates);
+- current rates from the Go and Free gateway `/models` directories (USD per 1M tokens) — all history is estimated at the rates in force at query time (the directories publish no historical rates);
 - the highest matching context tier prices the whole request;
-- DeepSeek V4.1 Flash and V4 Pro double during the documented peak window;
+- each model’s `cost.multipliers` dynamically applies UTC weekday/hour and date conditions; Go and Free requests retain separate tariffs even for overlapping IDs;
 - a model whose upstream cost block is missing or malformed is treated as unpriced: it adds no cost, is counted separately, and its cost cell shows an **unpriced** tag; such models were previously priced at zero silently — the new display is louder but honest. A genuinely free model with a published, legal (including all-zero) cost block still prices at zero;
 - the lead sentence only states an amount when at least one request was priced: with `pricedRequests === 0` it puts `—` where the amount would go (the same meaning as the KPI's `-`), so "cannot be priced" is never rendered as `$0.00`;
 - when the price table fails or times out (at most a 4-second wait) the last successful table is used; with no usable table at all, every model that appeared is listed as unpriced;
@@ -101,7 +101,7 @@ The calendar is laid out densely by calendar date across the selected range (a 3
 - a request that fails or is canceled before usage may still be billed by the gateway but adds no cost;
 - summaries count as requests, so the request total includes them;
 - device or gateway clock skew can move a request across a peak boundary or a day boundary;
-- models.dev rates and the official plan page can drift; the footer shows the price update time.
+- OpenCode /models rates and the official plan page can drift; the footer shows the price update time.
 
 ## Verification
 

@@ -18,8 +18,8 @@ import {
 } from '../src/analytics.ts'
 import { parseAnalyticsReport } from '../src/contracts.ts'
 import { expect, it, describe } from 'vitest'
-import { readModelMetadata } from '../src/catalog.ts'
-import { metadataDocument, modelMetadata } from './support/data.ts'
+import { readModelDirectory } from '../src/catalog.ts'
+import { modelsDocument, modelEntry, peakMultipliers } from './support/data.ts'
 
 describe("session event folding", () => {
   const base = Date.UTC(2026, 9, 18, 9, 0)
@@ -254,11 +254,13 @@ describe("plan pricing", () => {
     expect(billedInput(oneMillionEach)).toBe(2_000_000)
   })
 
-  it('doubles DeepSeek only inside the documented UTC peak windows', () => {
-    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, flash, mondayPeak)).toBe(1_506_000)
-    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, flash, Date.UTC(2026, 9, 19, 4, 0))).toBe(753_000)
-    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, flash, saturdayPeakHours)).toBe(753_000)
-    expect(priceUsage('glm-5.3', oneMillionEach, flash, mondayPeak)).toBe(753_000)
+  it('uses advertised UTC multipliers independently of the model name', () => {
+    const peak = { ...flash, multipliers: peakMultipliers }
+    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, peak, mondayPeak)).toBe(1_506_000)
+    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, peak, Date.UTC(2026, 9, 19, 4, 0))).toBe(753_000)
+    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, peak, saturdayPeakHours)).toBe(753_000)
+    expect(priceUsage('glm-5.3', oneMillionEach, peak, mondayPeak)).toBe(1_506_000)
+    expect(priceUsage('deepseek-v4.1-flash', oneMillionEach, flash, mondayPeak)).toBe(753_000)
   })
 
   it('uses the highest matching context tier for the whole request', () => {
@@ -276,7 +278,7 @@ describe("plan pricing", () => {
     const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
     expect(isFreeCost(free)).toBe(true)
     expect(isFreeCost({ ...free, tiers: [{ inputTokensAbove: 1, ...free }] })).toBe(true)
-    expect(priceUsage('longcat-2.5-preview-free', oneMillionEach, free, mondayPeak)).toBe(0)
+    expect(priceUsage('beam-free', oneMillionEach, free, mondayPeak)).toBe(0)
     expect(isFreeCost(flash)).toBe(false)
   })
 
@@ -284,10 +286,10 @@ describe("plan pricing", () => {
     const base = 'https://gateway.example/v1'
 
     it('marks a missing or non-object cost block instead of reading it as free', () => {
-      const result = readModelMetadata(metadataDocument({
-        'no-cost-block': modelMetadata({ cost: undefined }),
-        'non-object-cost': modelMetadata({ cost: 'free' }),
-      }), base, new Map())
+      const result = readModelDirectory(modelsDocument({
+        'no-cost-block': modelEntry({ cost: undefined }),
+        'non-object-cost': modelEntry({ cost: 'free' }),
+      }), base)
       expect(result.details.get('no-cost-block')?.costKnown).toBe(false)
       expect(result.details.get('non-object-cost')?.costKnown).toBe(false)
       // Neither route may make the model unavailable or drop its required cost:
@@ -298,12 +300,12 @@ describe("plan pricing", () => {
       }
     })
 
-    it('marks a malformed rate component while the surviving components still parse', () => {
-      const result = readModelMetadata(metadataDocument({
-        'half-cost-model': modelMetadata({ cost: { input: 0.15, output: 'n/a', cache_read: 0.003, cache_write: 0 } }),
-        'negative-cost': modelMetadata({ cost: { input: -1, output: 0.6, cache_read: 0, cache_write: 0 } }),
-        'null-component': modelMetadata({ cost: { input: 0.15, output: 0.6, cache_read: null, cache_write: 0 } }),
-      }), base, new Map())
+    it('marks the entire tariff unpriced when any rate component is invalid', () => {
+      const result = readModelDirectory(modelsDocument({
+        'half-cost-model': modelEntry({ cost: { text: { input: { price: 0.15, cache: { read: 0.003, write: 0 } }, output: { price: 'n/a' } } } }),
+        'negative-cost': modelEntry({ cost: { text: { input: { price: -1, cache: { read: 0, write: 0 } }, output: { price: 0.6 } } } }),
+        'null-component': modelEntry({ cost: { text: { input: { price: 0.15, cache: { read: null, write: 0 } }, output: { price: 0.6 } } } }),
+      }), base)
       expect(result.details.get('half-cost-model')?.costKnown).toBe(false)
       expect(result.details.get('negative-cost')?.costKnown).toBe(false)
       expect(result.details.get('null-component')?.costKnown).toBe(false)
@@ -311,16 +313,16 @@ describe("plan pricing", () => {
         expect(result.errors.get(id)).toBeUndefined()
         expect(result.models.get(id)).toHaveProperty('cost')
       }
-      // Existing folding is unchanged: legal components keep their values, bad ones read 0.
-      expect(result.models.get('half-cost-model')?.cost).toMatchObject({ input: 0.15, output: 0, cacheRead: 0.003 })
+      // Invalid tariffs carry placeholder rates and are explicitly excluded from analytics pricing.
+      expect(result.models.get('half-cost-model')?.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
     })
 
     it('keeps a published all-zero block unmarked so free models stay unlimited', () => {
-      const result = readModelMetadata(metadataDocument({
+      const result = readModelDirectory(modelsDocument({
         // cache_write absent: an absent component folds to 0 and stays legal.
-        'free-partial': modelMetadata({}),
-        'free-explicit': modelMetadata({ cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 } }),
-      }), base, new Map())
+        'free-partial': modelEntry({}),
+        'free-explicit': modelEntry({ cost: { text: { input: { price: 0, cache: { read: 0, write: 0 } }, output: { price: 0 } } } }),
+      }), base)
       for (const id of ['free-partial', 'free-explicit']) {
         expect(result.details.get(id)?.costKnown).toBeUndefined()
         expect(result.errors.get(id)).toBeUndefined()
@@ -357,7 +359,7 @@ describe('local aggregate reports and memory cache', () => {
     models: new Map([
       ['deepseek-v4.1-flash', {
         id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash',
-        cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
+        cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0, multipliers: peakMultipliers },
       }],
     ]),
   }
@@ -463,7 +465,7 @@ describe('local aggregate reports and memory cache', () => {
       expect(report.byModel).toHaveLength(1)
       expect(report.byModel[0]).toMatchObject({
         model: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash',
-        limitGoUsd: 80, limitGoPlusUsd: 160, estimatedMicroUsd: 755_400,
+        limitGoUsd: 100, limitGoPlusUsd: 200, estimatedMicroUsd: 755_400,
       })
       expect(report.byDay.map(row => row.day)).toEqual(['2026-09-25', '2026-10-19'])
       expect(JSON.stringify(report)).not.toContain('session-secret')
@@ -716,7 +718,7 @@ describe('local aggregate reports and memory cache', () => {
         ['bad-cost', { costKnown: false }],
         ['priced', {}],
       ]),
-      metadataUpdatedAtMs: 1234,
+      updatedAtMs: 1234,
     })
     expect(book.models.get('free-known')?.cost).toBeDefined()
     expect(book.models.get('bad-cost')?.cost).toBeUndefined()
@@ -772,7 +774,7 @@ describe('local aggregate reports and memory cache', () => {
     let mode: 'ok' | 'reject' | 'empty' = 'ok'
     const { ctx, read } = await harness({
       pricing: async () => {
-        if (mode === 'reject') throw new Error('models.dev unreachable')
+        if (mode === 'reject') throw new Error('OpenCode /models unreachable')
         if (mode === 'empty') return undefined
         return { ...pricing, updatedAt: Date.UTC(2026, 9, 1) }
       },
@@ -895,5 +897,38 @@ describe('local aggregate reports and memory cache', () => {
         details: { reason: 'no-session-query', retryable: false },
       })
     } finally { await ctx.fiber.dispose() }
+  })
+})
+
+describe('dual-route analytics', () => {
+  it('folds Go and Free messages/summaries separately and prices each from its own directory', async () => {
+    const at = Date.parse('2026-11-02T02:00:00Z'), id = 'deepseek-v4.1-flash'
+    const go = readModelDirectory(modelsDocument({ [id]: modelEntry({ cost: {
+      text: { input: { price: 1 }, output: { price: 1 } }, multipliers: peakMultipliers,
+    } }) }), 'https://go.example/v1')
+    const free = readModelDirectory(modelsDocument({ [id]: modelEntry() }), 'https://free.example/v1', 'free')
+    const book = analyticsPriceBook({ ...go, source: 'go', updatedAtMs: at }, { ...free, source: 'free', updatedAtMs: at - 1000 })
+    expect(book.updatedAt).toBe(at - 1000)
+    expect([...book.models.keys()]).toEqual([id, `dsh-opencode-free/${id}`])
+    const usage = { inputTokens: 10, outputTokens: 5 }
+    const snapshot: AnalyticsSnapshotLike = { inheritedEventCount: 0, events: [
+      { type: 'request/header', seq: 0, time: at, data: { header: { config: { provider: 'dsh-opencode-go', model: id } } } },
+      { type: 'assistant/message', seq: 1, time: at, data: { message: { model: id }, usage } },
+      { type: 'request/header', seq: 2, time: at, data: { header: { config: { provider: 'dsh-opencode-free', model: id } } } },
+      { type: 'assistant/message', seq: 3, time: at, data: { message: { model: id }, usage } },
+      { type: 'compaction/summary', seq: 4, time: at, data: { provider: 'dsh-opencode-free', model: id, usage } },
+    ] }
+    const folded = foldSession(snapshot)
+    expect(folded.facts).toHaveLength(3)
+    expect(folded.facts.filter(fact => fact.source === 'free')).toHaveLength(2)
+    expect(isPluginRoute('dsh-opencode-free', at)).toBe(true)
+    const ctx = context()
+    const service = new GoAnalyticsService(ctx, { query: () => ({
+      listSessions: async () => [{ header: { id: 'same-model-both-routes', createdAt: at } }], readSession: async () => snapshot,
+    }), pricing: async () => book })
+    const report = await service.read({ from: at - 1, to: at + 1, timeZone: 'UTC' })
+    expect(report.totals).toMatchObject({ requests: 3, summaries: 1, pricedRequests: 3, unpricedRequests: 0, inputTokens: 30, outputTokens: 15, estimatedMicroUsd: 30 })
+    expect(report.byModel).toContainEqual(expect.objectContaining({ model: id, requests: 1, estimatedMicroUsd: 30, limitGoUsd: 100 }))
+    expect(report.byModel).toContainEqual(expect.objectContaining({ model: `dsh-opencode-free/${id}`, name: 'Future model · OpenCode Free', requests: 2, estimatedMicroUsd: 0, limitNote: 'unlimited', limitGoUsd: null }))
   })
 })

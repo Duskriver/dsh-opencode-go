@@ -16,10 +16,23 @@ export const PROVIDER_ID = 'dsh-opencode-go'
 
 export const DISPLAY_NAME = 'DSH OpenCode Go'
 
+export const FREE_PROVIDER_ID = 'dsh-opencode-free'
+
+export const FREE_DISPLAY_NAME = 'DSH OpenCode Free'
+
+export type ModelSource = 'go' | 'free'
+
+/** Go keeps its legacy keys; Free owns a separate settings namespace. */
+export function modelSettingsKey(model: { id: string; source?: ModelSource }): string {
+  return model.source === 'free' ? `${FREE_PROVIDER_ID}/${model.id}` : model.id
+}
+
 export const SDK_PROVIDER_ID = 'opencode-go'
 
 /** Public Go discovery/usage base; inference uses the documented protocol-specific siblings. */
 export const DEFAULT_BASE_URL = 'https://opencode.ai/inference/go/v1'
+
+export const DEFAULT_FREE_BASE_URL = 'https://opencode.ai/inference/v1'
 
 /**
  * Migrate the legacy official address before any request is constructed.
@@ -148,19 +161,15 @@ export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
   /**
-   * Whether this adapter serves its route at all. False withdraws the
-   * `dsh-opencode-go` route and its models from every picker without unloading the
-   * plugin, so the settings page that owns this switch stays reachable to turn
-   * it back on. Independent of the credential: a key present while this is
-   * false registers nothing.
+   * Whether this plugin serves Go and Free. False withdraws both routes and
+   * their models without unloading the settings page. Go additionally requires
+   * a usable configured key; Free supports public access.
    */
   enabled: boolean
-  /** Usage pill visibility; auto follows this plugin's selected provider. */
+  /** Usage pill visibility; auto follows only the selected Go route. */
   usageDisplay: UsageDisplayMode
   /** Per-model picker switches; absent entries default to enabled unless deprecated. */
   modelVisibility?: Record<string, boolean>
-  /** Experimental opt-in routing; omitted/null entries follow the catalog. */
-  protocolOverrides?: GoProtocolOverrides
   /** Legacy credential reference, kept in sync with the first/current account. */
   apiKeyEnv: string
   /** The first account is current; subsequent accounts are tried in order. */
@@ -169,6 +178,8 @@ export interface OpencodeGoConfig {
   autoSwitch?: boolean
   /** Discovery/usage base; the official Go gateway selects inference endpoints by protocol. */
   baseURL: string
+  /** Platform discovery base; only explicitly free chat models are served. */
+  freeBaseURL: string
   /** Optional HTTP(S) or SOCKS5 proxy; blank uses the default network transport. */
   proxyURL: string
   /** Request/picker cache lifetime in minutes; explicit discovery bypasses it. */
@@ -194,26 +205,9 @@ export interface OpencodeGoConfig {
 /** Settings snapshots may omit fields inherited from their base layer. */
 export type OpencodeGoSettings = Partial<OpencodeGoConfig>
 
-/** The supported experimental override surface, shared with the settings UI. */
-export const RESPONSES_OVERRIDE_MODEL = 'deepseek-v4.1-flash'
-
-export type GoProtocolOverrides = Partial<Record<typeof RESPONSES_OVERRIDE_MODEL, 'openai-responses' | null>>
-
-/** Null selects catalog routing even when a lower settings layer overrides it. */
-export function assertProtocolOverrides(value: unknown): asserts value is GoProtocolOverrides | undefined {
-  if (value === undefined) return
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('llm-opencode-go: protocolOverrides must be a model-to-protocol object')
-  }
-  for (const [model, protocol] of Object.entries(value)) {
-    if (model !== RESPONSES_OVERRIDE_MODEL || (protocol !== null && protocol !== 'openai-responses')) {
-      throw new Error(`llm-opencode-go: protocolOverrides only supports ${RESPONSES_OVERRIDE_MODEL}: openai-responses (or null for automatic routing)`)
-    }
-  }
-}
-
 export interface GoModel {
   id: string
+  source?: ModelSource
   name?: string
   contextWindow?: number
   maxTokens?: number
@@ -221,7 +215,7 @@ export interface GoModel {
   reasoningBudget?: ThinkingBudgetRange
   deprecated?: boolean
   releaseDate?: string
-  /** Input modalities models.dev declares, in {@link INPUT_MODALITIES} order. */
+  /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
   inputModalities?: readonly InputModality[]
   /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
   configurationMissing?: boolean
@@ -233,8 +227,7 @@ export interface ThinkingBudgetRange {
 }
 
 /**
- * Input modalities this page can name. models.dev uses these same five tokens, so
- * an unknown token is dropped rather than rendered as an untranslatable chip.
+ * Input modalities this page can name; MIME types are normalized to these tokens.
  */
 export const INPUT_MODALITIES = ['text', 'image', 'audio', 'video', 'pdf'] as const
 
@@ -242,7 +235,7 @@ export type InputModality = typeof INPUT_MODALITIES[number]
 
 /**
  * Normalize one `modalities.input` array into display order.
- * @param value - the raw declaration read from models.dev or from a Host response.
+ * @param value - the raw gateway declaration or Host response.
  * @returns the declared modalities in {@link INPUT_MODALITIES} order, or
  *   `undefined` when nothing recognizable was declared.
  */
@@ -250,7 +243,10 @@ export function normalizeInputModalities(value: unknown): readonly InputModality
   if (!Array.isArray(value)) return undefined
   const declared = new Set(value
     .filter((item): item is string => typeof item === 'string')
-    .map(item => item.toLowerCase()))
+    .map(item => item.trim().toLowerCase().split(';')[0]!)
+    .map(item => item.startsWith('image/') ? 'image' : item.startsWith('audio/') ? 'audio'
+      : item.startsWith('video/') ? 'video' : item === 'application/pdf' ? 'pdf'
+        : item.startsWith('text/') ? 'text' : item))
   const ordered = INPUT_MODALITIES.filter(modality => declared.has(modality))
   return ordered.length === 0 ? undefined : ordered
 }
@@ -268,16 +264,17 @@ export interface GoModelCatalog {
   readonly stale: boolean
   readonly error?: string
   /** Optional for clients reading an older Host response. Timestamps are Unix milliseconds. */
-  readonly sources?: { readonly listing: GoCatalogSourceStatus; readonly metadata: GoCatalogSourceStatus }
+  readonly sources?: { readonly go: GoCatalogSourceStatus; readonly free: GoCatalogSourceStatus }
 }
 
 /** Missing configuration cannot be enabled; configured models follow explicit switches or lifecycle defaults. */
 export function isModelEnabled(
-  model: Pick<GoModel, 'id' | 'deprecated' | 'configurationMissing'>,
+  model: Pick<GoModel, 'id' | 'source' | 'deprecated' | 'configurationMissing'>,
   modelVisibility?: Readonly<Record<string, boolean>>,
 ): boolean {
   if (model.configurationMissing) return false
-  const enabled = modelVisibility && Object.hasOwn(modelVisibility, model.id) ? modelVisibility[model.id] : undefined
+  const key = modelSettingsKey(model)
+  const enabled = modelVisibility && Object.hasOwn(modelVisibility, key) ? modelVisibility[key] : undefined
   return typeof enabled === 'boolean' ? enabled : !model.deprecated
 }
 
@@ -306,6 +303,10 @@ export function parseGoModels(value: unknown): GoModel[] {
     const row = entry as Record<string, unknown>
     if (typeof row.id !== 'string' || !row.id) throw new Error('Missing OpenCode Go model id')
     const model: GoModel = { id: row.id }
+    if (row.source !== undefined) {
+      if (row.source !== 'go' && row.source !== 'free') throw new Error('Invalid OpenCode model source')
+      model.source = row.source
+    }
     if (typeof row.name === 'string') model.name = row.name
     for (const key of ['contextWindow', 'maxTokens'] as const) {
       if (typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] > 0) model[key] = row[key]
@@ -355,7 +356,7 @@ function parseSources(value: unknown): NonNullable<GoModelCatalog['sources']> {
       ...(source.warning === undefined ? {} : { warning: source.warning as string }),
     }
   }
-  return { listing: parse(sources.listing), metadata: parse(sources.metadata) }
+  return { go: parse(sources.go), free: parse(sources.free) }
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {

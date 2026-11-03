@@ -26,7 +26,7 @@ function sdkSource() {
 
 function adapterSource() {
   const manifest = JSON.parse(readFileSync(findPackageJSON('opencode-go-pi-ai', import.meta.url), 'utf8'))
-  if (manifest.version !== '1.2.0') throw new Error('Review the Google adapter patches before upgrading pi-ai')
+  if (manifest.version !== '1.5.0') throw new Error('Review the Google adapter patches before upgrading pi-ai')
   let source = readFileSync(adapter, 'utf8')
   const constructor = 'return new GoogleGenAI({'
   const parts = 'for (const part of candidate.content.parts) {'

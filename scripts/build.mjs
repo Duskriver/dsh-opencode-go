@@ -86,7 +86,7 @@ async function compile(output) {
   }
   await writeFile(hostPath, code)
   // Consumers must also resolve exported types without installing pi-ai.
-  const bundledTypes = ['opencode-go-pi-ai', '@earendil-works/pi-telemetry', 'typebox']
+  const bundledTypes = ['opencode-go-pi-ai', '@earendil-works/pi-telemetry', '@earendil-works/pi-schema']
   const sdkDirectory = resolve('node_modules/opencode-go-pi-ai')
   const sdk = JSON.parse(await readFile(join(sdkDirectory, 'package.json'), 'utf8'))
   const declarations = await rollup({
@@ -125,14 +125,18 @@ async function compile(output) {
     const filename = (await readdir(directory)).find(name => /^licen[sc]e(?:\.(?:txt|md))?$/i.test(name))
     // The pi monorepo omits its root license from the published SDK packages.
     const licensePath = filename ? join(directory, filename)
-      : ['@earendil-works/pi-ai', '@earendil-works/pi-telemetry'].includes(manifest.name)
+      : ['@earendil-works/pi-ai', '@earendil-works/pi-telemetry', '@earendil-works/pi-schema'].includes(manifest.name)
         ? new URL(`./licenses/pi-${manifest.version}-LICENSE`, import.meta.url) : undefined
     // data-uri-to-buffer 4.0.1 publishes its complete license only in README.md.
     const embedded = !licensePath && manifest.name === 'data-uri-to-buffer' && manifest.version === '4.0.1'
       ? (await readFile(join(directory, 'README.md'), 'utf8')).match(/License\n-+\n\n([\s\S]*?)\n\n\[rfc\]:/)?.[1] : undefined
     if (!licensePath && !embedded) throw new Error(`Missing license for bundled package ${manifest.name}`)
-    const license = (licensePath ? await readFile(licensePath, 'utf8') : embedded)
-      .replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
+    let license = licensePath ? await readFile(licensePath, 'utf8') : embedded
+    if (manifest.name === '@earendil-works/pi-schema') {
+      license += '\n\nIncludes code adapted from TypeBox 1.3.27 (MIT):\n\n'
+        + await readFile(join(directory, 'LICENSES/typebox-LICENSE'), 'utf8')
+    }
+    license = license.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
     licenses.push(`${manifest.name}@${manifest.version}\n\n${license}\n`)
   }
   await writeFile(join(output, 'vendor-licenses.txt'), licenses.join('\n---\n\n'))

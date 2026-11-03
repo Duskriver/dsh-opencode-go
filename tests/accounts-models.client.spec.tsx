@@ -56,7 +56,7 @@ describe("model availability and picker visibility", () => {
   it('shows a mixed-listing warning while keeping valid models usable', async () => {
     const warning = 'Model listing ignored 1 of 3 rows with invalid model ids; the listing may be incomplete'
     const { snapshot } = await mountOpen({ catalog: { models, stale: false,
-      sources: { listing: { warning }, metadata: {} } } })
+      sources: { go: { warning }, free: {} } } })
     expect(screen.getByRole('alert').textContent).toContain(warning)
     expect(toggle('Alpha').disabled).toBe(false)
     expect(snapshot().models).toMatchObject({ stale: false, count: 3 })
@@ -71,86 +71,112 @@ describe("model availability and picker visibility", () => {
   async function refresh() { await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsRefresh })) }) }
 
   describe('per-model switches through the settings controller and component', () => {
-    it('distinguishes a metadata outage from a confirmed missing configuration and keeps the warning during retry', async () => {
-      const id = 'deepseek-v4.1-flash'
-      const missing = { id, configurationMissing: true }
+    it('keeps invalid declarations disabled while a source refresh fails, then enables repaired models', async () => {
+      const id = 'future-model', missing = { id, configurationMissing: true }
       const { read, host } = await mountOpen({ catalog: {
-        models: [missing, ...models], stale: true, error: 'models.dev answered HTTP 503',
-        sources: { listing: { updatedAt: Date.now() }, metadata: { error: 'HTTP 503' } },
+        models: [missing, ...models], stale: true, error: 'Go answered HTTP 503',
+        sources: { go: { error: 'Go answered HTTP 503' }, free: { updatedAt: Date.now() } },
       } })
-      expect(screen.getByRole('alert').textContent).toContain('Could not load model configuration')
-      expect(screen.getAllByText('Configuration unavailable').length).toBeGreaterThan(0)
-      expect(screen.queryByText(en.configurationMissingHint)).toBeNull()
-      expect(screen.getByText(/Check network access to models.dev from the machine running DSH/)).toBeTruthy()
+      expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
+      expect(screen.getAllByText(en.configurationMissing).length).toBeGreaterThan(0)
       expect(toggle(id).disabled).toBe(true)
       expect(toggle('Alpha').disabled).toBe(false)
       await flip(id)
       expect(host.set).not.toHaveBeenCalled()
-
       const pending = Promise.withResolvers<{ ok: true; value: GoModelCatalog }>()
       read.mockImplementationOnce(() => pending.promise)
       await refresh()
       expect(screen.getByText(en.modelsRefreshing)).toBeTruthy()
-      expect(screen.getByRole('alert').textContent).toContain('Could not load model configuration')
-      expect(screen.getByText('models.dev answered HTTP 503')).toBeTruthy()
-      expect(toggle('Alpha').disabled).toBe(false)
-
-      // The metadata source recovers, but it still has no configuration for this ID.
+      expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
+      expect(screen.getByText('Go answered HTTP 503')).toBeTruthy()
       await act(async () => { pending.resolve({ ok: true, value: {
-        models: [missing, ...models], stale: false,
-        sources: { listing: { updatedAt: Date.now() }, metadata: { updatedAt: Date.now() } },
+        models: [missing, ...models], stale: false, sources: { go: { updatedAt: Date.now() }, free: { updatedAt: Date.now() } },
       } }) })
       expect(screen.queryByRole('alert')).toBeNull()
-      expect(screen.queryByText('Configuration unavailable')).toBeNull()
-      expect(screen.getAllByText(en.configurationMissing).length).toBeGreaterThan(0)
-      expect(screen.getByText(en.configurationMissingHint)).toBeTruthy()
       expect(toggle(id).disabled).toBe(true)
-
       read.mockResolvedValueOnce({ ok: true, value: {
-        models: [{ id, name: 'DeepSeek V4.1 Flash' }, ...models], stale: false,
-        sources: { listing: { updatedAt: Date.now() }, metadata: { updatedAt: Date.now() } },
+        models: [{ id, name: 'Future Model' }, ...models], stale: false,
+        sources: { go: { updatedAt: Date.now() }, free: { updatedAt: Date.now() } },
       } })
       await refresh()
       expect(screen.queryByText(en.configurationMissing)).toBeNull()
-      expect(toggle('DeepSeek V4.1 Flash').disabled).toBe(false)
-      expect(checked('DeepSeek V4.1 Flash')).toBe(true)
+      expect(toggle('Future Model').disabled).toBe(false)
+      expect(checked('Future Model')).toBe(true)
     })
 
-    it('identifies metadata failure even when the gateway successfully returns an empty listing', async () => {
+    it('keeps the healthy Go view usable during a Free source outage and isolates empty-source diagnostics', async () => {
       const { read } = await mountOpen({ catalog: {
-        models: [], stale: true, error: 'models.dev answered HTTP 503',
-        sources: { listing: { updatedAt: Date.now() }, metadata: { error: 'HTTP 503' } },
+        models, stale: true, error: 'Free answered HTTP 503',
+        sources: { go: { updatedAt: Date.now() }, free: { error: 'Free answered HTTP 503' } },
       } })
-      expect(screen.getByRole('alert').textContent).toContain('Could not load model configuration')
-      expect(screen.queryByText(en.modelsFailed)).toBeNull()
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsRefresh }).disabled).toBe(false)
-      read.mockResolvedValueOnce({ ok: true, value: { models: [], stale: false } })
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(toggle('Alpha').disabled).toBe(false)
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
+      expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
+      expect(screen.getByText('Free answered HTTP 503')).toBeTruthy()
+      expect(screen.queryByRole('switch', { name: t('modelVisibleLabel', { name: 'Alpha' }) })).toBeNull()
+      read.mockResolvedValueOnce({ ok: true, value: { models, stale: false, sources: { go: {}, free: { updatedAt: Date.now() } } } })
       await refresh()
       expect(screen.queryByRole('alert')).toBeNull()
       expect(screen.getByText(en.modelsEmpty)).toBeTruthy()
     })
 
-    it('carries source diagnostics through the controller and clears them after recovery', async () => {
-      const listingTime = Date.UTC(2026, 8, 25, 10)
-      const metadataTime = listingTime - 60_000
+    it('carries independent source timestamps through the controller and clears stale diagnostics after recovery', async () => {
+      const goTime = Date.UTC(2026, 8, 25, 10), freeTime = goTime - 60000
       const { read } = await mountOpen({ catalog: {
-        models, stale: true, error: 'models.dev answered HTTP 503',
-        sources: { listing: { updatedAt: listingTime }, metadata: { updatedAt: metadataTime, error: 'HTTP 503' } },
+        models, stale: true, error: 'Free answered HTTP 503',
+        sources: { go: { updatedAt: goTime }, free: { updatedAt: freeTime, error: 'HTTP 503' } },
       } })
-      expect(screen.getByRole('alert').textContent).toBe(en.modelsMetadataFailed)
-      expect(screen.getByText(/Model availability: Up to date/).textContent).toContain(new Date(listingTime).toLocaleString())
-      expect(screen.getByText(/Model configuration: Refresh failed/).textContent).toContain(new Date(metadataTime).toLocaleString())
-      expect(toggle('Alpha').disabled).toBe(false)
-      // A failed RPC cannot confirm either source is still current.
+      expect(screen.getByText(/Go model source: Up to date/).textContent).toContain(new Date(goTime).toLocaleString())
+      expect(screen.getByText(/Free model source: Refresh failed/).textContent).toContain(new Date(freeTime).toLocaleString())
       read.mockRejectedValueOnce(new Error('Host unreachable'))
       await refresh()
       expect(screen.getByText('Host unreachable')).toBeTruthy()
-      expect(screen.queryByText(/Model availability: Up to date/)).toBeNull()
+      expect(screen.queryByText(/Go model source: Up to date/)).toBeNull()
       read.mockResolvedValueOnce({ ok: true, value: { models, stale: false } })
       await refresh()
       expect(screen.queryByRole('alert')).toBeNull()
-      expect(screen.queryByText(/Model configuration: Refresh failed/)).toBeNull()
+      expect(screen.queryByText(/Free model source: Refresh failed/)).toBeNull()
       expect(toggle('Alpha').disabled).toBe(false)
+    })
+
+    it('keeps duplicate ids in separate tabs and persists Free switches without changing Go', async () => {
+      const { host } = await mountOpen({ value: { modelVisibility: { same: false } }, catalog: { stale: false, models: [
+        { id: 'same', name: 'Same Go', source: 'go' }, { id: 'same', name: 'Same Free', source: 'free' },
+      ] } })
+      expect(checked('Same Go')).toBe(false)
+      expect(screen.queryByRole('switch', { name: t('modelVisibleLabel', { name: 'Same Free' }) })).toBeNull()
+      const free = screen.getByRole('tab', { name: en.modelsFreeTab })
+      fireEvent.keyDown(screen.getByRole('tab', { name: en.modelsGoTab }), { key: 'ArrowRight' })
+      expect(document.activeElement).toBe(free)
+      expect(free.getAttribute('aria-selected')).toBe('true')
+      expect(checked('Same Free')).toBe(true)
+      await flip('Same Free')
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { same: false, 'dsh-opencode-free/same': false })
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsGoTab }))
+      expect(checked('Same Go')).toBe(false)
+    })
+
+    it('stages capacities and resets only the active source while preserving the other route', async () => {
+      const { host, snapshot } = await mountOpen({ value: { modelLimits: {
+        same: { contextWindow: 10000, maxTokens: 1000 }, 'dsh-opencode-free/same': { contextWindow: 20000, maxTokens: 2000 },
+      } }, catalog: { stale: false, models: [
+        { id: 'same', name: 'Same Go', source: 'go', contextWindow: 100000, maxTokens: 10000 },
+        { id: 'same', name: 'Same Free', source: 'free', contextWindow: 200000, maxTokens: 20000 },
+      ] } })
+      expect(screen.getByRole<HTMLInputElement>('spinbutton', { name: t('limitsContextLabel', { name: 'Same Go' }) }).value).toBe('10000')
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
+      const input = screen.getByRole('spinbutton', { name: t('limitsContextLabel', { name: 'Same Free' }) })
+      fireEvent.change(input, { target: { value: '30000' } })
+      expect(snapshot().modelLimitDraft).toEqual({ same: { contextWindow: 10000, maxTokens: 1000 },
+        'dsh-opencode-free/same': { contextWindow: 30000, maxTokens: 2000 } })
+      expect(host.mutate).not.toHaveBeenCalled()
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.save })) })
+      expect(host.form.getSnapshot().value?.modelLimits?.['dsh-opencode-free/same']?.contextWindow).toBe(30000)
+      fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+      expect(snapshot().modelLimitDraft).toEqual({ same: { contextWindow: 10000, maxTokens: 1000 }, 'dsh-opencode-free/same': null })
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsGoTab }))
+      expect(screen.getByRole<HTMLInputElement>('spinbutton', { name: t('limitsContextLabel', { name: 'Same Go' }) }).value).toBe('10000')
     })
 
     it('defaults normal models on and deprecated models off, applying each switch immediately', async () => {

@@ -29,7 +29,7 @@ export declare function readConfig(config: LiveConfig): OpencodeGoConfig;
  * @param raw - the configured base URL.
  * @returns the current gateway base URL without trailing slashes.
  */
-export declare function assertBaseURL(raw: string): string;
+export declare function assertBaseURL(raw: string, field?: 'baseURL' | 'freeBaseURL'): string;
 /**
  * Reject a selected credential reference that is not a bare environment
  * variable name. The schema pattern above fails the composition layer and the

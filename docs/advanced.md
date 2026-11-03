@@ -42,20 +42,13 @@ socks5://127.0.0.1:1080
 
 支持 HTTP、HTTPS、SOCKS5 和带用户名、密码的代理 URL。保存后，后续对话、模型目录更新和用量查询使用新代理。代理运行在 DSH 所在的机器上；远程部署中的 `127.0.0.1` 指服务器自身。
 
-### 实验性协议与手动配置
+### 双路由与手动配置
 
-在 **高级设置 → DeepSeek V4.1 Flash 协议** 中可选择 **Responses（实验性）** 并保存，便于比较同一模型的不同协议。默认 **自动** 跟随模型目录；改回自动即可恢复。选择只影响新请求，不会切换已准备或正在执行的调用，也不会在协议错误后自动改用另一协议。
+`dsh-opencode-go`（DSH OpenCode Go）从 `baseURL` 的 `/models` 动态发现全部聊天模型，需要至少一个可用 API Key 才激活。`dsh-opencode-free`（DSH OpenCode Free）从 `freeBaseURL` 的 `/models` 筛选已声明合法价格、且文本输入、输出、缓存及所有上下文阶梯均为零的聊天模型；缺失或非法价格不会被视为免费。插件开启即激活 Free 路由。
 
-目前仅支持 `deepseek-v4.1-flash` 的 Responses 覆盖，沿用当前账号、代理、会话标识与用量处理。[issue #45](https://github.com/Duskriver/dsh-opencode-go/issues/45) 报告了更低延迟，但它不是网关的稳定性能承诺，也不能据此确认底层服务商；是否更快请以自己的测试为准。无需覆盖时省略以下配置：
+Free 共用账号列表，优先使用已配置的可用 Key，并遵循多账号自动切换设置；没有可用 Key 时使用 `Bearer public`。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
 
-```yaml
-- id: opencode-go
-  config:
-    protocolOverrides:
-      deepseek-v4.1-flash: openai-responses
-```
-
-将该模型的值设为 `null` 会明确选择自动，即使继承的配置启用了 Responses；设置页的「恢复默认」会移除当前层覆盖，恢复继承值。其他模型或协议组合会被拒绝。
+协议、能力、思考控制与价格直接来自各自的 `/models` 条目。官方网关优先使用条目声明的协议地址；自定义网关保留配置的前缀。两个模型源分别缓存到 `~/.dsh/cache/dsh-opencode-go/go.models.json` 与 `free.models.json`，支持 ETag 与离线保留；缓存带有网关来源标记，不会用于其他地址。
 
 在 patch 文件中添加 `opencode-go` 配置块，可与上面的默认模型配置一起使用：
 
@@ -71,11 +64,14 @@ socks5://127.0.0.1:1080
         name: 备用账号
         apiKeyEnv: OPENCODE_GO_BACKUP_KEY
     autoSwitch: true
+    freeBaseURL: https://opencode.ai/inference/v1
     proxyURL: http://127.0.0.1:7890
     refreshMinutes: 60
     modelVisibility:
       deepseek-v4-pro: false
     modelLimits:
+      dsh-opencode-free/beam-free:
+        maxTokens: 8192
       deepseek-v4.1-flash:
         maxTokens: 8192
       qwen3.7-plus:
@@ -88,11 +84,11 @@ socks5://127.0.0.1:1080
 | 配置项 | 用途 |
 | --- | --- |
 | `baseURL` | OpenCode Go 网关地址，默认 `https://opencode.ai/inference/go/v1`；官方网关自动按模型协议选择推理端点 |
+| `freeBaseURL` | 平台免费模型网关，默认 `https://opencode.ai/inference/v1`；高级设置可编辑并校验 URL |
 | `usageDisplay` | 额度显示模式：`auto`、`always` 或 `off` |
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
-| `modelVisibility` | 按模型 ID 控制选择器中的显示状态 |
-| `protocolOverrides` | 实验性协议覆盖；目前仅支持 `deepseek-v4.1-flash: openai-responses`，省略或模型值为 `null` 时自动跟随目录 |
+| `modelVisibility` | Go 用原模型 ID；Free 用 `dsh-opencode-free/<模型 ID>`，分别控制显示 |
 | `modelLimits` | 按模型覆盖 `contextWindow`、`maxTokens`，或用 `thinkingBudgets` 添加思考预算选项；空值使用默认设置 |
 | `maxImages` | 单次请求历史中的图片数量上限，默认不设上限；超过时先卸载最旧图片 |
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |

@@ -1,3 +1,4 @@
+import { fixtureModels, modelEntry, modelsDocument } from './data.ts'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 
@@ -145,12 +146,13 @@ export async function mockGateway(modelListing: {
   }
 }
 
-/** Every curated model id a listing must carry for the full table to serve. */
+/** The small shared chat fixture used by request tests. */
 export function fullLiveListing(): string[] {
-  return ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'kimi-k3', 'minimax-m3']
+  return ['deepseek-v4-pro', 'deepseek-v4.1-flash', 'kimi-k3', 'minimax-m3']
 }
 
-/** The listing shape the gateway answers: an OpenAI `data` array of id rows. */
+/** Full gateway declarations, including arbitrary models absent from the shared fixture. */
 export function listingBody(ids: readonly string[]): unknown {
-  return { object: 'list', data: ids.map(id => ({ id, object: 'model', created: 0, owned_by: 'opencode' })) }
+  const fixtures = fixtureModels()
+  return modelsDocument(Object.fromEntries(ids.map(id => [id, fixtures[id] ?? modelEntry({ name: id })])))
 }

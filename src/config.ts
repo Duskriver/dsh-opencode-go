@@ -7,6 +7,7 @@ import {
   DEFAULT_REQUEST_IMAGE_MAX_BYTES,
   DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
   DEFAULT_BASE_URL,
+  DEFAULT_FREE_BASE_URL,
   migrateGatewayBaseURL,
   DEFAULT_USAGE_DISPLAY,
   USAGE_DISPLAY_MODES,
@@ -17,7 +18,6 @@ import {
   PROFILE_ENTRY_ID,
   assertProxyURL,
   assertAccounts,
-  assertProtocolOverrides,
 } from './contracts.ts'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -41,7 +41,6 @@ const fields = {
   enabled: z.boolean().default(true),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   modelVisibility: z.dict(z.boolean().required()).default({}),
-  protocolOverrides: z.dict(z.union([z.const(null), z.const('openai-responses')])).default({}),
   // A bare environment variable name: an empty string would otherwise pass the
   // schema, then never match any account (accountRefOf normalizes it away) and
   // silently deregister the route while the default credential still resolves.
@@ -54,6 +53,7 @@ const fields = {
   // Settings rebuild and serialize this schema before sending it to clients.
   // Keep it data-only: a rehydrated transform loses its callback on forwarding.
   baseURL: z.string().default(DEFAULT_BASE_URL),
+  freeBaseURL: z.string().default(DEFAULT_FREE_BASE_URL),
   proxyURL: z.string().default(''),
   refreshMinutes: z.number().step(1).min(1).max(7 * 24 * 60).default(DEFAULT_REFRESH_MINUTES),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
@@ -99,20 +99,21 @@ export function readConfig(config: LiveConfig): OpencodeGoConfig {
  * @param raw - the configured base URL.
  * @returns the current gateway base URL without trailing slashes.
  */
-export function assertBaseURL(raw: string): string {
+export function assertBaseURL(raw: string, field: 'baseURL' | 'freeBaseURL' = 'baseURL'): string {
   let url: URL
   try {
     url = new URL(raw)
   } catch {
-    throw new Error(`llm-opencode-go: baseURL "${raw}" is not a valid URL`)
+    throw new Error(`llm-opencode-go: ${field} "${raw}" is not a valid URL`)
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error(`llm-opencode-go: baseURL "${raw}" must be http or https`)
+    throw new Error(`llm-opencode-go: ${field} "${raw}" must be http or https`)
   }
   if (url.search.length > 0 || url.hash.length > 0) {
-    throw new Error(`llm-opencode-go: baseURL "${raw}" must not carry a query or fragment`)
+    throw new Error(`llm-opencode-go: ${field} "${raw}" must not carry a query or fragment`)
   }
-  return migrateGatewayBaseURL(url.toString().replace(/\/+$/, ''))
+  const normalized = url.toString().replace(/\/+$/, '')
+  return field === 'baseURL' ? migrateGatewayBaseURL(normalized) : normalized
 }
 
 /**
@@ -130,10 +131,10 @@ export function assertApiKeyEnv(raw: string): void {
 
 export function validateGoConfig(value: OpencodeGoConfig): void {
   assertBaseURL(value.baseURL)
+  assertBaseURL(value.freeBaseURL, 'freeBaseURL')
   assertProxyURL(value.proxyURL)
   assertApiKeyEnv(value.apiKeyEnv)
   assertAccounts(value.accounts, value.apiKeyEnv)
-  assertProtocolOverrides(value.protocolOverrides)
 }
 
 /** DSH profile forms edit the plugin's live Config fields directly. */

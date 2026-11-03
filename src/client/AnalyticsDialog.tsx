@@ -758,7 +758,7 @@ function Footer({ report, locale, t, maxSessions, loading, onScanMore }: CopyPro
       </button> : null}
     </div> : null}
     <div className={css.footCol}>
-      <p>{t('analyticsPriceSource')} models.dev{report.pricing.updatedAt === undefined ? '' : ' · ' + new Date(report.pricing.updatedAt).toLocaleString(locale)}</p>
+      <p>{t('analyticsPriceSource')} OpenCode /models{report.pricing.updatedAt === undefined ? '' : ' · ' + new Date(report.pricing.updatedAt).toLocaleString(locale)}</p>
       <p>{t('analyticsNotInvoice')}</p>
       {report.pricing.unavailable === true ? <p>{t('analyticsPricingUnavailable')}</p> : null}
     </div>

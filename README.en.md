@@ -15,6 +15,7 @@
 
 DSH already supports OpenCode Go natively. This plugin focuses on usage inside conversations, managing multiple accounts, and dedicated model and settings controls.
 
+- **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. Free shares saved keys and uses public access when none is usable.
 - **Usage at a glance**: see usage beside the conversation input, then open the panel for five-hour, weekly, and monthly percentages and reset times.
 - **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
 - **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
@@ -39,10 +40,10 @@ Under **Settings → OpenCode Go → Advanced settings → Usage display**, choo
 
 ## Usage analytics
 
-Open **Usage analytics** at the bottom of the conversation usage panel, or under **Settings → OpenCode Go → Usage analytics**. Both open the same dashboard. It covers **this plugin's route**, including closed sessions, totals input, output, and cache tokens per model, and estimates cost with the Go plan's models.dev prices.
+Open **Usage analytics** at the bottom of the conversation usage panel, or under **Settings → OpenCode Go → Usage analytics**. Both open the same dashboard. It covers **both Go and Free routes**, including closed sessions, totals input, output, and cache tokens per model, and estimates cost with each gateway’s current `/models` prices.
 
-- Ranges: today, 7 days, 30 days, and 90 days. Opening scans local sessions without uploading their contents; closing the dialog stops the request. Model and pricing metadata may refresh from [models.dev](https://models.dev/api.json), without sending it conversation content, account keys or per-request analytics. Normal inference sends request content to your configured model gateway, which also serves quota queries; there is no additional telemetry or analytics service.
-- Cost uses the request start time. DeepSeek V4.1 Flash and V4 Pro are charged at twice the off-peak rate during the official peak window (01:00–04:00 and 06:00–10:00 UTC, Monday through Friday).
+- Ranges: today, 7 days, 30 days, and 90 days. Opening scans local sessions without uploading their contents; closing the dialog stops the request. Model and pricing metadata may refresh from [OpenCode /models](https://opencode.ai/inference/go/v1/models), without sending it conversation content, account keys or per-request analytics. Normal inference sends request content to your configured model gateway, which also serves quota queries; there is no additional telemetry or analytics service.
+- Cost uses request start time, text/context-tier rates, and each model’s declared UTC weekday/hour or date multipliers. Go and Free records stay separate even for the same model ID.
 - Each model row shows only the display name and usage figures. Official quota percentages remain authoritative; the estimate is not an invoice.
 - A scan stops at 500 sessions, 500,000 events, or 12 seconds by default and says so, including why. **Scan more history** raises the session cap to 2,000; the choice is remembered locally. Session folds are reused in memory for at most five seconds and scanned again after a restart; no fold cache is written to disk.
 - DSH's native OpenCode Go route is excluded; pre-0.1.16 legacy route records are admitted by request time. A Host without `sessionQuery` shows an unavailable state.
@@ -114,19 +115,19 @@ Search **Available models** by name or ID, or filter by **New in 7 days**, **Cus
 - Select a model to inspect its catalog context window, maximum output, and input modalities. Save limit overrides to apply them; empty values use defaults.
 - Reasoning models offer the applicable switch, effort, or token budget options. Budget-based models also accept custom budgets that become available after saving.
 
-Requests to `deepseek-v4.1-flash` default to a **64k (65,536-token)** output allowance, bounded by the model's output capacity. The same default is reported to DSH for compaction budgeting. This rule applies only to that model; other models retain their SDK output defaults. Set a model's **Max output** override when a longer answer is needed.
+Any model with an output capacity above **65,536 tokens** defaults to that allowance when neither the caller nor settings specifies one. Smaller models retain their SDK defaults. DSH receives the same allowance for compaction budgeting. Set a model’s **Max output** override when a longer answer is needed.
 
 Streaming, reasoning, tool calls, and image input depend on model capabilities. Input modalities shown in Settings come from online model metadata; this plugin currently converts and forwards only image attachments.
 
 ### Grouped advanced settings
 
-Advanced settings are grouped into **Usage and protocol**, **Connection**, **Cache and timeouts**, and **Image handling**. Hover over a question mark for help. **Reset all to defaults** clears the card's custom overrides; save to apply the reset. The current account selection is preserved.
+Advanced settings are grouped into **Usage settings**, **Connection**, **Cache and timeouts**, and **Image handling**. Hover over a question mark for help. **Reset all to defaults** clears the card's custom overrides; save to apply the reset. The current account selection is preserved.
 
 ![Advanced settings: grouped controls, hints, and a shared reset action](docs/assets/advanced-settings.png)
 
 HTTP, HTTPS, and SOCKS5 proxies are supported. After saving, subsequent conversations, catalog updates, and usage queries use the proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
 
-The DeepSeek V4.1 Flash Responses option is experimental, applies only to new requests, and does not promise lower latency. See the [advanced guide](docs/advanced.en.md) for full configuration and usage instructions.
+Set `baseURL` and `freeBaseURL` independently under Connection. Protocol selection follows the gateway model declaration. See the [advanced guide](docs/advanced.en.md) for account, model-key and disk-cache details.
 
 Screenshots illustrate the interface. Actual models, quotas, and timestamps depend on your account and the current online catalog.
 
@@ -180,7 +181,7 @@ npm run check:dist
 npm run verify
 ```
 
-Twelve test files cover host services, accounts, catalog, protocols, analytics, transport and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
+Fourteen test files cover host services, accounts, catalog, protocols, analytics, transport and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
 
 ## More documentation
 

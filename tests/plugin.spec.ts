@@ -33,7 +33,7 @@ import {
 } from '@deepseek-ai/dsh-attachment'
 import { Config, type LiveConfig } from '../src/config.ts'
 import { OpencodeGoCatalog } from '../src/catalog.ts'
-import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/data.ts'
+import { modelsDocument, modelEntry } from './support/data.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -75,11 +75,11 @@ describe("route lifecycle", () => {
       const id = 'persisted-model'
       const gateway = await mockGateway({ status: 200, body: listingBody([id, 'new-model']) })
       const original = globalThis.fetch
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-        ? Promise.resolve(Response.json(metadataDocument({ [id]: modelMetadata() }))) : original(input, init))
+      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === `${gateway.url}/models`
+        ? Promise.resolve(Response.json(modelsDocument({ [id]: modelEntry() }))) : original(input, init))
       await new OpencodeGoCatalog(gateway.url, 60_000, () => {}, () => {}).snapshot(true)
       const metadata = Promise.withResolvers<Response>()
-      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
+      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === `${gateway.url}/models`
         ? metadata.promise : original(input, init))
       vi.stubEnv('OPENCODE_API_KEY', 'test-key')
       const ctx = new Context()
@@ -90,11 +90,11 @@ describe("route lifecycle", () => {
       try {
         expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id])
         expect(updated).not.toHaveBeenCalled()
-        metadata.resolve(Response.json(metadataDocument({ [id]: modelMetadata(), 'new-model': modelMetadata() })))
-        await expect.poll(() => updated.mock.calls.length).toBe(1)
+        metadata.resolve(Response.json(modelsDocument({ [id]: modelEntry(), 'new-model': modelEntry() })))
+        await expect.poll(() => updated.mock.calls.length).toBe(2)
         expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id, 'new-model'])
       } finally {
-        metadata.resolve(Response.json(metadataDocument()))
+        metadata.resolve(Response.json(modelsDocument()))
         await ctx.fiber.dispose()
       }
     })
@@ -169,7 +169,7 @@ describe("route lifecycle", () => {
       vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input)
         destinations.push(url)
-        if (url === MODELS_METADATA_URL) metadataRequests.push(new Request(input, init))
+        if (url === `${gateway.url}/models`) metadataRequests.push(new Request(input, init))
         return fetch(input, init)
       })
       const ctx = new Context()
@@ -194,7 +194,7 @@ describe("route lifecycle", () => {
           const publicRequest = JSON.stringify([request.url, [...request.headers]])
           for (const privateValue of [apiKey, prompt, sessionId]) expect(publicRequest).not.toContain(privateValue)
         }
-        expect(destinations.every(url => url === MODELS_METADATA_URL || url.startsWith(`${gateway.url}/`))).toBe(true)
+        expect(destinations.every(url => url === `${gateway.url}/models` || url.startsWith(`${gateway.url}/`))).toBe(true)
       } finally { await ctx.fiber.dispose() }
     })
 
@@ -298,7 +298,7 @@ describe("route lifecycle", () => {
       vi.stubEnv('OPENCODE_API_KEY', 'test-key')
       const gateway = await mockGateway({
         status: 200,
-        body: listingBody([...fullLiveListing(), 'mystery-model']),
+        body: { data: [...(listingBody(fullLiveListing()) as { data: unknown[] }).data, { id: 'mystery-model', ...modelEntry({ api: {} }) }] },
       })
       gateway.pushCompletions({ events: textEvents })
       const ctx = new Context()
@@ -306,7 +306,7 @@ describe("route lifecycle", () => {
       apply(ctx, configOf(gateway.url))
 
       const models = await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })
-      expect(models.find(model => model.id === 'mystery-model')?.name).toContain('metadata unavailable')
+      expect(models.find(model => model.id === 'mystery-model')?.name).toContain('configuration unavailable')
       expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
     })
 
@@ -361,7 +361,7 @@ describe("route lifecycle", () => {
       expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
     })
 
-    it('keeps the route unregistered until its credential resolves', async () => {
+    it('activates only Free until a usable credential enables Go', async () => {
       Reflect.deleteProperty(process.env, 'OPENCODE_API_KEY')
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       const ctx = new Context()
@@ -371,7 +371,7 @@ describe("route lifecycle", () => {
       // No key anywhere: the route stays dormant so first-run onboarding never
       // mistakes it for a usable provider, and no request reaches the gateway.
       await new Promise(resolve => setTimeout(resolve, 50))
-      expect(ctx.llm.listProviders()).toEqual([])
+      expect(ctx.llm.listProviders()).toEqual([{ id: 'dsh-opencode-free', name: 'DSH OpenCode Free' }])
       expect(gateway.paths).toEqual([])
     })
 
@@ -693,7 +693,7 @@ describe('profile forms and live configuration', () => {
     await expect.poll(() => ctx.llm.listProviders()).toEqual([])
     expect(entry.fiber).toBe(fiber)
     await ctx.settings.update('opencode-go', { enabled: true, modelVisibility: { 'deepseek-v4.1-flash': false } })
-    await expect.poll(() => ctx.llm.listProviders()).toHaveLength(1)
+    await expect.poll(() => ctx.llm.listProviders()).toHaveLength(2)
     expect(await ctx.llm.listModels('dsh-opencode-go')).toEqual([])
     await ctx.settings.update('opencode-go', { modelVisibility: {}, modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 123456, maxTokens: 2048 } } })
     const resolved = await ctx.llm.resolveModelInfo('dsh-opencode-go', 'deepseek-v4.1-flash')

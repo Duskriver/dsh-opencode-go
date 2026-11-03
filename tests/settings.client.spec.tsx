@@ -36,8 +36,8 @@ describe("settings page and typed capacity editing", () => {
     return { text, overridden: false, invalid: false, ...rest }
   }
 
-  type SectionField = 'baseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
-    | 'usageDisplay' | 'protocolOverrides'
+  type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+    | 'usageDisplay'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -71,7 +71,7 @@ describe("settings page and typed capacity editing", () => {
     return {
       ...settled,
       usageDisplay: field('auto'),
-      protocolOverrides: field('auto'),
+      freeBaseURL: field('https://opencode.ai/inference/v1'),
       baseURL: field('https://opencode.ai/zen/go/v1'),
       proxyURL: field(''),
       refreshMinutes: field('60'),
@@ -141,19 +141,18 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
-    it('exposes only automatic and experimental Responses routing and stages the selection', () => {
+    it('stages the independent Free gateway URL in advanced settings and offers reset', () => {
       const reading = actions()
-      renderSection(stateOf({ protocolOverrides: field('openai-responses', { overridden: true }) }), reading)
+      renderSection(stateOf({ freeBaseURL: field('https://free.example/v1', { overridden: true }) }), reading)
       openAdvanced()
-      const group = screen.getByRole('radiogroup', { name: en.protocolOverridesLabel })
-      const choices = within(group).getAllByRole('radio')
-      expect(choices.map(choice => choice.textContent)).toEqual([en.protocolOverridesAuto, en.protocolOverridesResponses])
-      expect(choices.map(choice => choice.getAttribute('aria-checked'))).toEqual(['false', 'true'])
-      fireEvent.click(choices[0])
-      expect(reading.edit).toHaveBeenCalledWith('protocolOverrides', 'auto')
+      const input = screen.getByRole('textbox', { name: en.freeBaseURLLabel })
+      expect((input as HTMLInputElement).value).toBe('https://free.example/v1')
+      fireEvent.change(input, { target: { value: 'https://new-free.example/v1' } })
+      expect(reading.edit).toHaveBeenCalledWith('freeBaseURL', 'https://new-free.example/v1')
       expect(reading.save).not.toHaveBeenCalled()
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
-      expect(reading.resetField).toHaveBeenCalledWith('protocolOverrides')
+      expect(reading.resetField).toHaveBeenCalledWith('freeBaseURL')
+      expect(screen.queryByText('DeepSeek V4.1 Flash protocol')).toBeNull()
     })
 
     it('stages the three usage display modes in advanced settings and offers reset', () => {
@@ -224,7 +223,7 @@ describe("settings page and typed capacity editing", () => {
       openAdvanced()
       const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
       const order: [string, string][] = [
-        [en.groupUsageProtocol, en.usageDisplayLabel],
+        [en.groupUsage, en.usageDisplayLabel],
         [en.groupConnection, en.baseURLLabel],
         [en.groupCacheTimeouts, en.refreshMinutesLabel],
         [en.groupImages, en.maxImagesLabel],
@@ -785,7 +784,7 @@ describe("settings page and typed capacity editing", () => {
       host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
       const controller = new OpencodeGoSectionController(host.form, { remote: {
         credentials: { describe: async () => ({ ok: true, value: {} }) },
-        llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+        opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
       } } as never)
       render(<OpencodeGoSection {...controller.inject()} t={t}
         useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
@@ -810,7 +809,7 @@ describe("settings page and typed capacity editing", () => {
       host.publish({ status: 'ready', writable: true, value: base, base, user: {} })
       const controller = new OpencodeGoSectionController(host.form, { remote: {
         credentials: { describe: async () => ({ ok: true, value: {} }) },
-        llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+        opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
       } } as never)
       render(<OpencodeGoSection {...controller.inject()} t={t}
         useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
@@ -846,7 +845,7 @@ describe("settings page and typed capacity editing", () => {
 
       const controller = new OpencodeGoSectionController(host.form, { remote: {
         credentials: { describe: async () => ({ ok: true, value: {} }) },
-        llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+        opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
       } } as never)
       host.publish({ status: 'ready', writable: true, value: {}, base: {}, user: {} })
       render(<OpencodeGoSection {...controller.inject()} t={t}
@@ -895,7 +894,7 @@ describe("settings page and typed capacity editing", () => {
 
       const controller = new OpencodeGoSectionController(host.form, { remote: {
         credentials: { describe: async () => ({ ok: true, value: {} }) },
-        llm: { discoverModels: async () => ({ ok: true, value: [{ id: 'm', name: 'Model', contextWindow: 262144, maxTokens: 32768 }] }) },
+        opencodeGoModels: { read: async () => ({ ok: true, value: { models: [{ id: 'm', name: 'Model', contextWindow: 262144, maxTokens: 32768 }], stale: false } }) },
       } } as never)
       host.publish({ status: 'ready', writable: true,
         value: { modelLimits: { m: { contextWindow: 100000, maxTokens: 1024 } } }, user: {} })
@@ -970,7 +969,7 @@ describe("settings page and typed capacity editing", () => {
       byModel: [], byDay: [],
       coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
         summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
-      pricing: { source: 'models.dev', unpricedModels: [] },
+      pricing: { source: 'OpenCode /models', unpricedModels: [] },
     })
     setGoTheme('graphite')
     renderSection(stateOf(), {}, { analytics: { readAnalytics } })
@@ -1005,7 +1004,7 @@ describe("advanced settings reset", () => {
     host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
     const controller = new OpencodeGoSectionController(host.form, { remote: {
       credentials: { describe: async () => ({ ok: true, value: {} }) },
-      llm: { discoverModels: async () => ({ ok: true, value: [] }) },
+      opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
     } } as never)
     render(<OpencodeGoSection {...controller.inject()} t={key => en[key]}
       useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
@@ -1240,6 +1239,20 @@ describe('typed ConfigForm drafts and writes', () => {
     return { host, controller, actions, snapshot: actions.hooks.opencodeGo.getSnapshot }
   }
 
+  it.each(['baseURL', 'freeBaseURL'] as const)('validates %s drafts before saving', async field => {
+    const { host, controller, actions, snapshot } = setup()
+    for (const value of ['invalid', 'ftp://gateway.example', 'https://gateway.example/v1?key=x', 'https://gateway.example/v1#fragment']) {
+      actions.edit(field, value)
+      expect(snapshot()[field].invalid).toBe(true)
+      await controller.save()
+      expect(host.mutate).not.toHaveBeenCalled()
+    }
+    actions.edit(field, 'https://gateway.example/prefix/v1')
+    expect(snapshot()[field].invalid).toBe(false)
+    await controller.save()
+    expect(host.form.getSnapshot().value?.[field]).toBe('https://gateway.example/prefix/v1')
+  })
+
   it('sends typed capacity objects and text fields together at one revision', async () => {
     const { host, controller, actions, snapshot } = setup({ refreshMinutes: 60 })
     const limits = { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } }
@@ -1324,21 +1337,19 @@ describe('typed ConfigForm drafts and writes', () => {
     expect(host.listenerCount()).toBe(0)
   })
 
-  it('resets protocol and usage modes to the inherited values while preserving account selection', async () => {
-    const value = { apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'always' as const,
-      protocolOverrides: { 'deepseek-v4.1-flash': 'openai-responses' as const } }
+  it('resets Free gateway and usage mode to inherited values while preserving account selection', async () => {
+    const value = { apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'always' as const, freeBaseURL: 'https://free.example/v1' }
     const { host, controller, actions, snapshot } = setup(value)
-    host.publish({ base: { usageDisplay: 'auto', protocolOverrides: {} }, user: value })
+    host.publish({ base: { usageDisplay: 'auto', freeBaseURL: 'https://opencode.ai/inference/v1' }, user: value })
     actions.edit('usageDisplay', 'off')
-    actions.edit('protocolOverrides', 'auto')
+    actions.edit('freeBaseURL', 'https://new-free.example/v1')
     await controller.save()
-    expect(host.form.getSnapshot().value).toMatchObject({ apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'off',
-      protocolOverrides: { 'deepseek-v4.1-flash': null } })
+    expect(host.form.getSnapshot().value).toMatchObject({ apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'off', freeBaseURL: 'https://new-free.example/v1' })
     actions.resetField('usageDisplay')
-    actions.resetField('protocolOverrides')
+    actions.resetField('freeBaseURL')
     await controller.save()
     expect(snapshot().usageDisplay.text).toBe('auto')
-    expect(snapshot().protocolOverrides.text).toBe('auto')
+    expect(snapshot().freeBaseURL.text).toBe('https://opencode.ai/inference/v1')
     expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')
   })
 })

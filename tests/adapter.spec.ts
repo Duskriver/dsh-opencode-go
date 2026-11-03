@@ -14,7 +14,7 @@ import { discoverCatalogModels, discoverSettingsModels, PROVIDER_ID } from '../s
 import { PlainConfig } from '../src/config.ts'
 import { configOf } from './support/host.ts'
 import { closeMockGateways, listingBody, mockGateway, textEvents, fullLiveListing } from './support/gateway.ts'
-import { metadataDocument, modelMetadata, MODELS_METADATA_URL } from './support/data.ts'
+import { modelsDocument, modelEntry } from './support/data.ts'
 import SessionStore from '@deepseek-ai/dsh-session'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -67,11 +67,13 @@ describe("requests and deadlines", () => {
     it.each(['resolve', 'prepare', 'stream'] as const)('cancels %s during discovery while another caller keeps the shared refresh', async (operation) => {
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       const original = globalThis.fetch
+      const discoveryReads = vi.fn()
       let completeMetadata!: (response: Response) => void
       let metadataSignal: AbortSignal | null | undefined
       const started = Promise.withResolvers<void>()
       vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
-        if (String(input) !== MODELS_METADATA_URL) return original(input, init)
+        if (!String(input).endsWith('/models')) return original(input, init)
+        discoveryReads()
         metadataSignal = init?.signal
         started.resolve()
         return new Promise<Response>(resolve => { completeMetadata = resolve })
@@ -95,11 +97,11 @@ describe("requests and deadlines", () => {
         expect(metadataSignal?.aborted).toBe(false)
         expect(gateway.paths).not.toContain('/chat/completions')
       } finally {
-        completeMetadata(Response.json(metadataDocument()))
+        completeMetadata(Response.json(modelsDocument()))
         await outcome
         await expect(other).resolves.toMatchObject({ id: 'deepseek-v4.1-flash' })
       }
-      expect(gateway.modelListings).toBe(1)
+      expect(discoveryReads).toHaveBeenCalledOnce()
     })
 
     it.each([
@@ -211,8 +213,8 @@ describe("requests and deadlines", () => {
       gateway.pushCompletions({ events: textEvents })
       const adapter = await adapterFor(gateway.url)
 
-      // pi-ai 0.87.1 no longer advertises off for V4.1; V4 still supports it.
-      await drain(adapter.stream(requestOf({ model: 'deepseek-v4-flash', reasoningEffort: ReasoningEffortId('off') })))
+      // V4.1 Flash does not advertise Off; V4 Pro supports the native disable flag.
+      await drain(adapter.stream(requestOf({ model: 'deepseek-v4-pro', reasoningEffort: ReasoningEffortId('off') })))
 
       expect(gateway.bodies[0]).toMatchObject({ thinking: { type: 'disabled' } })
       expect(gateway.bodies[0]).not.toHaveProperty('reasoning_effort')
@@ -449,7 +451,7 @@ describe("requests and deadlines", () => {
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       const adapter = await adapterFor(gateway.url)
 
-      const image = requestOf({ model: 'deepseek-v4-flash' })
+      const image = requestOf({ model: 'deepseek-v4-pro' })
       image.messages = [createUserMessage({
         content: [{ type: 'image', attachment: IMAGE_REF }],
         source: { kind: 'plugin', plugin: 'test' },
@@ -783,24 +785,24 @@ describe("host and wire capacity alignment", () => {
   it('bounds the DeepSeek V4.1 Flash default by a smaller declared output capacity without changing the catalog', async () => {
     const model = 'deepseek-v4.1-flash'
     const original = globalThis.fetch
-    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-      ? Promise.resolve(Response.json(metadataDocument({ [model]: modelMetadata({ limit: { context: 262144, output: 8192 } }) })))
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input).endsWith('/models')
+      ? Promise.resolve(Response.json(modelsDocument({ [model]: modelEntry({ limit: { context: 262144, output: 8192 } }) })))
       : original(input, init))
     const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
     gateway.pushCompletions({ events: textEvents })
     const config = configOf(gateway.url)
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
-    expect((await adapter.resolveModel('dsh-opencode-go', model)).defaultMaxTokens).toBe(8192)
+    expect((await adapter.resolveModel('dsh-opencode-go', model)).defaultMaxTokens).toBeUndefined()
     for await (const chunk of adapter.stream({ provider: 'dsh-opencode-go', model, messages: [] })) void chunk
     expect(gateway.bodies[0]).toMatchObject({ max_tokens: 8192 })
     expect(await discoverCatalogModels(adapter.catalogOf(config))).toContainEqual(expect.objectContaining({ id: model, maxTokens: 8192 }))
   })
 
-  it.each(['deepseek-v4-flash', 'deepseek-v4.1-flash-vision-exp', 'kimi-k3', 'future-model'])(
-    'preserves the SDK default and explicit caller allowance for other models: %s', async model => {
+  it.each(['deepseek-v4-pro', 'deepseek-v4.1-flash-vision-exp', 'kimi-k3', 'future-model'])(
+    'caps large model defaults uniformly and preserves explicit caller allowances: %s', async model => {
     const original = globalThis.fetch
-    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === MODELS_METADATA_URL
-      ? Promise.resolve(Response.json(metadataDocument({ [model]: modelMetadata() })))
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input).endsWith('/models')
+      ? Promise.resolve(Response.json(modelsDocument({ [model]: modelEntry() })))
       : original(input, init))
     const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
     gateway.pushCompletions({ events: textEvents })
@@ -810,18 +812,18 @@ describe("host and wire capacity alignment", () => {
     await ctx.plugin(LlmRuntime)
     ctx.llm.registerAdapter(['dsh-opencode-go'], adapter)
     try {
-      expect(await adapter.resolveModel('dsh-opencode-go', model)).not.toHaveProperty('defaultMaxTokens')
+      expect((await adapter.resolveModel('dsh-opencode-go', model)).defaultMaxTokens).toBe(65536)
       const prepared = await ctx.llm.prepareCall({ provider: 'dsh-opencode-go', model })
-      expect(prepared.config.maxTokens).toBeUndefined()
+      expect(prepared.config.maxTokens).toBe(65536)
       for await (const chunk of prepared.stream({ provider: 'dsh-opencode-go', model, messages: [], ...prepared.config })) void chunk
-      expect(gateway.bodies[0]).toMatchObject({ max_tokens: 131_072 })
+      expect(gateway.bodies[0]).toMatchObject({ max_tokens: 65_536 })
       for await (const chunk of adapter.stream({ provider: 'dsh-opencode-go', model, messages: [], maxTokens: 196_608 })) void chunk
       expect(gateway.bodies[1]).toMatchObject({ max_tokens: 196_608 })
     } finally { await ctx.fiber.dispose() }
   })
 
   it('preserves an explicit output override for other models', async () => {
-    const model = 'deepseek-v4-flash'
+    const model = 'deepseek-v4-pro'
     const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
     gateway.pushCompletions({ events: textEvents })
     const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, {
@@ -831,18 +833,19 @@ describe("host and wire capacity alignment", () => {
     expect(gateway.bodies[0]).toMatchObject({ max_tokens: 98_304 })
   })
 
-  it.each([undefined, 'high'])('preserves the Anthropic SDK output default with reasoning=%s', async effort => {
+  it.each([undefined, 'high'])('caps large Anthropic default allowances with reasoning=%s', async effort => {
     const model = 'minimax-m3'
     const gateway = await mockGateway({ status: 200, body: listingBody([model]) })
     gateway.pushCompletions({ status: 400, body: '{"message":"fixture rejection"}' })
     const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url), resolveApiKey: async () => 'test-key' })
     const prepared = await adapter.prepareCall('dsh-opencode-go', model)
-    expect(prepared.model).not.toHaveProperty('defaultMaxTokens')
+    expect(prepared.model.defaultMaxTokens).toBe(65536)
     for await (const chunk of prepared.stream({ provider: 'dsh-opencode-go', model, messages: [],
       ...effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) },
     })) void chunk
     expect(gateway.paths.at(-1)).toMatch(/\/messages(?:\?|$)/)
-    expect(gateway.bodies[0]).toMatchObject({ max_tokens: 131_072 })
+    expect(gateway.bodies[0]).toMatchObject({ max_tokens: effort === undefined ? 65536 : 81920 })
+    if (effort) expect(gateway.bodies[0]).toHaveProperty('thinking.budget_tokens', 16384)
   })
 
   it('keeps original catalog references when runtime capacities are overridden', async () => {
@@ -872,9 +875,7 @@ describe("host and wire capacity alignment", () => {
     let config = configOf(gateway.url)
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
     expect((await adapter.resolveModel('dsh-opencode-go', 'union-alpha')).context?.contextWindow).toBe(262144)
-    const priorFetch = globalThis.fetch
-    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
-      String(input) === MODELS_METADATA_URL ? Promise.resolve(new Response('', { status: 503 })) : priorFetch(input, init))
+    gateway.setModelListing(503, {})
     config = { ...config, modelLimits: { 'union-alpha': { contextWindow: 123456 } } }
     await expect(adapter.resolveModel('dsh-opencode-go', 'union-alpha')).resolves.toMatchObject({ context: { contextWindow: 123456 } })
     // An explicit refresh must preserve the learned model too, not just the TTL hit.
@@ -894,7 +895,7 @@ describe("host and wire capacity alignment", () => {
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
     vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
-      if (String(input) === MODELS_METADATA_URL) await gate
+      if (String(input).endsWith('/models')) await gate
       return priorFetch(input, init)
     })
     const pending = adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')

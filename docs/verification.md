@@ -31,7 +31,7 @@ Coverage includes:
 
 ## Isolation and limits
 
-Vitest gives each test a temporary `DSH_HOME`, serves synthetic models.dev metadata, uses loopback gateways/proxies and rejects other network requests. The installed-package smoke also uses a temporary home, synthetic credentials and metadata, and loopback inference. It resolves the built package through the consumer's ordinary Cordis resolver and verifies discovery, streamed text, session headers, attribution, authorization and unload.
+Vitest gives each test a temporary `DSH_HOME`, serves complete synthetic `/models` declarations, uses loopback gateways/proxies and rejects other network requests. The installed-package smoke also uses a temporary home, synthetic credentials and metadata, and loopback inference. It resolves the built package through the consumer's ordinary Cordis resolver and verifies dual route discovery, streamed text, session headers, attribution, authorization and unload.
 
 The pinned rc.5 UI primitives package references an unpublished `index.js.map`; Vite reports a non-fatal source-map warning. Undici also reports its experimental SOCKS5 notice during the real proxy test. Neither creates a failed test or nonzero command exit. The suite does not filter these messages or patch installed packages.
 

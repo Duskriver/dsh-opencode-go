@@ -73,7 +73,7 @@ type AccountCredentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set
 type Connection = { settings: AccountSettingsWriter; credentials: AccountCredentials }
 
 function accountIdentity(config: OpencodeGoConfig): string {
-  return JSON.stringify([config.enabled, accountRefOf(config), config.accounts, config.autoSwitch, config.baseURL, config.proxyURL, config.protocolOverrides])
+  return JSON.stringify([config.enabled, accountRefOf(config), config.accounts, config.autoSwitch, config.baseURL, config.proxyURL, config.freeBaseURL])
 }
 
 function ownsAccountCredential(account: GoAccount): boolean {

@@ -7,7 +7,7 @@ declare module '@deepseek-ai/cordis' {
 }
 export { OpencodeGoAdapter } from './adapter.ts';
 export type { OpencodeGoAdapterOptions, OpencodeGoImageAccess, GoAccountSettlement } from './adapter.ts';
-export { DEFAULT_BASE_URL, DISPLAY_NAME, PROVIDER_ID, OpencodeGoCatalog, discoverCatalogModels, readLiveModelIds, } from './catalog.ts';
+export { DEFAULT_BASE_URL, DEFAULT_FREE_BASE_URL, DISPLAY_NAME, PROVIDER_ID, FREE_DISPLAY_NAME, FREE_PROVIDER_ID, OpencodeGoCatalog, discoverCatalogModels, readLiveModelIds, } from './catalog.ts';
 export { Config, PlainConfig, assertBaseURL } from './config.ts';
 export { assertProxyURL } from './contracts.ts';
 export type { OpencodeGoConfig } from './config.ts';

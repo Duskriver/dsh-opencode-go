@@ -54,11 +54,11 @@ describe("conversation usage", () => {
     byModel: [], byDay: [],
     coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
       summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
-    pricing: { source: 'models.dev', unpricedModels: [] },
+    pricing: { source: 'OpenCode /models', unpricedModels: [] },
   }
 
   const directory = (provider = 'deepseek') => createSnapshotStore<ModelDirectoryState>({
-    current: { provider, model: provider === 'dsh-opencode-go' ? 'deepseek-v4-flash' : 'deepseek-chat' }, routable: true,
+    current: { provider, model: provider === 'dsh-opencode-go' ? 'deepseek-v4-pro' : 'deepseek-chat' }, routable: true,
     groups: [], failures: [], status: 'ready', error: null,
   })
 
@@ -149,6 +149,23 @@ describe("conversation usage", () => {
     expect(read).toHaveBeenCalledTimes(2)
   })
 
+  it('hides auto usage for Free, shows it for Go, and stops polling when switching back to Free', async () => {
+    const host = usageSettings({ usageDisplay: 'auto' })
+    const selected = directory('dsh-opencode-free'), read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<UsagePill settings={host.form} directory={selected} readUsage={read} t={t} />) })
+    await tick()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(read).not.toHaveBeenCalled()
+    await act(async () => { selected.set({ ...selected.getSnapshot(), current: { provider: 'dsh-opencode-go', model: 'same' } }) })
+    expect(trigger()).toBeTruthy()
+    expect(read).toHaveBeenCalledOnce()
+    await act(async () => { selected.set({ ...selected.getSnapshot(), current: { provider: 'dsh-opencode-free', model: 'same' } }) })
+    await tick()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(read).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('sends no usage requests in off mode even when this plugin model is selected', async () => {
     const host = usageSettings({ usageDisplay: 'off' })
     const read = vi.fn().mockResolvedValue(usage)
@@ -191,7 +208,7 @@ describe("conversation usage", () => {
     const read = vi.fn().mockResolvedValue(usage)
     render(<UsagePill settings={settings} directory={store} readUsage={read} t={t} />)
     expect(read).not.toHaveBeenCalled()
-    await act(async () => { store.set({ ...store.getSnapshot(), current: { provider: 'dsh-opencode-go', model: 'deepseek-v4-flash' } }) })
+    await act(async () => { store.set({ ...store.getSnapshot(), current: { provider: 'dsh-opencode-go', model: 'deepseek-v4-pro' } }) })
     expect(trigger().textContent).toContain(percentageLabel(usage))
     // The label stays one string for accessibility and for textContent, but renders as addressable spans
     // for the narrow-composer tiers: reading (with a stale flag) and two unit words. No stale or
@@ -621,14 +638,14 @@ describe("analytics dashboard", () => {
       model: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', requests: 12, missingUsage: 0,
       inputTokens: 1000, outputTokens: 2000, cacheReadTokens: 3000, cacheWriteTokens: 0,
       estimatedMicroUsd: 1_234_000, pricedRequests: 10, unpricedRequests: 2,
-      limitGoUsd: 80, limitGoPlusUsd: 160,
+      limitGoUsd: 100, limitGoPlusUsd: 200,
     }],
     byDay: [{ day: '2026-10-18', requests: 12, tokens: 6000, estimatedMicroUsd: 1_234_000 }],
     coverage: {
       listedSessions: 20, scannedSessions: 20, matchedSessions: 3, failedSessions: 0,
       eventsScanned: 100, summaries: 2, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 1500,
     },
-    pricing: { source: 'models.dev', updatedAt: Date.UTC(2026, 9, 18), unpricedModels: [] },
+    pricing: { source: 'OpenCode /models', updatedAt: Date.UTC(2026, 9, 18), unpricedModels: [] },
     ...overrides,
   })
 
@@ -639,12 +656,12 @@ describe("analytics dashboard", () => {
     await screen.findAllByText('DeepSeek V4.1 Flash')
     // The simplified table no longer carries the invocation id or the plan limits.
     expect(screen.queryByText('deepseek-v4.1-flash')).toBeNull()
-    expect(screen.queryByText(/Go \$80/)).toBeNull()
+    expect(screen.queryByText(/Go \$100/)).toBeNull()
     expect(screen.getAllByText(/\$1\.23/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Prices: models\.dev/)).toBeTruthy()
+    expect(screen.getByText(/Prices: OpenCode \/models/)).toBeTruthy()
     // Review U5: the disclaimer must name the current-price estimate semantics.
     expect(screen.getByText(new RegExp(en.analyticsNotInvoice))).toBeTruthy()
-    expect(en.analyticsNotInvoice).toContain('current models.dev prices')
+    expect(en.analyticsNotInvoice).toContain('current OpenCode /models prices')
   })
 
   it('asks for a shorter range and can scan more history', async () => {
