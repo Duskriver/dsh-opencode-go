@@ -521,7 +521,10 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
       </div>
       {model ? (
         <div className={css.modelLayout}>
-          <nav className={css.modelList} aria-label={t('modelsLabel')}>
+          {/* A group, not a <nav>: the model picker is not navigation, and any
+              `nav button` styled by the host or a theme plugin would restyle
+              every row control (issue #76). */}
+          <div className={css.modelList} role="group" aria-label={t('modelsLabel')}>
             {entries.map(entry => <div key={entry.id}
               className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
               <button type="button" className={css.modelChoice}
@@ -537,7 +540,7 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
                 onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
             </div>)}
-          </nav>
+          </div>
           <section className={css.modelDetails} aria-label={t('modelDetails')}>
             <div className={css.modelHeading}>
               <h3>{model.name ?? model.id}</h3>

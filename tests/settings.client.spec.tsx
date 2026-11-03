@@ -307,17 +307,17 @@ describe("settings page and typed capacity editing", () => {
         { id: 'old', name: 'Old', deprecated: true }, { id: 'normal', name: 'Normal' },
         { id: 'new', name: 'New', releaseDate: new Date().toISOString().slice(0, 10) },
       ]) }))
-      const nav = () => screen.getByRole('navigation', { name: en.modelsLabel })
-      expect(within(nav()).getAllByRole('button').map(button => button.textContent?.split(' ')[0])).toEqual(['New', 'Normal', 'Old'])
+      const list = () => screen.getByRole('group', { name: en.modelsLabel })
+      expect(within(list()).getAllByRole('button').map(button => button.textContent?.split(' ')[0])).toEqual(['New', 'Normal', 'Old'])
       fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterDeprecated + ' 1') }))
-      expect(within(nav()).getAllByRole('button')).toHaveLength(1)
+      expect(within(list()).getAllByRole('button')).toHaveLength(1)
       fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'new' } })
-      expect(screen.queryByRole('navigation')).toBeNull()
+      expect(screen.queryByRole('group', { name: en.modelsLabel })).toBeNull()
     })
 
     it('shows one selected model editor immediately alongside the searchable list', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
-      expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+      expect(screen.getByRole('group', { name: en.modelsLabel })).toBeTruthy()
       expect(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' }))).toBeTruthy()
       expect(screen.queryByRole('button', { name: en.limitsLabel })).toBeNull()
     })
@@ -345,7 +345,7 @@ describe("settings page and typed capacity editing", () => {
         models: listing([{ id: 'm', name: 'Model' }]),
         modelLimitDraft: { m: { contextWindow: 1024 } },
       }))
-      const nav = screen.getByRole('navigation', { name: en.modelsLabel })
+      const nav = screen.getByRole('group', { name: en.modelsLabel })
       expect(nav.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
       expect(screen.getByText(t('limitsSummary', { count: 1 }))).toBeTruthy()
     })
@@ -353,7 +353,7 @@ describe("settings page and typed capacity editing", () => {
     it('keeps the compact row to the model name and its badges', () => {
       const today = new Date().toISOString().slice(0, 10)
       renderSection(stateOf({ models: listing([{ id: 'fresh-model', name: 'Fresh', releaseDate: today }]) }))
-      const row = within(screen.getByRole('navigation', { name: en.modelsLabel })).getByRole('button')
+      const row = within(screen.getByRole('group', { name: en.modelsLabel })).getByRole('button')
       expect(row.textContent).toContain('Fresh')
       expect(row.textContent).toContain(en.newBadge)
       // The model id and the release date are the parameter card's job.
@@ -445,12 +445,12 @@ describe("settings page and typed capacity editing", () => {
       const trigger = screen.getByRole('button', { name: en.modelsLabel })
       expect(trigger.getAttribute('aria-expanded')).toBe('false')
       expect(document.getElementById('opencode-go-models')).toBeNull()
-      expect(screen.queryByRole('navigation', { name: en.modelsLabel })).toBeNull()
+      expect(screen.queryByRole('group', { name: en.modelsLabel })).toBeNull()
 
       fireEvent.click(trigger)
       expect(trigger.getAttribute('aria-expanded')).toBe('true')
       expect(document.getElementById('opencode-go-models')).not.toBeNull()
-      expect(screen.getByRole('navigation', { name: en.modelsLabel })).toBeTruthy()
+      expect(screen.getByRole('group', { name: en.modelsLabel })).toBeTruthy()
 
       fireEvent.click(trigger)
       expect(trigger.getAttribute('aria-expanded')).toBe('false')
@@ -586,7 +586,7 @@ describe("settings page and typed capacity editing", () => {
       const sequence = [
         screen.getByRole('switch', { name: en.enabledLabel }),
         screen.getByRole('button', { name: new RegExp(en.accountsTitle) }),
-        screen.getByRole('navigation', { name: en.modelsLabel }),
+        screen.getByRole('group', { name: en.modelsLabel }),
         screen.getByText(en.advancedLabel),
       ]
       for (let index = 1; index < sequence.length; index += 1) {
