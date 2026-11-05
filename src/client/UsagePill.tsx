@@ -1,4 +1,4 @@
-/** Conversation quota indicator, account selection and analytics entry. */
+/** Conversation and sidebar quota indicators, account selection and analytics. */
 import css from './UsagePill.module.css'
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -9,6 +9,8 @@ import {
   type UsageWindow,
   PROVIDER_ID,
   DEFAULT_USAGE_DISPLAY,
+  DEFAULT_USAGE_PILL_STYLE,
+  type UsagePillStyle,
   accountsOf,
   accountRefOf,
   type GoAccount,
@@ -32,6 +34,11 @@ export interface UsagePillProps {
   credentialChanges?: SnapshotStore<number>
   selectAccount?: (ref: string) => Promise<boolean>
 }
+
+/** A root sidebar entry receives its width mode from the host slot owner. */
+export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & { wide: boolean }
+
+type UsageVariant = 'pill' | 'sidebar' | 'sidebar-icon'
 
 const unchanged = () => 0
 
@@ -101,9 +108,19 @@ function Tick() {
   return <svg className={css.tick} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" /></svg>
 }
 
-/** Only a visible, enabled pill mounts the usage poller. */
-export function UsagePill({ directory, settings, credentialChanges, ...props }: UsagePillProps) {
+/** Only a visible, enabled input indicator mounts the usage poller. */
+export function UsagePill({ directory, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
+  return <UsageSurface {...props} variant="pill" provider={state.current?.provider} />
+}
+
+export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
+  return <UsageSurface {...props} variant={wide ? 'sidebar' : 'sidebar-icon'} />
+}
+
+/** Both placements share polling identity, account selection and detail content. */
+function UsageSurface({ settings, credentialChanges, variant, provider, ...props }:
+  Omit<UsagePillProps, 'directory'> & { variant: UsageVariant; provider?: string }) {
   // The Host scope is a class instance whose methods read their own state, so
   // React has to reach them through this receiver: a reference handed over as a
   // plain value loses it and throws on the pill's first render.
@@ -119,12 +136,15 @@ export function UsagePill({ directory, settings, credentialChanges, ...props }: 
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
   const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
   const visible = config.status === 'ready' && config.value?.enabled !== false
-    && (mode === 'always' || mode === 'auto' && state.current?.provider === PROVIDER_ID)
+    && (variant === 'pill'
+      ? mode === 'always' || mode === 'auto' && provider === PROVIDER_ID
+      : config.value?.showSidebarQuota === true)
   const accounts = accountsOf(config.value ?? {})
   const activeRef = accountRefOf(config.value ?? {})
   return visible ? <>
     <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts])}
       {...props} accounts={accounts} activeRef={activeRef} writable={config.writable}
+      variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
       analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling. */}
@@ -133,10 +153,11 @@ export function UsagePill({ directory, settings, credentialChanges, ...props }: 
   </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange }:
+function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, variant, pillStyle }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
+    variant: UsageVariant; pillStyle: UsagePillStyle
   }) {
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
@@ -243,10 +264,27 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
       {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
     </>
-  return <span className={css.root} ref={root} style={themeStyle(tokens)}>
-    <button type="button" className={css.trigger} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}
-      aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open); setView('usage') }}>{segments}</button>
-    {open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
+  const sidebar = variant !== 'pill'
+  const triggerClass = variant === 'sidebar' ? css.sidebarCard : variant === 'sidebar-icon' ? css.sidebarIcon
+    : [css.trigger, pillStyle === 'plain' ? css.plain : undefined].filter(Boolean).join(' ')
+  return <span className={[css.root, sidebar ? css.sidebarRoot : undefined].filter(Boolean).join(' ')}
+    data-wide={sidebar ? String(variant === 'sidebar') : undefined} ref={root} style={themeStyle(tokens)}>
+    <button type="button" className={triggerClass} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}
+      aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open); setView('usage') }}>
+      {variant === 'sidebar' ? <>
+        <span className={css.sidebarHead}>
+          <strong>OpenCode Go</strong>
+          <span className={css.sidebarBadge} title={accountName}>{accounts.length ? accountName : 'Go'}</span>
+        </span>
+        {(['rolling', 'weekly'] as const).map(key => <span className={css.sidebarWindow} key={key}>
+          <span>{t(`usage_${key}`)}</span>
+          <progress aria-label={t(`usage_${key}`)} max={100} value={usage ? Math.min(100, Math.max(0, usage[key].percent)) : 0}
+            className={[key === 'rolling' ? css.progressRolling : css.progressWeekly, usage ? usageLevel(usage[key]) : undefined].filter(Boolean).join(' ')} />
+          <strong>{usage ? `${usage[key].percent}%` : failure ? '—' : '…'}</strong>
+        </span>)}
+      </> : variant === 'sidebar-icon' ? <ChartIcon /> : segments}
+    </button>
+    {open && <div className={[css.panel, sidebar ? css.sidebarPanel : undefined].filter(Boolean).join(' ')} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
       {/* The frosted material is a dedicated child, the way the host's own
           MenuSurface paints it, so the panel's content and the body's scrolling
           never share the filtered element. */}
@@ -331,6 +369,8 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
         </button> : null}
         {current ? <div className={css.foot}>
           <span>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</span>
+          {!failure ? <button type="button" className={css.switch} disabled={refreshing}
+            onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRefresh')}</button> : null}
         </div> : null}
       </>}
       </div>

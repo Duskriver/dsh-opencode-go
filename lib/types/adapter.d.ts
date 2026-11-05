@@ -6,6 +6,7 @@ import type { Api, Model, Provider } from './sdk-types.ts';
 import { type OpencodeGoConfig } from './config.ts';
 import { ProxyTransport } from './transport.ts';
 import { OpencodeGoCatalog } from './catalog.ts';
+import { FreeBunTransport } from './free-transport.ts';
 /**
  * Cap large models at 64k unless the caller or settings specify an allowance.
  * Per-model settings continue to cap explicit caller values.
@@ -50,7 +51,8 @@ export interface OpencodeGoRequestSnapshot {
 export declare class OpencodeGoRequestExecutor {
     private readonly options;
     private readonly transport;
-    constructor(options: OpencodeGoRequestExecutorOptions, transport: ProxyTransport);
+    private readonly freeTransport;
+    constructor(options: OpencodeGoRequestExecutorOptions, transport: ProxyTransport, freeTransport?: FreeBunTransport);
     /** One account, one SDK attempt; host recovery still owns failures after output. */
     stream(options: GenerateOptions, snapshot: OpencodeGoRequestSnapshot): AsyncIterable<StreamChunk>;
 }
@@ -106,6 +108,7 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly resolveCatalog;
     private readonly transport;
     private readonly requestExecutor;
+    private readonly freeTransport;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
     /** Reference updates invalidate rejections from attempts using an older key. */

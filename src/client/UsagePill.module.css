@@ -5,6 +5,9 @@
   background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; font-size: 12.5px; line-height: 1.6;
   padding: 4px 9px; border-radius: 12px; cursor: pointer; white-space: nowrap; }
 .trigger:hover, .trigger:focus-visible { background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); border-color: color-mix(in srgb, var(--go-accent, currentColor) 42%, var(--go-border, transparent)); }
+.trigger.plain { border: 0; background: transparent; color: inherit; opacity: .75; font-size: 12px; padding: 4px 6px; border-radius: 6px; font-weight: inherit; }
+.trigger.plain:hover, .trigger.plain:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
+.trigger:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 2px; }
 .reading { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stale { color: var(--go-warning, currentColor); }
 .fallback { color: var(--go-warning, currentColor); }
@@ -28,6 +31,26 @@
   box-sizing: border-box; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 12%, transparent)); border-radius: 16px;
   color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); font-size: 12px; isolation: isolate; display: flex; flex-direction: column;
   box-shadow: 0 20px 60px #0005; }
+.sidebarPanel { left: 0; right: auto; }
+.sidebarRoot { display: flex; width: 100%; min-width: 0; }
+.sidebarRoot[data-wide='false'] { width: 36px; min-width: 36px; flex: none; }
+.sidebarCard, .sidebarIcon { box-sizing: border-box; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 16%, transparent));
+  background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; cursor: pointer; }
+.sidebarCard { display: flex; flex-direction: column; align-items: stretch; gap: 9px; width: 100%; min-width: 0; padding: 10px; border-radius: 10px; text-align: left; }
+.sidebarHead { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sidebarHead > strong { flex: none; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.sidebarBadge { margin-left: auto; min-width: 0; padding: 1px 6px; border-radius: 5px; font-size: 10px; line-height: 1.6;
+  background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); color: var(--go-muted, currentColor);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebarWindow { display: grid; grid-template-columns: 48px minmax(0, 1fr) 34px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
+.sidebarWindow > span { color: var(--go-muted, currentColor); white-space: nowrap; }
+.sidebarWindow > strong { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+.sidebarIcon { display: grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: 9px; }
+.sidebarIcon .icon { width: 18px; height: 18px; }
+.sidebarCard:hover, .sidebarIcon:hover { background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); }
+.sidebarCard:focus-visible, .sidebarIcon:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 2px; }
+/* The host footer's action list must stack the card with other plugins' entries. */
+:global([class*="_footArea"] [class*="_footerActions"]) { flex-direction: column; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
   background: color-mix(in srgb, var(--go-surface, var(--dsw-specific-menu, #2a2a2c)) 88%, transparent);
   backdrop-filter: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); }
@@ -71,17 +94,19 @@
 .windowRow { display: flex; align-items: center; gap: 10px; }
 .windowLabel { flex: none; width: 48px; font-size: 12.5px; color: var(--go-muted, var(--dsw-alias-label-secondary, currentColor)); }
 .windowPercent { flex: none; width: 38px; text-align: right; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.window progress { flex: 1; min-width: 60px; height: 8px; display: block; appearance: none; border: 0; border-radius: 99px;
+.window progress, .sidebarWindow progress { flex: 1; min-width: 0; width: 100%; height: 8px; display: block; appearance: none; border: 0; border-radius: 99px;
   background: color-mix(in srgb, var(--go-text, currentColor) 12%, transparent); }
-.window progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
-.window progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent, #39a878)); border-radius: 99px; }
-.window progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent, #39a878)); border-radius: 99px; }
+.window progress::-webkit-progress-bar, .sidebarWindow progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
+.window progress::-webkit-progress-value, .sidebarWindow progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent, #39a878)); border-radius: 99px; }
+.window progress::-moz-progress-bar, .sidebarWindow progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent, #39a878)); border-radius: 99px; }
+.window progress { min-width: 60px; }
+.sidebarWindow progress { height: 5px; }
 .windowReset { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
 .progressRolling { --go-progress: var(--go-accent); }
 .progressWeekly { --go-progress: var(--go-success); }
 .progressMonthly { --go-progress: var(--go-warning); }
-.window progress.high { --go-progress: var(--go-warning); }
-.window progress.limited { --go-progress: var(--go-danger); }
+.window progress.high, .sidebarWindow progress.high { --go-progress: var(--go-warning); }
+.window progress.limited, .sidebarWindow progress.limited { --go-progress: var(--go-danger); }
 .limitedText { margin-top: 2px; color: var(--go-danger, #e5484d); font-weight: 600; }
 
 .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 6px 1px; font-size: 10.5px; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }

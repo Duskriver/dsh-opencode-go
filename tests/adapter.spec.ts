@@ -3,6 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import {
   ReasoningEffortId,
+  BlockAssembler,
   createUserMessage,
   MessageId,
   userAgent,
@@ -176,6 +177,52 @@ describe("requests and deadlines", () => {
       expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: {
         code: 'INVALID_REQUEST', message: expect.stringContaining('Compact the context (/compact)'),
       } } })
+    })
+
+    it.each([200, 400])('clamps a Chinese conversation above 80 percent from replayed usage for HTTP %s', async status => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      const contextWindow = 131_072
+      gateway.pushCompletions({ events: [
+        textEvents[0]!, textEvents[1]!,
+        JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: 'stop' }], usage: {
+          prompt_tokens: 110_000, completion_tokens: 1_024, prompt_tokens_details: { cached_tokens: 12_000 },
+        } }), '[DONE]',
+      ] })
+      gateway.pushCompletions(status === 400
+        ? { status, body: '{"model":"deepseek-v4.1-flash"}' }
+        : { events: textEvents })
+      const adapter = new OpencodeGoAdapter({
+        config: () => configOf(gateway.url, { modelLimits: { 'deepseek-v4.1-flash': { contextWindow } } }),
+        resolveApiKey: async () => 'test-key',
+      })
+      const first = requestOf({ messages: [createUserMessage({
+        content: [{ type: 'text', text: '中文'.repeat(30_000) }], source: { kind: 'plugin', plugin: 'test' },
+      })] })
+      const assembler = new BlockAssembler()
+      for (const chunk of await drain(adapter.stream(first))) assembler.push(chunk)
+      // Persist and restore exactly as a host session does between turns.
+      const previous = JSON.parse(JSON.stringify(assembler.message({
+        provider: PROVIDER_ID, model: first.model, replayState: assembler.replayState,
+      })))
+      expect(previous.source.replayState.response.usage).toEqual({
+        input: 98_000, output: 1_024, cacheRead: 12_000, cacheWrite: 0, totalTokens: 111_024,
+      })
+      const next = createUserMessage({ content: [{ type: 'text', text: '继续' }], source: { kind: 'plugin', plugin: 'test' } })
+      const chunks = await drain(adapter.stream(requestOf({ messages: [...first.messages, previous, next] })))
+      // Actual prior usage + one trailing token + the SDK's 4096-token reserve.
+      expect(gateway.bodies[0]).toMatchObject({ max_tokens: 65_536 })
+      expect(gateway.bodies[1]).toMatchObject({ max_tokens: contextWindow - 111_024 - 1 - 4_096 })
+      expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: status === 400
+        ? { kind: 'error', failure: { code: 'CONTEXT_WINDOW_EXCEEDED' } }
+        : { kind: 'stop' } })
+    })
+
+    it('keeps a model-only 400 as invalid request for a small context', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({ status: 400, body: '{"model":"deepseek-v4.1-flash"}' })
+      const adapter = await adapterFor(gateway.url)
+      const chunks = await drain(adapter.stream(requestOf()))
+      expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'INVALID_REQUEST' } } })
     })
 
     it('sends a fresh random session value per request when none arrived', async () => {

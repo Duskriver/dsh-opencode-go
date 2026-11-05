@@ -31,6 +31,8 @@ export interface PiAiReplayResponse {
     /** Provider-native effort for historical replay; absence is preserved. */
     providerThinkingLevel?: string;
     stopReason: AssistantMessage['stopReason'];
+    /** Measured context footprint for the next turn's SDK output-token clamp. */
+    usage?: Pick<PiUsage, 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'totalTokens'>;
 }
 /**
  * Project a successful pi-ai response into the minimal durable replay state.

@@ -11,6 +11,7 @@ import {
   modelSettingsKey,
 } from './contracts.ts'
 import { normalizeContext } from 'opencode-go-pi-ai'
+import { estimateContextTokens } from 'opencode-go-pi-ai/utils/estimate'
 import {
   LlmError,
   attributionHeaders,
@@ -46,6 +47,7 @@ import {
 } from './catalog.ts'
 import { createHash, randomUUID } from 'node:crypto'
 import { accountFallback, isGatewayKeyRejection } from './accounts.ts'
+import { FreeBunTransport, OPENCODE_FREE_USER_AGENT } from './free-transport.ts'
 
 const DEFAULT_MAX_TOKENS = 65_536
 
@@ -116,6 +118,7 @@ export class OpencodeGoRequestExecutor {
   constructor(
     private readonly options: OpencodeGoRequestExecutorOptions,
     private readonly transport: ProxyTransport,
+    private readonly freeTransport: FreeBunTransport = new FreeBunTransport(),
   ) {}
 
   /** One account, one SDK attempt; host recovery still owns failures after output. */
@@ -176,12 +179,15 @@ export class OpencodeGoRequestExecutor {
       watchdog.signal.throwIfAborted()
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
+      const transcript = normalizeContext(context)
       const diagnostics = new GatewayDiagnostics({
         provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
-        fetch: this.transport.forProxy(config.proxyURL), contextWindow: model.contextWindow, maxTokens,
+        fetch: model.source === 'free' ? this.freeTransport.forProxy(config.proxyURL) : this.transport.forProxy(config.proxyURL),
+        contextWindow: model.contextWindow, maxTokens: maxTokens ?? model.maxTokens,
+        estimatedContextTokens: estimateContextTokens(transcript).tokens,
       })
       const reasoningOptions = reasoningRequest(reasoningIntent(model, reasoning))
-      const events = provider.streamSimple(model, normalizeContext(context), {
+      const events = provider.streamSimple(model, transcript, {
         apiKey,
         fetch: diagnostics.fetch,
         ...reasoningOptions,
@@ -189,12 +195,12 @@ export class OpencodeGoRequestExecutor {
         ...maxTokens === undefined ? {} : { maxTokens },
         sessionId,
         signal: watchdog.signal,
-        // Harness-owned request identity: the gateway refuses requests without
-        // `x-opencode-session` and profiles clients by User-Agent, and
-        // attribution merges last in pi-ai's client.
-        headers: {
+        headers: model.source === 'free' ? {
           'x-opencode-session': sessionId,
-          ...model.source === 'free' ? { authorization: `Bearer ${apiKey}` } : {},
+          'user-agent': OPENCODE_FREE_USER_AGENT,
+          authorization: `Bearer ${apiKey}`,
+        } : {
+          'x-opencode-session': sessionId,
           ...attributionHeaders(),
         },
         // The agent recovery layer owns visible attempts; one adapter call is
@@ -359,6 +365,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
   private readonly resolveCatalog: (config: OpencodeGoConfig) => OpencodeGoCatalog
   private readonly transport: ProxyTransport
   private readonly requestExecutor: OpencodeGoRequestExecutor
+  private readonly freeTransport = new FreeBunTransport()
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
   private readonly rejectedKeys = new Map<string, Map<string, number>>()
@@ -374,7 +381,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     super()
     this.source = options.source ?? 'go'
     this.transport = options.transport ?? new ProxyTransport()
-    this.requestExecutor = new OpencodeGoRequestExecutor(options, this.transport)
+    this.requestExecutor = new OpencodeGoRequestExecutor(options, this.transport, this.freeTransport)
     const catalogs = options.catalog ? undefined : new GoCatalogManager({
       transport: this.transport, onFallback: options.onFallback, onOmitted: options.onOmitted,
       onRefresh: options.onCatalogRefresh, onWarning: options.onCatalogWarning,
@@ -382,7 +389,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     this.resolveCatalog = options.catalog ?? (config => catalogs!.forConfig(config, this.source))
   }
 
-  dispose(): Promise<void> { return this.transport.dispose() }
+  async dispose(): Promise<void> { await Promise.all([this.transport.dispose(), this.freeTransport.dispose()]) }
 
   /**
    * The catalog resolver for one configuration, rebuilding on the facts it
@@ -541,30 +548,39 @@ export class OpencodeGoAdapter extends LlmAdapter {
     })
     const candidates = this.accountCandidates(snapshot.config, ordered, usable, options.signal)
     let candidate = await candidates.next()
+    const streamPublic = () => this.requestExecutor.stream(options, { config: snapshot.config, model: snapshot.model,
+      provider: snapshot.catalog.provider, sessionId: snapshot.sessionId, apiKey: 'public' })
     if (candidate.done) {
-      if (this.source === 'free') yield* this.requestExecutor.stream(options, { config: snapshot.config, model: snapshot.model,
-        provider: snapshot.catalog.provider, sessionId: snapshot.sessionId, apiKey: 'public' })
+      if (this.source === 'free') yield* streamPublic()
       return
     }
     let switchReason: GoAccountSwitch['reason'] | undefined
     let failedRef: string | undefined
-    while (!candidate.done) {
+    let publicFallback = false
+    while (!candidate.done && !publicFallback) {
       const { ref, apiKey, credentialVersion, skippedRef } = candidate.value
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
       const retryFailure = async (failure: { code: string } | undefined): Promise<boolean> => {
         const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
-          aborted: options.signal?.aborted === true, hasNext: snapshot.config.autoSwitch === true })
+          aborted: options.signal?.aborted === true, hasNext: snapshot.config.autoSwitch === true || this.source === 'free' })
         if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && failure && isGatewayKeyRejection(failure)
           && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway)
         if (!reason || !failure) return false
-        const next = await candidates.next()
-        if (next.done) return false
-        switchReason ??= reason
-        failedRef ??= ref
-        candidate = next
-        return true
+        if (snapshot.config.autoSwitch) {
+          const next = await candidates.next()
+          if (!next.done) {
+            switchReason ??= reason
+            failedRef ??= ref
+            candidate = next
+            return true
+          }
+        }
+        // Public Free access remains available when saved credentials are
+        // rejected, including when switching between saved accounts is off.
+        publicFallback = this.source === 'free' && ['INVALID_CREDENTIAL', 'AUTH'].includes(failure.code)
+        return publicFallback
       }
       const announce = (): void => {
         if (emitted) return
@@ -606,6 +622,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
         if (!await retryFailure(error instanceof LlmError ? error : undefined)) throw error
       }
     }
+    if (publicFallback) yield* streamPublic()
   }
 
   /** Resolve Free keys only when selecting an account or retrying a failed attempt. */

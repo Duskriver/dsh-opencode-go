@@ -72,6 +72,8 @@ export interface PiAiReplayResponse {
   /** Provider-native effort for historical replay; absence is preserved. */
   providerThinkingLevel?: string
   stopReason: AssistantMessage['stopReason']
+  /** Measured context footprint for the next turn's SDK output-token clamp. */
+  usage?: Pick<PiUsage, 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'totalTokens'>
 }
 
 /** The validated halves of one pi-ai replay envelope. */
@@ -119,6 +121,7 @@ function emptyPiUsage(): PiUsage {
 export function toPiReplayState(message: AssistantMessage, requestedModel = message.model, requestedProvider = message.provider): ReplayEnvelope {
   const responseModel = message.api === 'anthropic-messages' && message.model !== requestedModel
     ? message.model : message.responseModel
+  const { input, output, cacheRead, cacheWrite, totalTokens } = message.usage
   const response: PiAiReplayResponse = {
     kind: 'pi-ai',
     version: 2,
@@ -130,6 +133,7 @@ export function toPiReplayState(message: AssistantMessage, requestedModel = mess
     ...message.responseId === undefined ? {} : { responseId: message.responseId },
     ...message.providerThinkingLevel === undefined ? {} : { providerThinkingLevel: message.providerThinkingLevel },
     stopReason: message.stopReason,
+    ...hasUsage(message.usage) ? { usage: { input, output, cacheRead, cacheWrite, totalTokens } } : {},
   }
   return {
     response,
@@ -178,6 +182,14 @@ function readReplayState(value: unknown): PiAiReplayState {
   if (response['responseModel'] !== undefined && typeof response['responseModel'] !== 'string') return invalidReplay('responseModel must be a string')
   if (response['responseId'] !== undefined && typeof response['responseId'] !== 'string') return invalidReplay('responseId must be a string')
   if (response['providerThinkingLevel'] !== undefined && typeof response['providerThinkingLevel'] !== 'string') return invalidReplay('providerThinkingLevel must be a string')
+  if (response['usage'] !== undefined) {
+    const usage = response['usage']
+    if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) return invalidReplay('usage must be an object')
+    for (const field of ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const) {
+      const tokens = (usage as Record<string, unknown>)[field]
+      if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens < 0) return invalidReplay(`usage ${field} must be a non-negative finite number`)
+    }
+  }
   const blocks = envelope['blocks']
   if (!Array.isArray(blocks)) return invalidReplay('blocks must be an array')
   for (const [index, value] of blocks.entries()) {
@@ -272,7 +284,7 @@ function replayedAssistant(message: HistoryMessage, source: ModelMessageSource, 
     ...state.response.responseModel === undefined ? {} : { responseModel: state.response.responseModel },
     ...state.response.responseId === undefined ? {} : { responseId: state.response.responseId },
     ...state.response.providerThinkingLevel === undefined ? {} : { providerThinkingLevel: state.response.providerThinkingLevel },
-    usage: emptyPiUsage(),
+    usage: { ...emptyPiUsage(), ...state.response.usage },
     stopReason: state.response.stopReason,
     timestamp: 0,
   }

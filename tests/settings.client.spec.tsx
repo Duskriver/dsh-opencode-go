@@ -2,12 +2,13 @@
 import { apply, accountCommands } from '../src/client/index.ts'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
-import { bindSnapshotSelector, createConfigForm, acceptFormWrites } from './support/client.tsx'
+import { bindSnapshotSelector, createConfigForm, acceptFormWrites, translator } from './support/client.tsx'
 import * as store from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { OpencodeGoSection, type OpencodeGoSectionProps, type OpencodeGoSectionState } from '../src/client/Section.tsx'
 import {
   OpencodeGoSectionController,
+  editableKeys,
   type OpencodeGoSettings,
   type OpencodeGoSectionFace,
 } from '../src/client/controller.ts'
@@ -22,7 +23,7 @@ import { Context } from '@deepseek-ai/cordis'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type { LocaleRuntime as HostLocaleRuntime, LocaleSettings } from '@deepseek-ai/dsh-client-locale/client'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import { UsagePill, type UsagePillProps } from '../src/client/UsagePill.tsx'
+import { UsagePill, SidebarQuota, type UsagePillProps, type SidebarQuotaProps } from '../src/client/UsagePill.tsx'
 
 describe("settings page and typed capacity editing", () => {
 
@@ -37,7 +38,7 @@ describe("settings page and typed capacity editing", () => {
   }
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
-    | 'usageDisplay'
+    | 'usageDisplay' | 'usagePillStyle' | 'showSidebarQuota'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -71,6 +72,8 @@ describe("settings page and typed capacity editing", () => {
     return {
       ...settled,
       usageDisplay: field('auto'),
+      usagePillStyle: field('badge'),
+      showSidebarQuota: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
       baseURL: field('https://opencode.ai/zen/go/v1'),
       proxyURL: field(''),
@@ -111,14 +114,15 @@ describe("settings page and typed capacity editing", () => {
   function renderSection(
     state: OpencodeGoSectionState,
     overrides: Partial<ReturnType<typeof actions>> = {},
-    options: { foldedModels?: boolean; analytics?: { readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport> } } = {},
+    options: { foldedModels?: boolean; locale?: 'en' | 'zh'; analytics?: { readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport> } } = {},
   ) {
     const store = createSnapshotStore(state)
     const props = {
       ...actions(),
       ...overrides,
       ...(options.analytics ?? {}),
-      t,
+      t: options.locale ? translator(options.locale) : t,
+      getLocale: () => options.locale === 'zh' ? 'zh-CN' : 'en-US',
       useOpencodeGo: bindSnapshotSelector(store),
     } as unknown as OpencodeGoSectionProps
     render(<OpencodeGoSection {...props} />)
@@ -141,6 +145,66 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
+    it('offers the sidebar switch and input appearance on the main settings page and stages both edits', () => {
+      const reading = actions()
+      renderSection(stateOf(), reading, { foldedModels: true })
+      const toggle = screen.getByRole('switch', { name: en.showSidebarQuotaLabel })
+      expect(toggle.getAttribute('aria-checked')).toBe('false')
+      fireEvent.click(toggle)
+      expect(reading.edit).toHaveBeenCalledWith('showSidebarQuota', 'true')
+      const group = screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })
+      expect(within(group).getByRole('radio', { name: en.usagePillStyle_badge }).getAttribute('aria-checked')).toBe('true')
+      fireEvent.click(within(group).getByRole('radio', { name: en.usagePillStyle_plain }))
+      expect(reading.edit).toHaveBeenCalledWith('usagePillStyle', 'plain')
+      expect(reading.save).not.toHaveBeenCalled()
+      expect(document.getElementById('opencode-go-advanced')).toBeNull()
+    })
+
+    it('disables appearance changes for read-only settings and resets saved appearance overrides', () => {
+      const reading = actions()
+      const state = stateOf({ showSidebarQuota: field('true', { overridden: true }), usagePillStyle: field('plain', { overridden: true }) })
+      const store = renderSection(state, reading)
+      fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
+      expect(reading.resetField.mock.calls).toEqual([['showSidebarQuota'], ['usagePillStyle']])
+      act(() => { store.set({ ...state, writable: false }) })
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.showSidebarQuotaLabel }).disabled).toBe(true)
+      for (const radio of within(screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })).getAllByRole<HTMLButtonElement>('radio')) {
+        expect(radio.disabled).toBe(true)
+      }
+    })
+
+    it.each((['en', 'zh'] as const).flatMap(locale => [384_000, 65_536, 32_768, undefined].map(maxTokens => ({ locale, maxTokens }))))(
+      'shows the effective output default and catalog maximum in $locale for $maxTokens tokens', ({ locale, maxTokens }) => {
+        const translate = translator(locale)
+        renderSection(stateOf({ models: listing([{ id: 'capacity', name: 'Capacity', contextWindow: 1_000_000, maxTokens }]) }), {}, { locale })
+        const output = screen.getByRole<HTMLInputElement>('spinbutton', { name: translate('limitsOutputLabel', { name: 'Capacity' }) })
+        expect(output.value).toBe('')
+        expect(output.placeholder).toBe(maxTokens === undefined ? translate('capacityMissing') : String(Math.min(maxTokens, 65_536)))
+        expect(output.getAttribute('max')).toBe(maxTokens === undefined ? null : String(maxTokens))
+        const hint = document.getElementById(output.getAttribute('aria-describedby')!)!.textContent
+        const expected = maxTokens !== undefined && maxTokens > 65_536
+          ? locale === 'zh' ? '默认：65,536 tokens（模型上限：384,000 tokens）' : 'Default: 65,536 tokens (catalog max: 384,000 tokens)'
+          : translate('capacityDefault', { value: maxTokens?.toLocaleString(locale) ?? translate('capacityMissing') })
+        expect(hint).toBe(expected)
+        const context = screen.getByRole<HTMLInputElement>('spinbutton', { name: translate('limitsContextLabel', { name: 'Capacity' }) })
+        expect(context.placeholder).toBe('1000000')
+        expect(document.getElementById(context.getAttribute('aria-describedby')!)?.textContent)
+          .toBe(translate('capacityDefault', { value: (1_000_000).toLocaleString(locale) }))
+      },
+    )
+
+    it('keeps an explicit max output override and a two-column model row with its override indicator', () => {
+      renderSection(stateOf({ models: listing([{ id: 'wide', name: 'A very long model name', maxTokens: 384_000 }]),
+        modelLimitDraft: { wide: { maxTokens: 98_304 } } }))
+      const output = screen.getByRole<HTMLInputElement>('spinbutton', { name: t('limitsOutputLabel', { name: 'A very long model name' }) })
+      expect(output.value).toBe('98304')
+      expect(output.placeholder).toBe('65536')
+      const choose = screen.getByRole('button', { name: 'A very long model name' })
+      expect(choose.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
+      expect(Array.from(choose.parentElement!.children).map(child => child.getAttribute('role'))).toEqual([null, 'switch'])
+      expect(screen.getByRole('tabpanel').contains(choose)).toBe(true)
+    })
+
     it('stages the independent Free gateway URL in advanced settings and offers reset', () => {
       const reading = actions()
       renderSection(stateOf({ freeBaseURL: field('https://free.example/v1', { overridden: true }) }), reading)
@@ -1239,6 +1303,38 @@ describe('typed ConfigForm drafts and writes', () => {
     return { host, controller, actions, snapshot: actions.hooks.opencodeGo.getSnapshot }
   }
 
+  it('defaults, validates and persists sidebar visibility and pill style as typed values', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    expect(editableKeys).toEqual(expect.arrayContaining(['showSidebarQuota', 'usagePillStyle']))
+    expect(snapshot()).toMatchObject({ showSidebarQuota: { text: 'false' }, usagePillStyle: { text: 'badge' } })
+    actions.edit('showSidebarQuota', 'true')
+    actions.edit('usagePillStyle', 'plain')
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledWith([
+      { op: 'set', path: ['showSidebarQuota'], value: true },
+      { op: 'set', path: ['usagePillStyle'], value: 'plain' },
+    ], expect.any(Number))
+    expect(host.form.getSnapshot().user).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    expect(snapshot().dirty).toBe(false)
+    actions.edit('usagePillStyle', 'neon')
+    actions.edit('showSidebarQuota', '1')
+    expect(snapshot()).toMatchObject({ invalid: true, showSidebarQuota: { invalid: true }, usagePillStyle: { invalid: true } })
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('resets appearance to inherited values without changing the selected account', async () => {
+    const value = { apiKeyEnv: 'ACCOUNT_A', showSidebarQuota: false, usagePillStyle: 'badge' as const }
+    const { host, controller, actions, snapshot } = setup(value)
+    host.publish({ base: { showSidebarQuota: true, usagePillStyle: 'plain' }, user: value })
+    actions.resetField('showSidebarQuota')
+    actions.resetField('usagePillStyle')
+    await controller.save()
+    expect(snapshot()).toMatchObject({ showSidebarQuota: { text: 'true' }, usagePillStyle: { text: 'plain' } })
+    expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')
+    expect(host.form.getSnapshot().user).toEqual({ apiKeyEnv: 'ACCOUNT_A' })
+  })
+
   it.each(['baseURL', 'freeBaseURL'] as const)('validates %s drafts before saving', async field => {
     const { host, controller, actions, snapshot } = setup()
     for (const value of ['invalid', 'ftp://gateway.example', 'https://gateway.example/v1?key=x', 'https://gateway.example/v1#fragment']) {
@@ -1477,6 +1573,31 @@ describe('client registration and remote lifecycle', () => {
     expect(harness.ctx.remote.opencodeGoAccounts.execute).toHaveBeenCalledExactlyOnceWith({ kind: 'select', ref: 'ACCOUNT_A' })
     harness.settings.publish({ writable: false })
     await expect(face.selectAccount!('ACCOUNT_A')).resolves.toBe(false)
+    await harness.dispose()
+    expect(harness.listeners.size).toBe(0)
+  })
+
+  it('registers sidebar quota at the root without requiring a conversation or model directory', async () => {
+    const harness = clientHarness()
+    harness.settings.publish({ value: { showSidebarQuota: true, usageDisplay: 'off', accounts: [] } })
+    const window = { status: 'ok', percent: 12, resetsAt: '2026-12-01T00:00:00Z' }
+    const read = vi.fn(async () => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
+    Object.assign(harness.ctx.remote, { opencodeGoUsage: { read } })
+    apply(harness.ctx as never)
+    expect(harness.slotsInject).toHaveBeenCalledWith('sidebar.footer.action', expect.any(Function))
+    expect(harness.slotsInject).not.toHaveBeenCalledWith('conversation.input.right', expect.any(Function))
+    const registrations = harness.slotsRegister.mock.calls as unknown as Array<[
+      { id: string; name: string; inject: () => Omit<SidebarQuotaProps, 'wide'> }, unknown,
+    ]>
+    const [registration, component] = registrations.find(([entry]) => entry.id === 'opencode-go-sidebar-quota')!
+    expect(registration.name).toBe('sidebar.footer.action')
+    expect(component).toBe(SidebarQuota)
+    const props = registration.inject()
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(<SidebarQuota {...props} wide />) })
+    expect(screen.getByText('OpenCode Go')).toBeTruthy()
+    expect(read).toHaveBeenCalledOnce()
+    view.unmount()
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)
   })

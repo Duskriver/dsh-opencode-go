@@ -13,6 +13,10 @@ export declare const DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS = 60000;
 export declare const DEFAULT_REQUEST_TIMEOUT_MS: number;
 /** Plain configuration values used by validation and direct adapter consumers. */
 export declare const PlainConfig: z<OpencodeGoConfig>;
+/** Derive defaults from the same schema used by persisted profile settings. */
+export declare const DEFAULT_CONFIG: Readonly<OpencodeGoConfig>;
+/** Fill omitted profile fields and normalize the legacy official gateway. */
+export declare function normalizeConfig(value?: Partial<OpencodeGoConfig>): OpencodeGoConfig;
 /** The Loader retains these references when profile fields change. */
 export type LiveConfig = {
     [K in keyof OpencodeGoConfig]-?: {

@@ -223,5 +223,8 @@
     "opencode-go",
     "llm",
     "cordis"
-  ]
+  ],
+  "optionalDependencies": {
+    "bun": "1.4.4"
+  }
 }

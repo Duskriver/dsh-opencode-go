@@ -3,6 +3,15 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
 import { type OpencodeGoSettings, type ExecuteAccountCommand } from './controller.ts';
 import { en } from './presentation.ts';
 declare module '@deepseek-ai/dsh-client-ui-slots' {
+    interface SlotMap {
+        'sidebar.footer.action': {
+            kind: 'list';
+            scope: 'root';
+            owner: {
+                wide: boolean;
+            };
+        };
+    }
     interface LocaleNamespaceMap {
         /** The OpenCode Go settings page copy. */
         'settings.opencode-go': keyof typeof en;

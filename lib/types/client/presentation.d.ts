@@ -60,6 +60,7 @@ export declare const en: {
     usageRefreshFailed: string;
     usageLastUpdated: string;
     usageRetry: string;
+    usageRefresh: string;
     usageRefreshing: string;
     analyticsOpen: string;
     analyticsTitle: string;
@@ -177,6 +178,7 @@ export declare const en: {
     thinkingBudgetAdd: string;
     thinkingBudgetRemove: string;
     capacityDefault: string;
+    capacityDefaultCapped: string;
     capacityMissing: string;
     modalityLabel: string;
     modalityText: string;
@@ -213,6 +215,14 @@ export declare const en: {
     advancedResetAll: string;
     advancedLabel: string;
     groupUsage: string;
+    usageAppearanceLabel: string;
+    usageAppearanceReset: string;
+    showSidebarQuotaLabel: string;
+    showSidebarQuotaHint: string;
+    usagePillStyleLabel: string;
+    usagePillStyleHint: string;
+    usagePillStyle_badge: string;
+    usagePillStyle_plain: string;
     groupConnection: string;
     groupCacheTimeouts: string;
     groupImages: string;

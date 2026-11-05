@@ -24,6 +24,7 @@ import {
 } from '../src/conversion.ts'
 import { requestOf } from './support/host.ts'
 import type { AssistantMessage, AssistantMessageEvent } from '../src/sdk-types.ts'
+import { estimateContextTokens } from 'opencode-go-pi-ai/utils/estimate'
 
 describe("stream outcomes", () => {
   function message(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
@@ -185,9 +186,34 @@ describe('current history roles and durable replay', () => {
     const replay = toPiReplayState(piMessage(), 'requested-model', 'dsh-opencode-go')
     const stored = JSON.parse(JSON.stringify(durable(replay)))
     const converted = toPiAssistant(stored)
-    expect(converted).toMatchObject({ api: 'google-generative-ai', provider: 'opencode-go', model: 'requested-model', responseId: 'response-1', providerThinkingLevel: 'low', stopReason: 'toolUse', content: piMessage().content })
+    expect(converted).toMatchObject({ api: 'google-generative-ai', provider: 'opencode-go', model: 'requested-model', responseId: 'response-1', providerThinkingLevel: 'low', stopReason: 'toolUse', content: piMessage().content, usage: piMessage().usage })
     const context = toPiContext(requestOf({ messages: [stored, createToolResultMessage({ callId, content: [{ type: 'text', text: 'file contents' }], isError: false })] }))
     expect(context.messages[1]).toMatchObject({ role: 'toolResult', toolName: 'lookup', toolCallId: callId })
+  })
+
+  it.each(['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const)('preserves nonzero %s through durable replay without persisting cost', field => {
+    const message = piMessage()
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, [field]: 17 }
+    message.usage = { ...tokens, cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 } }
+    const replay = toPiReplayState(message, 'requested-model', 'dsh-opencode-go')
+    expect(replay.response).toHaveProperty('usage', tokens)
+    expect((replay.response as { usage: unknown }).usage).not.toHaveProperty('cost')
+    const restored = toPiAssistant(JSON.parse(JSON.stringify(durable(replay))))
+    expect(restored.usage).toEqual({ ...tokens, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } })
+    expect(estimateContextTokens([restored])).toMatchObject({ tokens: 17, usageTokens: 17, lastUsageIndex: 0 })
+  })
+
+  it('omits unmeasured usage and reads older replay envelopes without usage', () => {
+    const message = piMessage()
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+    message.usage = usage
+    expect(toPiReplayState(message).response).not.toHaveProperty('usage')
+    const replay = toPiReplayState(piMessage(), 'requested-model', 'dsh-opencode-go')
+    delete (replay.response as { usage?: unknown }).usage
+    const degraded = vi.fn()
+    expect(toPiAssistant(durable(replay), degraded)).toMatchObject({ api: 'google-generative-ai', usage })
+    expect(degraded).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -198,6 +224,13 @@ describe('current history roles and durable replay', () => {
     (state: any) => { state.blocks.pop() },
     (state: any) => { state.blocks[0].type = 'text' },
     (state: any) => { state.blocks[0].thinkingSignature = false },
+    (state: any) => { state.response.usage = null },
+    (state: any) => { state.response.usage = [] },
+    (state: any) => { state.response.usage.input = -1 },
+    (state: any) => { state.response.usage.output = '1' },
+    (state: any) => { state.response.usage.cacheRead = Infinity },
+    (state: any) => { state.response.usage.cacheWrite = NaN },
+    (state: any) => { delete state.response.usage.totalTokens },
   ])('degrades malformed replay to neutral content while reporting its reason', mutate => {
     const replay = structuredClone(toPiReplayState(piMessage(), 'requested-model', 'dsh-opencode-go'))
     mutate(replay)

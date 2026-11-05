@@ -186,8 +186,8 @@ describe("model availability and picker visibility", () => {
       expect(checked('Beta')).toBe(true)
       expect(checked('Old')).toBe(false)
       expect(screen.queryByRole('checkbox')).toBeNull()
-      // The accounts card ships folded, so its fallback switch is not on the page yet.
-      expect(screen.getAllByRole('switch')).toHaveLength(4) // provider and one per model
+      // Model switches belong to the list; provider and sidebar settings have their own switches.
+      expect(within(screen.getByRole('navigation', { name: en.modelsLabel })).getAllByRole('switch')).toHaveLength(3)
 
       await flip('Beta')
       expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { beta: false })

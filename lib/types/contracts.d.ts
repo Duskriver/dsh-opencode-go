@@ -26,6 +26,9 @@ export declare function assertProxyURL(raw: string | undefined): string;
 export declare const USAGE_DISPLAY_MODES: readonly ["auto", "always", "off"];
 export type UsageDisplayMode = typeof USAGE_DISPLAY_MODES[number];
 export declare const DEFAULT_USAGE_DISPLAY: UsageDisplayMode;
+export declare const USAGE_PILL_STYLES: readonly ["badge", "plain"];
+export type UsagePillStyle = typeof USAGE_PILL_STYLES[number];
+export declare const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle;
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
     id: string;
@@ -83,6 +86,10 @@ export interface OpencodeGoConfig {
     enabled: boolean;
     /** Usage pill visibility; auto follows only the selected Go route. */
     usageDisplay: UsageDisplayMode;
+    /** Show quota in the sidebar independently of the selected conversation model. */
+    showSidebarQuota: boolean;
+    /** Appearance of the conversation input's quota trigger. */
+    usagePillStyle: UsagePillStyle;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
     /** Legacy credential reference, kept in sync with the first/current account. */

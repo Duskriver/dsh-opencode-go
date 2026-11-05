@@ -11,6 +11,8 @@ import {
   migrateGatewayBaseURL,
   DEFAULT_USAGE_DISPLAY,
   USAGE_DISPLAY_MODES,
+  DEFAULT_USAGE_PILL_STYLE,
+  USAGE_PILL_STYLES,
   ACCOUNT_REF_PATTERN,
   DEFAULT_ACCOUNT_REF,
   MAX_ACCOUNTS,
@@ -40,6 +42,8 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * 60_000
 const fields = {
   enabled: z.boolean().default(true),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
+  showSidebarQuota: z.boolean().default(false),
+  usagePillStyle: z.union(USAGE_PILL_STYLES.map(style => z.const(style))).default(DEFAULT_USAGE_PILL_STYLE),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   // A bare environment variable name: an empty string would otherwise pass the
   // schema, then never match any account (accountRefOf normalizes it away) and
@@ -75,6 +79,15 @@ const fields = {
 
 /** Plain configuration values used by validation and direct adapter consumers. */
 export const PlainConfig: z<OpencodeGoConfig> = z.object(fields)
+
+/** Derive defaults from the same schema used by persisted profile settings. */
+export const DEFAULT_CONFIG: Readonly<OpencodeGoConfig> = PlainConfig()
+
+/** Fill omitted profile fields and normalize the legacy official gateway. */
+export function normalizeConfig(value: Partial<OpencodeGoConfig> = {}): OpencodeGoConfig {
+  const config = PlainConfig({ ...DEFAULT_CONFIG, ...value })
+  return { ...config, baseURL: migrateGatewayBaseURL(config.baseURL) }
+}
 
 /** The Loader retains these references when profile fields change. */
 export type LiveConfig = { [K in keyof OpencodeGoConfig]-?: { get(): OpencodeGoConfig[K] } }

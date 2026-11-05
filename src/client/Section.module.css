@@ -253,6 +253,7 @@
    into a paragraph. */
 .rowTitle { min-width: 0; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-primary); }
 .rowControl { display: flex; align-items: center; min-width: 0; }
+.toggleControl { justify-content: flex-end; }
 .rowControl > .input { width: 100%; box-sizing: border-box; }
 /* The card's own first line: what it holds, and the single reset that returns every
    row to its inherited default. */
@@ -651,11 +652,12 @@
 }
 
 .modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
-.modelRow { display: flex; align-items: center; gap: 8px; padding-right: 6px; }
+.modelPanel { display: flex; flex-direction: column; gap: 16px; width: 100%; min-width: 0; }
+.modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-right: 6px; }
 .modelRow + .modelRow { border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .modelRowSelected { background: var(--dsw-alias-bg-layer-3); border-radius: 6px; border-top-color: transparent; }
-.modelRow > [role="switch"] { flex-shrink: 0; }
-.modelChoice { display: flex; align-items: baseline; flex: 1; min-width: 0; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
+.modelRow > [role="switch"] { width: 36px; min-width: 36px; flex: 0 0 36px; }
+.modelChoice { display: flex; align-items: baseline; width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-primary); cursor: pointer; }
 /* Hover and selection cover the same whole row — name, badges, override mark and
    switch — so a row reads as one bar instead of stopping at the switch. A
    selected row keeps its own surface; hover stays one step lighter than it, so
@@ -665,7 +667,7 @@
   border-top-color: transparent;
   border-radius: 6px;
 }
-.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: anywhere; flex: 0 1 auto; min-width: 0; }
+.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: normal; word-break: normal; overflow: hidden; flex: 0 1 auto; min-width: 0; }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-brand-primary); }
 .modelDetails { overflow-y: auto; min-height: 0; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .modelDetails h3 { font-size: 14px; margin: 0; overflow-wrap: anywhere; }

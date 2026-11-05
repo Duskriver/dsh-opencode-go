@@ -14,5 +14,10 @@ export interface UsagePillProps {
     credentialChanges?: SnapshotStore<number>;
     selectAccount?: (ref: string) => Promise<boolean>;
 }
-/** Only a visible, enabled pill mounts the usage poller. */
-export declare function UsagePill({ directory, settings, credentialChanges, ...props }: UsagePillProps): import("react").JSX.Element | null;
+/** A root sidebar entry receives its width mode from the host slot owner. */
+export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {
+    wide: boolean;
+};
+/** Only a visible, enabled input indicator mounts the usage poller. */
+export declare function UsagePill({ directory, ...props }: UsagePillProps): import("react").JSX.Element;
+export declare function SidebarQuota({ wide, ...props }: SidebarQuotaProps): import("react").JSX.Element;

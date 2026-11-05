@@ -238,37 +238,54 @@ export async function readJsonResponse(
   return body
 }
 
-/** Gateway status codes cover several domains; a 401 alone cannot reject a key. */
-export function classifyGatewayError(status: number, body: string, fallback: string): string {
+interface GatewayContextBudget {
+  contextWindow?: number
+  maxTokens?: number
+  estimatedContextTokens?: number
+}
+
+/** Gateway status codes cover several domains; model permissions do not reject a key. */
+export function classifyGatewayError(status: number, body: string, fallback: string, budget: GatewayContextBudget = {}): string {
   let error: { type?: unknown; code?: unknown; message?: unknown } | undefined
+  let modelOnly = false
   try {
     const parsed = JSON.parse(body)
     error = parsed?.error && typeof parsed.error === 'object' ? parsed.error : parsed
+    modelOnly = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      && typeof parsed.model === 'string' && Object.keys(parsed).length === 1
   } catch { /* Proxies may return plain text or HTML. Status remains authoritative. */ }
   const types = [error?.type, error?.code].filter((value): value is string => typeof value === 'string')
     .map(value => value.replace(/[^a-z0-9]/gi, '').toLowerCase())
   if (types.some(type => ['modelerror', 'modelnotfound', 'unknownmodel'].includes(type))) return 'UNKNOWN_MODEL'
   if (types.some(type => ['creditserror', 'monthlylimiterror', 'userlimiterror', 'gousagelimiterror',
-    'insufficientquota', 'quotaexceeded'].includes(type))) return 'QUOTA'
+    'freeusagelimiterror', 'insufficientquota', 'quotaexceeded'].includes(type))) return 'QUOTA'
   if (types.some(type => ['autherror', 'authenticationerror', 'invalidapikey', 'invalidkey'].includes(type))) return 'INVALID_CREDENTIAL'
-  if (types.some(type => ['regionerror', 'datapolicyerror', 'permissionerror', 'permissiondenied'].includes(type))) return 'AUTH'
+  if (types.some(type => ['regionerror', 'datapolicyerror', 'permissionerror', 'permissiondenied'].includes(type))) return 'PERMISSION_DENIED'
   if (types.some(type => ['ratelimiterror', 'ratelimitexceeded'].includes(type))) return 'RATE_LIMIT'
   const message = typeof error?.message === 'string' ? error.message : body
   // Legacy gateways report subscription limits as untyped 401/402/403/429.
   // A proxy's 5xx diagnostic may quote an earlier quota failure; it cannot
   // authorize switching accounts without structured evidence.
   if ([401, 402, 403, 429].includes(status) && isQuotaExceededError(message)) return 'QUOTA'
-  if ((status === 401 || status === 403)
+  if ([401, 402, 403].includes(status)
     && /(?:invalid|incorrect|expired)[ _-]?(?:api[ _-]?)?key|invalid credential/i.test(message)) return 'INVALID_CREDENTIAL'
-  if (status === 401 || status === 402 || status === 403) return 'AUTH'
+  if (status === 401) return 'AUTH'
+  if (status === 402 || status === 403) return 'PERMISSION_DENIED'
   if (status === 404) return 'UNKNOWN_MODEL'
   if (status === 429) return 'RATE_LIMIT'
   if (status === 408 || status === 504) return 'TIMEOUT'
   if (status >= 500) return 'SERVER'
   if (status === 400 || status === 413 || status === 422) {
     // Read explicit codes too: the SDK can discard an error envelope's code
-    // while flattening it into a message. An opaque 400 proves no overflow.
+    // while flattening it into a message.
     if (isContextWindowExceededError([error?.type, error?.code, message].join(' '))) return 'CONTEXT_WINDOW_EXCEEDED'
+    // Some gateways return only the model on overflow. Require request-budget
+    // evidence before treating this otherwise opaque rejection as capacity.
+    const { contextWindow, estimatedContextTokens, maxTokens = 0 } = budget
+    if (status === 400 && modelOnly && contextWindow !== undefined && Number.isFinite(contextWindow) && contextWindow > 0
+      && estimatedContextTokens !== undefined && Number.isFinite(estimatedContextTokens) && estimatedContextTokens >= 0
+      && Number.isFinite(maxTokens) && maxTokens >= 0
+      && estimatedContextTokens + maxTokens >= contextWindow * 0.8) return 'CONTEXT_WINDOW_EXCEEDED'
     return fallback === 'CONTEXT_WINDOW_EXCEEDED' ? fallback : 'INVALID_REQUEST'
   }
   return fallback
@@ -328,14 +345,12 @@ export class GatewayDiagnostics {
   private code: Promise<string> | undefined
   private readonly secrets: string[]
 
-  constructor(private readonly options: {
+  constructor(private readonly options: GatewayContextBudget & {
     provider: string
     model: string
     apiKey: string
     proxyURL?: string
     fetch?: typeof globalThis.fetch
-    contextWindow?: number
-    maxTokens?: number
   }) {
     this.secrets = [options.apiKey]
     if (options.proxyURL) {
@@ -372,7 +387,7 @@ export class GatewayDiagnostics {
     if (!response.ok) {
       const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined)
       const preview = previewBody(response, signal)
-      this.code = preview.then(body => classifyGatewayError(response.status, body.text, 'PI_AI_ERROR'))
+      this.code = preview.then(body => classifyGatewayError(response.status, body.text, 'PI_AI_ERROR', this.options))
       this.evidence = preview.then(body => ({ status: response.status,
         body: { ...body, text: this.redact(body.text, body.truncated || body.readFailed) } }))
     }

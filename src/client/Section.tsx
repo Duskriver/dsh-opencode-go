@@ -44,6 +44,7 @@ import {
   type GoModel,
   type InputModality,
   USAGE_DISPLAY_MODES,
+  USAGE_PILL_STYLES,
   type AnalyticsQuery,
   type AnalyticsReport,
   type GoUsage,
@@ -528,11 +529,12 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                 aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
                 {/* The row carries the name and its badges only; the model id and
                     the release date belong to the parameter card. */}
-                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
+                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}
+                  {hasCapacityOverride(draft[modelSettingsKey(entry)])
+                    ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
+                    : null}
+                </span>
               </button>
-              {hasCapacityOverride(draft[modelSettingsKey(entry)])
-                ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
-                : null}
               <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
                 onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
@@ -611,10 +613,12 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   onChange: (id: string, field: 'contextWindow' | 'maxTokens', value: number | undefined) => void
 }) {
   const id = `opencode-go-${field}-${encodeURIComponent(model.id)}`
-  const defaultValue = model[field]
+  const catalogValue = model[field]
+  const defaultValue = field === 'maxTokens' && catalogValue !== undefined ? Math.min(catalogValue, 65_536) : catalogValue
+  const cappedOutput = field === 'maxTokens' && catalogValue !== undefined && catalogValue > 65_536
   return <div className={css.stat}>
     <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
-    <input id={id} className={css.input} type="number" min={1} step={1} inputMode="numeric"
+    <input id={id} className={css.input} type="number" min={1} max={field === 'maxTokens' ? model.maxTokens : undefined} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
       aria-describedby={`${id}-default`} value={limit?.[field] ?? ''}
       placeholder={defaultValue === undefined ? t('capacityMissing') : String(defaultValue)} disabled={disabled}
@@ -625,7 +629,9 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
         else if (Number.isSafeInteger(value) && value > 0) onChange(modelSettingsKey(model), field, value)
       }} />
     <span id={`${id}-default`} className={css.hint}>
-      {t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString(locale) })}
+      {cappedOutput
+        ? t('capacityDefaultCapped', { value: defaultValue!.toLocaleString(locale), max: catalogValue.toLocaleString(locale) })
+        : t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString(locale) })}
       {limit?.[field] != null ? ` · ${t('overridden')}` : ''}
     </span>
   </div>
@@ -673,6 +679,8 @@ const ADVANCED_FIELDS = [
   'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
   'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
+
+const APPEARANCE_FIELDS = ['showSidebarQuota', 'usagePillStyle'] as const
 
 export type { OpencodeGoSectionState } from './controller.ts'
 
@@ -953,6 +961,36 @@ function Loaded(props: {
         </div>
       </section>
       {accountCard}
+      <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('usageAppearanceLabel')}</h3>
+          <button type="button" className={css.reset}
+            disabled={disabled || !APPEARANCE_FIELDS.some(field => state[field].overridden || state[field].invalid)}
+            onClick={() => {
+              for (const field of APPEARANCE_FIELDS) {
+                if (state[field].overridden || state[field].invalid) props.resetField(field)
+              }
+            }}>{t('usageAppearanceReset')}</button>
+        </div>
+        <div className={css.cardBody}>
+          <div className={css.rows}>
+            <div className={css.row}>
+              <div className={css.rowLabel}>
+                <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
+                <HintMark hint={t('showSidebarQuotaHint')} />
+              </div>
+              <div className={`${css.rowControl} ${css.toggleControl}`}>
+                <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
+                  title={t('showSidebarQuotaHint')} disabled={disabled || state.saving}
+                  onChange={next => { props.edit('showSidebarQuota', String(next)) }} />
+              </div>
+            </div>
+            <ValueField id="opencode-go-usage-pill-style" label={t('usagePillStyleLabel')} hint={t('usagePillStyleHint')}
+              field={state.usagePillStyle} options={USAGE_PILL_STYLES.map(value => ({ value, label: t(`usagePillStyle_${value}`) }))}
+              {...fieldProps} onEdit={text => { props.edit('usagePillStyle', text) }} />
+          </div>
+        </div>
+      </section>
       {/* The card unfolds like the model and advanced cards: its first row opens
           the dashboard, its second is the only place a style is chosen — the pill
           and the dashboard themselves never change their own look. Folded, it
@@ -1023,7 +1061,7 @@ function Loaded(props: {
                   }}
                   onClick={() => { setModelSource(source) }}>{t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')}</button>)}
               </div>
-              <div role="tabpanel" id="opencode-model-panel" aria-labelledby={`opencode-model-tab-${modelSource}`}>
+              <div role="tabpanel" id="opencode-model-panel" className={css.modelPanel} aria-labelledby={`opencode-model-tab-${modelSource}`}>
               {modelNotices}
               <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
                 modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}

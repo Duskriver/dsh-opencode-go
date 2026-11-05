@@ -33,9 +33,9 @@ export interface AttemptOutcome {
     aborted: boolean;
     hasNext: boolean;
 }
-/** Switching accounts must never replay output or already charged work. */
+/** Switching accounts must never replay output, charged work or model permission failures. */
 export declare function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reason'] | undefined;
-/** Gateway credential, rate and quota failures cool down this account for five minutes. */
+/** Only credential, rate and quota failures cool down a key; PERMISSION_DENIED is model-scoped. */
 export declare function isGatewayKeyRejection(failure: {
     code: string;
 }): boolean;

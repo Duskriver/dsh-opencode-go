@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testi
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { GoUsage, AnalyticsQuery, AnalyticsReport } from '../src/contracts.ts'
-import { UsagePill } from '../src/client/UsagePill.tsx'
+import { UsagePill, SidebarQuota } from '../src/client/UsagePill.tsx'
 import {
   en,
   setGoTheme,
@@ -91,6 +91,103 @@ describe("conversation usage", () => {
   const tick = async (milliseconds = 60_000) => { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) }) }
 
   const showDetails = () => { fireEvent.click(trigger()) }
+
+  it.each([undefined, 'badge', 'plain'] as const)('applies input quota style %s and changes it without restarting polling or closing details', async usagePillStyle => {
+    const host = usageSettings({ usageDisplay: 'always', usagePillStyle })
+    const read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<UsagePill settings={host.form} directory={directory()} readUsage={read} t={t} />) })
+    expect(trigger().classList.contains(css.plain)).toBe(usagePillStyle === 'plain')
+    showDetails()
+    const next = usagePillStyle === 'plain' ? 'badge' : 'plain'
+    await act(async () => { host.publish({ value: { usageDisplay: 'always', usagePillStyle: next } }) })
+    expect(trigger().classList.contains(css.plain)).toBe(next === 'plain')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(read).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { enabled: true, showSidebarQuota: undefined },
+    { enabled: true, showSidebarQuota: false },
+    { enabled: false, showSidebarQuota: true },
+  ])('keeps sidebar quota hidden and idle unless explicitly enabled: %j', async value => {
+    const host = usageSettings({ usageDisplay: 'always', ...value })
+    const read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={read} t={t} />) })
+    expect(screen.queryByRole('button')).toBeNull()
+    await tick()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('shows two sidebar quota bars independently of the input indicator and shares refreshable, left-aligned details with the narrow icon', async () => {
+    const host = usageSettings({ usageDisplay: 'off', showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
+    const read = vi.fn().mockResolvedValueOnce(usage).mockResolvedValue(updated)
+    const props = { settings: host.form, readUsage: read, t }
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(<SidebarQuota {...props} wide />) })
+    expect(trigger().classList.contains(css.sidebarCard)).toBe(true)
+    expect(within(trigger()).getByText('OpenCode Go')).toBeTruthy()
+    expect(within(trigger()).getByText('Backup')).toBeTruthy()
+    expect(within(trigger()).getAllByRole('progressbar')).toHaveLength(2)
+    expect(within(trigger()).getByRole('progressbar', { name: en.usage_rolling }).getAttribute('value')).toBe('0')
+    expect(within(trigger()).getByRole('progressbar', { name: en.usage_weekly }).getAttribute('value')).toBe('10')
+    expect(within(trigger()).queryByRole('progressbar', { name: en.usage_monthly })).toBeNull()
+    showDetails()
+    let panel = screen.getByRole('dialog', { name: en.usageTitle })
+    expect(panel.classList.contains(css.sidebarPanel)).toBe(true)
+    expect(within(panel).getAllByRole('progressbar')).toHaveLength(3)
+    await act(async () => { fireEvent.click(within(panel).getByRole('button', { name: en.usageRefresh })) })
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(trigger().getAttribute('aria-label')).toContain(percentageLabel(updated))
+    await act(async () => { view.rerender(<SidebarQuota {...props} wide={false} />) })
+    expect(trigger().classList.contains(css.sidebarIcon)).toBe(true)
+    expect(trigger().querySelector('svg')).toBeTruthy()
+    expect(trigger().textContent).toBe('')
+    panel = screen.getByRole('dialog', { name: en.usageTitle })
+    expect(panel.classList.contains(css.sidebarPanel)).toBe(true)
+    expect(read).toHaveBeenCalledTimes(2)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    showDetails()
+    expect(screen.getByRole('dialog', { name: en.usageTitle })).toBeTruthy()
+  })
+
+  it('switches accounts from the sidebar detail and refreshes its account badge', async () => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    host.publish({ writable: true })
+    const selectAccount = vi.fn(async (apiKeyEnv: string) => {
+      host.publish({ value: { ...host.form.getSnapshot().value, apiKeyEnv } })
+      return true
+    })
+    const read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={read} t={t} selectAccount={selectAccount} />) })
+    showDetails()
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountSwitchAction) }))
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'Backup' })) })
+    expect(selectAccount).toHaveBeenCalledExactlyOnceWith('ACCOUNT_B')
+    expect(within(trigger()).getByText('Backup')).toBeTruthy()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops sidebar polling on disable and restarts it after live settings and credential changes', async () => {
+    const host = usageSettings({ usageDisplay: 'off', showSidebarQuota: true, accounts: [] })
+    const changes = createSnapshotStore(0), read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} credentialChanges={changes} readUsage={read} t={t} />) })
+    expect(within(trigger()).getByText('Go')).toBeTruthy()
+    expect(read).toHaveBeenCalledOnce()
+    await act(async () => { changes.set(1) })
+    expect(read).toHaveBeenCalledTimes(2)
+    showDetails()
+    await act(async () => { host.publish({ value: { showSidebarQuota: false } }) })
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await tick()
+    expect(read).toHaveBeenCalledTimes(2)
+    await act(async () => { host.publish({ value: { showSidebarQuota: true, enabled: false } }) })
+    expect(screen.queryByRole('button')).toBeNull()
+    await act(async () => { host.publish({ value: { showSidebarQuota: true, enabled: true } }) })
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(trigger().getAttribute('aria-expanded')).toBe('false')
+  })
 
   it.each(['deepseek', 'opencode-go', 'dsh-opencode-go'])('keeps usage visible in always mode while using %s', async provider => {
     const host = usageSettings({ usageDisplay: 'always' })

@@ -10,6 +10,8 @@ import {
   type ModelSource,
   DEFAULT_USAGE_DISPLAY,
   USAGE_DISPLAY_MODES,
+  DEFAULT_USAGE_PILL_STYLE,
+  USAGE_PILL_STYLES,
   SETTINGS_NAMESPACE,
   type OpencodeGoConfig,
   type OpencodeGoSettings,
@@ -32,12 +34,14 @@ export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } 
 
 export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
-export const TEXT_FIELDS = ['usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
+export const TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'showSidebarQuota', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
   'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes'] as const
 
 export type TextField = typeof TEXT_FIELDS[number]
 
-export type EditableField = TextField | 'modelLimits'
+export const editableKeys = [...TEXT_FIELDS, 'modelLimits'] as const
+
+export type EditableField = typeof editableKeys[number]
 
 export interface FieldState { text: string; overridden: boolean; invalid: boolean }
 
@@ -59,11 +63,15 @@ type FieldWrite = { kind: 'set'; value: OpencodeGoConfig[EditableField] } | { ki
 
 function formatField(field: TextField, value: unknown): string {
   if (field === 'usageDisplay') return typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY
+  if (field === 'usagePillStyle') return typeof value === 'string' ? value : DEFAULT_USAGE_PILL_STYLE
+  if (field === 'showSidebarQuota') return String(value === true)
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 }
 
 function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'usageDisplay') return USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as OpencodeGoConfig['usageDisplay'] } : undefined
+  if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as OpencodeGoConfig['usagePillStyle'] } : undefined
+  if (field === 'showSidebarQuota') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
     try { assertProxyURL(trimmed); return { kind: 'set', value: trimmed } }
@@ -168,6 +176,8 @@ export interface OpencodeGoSectionState extends FormShell {
   accounts: GoAccountsState
   enabled: boolean
   usageDisplay: FieldState
+  showSidebarQuota: FieldState
+  usagePillStyle: FieldState
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean

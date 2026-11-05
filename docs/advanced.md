@@ -48,6 +48,12 @@ socks5://127.0.0.1:1080
 
 Free 共用账号列表，优先使用已配置的可用 Key，并遵循多账号自动切换设置；没有可用 Key 时使用 `Bearer public`。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
 
+Free 推理通过插件附带的独立 Bun 1.4.4 HTTP worker 直接发送 API 请求；不依赖本机 OpenCode。模型发现、消息和工具转换、响应解析仍由现有 Node SDK 负责，Go 沿用原传输。Free 使用实测的 `opencode/latest/2.2.5/cli` UA，保留宿主会话 ID 的原有规范化，不注入占位工具或抓包中的账号、项目和会话值。这些兼容行为不保证上游开放免费服务；实际的 `FreeUsageLimitError` 仍按 `QUOTA` 返回。
+
+Bun 通过 npm 可选依赖安装对应平台的二进制；禁用安装脚本仍可使用，但不能省略可选依赖。若缺少运行时，Free 会报告 `MISSING_BUN_RUNTIME`，可重新安装插件并启用 optional dependencies；Go 不受影响。当前平台包支持的系统和 CPU 以 Bun 的官方发行包为准。
+
+每个 Free HTTP 请求使用一个 worker，默认最多并发 4 个，其余请求可排队或取消。请求通过标准输入传递，响应头和原始 SSE 字节通过标准输出返回；Key 不进入命令行参数或临时文件。消费者停止、超时、取消或卸载插件都会终止相关请求并回收 worker。IPC 请求上限为编码后 256 MiB。HTTP/HTTPS 代理由 Bun 连接；SOCKS5 使用该请求专属、带随机认证凭据的本机字节隧道，目标 TLS 握手仍由 Bun 完成。代理失败不会回退到直连。
+
 协议、能力、思考控制与价格直接来自各自的 `/models` 条目。官方网关优先使用条目声明的协议地址；自定义网关保留配置的前缀。两个模型源分别缓存到 `~/.dsh/cache/dsh-opencode-go/go.models.json` 与 `free.models.json`，支持 ETag 与离线保留；缓存带有网关来源标记，不会用于其他地址。
 
 在 patch 文件中添加 `opencode-go` 配置块，可与上面的默认模型配置一起使用：
