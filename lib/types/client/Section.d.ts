@@ -1,5 +1,4 @@
 import { type en } from './presentation.ts';
-import { type ReactNode } from 'react';
 import type { GoAccountsActions, GoAccountsState, OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels, OpencodeGoSectionFace } from './controller.ts';
 import { type ModelSource } from '../contracts.ts';
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots';
@@ -29,7 +28,7 @@ export declare function AccountsCard({ state, actions, writable, t, locale }: {
 type ModelTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string;
 export declare function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefined): boolean;
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
-export declare function ModelEditor({ source, models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
+export declare function ModelEditor({ source, models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
     source?: ModelSource;
     models: OpencodeGoModels;
     draft: OpencodeGoModelLimits;
@@ -38,8 +37,6 @@ export declare function ModelEditor({ source, models, draft, modelVisibility, t,
     locale?: string;
     disabled: boolean;
     visibilitySaving: boolean;
-    /** Optional control pinned to the right of the filter row, such as a refresh. */
-    filterAction?: ReactNode;
     onEdit: (next: OpencodeGoModelLimits) => void;
     onModelEnabled: (id: string, enabled: boolean) => void;
 }): import("react").JSX.Element;

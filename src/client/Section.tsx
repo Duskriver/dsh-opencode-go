@@ -412,7 +412,7 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
 }
 
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
-export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
+export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
   source?: ModelSource
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
@@ -421,8 +421,6 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   locale?: string
   disabled: boolean
   visibilitySaving: boolean
-  /** Optional control pinned to the right of the filter row, such as a refresh. */
-  filterAction?: ReactNode
   onEdit: (next: OpencodeGoModelLimits) => void
   onModelEnabled: (id: string, enabled: boolean) => void
 }) {
@@ -461,15 +459,16 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   </>
   return (
     <div className={css.limitsEditor}>
-      <p className={css.hint}>{t('visibilityHint')}</p>
-      <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
-      <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
-        placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
-      <div className={css.filters} role="group" aria-label={t('filterLabel')}>
-        {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
-          aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
-        {filterAction ? <span className={css.filterAction}>{filterAction}</span> : null}
+      <div className={css.modelSearchRow}>
+        <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
+        <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
+          placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
+        <div className={css.filters} role="group" aria-label={t('filterLabel')}>
+          {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
+            aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
+        </div>
       </div>
+      <p className={css.modelHelp}>{t('visibilityHint')}</p>
       {model ? (
         <div className={css.modelLayout}>
           <nav className={css.modelList} aria-label={t('modelsLabel')}>
@@ -805,51 +804,60 @@ function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
   </section>
 }
 
-/**
- * The gateway's model listing in the state the page last read.
- * @param props.models - the listing state the controller published.
- * @param props.t - section copy.
- * @returns the listing body: a progress line, the Host diagnostic, or an empty
- *   body once the capacity table can show the complete model list.
- */
-function ModelsBody({ models, t, locale, source }: {
+/** Compact freshness for the selected source; full timestamps stay available on hover. */
+function ModelSourceStatus({ models, source, t, locale }: {
   models: OpencodeGoModels
   source: ModelSource
   t: SectionTranslate
   locale?: string
 }) {
+  const status = models.status === 'ready' || models.status === 'failed' ? models.sources?.[source] : undefined
+  const busy = models.status === 'idle' || models.status === 'loading' || models.status === 'ready' && models.refreshing
+  const failed = models.status === 'failed' || models.status === 'ready' && models.stale
+  const label = busy ? t('modelsRefreshingShort') : failed ? t('modelsSourceFailed')
+    : status?.updatedAt === undefined && status !== undefined ? t('modelsSourceNeverFetched') : t('modelsSourceCurrent')
+  const updated = status?.updatedAt === undefined ? undefined : new Date(status.updatedAt)
+  const fullTime = updated ? t('modelsSourceUpdated', { time: updated.toLocaleString(locale) }) : undefined
+  const detail = `${t(source === 'go' ? 'modelsGoSource' : 'modelsFreeSource')}: ${label}${fullTime ? `. ${fullTime}` : ''}`
+  const sameDay = updated?.toDateString() === new Date().toDateString()
+  const progressLabel = models.status === 'ready' ? t('modelsRefreshing') : t('modelsLoading')
+  return <span className={css.modelSync} role="status" aria-label={busy ? progressLabel : detail}
+    data-state={busy ? 'loading' : failed ? 'failed' : updated ? 'ready' : 'idle'} title={detail}>
+    <span className={css.modelSyncDot} aria-hidden="true" />
+    <span>{label}</span>
+    {updated && !busy ? <time dateTime={updated.toISOString()}>{updated.toLocaleString(locale, {
+      ...(sameDay ? {} : { month: 'short', day: 'numeric' }), hour: '2-digit', minute: '2-digit', hour12: false,
+    })}</time> : null}
+  </span>
+}
+
+/** Keep only actionable failures and warnings below the catalog toolbar. */
+function ModelsBody({ models, t, source, showProgress = true }: {
+  models: OpencodeGoModels
+  source?: ModelSource
+  t: SectionTranslate
+  showProgress?: boolean
+}) {
   const sources = models.status === 'ready' || models.status === 'failed' ? models.sources : undefined
-  const sourceStatus = sources
-    ? (['go', 'free'] as const).map(source => {
-      const status = sources[source]
-      return <p className={css.hint} key={source}>
-        {t(source === 'go' ? 'modelsGoSource' : 'modelsFreeSource')}: {' '}
-        {status.error ? t('modelsSourceFailed') : t('modelsSourceCurrent')}. {' '}
-        {status.updatedAt === undefined ? t('modelsSourceNeverFetched')
-          : t('modelsSourceUpdated', { time: new Date(status.updatedAt).toLocaleString(locale) })}
-        {status.warning ? <> {status.warning}</> : null}
-      </p>
-    }) : null
   if (models.status === 'failed') {
     return (
       <>
         <p className={css.failedNote} role="alert">{t('modelsFailed')}</p>
         {models.message ? <p className={css.hint}>{models.message}</p> : null}
-        {sourceStatus}
       </>
     )
   }
-  if (models.status !== 'ready') return <p className={css.hint} role="status" aria-live="polite">{t('modelsLoading')}</p>
-  const progress = models.refreshing ? <p className={css.hint} role="status">{t('modelsRefreshing')}</p> : null
+  if (models.status !== 'ready') return showProgress ? <p className={css.hint} role="status" aria-live="polite">{t('modelsLoading')}</p> : null
+  const progress = showProgress && models.refreshing ? <p className={css.hint} role="status">{t('modelsRefreshing')}</p> : null
   if (models.stale) return <>
     {progress}
     <p className={css.failedNote} role="alert">{t('modelsStale')}</p>
     {models.message ? <p className={css.hint}>{models.message}</p> : null}
-    {sourceStatus}
   </>
-  const warning = sources?.[source].warning
-    ? <p className={css.failedNote} role="alert">{sources[source].warning}</p> : null
-  return <>{progress}{warning}{sourceStatus}{models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
+  const warnings = (source ? [source] : ['go', 'free'] as const).map(key => sources?.[key]?.warning)
+    .filter((warning): warning is string => Boolean(warning))
+  return <>{progress}{warnings.map((warning, index) => <p className={css.failedNote} role="alert" key={index}>{warning}</p>)}
+    {models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
 }
 
 /**
@@ -914,7 +922,7 @@ function Loaded(props: {
   // the card above, so the notices render under the header either way.
   const modelNotices = (
     <>
-      <ModelsBody models={models} source={modelSource} t={t} locale={props.locale} />
+      <ModelsBody models={modelsOpen ? models : state.models} source={modelsOpen ? modelSource : undefined} t={t} showProgress={!modelsOpen} />
       {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
     </>
   )
@@ -964,12 +972,7 @@ function Loaded(props: {
         </div>
       </section>
       {accountCard}
-      {/* The model card takes whatever height the page has left: its list and its
-          parameter card are the reason the page is open. It folds away exactly
-          like the tuning card does, and the listing's own refresh sits with the
-          filters it re-reads rather than in this header. Its notices stay out of
-          the fold: a refused switch write or an unreachable gateway is news
-          whether or not the list is open. */}
+      {/* Source controls share one row; failures remain visible when folded. */}
       <section className={modelsOpen ? css.cardModels : css.cardModels + ' ' + css.cardFolded}>
         <button
           type="button"
@@ -984,8 +987,14 @@ function Loaded(props: {
         {modelsOpen
           ? (
             <div id="opencode-go-models" className={css.cardBody}>
+              <div className={css.modelToolbar}>
               <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
-                {(['go', 'free'] as const).map(source => <button key={source} type="button" role="tab"
+                {(['go', 'free'] as const).map(source => {
+                  const catalog = modelsForSource(state.models, source)
+                  const status = catalog.status === 'ready' || catalog.status === 'failed' ? catalog.sources?.[source] : undefined
+                  const label = t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')
+                  return <button key={source} type="button" role="tab" aria-label={label}
+                  title={status?.error ?? status?.warning}
                   id={`opencode-model-tab-${source}`} aria-selected={modelSource === source}
                   tabIndex={modelSource === source ? 0 : -1}
                   aria-controls="opencode-model-panel" className={css.modelTab}
@@ -996,22 +1005,23 @@ function Loaded(props: {
                     setModelSource(next)
                     document.getElementById(`opencode-model-tab-${next}`)?.focus()
                   }}
-                  onClick={() => { setModelSource(source) }}>{t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')}</button>)}
+                  onClick={() => { setModelSource(source) }}>{label}
+                    {catalog.status === 'ready' ? <span className={css.modelTabCount} aria-hidden="true">{catalog.count}</span> : null}
+                    {status?.error || status?.warning ? <span className={css.modelTabWarning} aria-hidden="true" /> : null}
+                  </button>
+                })}
+              </div>
+              <div className={css.modelTools}>
+                <ModelSourceStatus models={models} source={modelSource} t={t} locale={props.locale} />
+                <Button variant="outline" size="sm"
+                  disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
+                  onClick={loadModels}>{t('modelsRefresh')}</Button>
+              </div>
               </div>
               <div role="tabpanel" id="opencode-model-panel" className={css.modelPanel} aria-labelledby={`opencode-model-tab-${modelSource}`}>
               {modelNotices}
               <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
                 modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-                filterAction={(
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
-                    onClick={loadModels}
-                  >
-                    {t('modelsRefresh')}
-                  </Button>
-                )}
                 onModelEnabled={props.setModelEnabled}
                 onEdit={props.editModelLimits} />
               </div>

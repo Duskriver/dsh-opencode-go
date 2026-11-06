@@ -129,6 +129,7 @@ export declare const en: {
     modelsSourceNeverFetched: string;
     modelsSourceUpdated: string;
     modelsRefreshing: string;
+    modelsRefreshingShort: string;
     modelsEmpty: string;
     limitsLabel: string;
     limitsHint: string;

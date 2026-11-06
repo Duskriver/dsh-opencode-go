@@ -550,13 +550,17 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
     })
 
-    it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {
+    it('keeps the header compact and groups refresh with the source controls', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
       expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
 
       const refresh = screen.getByRole('button', { name: en.modelsRefresh })
+      const sources = screen.getByRole('tablist', { name: en.modelSourcesLabel })
       const filters = screen.getByRole('group', { name: en.filterLabel })
-      expect(filters.contains(refresh)).toBe(true)
+      const toolbar = document.getElementById('opencode-go-models')?.firstElementChild
+      expect(toolbar?.contains(sources)).toBe(true)
+      expect(toolbar?.contains(refresh)).toBe(true)
+      expect(filters.contains(refresh)).toBe(false)
     })
 
     it('closes the model card with the tally on its own row beside the clear action', () => {
@@ -594,7 +598,7 @@ describe("settings page and typed capacity editing", () => {
 
     it('reports a reading listing, an empty listing, and a failed one', () => {
       renderSection(stateOf())
-      expect(screen.getByText(en.modelsLoading)).toBeTruthy()
+      expect(screen.getByRole('status', { name: en.modelsLoading })).toBeTruthy()
 
       cleanup()
       renderSection(stateOf({ models: listing([]) }))
