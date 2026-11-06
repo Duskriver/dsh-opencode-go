@@ -1579,10 +1579,14 @@ describe('client registration and remote lifecycle', () => {
 
   it('registers sidebar quota at the root without requiring a conversation or model directory', async () => {
     const harness = clientHarness()
-    harness.settings.publish({ value: { showSidebarQuota: true, usageDisplay: 'off', accounts: [] } })
+    harness.settings.publish({ value: { showSidebarQuota: true, usageDisplay: 'off', apiKeyEnv: 'ACCOUNT_A', accounts: [
+      { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+    ] } })
+    const original = harness.settings.form.getSnapshot()
     const window = { status: 'ok', percent: 12, resetsAt: '2026-12-01T00:00:00Z' }
     const read = vi.fn(async () => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
-    Object.assign(harness.ctx.remote, { opencodeGoUsage: { read } })
+    const readAccount = vi.fn(async (_ref: string) => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
+    Object.assign(harness.ctx.remote, { opencodeGoUsage: { read, readAccount } })
     apply(harness.ctx as never)
     expect(harness.slotsInject).toHaveBeenCalledWith('sidebar.footer.action', expect.any(Function))
     expect(harness.slotsInject).not.toHaveBeenCalledWith('conversation.input.right', expect.any(Function))
@@ -1596,7 +1600,15 @@ describe('client registration and remote lifecycle', () => {
     let view!: ReturnType<typeof render>
     await act(async () => { view = render(<SidebarQuota {...props} wide />) })
     expect(screen.getByText('OpenCode Go')).toBeTruthy()
-    expect(read).toHaveBeenCalledOnce()
+    expect(readAccount).toHaveBeenCalledExactlyOnceWith('ACCOUNT_A')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `${en.sidebarNextAccount}: Primary` })) })
+    expect(readAccount).toHaveBeenLastCalledWith('ACCOUNT_B')
+    expect(screen.getByRole('button', { name: `${en.sidebarNextAccount}: Backup` })).toBeTruthy()
+    expect(read).not.toHaveBeenCalled()
+    expect(harness.ctx.remote.opencodeGoAccounts.execute).not.toHaveBeenCalled()
+    expect(harness.settings.form.getSnapshot()).toBe(original)
+    expect(harness.settings.set).not.toHaveBeenCalled()
+    expect(harness.settings.mutate).not.toHaveBeenCalled()
     view.unmount()
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)

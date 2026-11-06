@@ -31,24 +31,25 @@
   box-sizing: border-box; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 12%, transparent)); border-radius: 16px;
   color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); font-size: 12px; isolation: isolate; display: flex; flex-direction: column;
   box-shadow: 0 20px 60px #0005; }
-.sidebarPanel { left: 0; right: auto; }
 .sidebarRoot { display: flex; width: 100%; min-width: 0; }
 .sidebarRoot[data-wide='false'] { width: 36px; min-width: 36px; flex: none; }
 .sidebarCard, .sidebarIcon { box-sizing: border-box; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 16%, transparent));
-  background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; cursor: pointer; }
+  background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; }
 .sidebarCard { display: flex; flex-direction: column; align-items: stretch; gap: 9px; width: 100%; min-width: 0; padding: 10px; border-radius: 10px; text-align: left; }
 .sidebarHead { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .sidebarHead > strong { flex: none; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .sidebarBadge { margin-left: auto; min-width: 0; padding: 1px 6px; border-radius: 5px; font-size: 10px; line-height: 1.6;
   background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); color: var(--go-muted, currentColor);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebarAccountButton { border: 0; font-family: inherit; cursor: pointer; }
+.sidebarAccountButton:hover { background: color-mix(in srgb, var(--go-text, currentColor) 12%, transparent); }
+.sidebarAccountButton:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 2px; }
+.sidebarStatus { font-size: 11px; color: var(--go-warning, currentColor); }
 .sidebarWindow { display: grid; grid-template-columns: 48px minmax(0, 1fr) 34px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
 .sidebarWindow > span { color: var(--go-muted, currentColor); white-space: nowrap; }
 .sidebarWindow > strong { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
 .sidebarIcon { display: grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: 9px; }
 .sidebarIcon .icon { width: 18px; height: 18px; }
-.sidebarCard:hover, .sidebarIcon:hover { background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); }
-.sidebarCard:focus-visible, .sidebarIcon:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 2px; }
 /* The host footer's action list must stack the card with other plugins' entries. */
 :global([class*="_footArea"] [class*="_footerActions"]) { flex-direction: column; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;

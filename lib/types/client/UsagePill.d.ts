@@ -17,6 +17,7 @@ export interface UsagePillProps {
 /** A root sidebar entry receives its width mode from the host slot owner. */
 export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {
     wide: boolean;
+    readAccountUsage?: (ref: string) => Promise<GoUsage>;
 };
 /** Only a visible, enabled input indicator mounts the usage poller. */
 export declare function UsagePill({ directory, ...props }: UsagePillProps): import("react").JSX.Element;

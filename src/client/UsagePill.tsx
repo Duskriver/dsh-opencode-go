@@ -36,9 +36,14 @@ export interface UsagePillProps {
 }
 
 /** A root sidebar entry receives its width mode from the host slot owner. */
-export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & { wide: boolean }
+export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {
+  wide: boolean
+  readAccountUsage?: (ref: string) => Promise<GoUsage>
+}
 
 type UsageVariant = 'pill' | 'sidebar' | 'sidebar-icon'
+
+const sidebarAccountStorageKey = 'dsh-opencode-go.sidebar-account'
 
 const unchanged = () => 0
 
@@ -118,9 +123,11 @@ export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
   return <UsageSurface {...props} variant={wide ? 'sidebar' : 'sidebar-icon'} />
 }
 
-/** Both placements share polling identity, account selection and detail content. */
-function UsageSurface({ settings, credentialChanges, variant, provider, ...props }:
-  Omit<UsagePillProps, 'directory'> & { variant: UsageVariant; provider?: string }) {
+/** The sidebar's viewed account is independent of the profile's request order. */
+function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, ...props }:
+  Omit<UsagePillProps, 'directory'> & {
+    variant: UsageVariant; provider?: string; readAccountUsage?: SidebarQuotaProps['readAccountUsage']
+  }) {
   // The Host scope is a class instance whose methods read their own state, so
   // React has to reach them through this receiver: a reference handed over as a
   // plain value loses it and throws on the pill's first render.
@@ -134,31 +141,55 @@ function UsageSurface({ settings, credentialChanges, variant, provider, ...props
   // endpoint or roster change remounts the polling subtree, and that must not close
   // an open dashboard or drop its in-flight report.
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  const [viewedAccountId, setViewedAccountId] = useState<string | null>(() => {
+    if (variant === 'pill') return null
+    try { return globalThis.localStorage?.getItem(sidebarAccountStorageKey) ?? null } catch { return null }
+  })
   const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
   const visible = config.status === 'ready' && config.value?.enabled !== false
     && (variant === 'pill'
       ? mode === 'always' || mode === 'auto' && provider === PROVIDER_ID
       : config.value?.showSidebarQuota === true)
   const accounts = accountsOf(config.value ?? {})
-  const activeRef = accountRefOf(config.value ?? {})
+  const viewedAccount = variant !== 'pill' && readAccountUsage
+    ? accounts.find(account => account.id === viewedAccountId) ?? accounts[0] : undefined
+  const viewedRef = viewedAccount?.apiKeyEnv
+  const activeRef = viewedRef ?? accountRefOf(config.value ?? {})
+  const readSidebarUsage = useCallback(() => viewedRef && readAccountUsage
+    ? readAccountUsage(viewedRef) : props.readUsage(), [viewedRef, readAccountUsage, props.readUsage])
+  useEffect(() => {
+    if (!visible || !viewedAccount) return
+    setViewedAccountId(viewedAccount.id)
+    try { globalThis.localStorage?.setItem(sidebarAccountStorageKey, viewedAccount.id) } catch { /* In-memory viewing still works. */ }
+  }, [visible, viewedAccount?.id])
+  const nextAccount = () => {
+    setViewedAccountId(previous => {
+      const index = Math.max(0, accounts.findIndex(account => account.id === previous))
+      return accounts[(index + 1) % accounts.length]!.id
+    })
+  }
   return visible ? <>
     <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts])}
-      {...props} accounts={accounts} activeRef={activeRef} writable={config.writable}
+      {...props} readUsage={variant === 'pill' ? props.readUsage : readSidebarUsage}
+      accounts={accounts} activeRef={activeRef} writable={config.writable}
+      onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
       analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling. */}
-    {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
+    {variant === 'pill' && props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
       readAnalytics={props.readAnalytics} readQuota={props.readUsage} t={props.t} getLocale={props.getLocale} /> : null}
   </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, variant, pillStyle }:
+function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
+    onNextAccount?: () => void
     variant: UsageVariant; pillStyle: UsagePillStyle
   }) {
+  const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -186,13 +217,13 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           setFailed(null)
         }
       } catch (error: unknown) {
-        // The sentinel only frees the latch (in `finally`) without touching the
-        // snapshot or reporting a failure the read never actually produced.
-        if (error === refreshTimedOut) return
+        // A timed-out pill read only frees the latch, keeping its snapshot.
+        // The sidebar marks its viewed account unavailable instead.
+        if (error === refreshTimedOut && !sidebar) return
         if (alive) {
           const failure = usageFailure(error)
           setFailed({ reader: readUsage, failure })
-          setSnapshot(previous => previous?.reader === readUsage && failure.retainPrevious
+          setSnapshot(previous => !sidebar && previous?.reader === readUsage && failure.retainPrevious
             && typeof previous.usage.source === 'string' && previous.usage.source.length > 0
             && previous.usage.source === failure.source ? previous : null)
         }
@@ -212,7 +243,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       clearInterval(timer)
       document.removeEventListener('visibilitychange', visible)
     }
-  }, [readUsage])
+  }, [readUsage, sidebar])
   useEffect(() => {
     if (!open) return
     const click = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
@@ -240,9 +271,9 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
     }).catch(() => { setSwitchFailed(true) }).finally(() => { setSwitching(false) })
   }
   const label = usage
-    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${sidebar ? ` · ${t('usage_monthly')} ${usage.monthly.percent}%` : ''}${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
     : `${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
-  /** The segments concatenate to exactly `label`: the two readings, the optional stale and
+  /** The pill's segments concatenate to exactly `label`: the two readings, the optional stale and
    *  fallback wording, and the active account's full name once a second account exists. The
    *  @container tiers in UsagePill.module.css can hide the unit words and the stale/fallback
    *  wording, while the account name truncates with an ellipsis instead of pushing the readings
@@ -264,27 +295,33 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
       {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
     </>
-  const sidebar = variant !== 'pill'
   const triggerClass = variant === 'sidebar' ? css.sidebarCard : variant === 'sidebar-icon' ? css.sidebarIcon
     : [css.trigger, pillStyle === 'plain' ? css.plain : undefined].filter(Boolean).join(' ')
+  const Trigger = sidebar ? 'span' : 'button'
   return <span className={[css.root, sidebar ? css.sidebarRoot : undefined].filter(Boolean).join(' ')}
     data-wide={sidebar ? String(variant === 'sidebar') : undefined} ref={root} style={themeStyle(tokens)}>
-    <button type="button" className={triggerClass} aria-expanded={open} aria-haspopup="dialog" data-fallback={notice ? '' : undefined}
-      aria-label={`${t('usageTitle')}: ${label}`} title={label} onClick={() => { setOpen(!open); setView('usage') }}>
+    <Trigger type={sidebar ? undefined : 'button'} role={sidebar ? 'group' : undefined} className={triggerClass}
+      aria-expanded={sidebar ? undefined : open} aria-haspopup={sidebar ? undefined : 'dialog'} data-fallback={notice ? '' : undefined}
+      aria-label={`${t('usageTitle')}: ${label}`} title={label}
+      onClick={sidebar ? undefined : () => { setOpen(!open); setView('usage') }}>
       {variant === 'sidebar' ? <>
         <span className={css.sidebarHead}>
           <strong>OpenCode Go</strong>
-          <span className={css.sidebarBadge} title={accountName}>{accounts.length ? accountName : 'Go'}</span>
+          {onNextAccount ? <button type="button" className={`${css.sidebarBadge} ${css.sidebarAccountButton}`}
+            aria-label={`${t('sidebarNextAccount')}: ${accountName}`} title={`${accountName} · ${t('sidebarNextAccount')}`}
+            onClick={onNextAccount}>{accountName}</button>
+            : <span className={css.sidebarBadge} title={accountName}>{accounts.length ? accountName : 'Go'}</span>}
         </span>
-        {(['rolling', 'weekly'] as const).map(key => <span className={css.sidebarWindow} key={key}>
+        {(['rolling', 'weekly', 'monthly'] as const).map(key => <span className={css.sidebarWindow} key={key}>
           <span>{t(`usage_${key}`)}</span>
           <progress aria-label={t(`usage_${key}`)} max={100} value={usage ? Math.min(100, Math.max(0, usage[key].percent)) : 0}
-            className={[key === 'rolling' ? css.progressRolling : css.progressWeekly, usage ? usageLevel(usage[key]) : undefined].filter(Boolean).join(' ')} />
+            className={[key === 'rolling' ? css.progressRolling : key === 'weekly' ? css.progressWeekly : css.progressMonthly, usage ? usageLevel(usage[key]) : undefined].filter(Boolean).join(' ')} />
           <strong>{usage ? `${usage[key].percent}%` : failure ? '—' : '…'}</strong>
         </span>)}
+        {failure ? <span className={css.sidebarStatus} role="status" title={failure.message}>{t('usageUnavailable')}</span> : null}
       </> : variant === 'sidebar-icon' ? <ChartIcon /> : segments}
-    </button>
-    {open && <div className={[css.panel, sidebar ? css.sidebarPanel : undefined].filter(Boolean).join(' ')} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
+    </Trigger>
+    {!sidebar && open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
       {/* The frosted material is a dedicated child, the way the host's own
           MenuSurface paints it, so the panel's content and the body's scrolling
           never share the filtered element. */}

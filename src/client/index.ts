@@ -154,6 +154,11 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
       if (!result.ok) throw result.error
       return result.value
     }
+    const readAccountUsage = async (ref: string) => {
+      const result = await ready.remote.opencodeGoUsage.readAccount(ref)
+      if (!result.ok) throw result.error
+      return result.value
+    }
     // Keep both quota placements available while analytics activates.
     // Cancellation is injected by the descriptor, outside the wire arguments.
     let analytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
@@ -186,7 +191,7 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
     })
     ready.slots.inject('sidebar.footer.action', () => ready.slots.register({
       name: 'sidebar.footer.action', id: 'opencode-go-sidebar-quota', order: 1000,
-      inject: usageProps,
+      inject: () => ({ ...usageProps(), readAccountUsage }),
     }, SidebarQuota))
     ready.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
       scope.slots.inject('conversation.input.right', () => scope.slots.register({

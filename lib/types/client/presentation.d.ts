@@ -29,6 +29,7 @@ export declare const en: {
     accountSwitchBack: string;
     accountSwitchHint: string;
     accountSwitchFailed: string;
+    sidebarNextAccount: string;
     accountFallbackQuota: string;
     accountFallbackCredential: string;
     accountsSummary: string;
