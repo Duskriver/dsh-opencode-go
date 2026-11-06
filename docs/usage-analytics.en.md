@@ -43,7 +43,7 @@ Only source-supported metrics are shown. Local session coverage, summary-call co
 ## Presentation and refresh
 
 - A wide-screen dialog becomes full-screen on narrow screens, with stacked daily token bars or daily request bars, model rankings and detail.
-- The pill, expanded sidebar and dashboard share one ink-blue / cool-white palette with cobalt accents, following the Host's light/dark mode. There is no theme picker. Account management and model settings retain Host components.
+- Settings, the pill, expanded sidebar and dashboard share warm paper / charcoal surfaces and terracotta accents, following the Host's light/dark mode. There is no theme picker. Locally installed Anthropic Serif / Sans / Mono fonts are preferred, with system and CJK serif fallbacks. Settings recolor the Host's existing controls only within the plugin section.
 - History queries run only when opening the dashboard, changing the viewing account or range, or refreshing manually. There is no background history polling; closing the dashboard cancels its active query.
 - The Host caches official reports and CSVs for 30 seconds, isolated by credential, account, network configuration, range and UTC date. A forced manual refresh bypasses the cache.
 - Authentication, permission, network and data-format errors show an explicit failure, without falling back to local session scans or fabricated zero usage.

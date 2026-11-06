@@ -467,7 +467,7 @@ export const zh: typeof en = {
 /** Every copy key this page's dictionaries must supply. */
 export type OpencodeGoKey = keyof typeof en
 
-/** Shared ink-blue/cool-white surfaces and restrained semantic colors. */
+/** Warm paper/charcoal surfaces shared by every plugin-owned view. */
 export interface GoThemeTokens {
   readonly bg: string
   readonly surface: string
@@ -477,6 +477,11 @@ export interface GoThemeTokens {
   readonly muted: string
   readonly accent: string
   readonly accent2: string
+  readonly accentSoft: string
+  readonly onAccent: string
+  readonly cacheRead: string
+  readonly cacheWrite: string
+  readonly shadow: string
   readonly success: string
   readonly warning: string
   readonly danger: string
@@ -485,14 +490,16 @@ export interface GoThemeTokens {
 /** One visual language in the Host's two color schemes; no separate preference. */
 export const GO_THEME_TOKENS: Record<'dark' | 'light', GoThemeTokens> = {
   dark: {
-    bg: '#0b1220', surface: '#111b2d', surface2: '#19263b', border: '#2b3950',
-    text: '#e6edf8', muted: '#a0afc5', accent: '#719bff', accent2: '#8ca3c5',
-    success: '#7fab99', warning: '#c9a971', danger: '#d58a96',
+    bg: '#242422', surface: '#2d2c29', surface2: '#353430', border: '#49473f',
+    text: '#eceae3', muted: '#b7b4a8', accent: '#e7a18a', accent2: '#b09a87',
+    accentSoft: '#49342b', onAccent: '#382017', cacheRead: '#8f8678', cacheWrite: '#a5aa8c', shadow: '#00000040',
+    success: '#9bc6a7', warning: '#d6b274', danger: '#e6a09c',
   },
   light: {
-    bg: '#f3f6fb', surface: '#ffffff', surface2: '#edf2f8', border: '#d6e0ed',
-    text: '#182941', muted: '#61738b', accent: '#2d63d7', accent2: '#718aaf',
-    success: '#537e70', warning: '#94713a', danger: '#ad596a',
+    bg: '#faf9f5', surface: '#fffefb', surface2: '#f0eee7', border: '#dedbd2',
+    text: '#30312e', muted: '#6b6a61', accent: '#a94e35', accent2: '#9f8b78',
+    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#b1a394', cacheWrite: '#858c6b', shadow: '#28261b18',
+    success: '#38654c', warning: '#8c6526', danger: '#a83e42',
   },
 }
 
@@ -528,7 +535,9 @@ export function useGoThemeTokens(): GoThemeTokens {
 }
 
 /**
- * Inline custom properties consumed by the pill and dialog styles.
+ * Inline custom properties consumed by settings, quota surfaces and history.
+ * Prefer installed Anthropic families; system fallbacks keep other machines
+ * offline-capable without distributing the user's local font files.
  * @param tokens - the active palette.
  * @returns a style object carrying every `--go-*` variable.
  */
@@ -542,9 +551,16 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-muted': tokens.muted,
     '--go-accent': tokens.accent,
     '--go-accent-2': tokens.accent2,
+    '--go-accent-soft': tokens.accentSoft,
+    '--go-on-accent': tokens.onAccent,
+    '--go-cache-read': tokens.cacheRead,
+    '--go-cache-write': tokens.cacheWrite,
+    '--go-shadow': tokens.shadow,
     '--go-success': tokens.success,
     '--go-warning': tokens.warning,
     '--go-danger': tokens.danger,
-    '--go-number-font': '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+    '--go-font': '"Anthropic Sans Web", "Anthropic Sans", "Styrene B", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+    '--go-display-font': '"Anthropic Serif Web", "Anthropic Serif", "Tiempos Text", Charter, "Songti SC", "Noto Serif SC", SimSun, Georgia, serif',
+    '--go-number-font': '"Anthropic Mono Web", "Anthropic Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
   } as CSSProperties
 }

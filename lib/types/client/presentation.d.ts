@@ -234,7 +234,7 @@ export declare const en: {
 export declare const zh: typeof en;
 /** Every copy key this page's dictionaries must supply. */
 export type OpencodeGoKey = keyof typeof en;
-/** Shared ink-blue/cool-white surfaces and restrained semantic colors. */
+/** Warm paper/charcoal surfaces shared by every plugin-owned view. */
 export interface GoThemeTokens {
     readonly bg: string;
     readonly surface: string;
@@ -244,6 +244,11 @@ export interface GoThemeTokens {
     readonly muted: string;
     readonly accent: string;
     readonly accent2: string;
+    readonly accentSoft: string;
+    readonly onAccent: string;
+    readonly cacheRead: string;
+    readonly cacheWrite: string;
+    readonly shadow: string;
     readonly success: string;
     readonly warning: string;
     readonly danger: string;
@@ -259,7 +264,9 @@ export declare function useHostScheme(): 'dark' | 'light';
 /** The unified tokens for the Host's current scheme. */
 export declare function useGoThemeTokens(): GoThemeTokens;
 /**
- * Inline custom properties consumed by the pill and dialog styles.
+ * Inline custom properties consumed by settings, quota surfaces and history.
+ * Prefer installed Anthropic families; system fallbacks keep other machines
+ * offline-capable without distributing the user's local font files.
  * @param tokens - the active palette.
  * @returns a style object carrying every `--go-*` variable.
  */

@@ -106,8 +106,8 @@ function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQu
     finally { if (!controller.signal.aborted) setExporting(false) }
   }
   return <div className={css.dashboard} style={themeStyle(tokens)} aria-busy={loading}>
-    <header className={css.header}><div className={css.brand}><span className={css.brandIcon}><Icon name="chart" /></span><span>OPENCODE <b>CONSOLE</b></span></div><button type="button" className={css.iconButton} onClick={onClose} aria-label={t('analyticsClose')}><Icon name="close" /></button></header>
-    <div className={css.heading}><div><span className={css.eyebrow}>WORKSPACE / USAGE</span><h1>{t('analyticsTitle')}</h1><p>{copy.scope}</p></div><span className={css.source}><i />OpenCode Console</span></div>
+    <header className={css.header}><div className={css.brand}><span className={css.brandIcon}><Icon name="chart" /></span><span>{t('titleLabel')}</span></div><button type="button" className={css.iconButton} onClick={onClose} aria-label={t('analyticsClose')}><Icon name="close" /></button></header>
+    <div className={css.heading}><div><h1>{t('analyticsTitle')}</h1><p>{copy.scope}</p></div><span className={css.source}><i />OpenCode Console</span></div>
     <div className={css.toolbar}>
       <label className={css.accountSelect}><span>{copy.account}</span><select aria-label={copy.account} value={accountRef} onChange={event => { setSelected(event.target.value) }} disabled={!accounts.length}>{accounts.map(a => <option key={a.apiKeyEnv} value={a.apiKeyEnv}>{a.name || t('accountDefault')}</option>)}</select></label>
       <div className={css.rangeGroup} role="group" aria-label={t('analyticsRange')}>{RANGES.map(value => <button type="button" key={value} aria-pressed={value === range} onClick={() => { setRange(value) }}>{t(RANGE_LABELS[value])}</button>)}</div><span className={css.utc}>UTC</span>

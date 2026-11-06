@@ -385,7 +385,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         })}
       </div>
       {editor ? (editor.kind === 'add' ? editorForm() : null)
-        : <Button variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
+        : <Button className={css.addAccount} variant="primary" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
           onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
       <div className={css.field}>
         <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}<HintMark hint={t('accountAutoSwitchHint')} /></span>
@@ -910,6 +910,7 @@ function Loaded(props: {
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
+  const tokens = useGoThemeTokens()
   const [advanced, setAdvanced] = useState(false)
   // The list is the page's largest block and the tuning fields sit under it, so
   // it ships folded: a reader opens it when they came to change models.
@@ -932,7 +933,7 @@ function Loaded(props: {
     if (state.available && state.models.status === 'idle') loadModels()
   }, [state.available, state.models.status, loadModels])
   if (!state.available) {
-    return <p className={css.intro}>{t('unavailable')}</p>
+    return <div className={css.page} style={themeStyle(tokens)}><p className={css.intro}>{t('unavailable')}</p></div>
   }
   const disabled = !state.writable
   // The provider switch says what its state means; the mark opens the sentence.
@@ -948,7 +949,7 @@ function Loaded(props: {
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
   const canResetAdvanced = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
   return (
-    <div className={css.page}>
+    <div className={css.page} style={themeStyle(tokens)}>
       <div className={css.pageBody}>
       <div className={css.pageTop}>
         <h2 className={css.title}>{t('titleLabel')}</h2>
