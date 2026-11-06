@@ -26,6 +26,7 @@ Vitest tests are organized by domain. Results for the history-dashboard migratio
 | `plugin.spec.ts` | Cordis mounting/unloading, native SettingsForms/profile writes, hot configuration, RPC and public exports |
 | `accounts.spec.ts` | Account CRUD, 20-account cap, serial writes, failed-write cleanup, fallback/promotion, stale calls and five-minute cooldown |
 | `free.spec.ts` | Dual route lifecycle, public Bearer fallback, saved keys, account retry and credential deadlines |
+| `free-channel.spec.ts`, `free-transport.spec.ts` | Free failure classification, Retry-After/backoff, cancellation, transport isolation and coexistence with Go |
 | `pricing.spec.ts` | Catalog tariff validation and Free-model eligibility; historical amounts come from official CSV |
 | `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `adapter.spec.ts` | Requests, capacity limits, session/attribution headers, immutable request snapshots, cancellation and timeouts |
@@ -52,6 +53,7 @@ Implementation modules are grouped by domain, with browser CSS and its ambient d
 | Inference and model discovery | `adapter.ts`, `catalog.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
 | Account commands and official quota | `accounts.ts` |
 | Official daily CSV history and aggregation | `analytics.ts` |
+| Free backoff, error classification and transport | `free-channel.ts`, `free-policy.ts`, `free-transport.ts` |
 | Browser-safe configuration and RPC contracts | `contracts.ts` |
 | HTTP, proxy transport and redacted errors | `transport.ts` |
 | Browser registration and state | `client/index.ts`, `client/controller.ts` |

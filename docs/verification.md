@@ -1,6 +1,6 @@
 # Verification
 
-The recorded baseline on 2026-11-02 used macOS, Node `24.22.1`, npm `12.2.1`, DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.18.5`. Those results precede the official-history dashboard migration.
+The recorded baseline on 2026-11-06 used macOS, Node `24.22.1`, npm `12.2.1`, development peers DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.18.5`. The installed DSH `0.2.2-rc.1` CLI was also exercised with an isolated headless profile and the rebuilt plugin. Those results precede the official-history dashboard migration and do not validate its new implementation.
 
 The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `~4.0.5`. The package retains its `.` and `./client` export contracts. The current architecture and command reference are in [development](development.md).
 
@@ -8,9 +8,9 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `~4.0.5`. The pack
 
 | Command | Result |
 | --- | --- |
-| `npm test` | 12 test files, 721 tests, zero failures or skipped tests |
+| `npm test` | 17 test files, 913 tests, zero failures or skipped tests |
 | `npm run typecheck` | Host and browser TypeScript projects pass |
-| `npm run check:dist` | All 21 shipped build artifacts match an independent rebuild |
+| `npm run check:dist` | All 33 shipped build artifacts match an independent rebuild |
 | `npm run verify` | Types, artifact comparison, full Vitest suite and installed-package smoke pass |
 
 `verify` includes `typecheck`, `test:ci` and `verify:installed`; `test:ci` includes `check:dist` and `npm test`. CI runs this same acceptance path after `npm ci --strict-peer-deps` on Linux and Windows with Node 22.19 and 24. Those CI jobs are configured; the baseline results above are from macOS.
@@ -36,10 +36,12 @@ The daily CSV at `https://opencode.ai/console/api/v2/usage/export?range=30d` sup
 | Credential/account/network/date cache isolation, force refresh, proxy path, cancellation, timeout and response limits | Pass: Host service and RPC tests, including independent cancellation and connection-change races |
 | Key/member-field boundary, third-party gateway rejection and explicit upstream failures | Pass: report excludes member fields and keys; explicit permission, credential, gateway and malformed-response failures |
 | Dashboard account/range/refresh, selected-account quotas and responsive light/dark UI | Pass: browser interaction tests plus real-browser 1280×1000 dark / 390×844 light checks, Chinese and English |
-| `npm test` | Pass: 16 files, 863 tests; zero failures or skipped tests |
+| `npm test` | Pass: 17 files, 886 tests; zero failures or skipped tests |
 | `npm run typecheck` / `npm run compile` | Pass: Host and browser types and distribution build |
-| `npm run check:dist` | Pass: all 29 shipped artifacts match an independent rebuild |
+| `npm run check:dist` | Pass: all 31 shipped artifacts match an independent rebuild |
 | `npm run verify` | Pass: types, build comparison, all tests and installed-package smoke |
+
+The user-facing Free status card, its copy/styles, status/probe RPCs and manual inference probe have been removed. Normal requests retain Free error classification and passive Retry-After/backoff, including account isolation, cancellation and coexistence with Go.
 
 Backend migration checks use synthetic CSVs, synthetic keys and loopback services, never a real user's key. The manual Console source check above is separate from automated tests.
 
@@ -59,6 +61,7 @@ The pre-migration baseline covered:
 - Stable session and attribution headers, stream outcomes/deadlines, independent tool-role conversion, replay signatures, image offload projection, exact encoded-byte/count budgets and request-local preparation concurrency.
 - Official quota/error codecs. Official-history CSV behavior is covered by the migration checks above.
 - Bounded JSON/gzip responses, safe gateway classification/redaction, actual HTTP CONNECT and SOCKS5 proxy paths, concurrent Google fetch binding and version-guarded SDK patch matching.
+- Free-specific quota/client/access/rate-limit classification, Retry-After seconds and HTTP dates including clock skew, bounded exponential fallback, endpoint/proxy isolation, concurrent completion ordering and zero inference during cooldown. A normal Host request test limits Free and then completes Go streaming with its saved fixture key in the same mount.
 - Settings Save/Reset/Discard and rejected/concurrent writes; AccountsCard additions, quota states, row actions and drag/keyboard sorting; model editor/search/visibility and refresh races; quota pill polling, account switching and retained readings; installed locale resolution and live Chinese/English changes. Dashboard and palette migration checks are listed separately above.
 
 ## Isolation and limits
@@ -68,5 +71,7 @@ Vitest gives each test a temporary `DSH_HOME`, serves complete synthetic `/model
 The pinned rc.5 UI primitives package references an unpublished `index.js.map`; Vite reports a non-fatal source-map warning. Undici also reports its experimental SOCKS5 notice during the real proxy test. Neither creates a failed test or nonzero command exit. The suite does not filter these messages or patch installed packages.
 
 JSDOM verifies DOM interactions and accessible state. Its static ResizeObserver fixture does not establish browser layout geometry or production latency; the real-browser preview checks above cover the recorded layouts. Loopback inference does not establish live gateway availability or paid model behavior. `npm run verify:headless -- /path/to/consumer` remains available for a consumer containing the official CLI; it is separate from the default acceptance path.
+
+The installed Harness CLI loaded the rebuilt package from an isolated `DSH_HOME`: Go completed one loopback request with the expected synthetic credential and session header (exit 0). A single public `beam-free` request to the real Free gateway returned HTTP 429 / `FreeUsageLimitError`, now surfaced as `FREE_QUOTA` (exit 1, expected upstream rejection). This validates error propagation, not live Free availability; no paid upstream inference was used. The 53,305-second backoff and Go coexistence were verified with deterministic HTTP/RPC fixtures.
 
 No publication or paid upstream inference was performed for the dashboard migration.

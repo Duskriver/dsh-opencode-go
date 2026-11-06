@@ -34,6 +34,8 @@ interface GatewayContextBudget {
 export declare function classifyGatewayError(status: number, body: string, fallback: string, budget?: GatewayContextBudget): string;
 export declare class GatewayDiagnostics {
     private readonly options;
+    private retryAt;
+    private transportFailed;
     private evidence;
     private code;
     private readonly secrets;
@@ -43,10 +45,13 @@ export declare class GatewayDiagnostics {
         apiKey: string;
         proxyURL?: string;
         fetch?: typeof globalThis.fetch;
+        free?: boolean;
     });
     private redact;
     readonly fetch: typeof globalThis.fetch;
     failureCode(fallback: string): Promise<string>;
+    /** Upstream deadline consumed by passive Free backoff. */
+    retryDeadline(): number | undefined;
     failureMessage(original: string): Promise<string>;
 }
 interface UsageErrorOptions {

@@ -16,6 +16,7 @@
 DSH already supports OpenCode Go natively. This plugin focuses on usage inside conversations, managing multiple accounts, and dedicated model and settings controls.
 
 - **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. Free shares saved keys and uses public access when none is usable.
+- **Free rate-limit protection**: honors upstream `Retry-After` and pauses new requests during cooldown. Shared Free quota/IP limits do not rotate Go accounts.
 - **Usage at a glance**: see usage beside the conversation input, then open the panel for five-hour, weekly, and monthly percentages and reset times.
 - **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
 - **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
@@ -181,7 +182,7 @@ npm run check:dist
 npm run verify
 ```
 
-Tests cover host services, accounts, catalog, protocols, analytics, transport and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
+Tests cover host services, accounts, catalog, protocols, analytics, transport, Free backoff, and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
 
 ## More documentation
 

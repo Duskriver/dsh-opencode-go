@@ -634,15 +634,6 @@
 
 .modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
 .modelPanel { display: flex; flex-direction: column; gap: 16px; width: 100%; min-width: 0; }
-.freeHeader { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 20px 0; }
-.freeActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
-.freeSelect { min-width: 120px; max-width: 100%; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px;
-  background: var(--dsw-alias-background-primary); color: var(--dsw-alias-label-primary); font: inherit; }
-.freeDetails { font-size: 12px; }
-.freeDetails summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
-.freeFacts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; line-height: 1.5; }
-.freeFacts dt { color: var(--dsw-alias-label-secondary); }
-.freeFacts dd { margin: 0; overflow-wrap: anywhere; }
 .modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-right: 6px; }
 .modelRow + .modelRow { border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .modelRowSelected { background: var(--dsw-alias-bg-layer-3); border-radius: 6px; border-top-color: transparent; }

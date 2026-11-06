@@ -7,6 +7,7 @@ import { Readable, Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createGunzip } from 'node:zlib'
 import { isContextWindowExceededError, isQuotaExceededError } from '@deepseek-ai/dsh-llm'
+import { classifyFreeGatewayError, retryAfterDeadline } from './free-policy.ts'
 
 /** Cancel a wait even when an external service does not observe its signal. */
 export function waitWithSignal<T>(work: () => PromiseLike<T>, signal?: AbortSignal): Promise<T> {
@@ -341,6 +342,8 @@ async function previewBody(response: Response, callerSignal?: AbortSignal | null
 }
 
 export class GatewayDiagnostics {
+  private retryAt: number | undefined
+  private transportFailed = false
   private evidence: Promise<{ status: number; body: BodyPreview }> | undefined
   private code: Promise<string> | undefined
   private readonly secrets: string[]
@@ -351,6 +354,7 @@ export class GatewayDiagnostics {
     apiKey: string
     proxyURL?: string
     fetch?: typeof globalThis.fetch
+    free?: boolean
   }) {
     this.secrets = [options.apiKey]
     if (options.proxyURL) {
@@ -383,11 +387,15 @@ export class GatewayDiagnostics {
   }
 
   readonly fetch: typeof globalThis.fetch = async (input, init) => {
-    const response = await (this.options.fetch ?? globalThis.fetch)(input, init)
+    let response: Response
+    try { response = await (this.options.fetch ?? globalThis.fetch)(input, init) }
+    catch (error) { this.transportFailed = true; throw error }
     if (!response.ok) {
+      this.retryAt = retryAfterDeadline(response.headers.get('retry-after'), Date.now(), response.headers.get('date'))
       const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined)
       const preview = previewBody(response, signal)
-      this.code = preview.then(body => classifyGatewayError(response.status, body.text, 'PI_AI_ERROR', this.options))
+      this.code = preview.then(body => (this.options.free ? classifyFreeGatewayError(response.status, body.text) : undefined)
+        ?? classifyGatewayError(response.status, body.text, 'PI_AI_ERROR', this.options))
       this.evidence = preview.then(body => ({ status: response.status,
         body: { ...body, text: this.redact(body.text, body.truncated || body.readFailed) } }))
     }
@@ -395,10 +403,14 @@ export class GatewayDiagnostics {
   }
 
   async failureCode(fallback: string): Promise<string> {
+    if (this.options.free && this.transportFailed) return 'NETWORK'
     const code = await this.code
     return code === undefined || code === 'PI_AI_ERROR'
       || code === 'INVALID_REQUEST' && fallback === 'CONTEXT_WINDOW_EXCEEDED' ? fallback : code
   }
+
+  /** Upstream deadline consumed by passive Free backoff. */
+  retryDeadline(): number | undefined { return this.retryAt }
 
   async failureMessage(original: string): Promise<string> {
     let message = this.redact(original)

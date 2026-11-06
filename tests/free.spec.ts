@@ -123,7 +123,7 @@ describe('Free credential selection and multi-account retry', () => {
     expect(onAccountSettled).not.toHaveBeenCalled()
     expect(gateway.headers.at(-1)?.authorization).toBe('Bearer public')
   })
-  it.each(['GoUsageLimitError', 'FreeUsageLimitError'])('retries %s with the next saved key and remembers rejection on this gateway', async type => {
+  it.each(['GoUsageLimitError'])('retries %s with the next saved key and remembers rejection on this gateway', async type => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
     gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { type, message: 'usage limit' } }) })
     gateway.pushCompletions({ events: textEvents }); gateway.pushCompletions({ events: textEvents })
@@ -139,7 +139,7 @@ describe('Free credential selection and multi-account retry', () => {
     expect(gateway.headers.filter((_, index) => gateway.paths[index] === '/chat/completions').map(headers => headers.authorization)).toEqual(['Bearer key-a', 'Bearer key-b', 'Bearer key-b'])
     expect(resolveApiKey.mock.calls.map(([current]) => current.apiKeyEnv)).toEqual(['ACCOUNT_A', 'ACCOUNT_B', 'ACCOUNT_B'])
   })
-  it('honors account retry for a Free quota response even when its message mentions OpenCode', async () => {
+  it('does not rotate accounts for a shared Free quota, even when its message mentions OpenCode', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
     gateway.pushCompletions({ status: 429, body: JSON.stringify({ type: 'error', error: {
       type: 'FreeUsageLimitError',
@@ -150,12 +150,12 @@ describe('Free credential selection and multi-account retry', () => {
     const resolveApiKey = vi.fn(async (config: { apiKeyEnv: string }) => config.apiKeyEnv === 'ACCOUNT_A' ? 'primary-key' : 'backup-key')
     const adapter = new OpencodeGoAdapter({ source: 'free',
       config: () => configOf(gateway.url, { freeBaseURL: gateway.url, apiKeyEnv: 'ACCOUNT_A', accounts, autoSwitch: true }), resolveApiKey })
-    expect((await drain(adapter.stream(freeRequest()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
-    expect(gateway.bodies).toHaveLength(2)
-    expect((await drain(adapter.stream(freeRequest()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
-    expect(resolveApiKey.mock.calls.map(([current]) => current.apiKeyEnv)).toEqual(['ACCOUNT_A', 'ACCOUNT_B', 'ACCOUNT_B'])
+    expect((await drain(adapter.stream(freeRequest()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'FREE_QUOTA' } } })
+    expect(gateway.bodies).toHaveLength(1)
+    await expect(drain(adapter.stream(freeRequest()))).rejects.toMatchObject({ code: 'FREE_COOLDOWN' })
+    expect(resolveApiKey.mock.calls.map(([current]) => current.apiKeyEnv)).toEqual(['ACCOUNT_A'])
     expect(gateway.headers.filter((_, index) => gateway.paths[index] === '/chat/completions').map(headers => headers.authorization))
-      .toEqual(['Bearer primary-key', 'Bearer backup-key', 'Bearer backup-key'])
+      .toEqual(['Bearer primary-key'])
   })
   it('uses public when backups have no key and revisits the saved key on the next request', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
@@ -204,7 +204,7 @@ describe('Free credential selection and multi-account retry', () => {
     { status: 403, error: { type: 'RegionError', message: 'Unavailable in region' }, code: 'PERMISSION_DENIED' },
     { status: 403, error: { type: 'DataPolicyError', message: 'Privacy policy restriction' }, code: 'PERMISSION_DENIED' },
     { status: 402, error: { message: 'Permission required' }, code: 'PERMISSION_DENIED' },
-    { status: 429, error: { type: 'FreeUsageLimitError', message: 'Free limit reached' }, code: 'QUOTA' },
+    { status: 429, error: { type: 'FreeUsageLimitError', message: 'Free limit reached' }, code: 'FREE_QUOTA' },
   ])('preserves $code without public retry', async ({ status, error, code }) => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
     gateway.pushCompletions({ status, body: JSON.stringify({ error }) })
@@ -215,9 +215,10 @@ describe('Free credential selection and multi-account retry', () => {
       code, message: expect.stringContaining(error.message),
     } } })
     expect(gateway.bodies).toHaveLength(1)
-    await drain(adapter.stream(freeRequest()))
+    if (code === 'FREE_QUOTA') await expect(drain(adapter.stream(freeRequest()))).rejects.toMatchObject({ code: 'FREE_COOLDOWN' })
+    else await drain(adapter.stream(freeRequest()))
     expect(gateway.headers.filter((_, index) => gateway.paths[index] === '/chat/completions').map(headers => headers.authorization))
-      .toEqual(['Bearer ACCOUNT_A', 'Bearer ACCOUNT_A'])
+      .toEqual(code === 'FREE_QUOTA' ? ['Bearer ACCOUNT_A'] : ['Bearer ACCOUNT_A', 'Bearer ACCOUNT_A'])
   })
   it.each(['output', 'usage', 'aborted'] as const)('does not retry a rejected key as public after %s', async mode => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
