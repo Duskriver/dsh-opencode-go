@@ -33,7 +33,11 @@ export interface PiAiReplayResponse {
     stopReason: AssistantMessage['stopReason'];
     /** Measured context footprint for the next turn's SDK output-token clamp. */
     usage?: Pick<PiUsage, 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'totalTokens'>;
+    /** Fingerprint of the request prefix and this reply that the usage measured. */
+    usageContext?: string;
 }
+/** Capture one converted request before the SDK can mutate it while streaming. */
+export declare function piContextUsageKey(context: PiContext, provider: string, model: string): string;
 /**
  * Project a successful pi-ai response into the minimal durable replay state.
  * The per-block half is index-aligned with the streamed blocks (pi-ai content
@@ -42,9 +46,10 @@ export interface PiAiReplayResponse {
  * @param message - completed native pi-ai assistant response.
  * @param requestedModel - request identity stored in the assistant source; defaults to the native model.
  * @param requestedProvider - DSH route stored in the assistant source; defaults to the native provider.
+ * @param usageContext - fingerprint of the request that produced this response.
  * @returns the versioned lossless-JSON replay projection.
  */
-export declare function toPiReplayState(message: AssistantMessage, requestedModel?: string, requestedProvider?: string): ReplayEnvelope;
+export declare function toPiReplayState(message: AssistantMessage, requestedModel?: string, requestedProvider?: string, usageContext?: string): ReplayEnvelope;
 /**
  * Convert one durable Harness assistant message into pi-ai history.
  *
@@ -141,9 +146,10 @@ export declare function mapStopReason(message: AssistantMessage, contextWindow?:
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
  * @param reservedMaxTokens - requested output allowance before SDK context clamping.
+ * @param usageContext - fingerprint of the request whose usage may budget a later turn.
  * @returns the harness chunks, ending with measured `usage` then `finish`;
  *   failures with no measured tokens omit usage to preserve context pressure. Throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
  */
-export declare function toStreamChunks(events: AsyncIterable<AssistantMessageEvent>, contextWindow?: number, callerSignal?: AbortSignal, requestedModel?: string, requestedProvider?: string, reservedMaxTokens?: number): AsyncGenerator<StreamChunk>;
+export declare function toStreamChunks(events: AsyncIterable<AssistantMessageEvent>, contextWindow?: number, callerSignal?: AbortSignal, requestedModel?: string, requestedProvider?: string, reservedMaxTokens?: number, usageContext?: string): AsyncGenerator<StreamChunk>;
 export { DEFAULT_MAX_REQUEST_IMAGE_BYTES, DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET, } from './contracts.ts';

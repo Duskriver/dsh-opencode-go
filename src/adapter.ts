@@ -33,7 +33,7 @@ import {
   assertBaseURL,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './config.ts'
-import { toPiContext, toStreamChunks, type PiImageRequestContext } from './conversion.ts'
+import { toPiContext, toStreamChunks, piContextUsageKey, type PiImageRequestContext } from './conversion.ts'
 import { GatewayDiagnostics, waitWithSignal, ProxyTransport } from './transport.ts'
 import {
   reasoningChoices,
@@ -180,6 +180,7 @@ export class OpencodeGoRequestExecutor {
       // Direct providers accept a transcript, unlike Models which normalizes
       // Context itself. Preserve prompts and tool declarations on every host.
       const transcript = normalizeContext(context)
+      const usageContext = piContextUsageKey(context, options.provider, model.id)
       const diagnostics = new GatewayDiagnostics({
         provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
         fetch: model.source === 'free' ? this.freeTransport.forProxy(config.proxyURL) : this.transport.forProxy(config.proxyURL),
@@ -207,7 +208,7 @@ export class OpencodeGoRequestExecutor {
         // one SDK attempt.
         maxRetries: 0,
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, options.provider, maxTokens)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, options.provider, maxTokens, usageContext)[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {
