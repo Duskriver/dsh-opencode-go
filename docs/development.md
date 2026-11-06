@@ -19,39 +19,39 @@ The development baseline is DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.
 
 ## Test suite
 
-Vitest discovers exactly 12 domain files:
+Vitest tests are organized by domain. Results for the history-dashboard migration are tracked separately in [verification notes](verification.md); the table below is a scope reference, not a passing-run claim.
 
 | Test file | Coverage |
 | --- | --- |
 | `plugin.spec.ts` | Cordis mounting/unloading, native SettingsForms/profile writes, hot configuration, RPC and public exports |
 | `accounts.spec.ts` | Account CRUD, 20-account cap, serial writes, failed-write cleanup, fallback/promotion, stale calls and five-minute cooldown |
 | `free.spec.ts` | Dual route lifecycle, public Bearer fallback, saved keys, account retry and credential deadlines |
-| `pricing.spec.ts` | Strict free-price validation, context tiers and dynamic UTC/date multipliers |
+| `pricing.spec.ts` | Catalog tariff validation and Free-model eligibility; historical amounts come from official CSV |
 | `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `adapter.spec.ts` | Requests, capacity limits, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |
 | `usage.spec.ts` | Official quota reads, current-account selection, native gateway access and safe error responses |
-| `analytics.spec.ts` | Session folding, totals, context/peak pricing, Go/Go Plus limits, memory cache freshness, scan limits and cancellation |
+| `analytics.spec.ts` | Official daily CSV parsing/aggregation, UTC ranges, provider/model grouping, account isolation, short cache and cancellation |
 | `transport.spec.ts` | Bounded JSON/gzip, classified/redacted HTTP errors, real CONNECT/SOCKS5 proxies and SDK bridge matching |
 | `settings.client.spec.tsx` | Page configuration, typed Save/Reset/refused writes, locale changes, registration and subscription/cancellation lifecycle |
 | `accounts-models.client.spec.tsx` | AccountsCard forms/status/quota, drag/keyboard ordering, model visibility, metadata failures and refresh races |
-| `usage.client.spec.tsx` | Conversation pill, AnalyticsDialog, pricing presentation, polling/visibility, accessibility and themes |
+| `usage.client.spec.tsx` | Conversation pill, dashboard account/range controls, official amount presentation, quota refresh/visibility and accessibility |
 
 All test imports target current modules directly. `vitest.config.ts` has no aliases or compatibility resolver. Its Google SDK loader is the same version-guarded transport patch used by the production build. The UI tests load the published DSH primitives and the installed locale bundle.
 
-`tests/setup.ts` gives each test a temporary `DSH_HOME`, provides complete synthetic `/models` entries, allows loopback HTTP fixtures and explicit `.invalid` destinations through the local proxy fixture, and rejects other network requests. `tests/support/` contains five shared helpers: current host/account services, ConfigForm/React fixtures, metadata data, loopback gateways and proxies. Fixtures clean up contexts, sockets, timers and temporary homes.
+`tests/setup.ts` gives each test a temporary `DSH_HOME`, provides complete synthetic `/models` entries, allows loopback HTTP fixtures and explicit `.invalid` destinations through the local proxy fixture, and rejects other network requests. `tests/support/` provides current host/account services, ConfigForm/React fixtures, metadata data, loopback gateways and proxies. Fixtures clean up contexts, sockets, timers and temporary homes.
 
 ## Modules
 
-The source contains 17 implementation modules, plus CSS and its ambient declaration:
+Implementation modules are grouped by domain, with browser CSS and its ambient declaration:
 
 | Domain | Modules |
 | --- | --- |
 | Host composition and settings | `index.ts`, `config.ts` |
 | Inference and model discovery | `adapter.ts`, `catalog.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
 | Account commands and official quota | `accounts.ts` |
-| Local usage analytics and plan pricing | `analytics.ts` |
+| Official daily CSV history and aggregation | `analytics.ts` |
 | Browser-safe configuration and RPC contracts | `contracts.ts` |
 | HTTP, proxy transport and redacted errors | `transport.ts` |
 | Browser registration and state | `client/index.ts`, `client/controller.ts` |
@@ -61,7 +61,13 @@ The host uses `settings.configure()` and volatile configuration fields; the brow
 
 Account commands and automatic primary-account promotion share one in-memory serial queue. Credential writes settle before the next command starts. Metadata changes use a single revision-guarded write; no WAL, startup recovery or conflict retry loop is maintained. Only credentials owned by the removed generated account are deleted. Request generations prevent late fallback outcomes from replacing a newer user selection. Credential, quota and rate-limit failures can try the next account only before output or positive usage, and rejected gateway keys cool down for five minutes. Changing a key or explicitly selecting an account clears its rejection state.
 
-Analytics folds session events, prices them using the current catalog (including context tiers and peak/off-peak pricing), and includes Go / Go Plus monthly limits. A bounded in-memory session cache reuses results for at most five seconds; restarting the process clears it. Reports retain coverage, truncation, pricing availability and cancellation. Analytics does not write fold files.
+Analytics requests `https://opencode.ai/console/api/v2/usage/export?range=7d|30d|90d` from the Host with the selected account's key. One daily CSV snapshot supplies totals, UTC daily buckets and provider/model detail. Today filters the 7-day snapshot to the current UTC date; absent dates are filled with zero. Input, output, cache read and both 5-minute/1-hour cache-write fields are summed without repricing. Integer `cost_micro_cents` use `1 USD = 100,000,000` units and are presented as the official usage amount, which does not establish extra Go charges.
+
+History queries occur only on open, account/range changes and manual refresh. Official reports and CSVs have a 30-second Host cache isolated by credential, account, network configuration, range and UTC date; forced refresh bypasses it. Queries retain the configured proxy path, cancellation, timeouts and response-size limits. Only official gateway configurations may send keys to Console. Third-party gateways, permission failures, network failures and invalid data produce explicit errors, without a local-history fallback.
+
+The browser receives only aggregate numbers and provider/model/day groups. The user's explicit CSV download may contain official member fields. The independent viewing-account selector defaults to the inference account and scopes all three dashboard quota windows to the selected workspace, including other clients; anonymous Free coverage is not guaranteed. The dashboard, pill and expanded sidebar share one ink-blue/cool-white palette with cobalt accents and follow the Host's light/dark mode. Account management and model settings retain Host components.
+
+Backend history tests use synthetic CSVs, synthetic keys and loopback services; real user keys are not used in automated tests. The separately recorded Console check establishes source availability for the checked account; automated migration results are recorded separately in the verification notes.
 
 Image count limits are checked before reads. Each request prepares up to four images concurrently and checks its own encoded-payload budget. The host's `requiredImageOffload` / `projectOffloadedImages` protocol owns durable offload marks. There is no plugin-wide preparation queue or payload pool. HTTP failure classification, credential redaction, context-capacity hints, stream deadlines and cancellation remain active; internal call tracing and diagnostic file capture are removed.
 

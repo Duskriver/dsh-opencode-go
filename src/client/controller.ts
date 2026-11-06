@@ -24,8 +24,6 @@ import {
   type GoModel,
   type GoModelCatalog,
   type GoUsage,
-  type AnalyticsQuery,
-  type AnalyticsReport,
   type AccountCommand,
   type SettingsWriteResult,
 } from '../contracts.ts'
@@ -198,8 +196,6 @@ export interface OpencodeGoSectionState extends FormShell {
 export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   hooks: { opencodeGo: SnapshotStore<OpencodeGoSectionState> }
   loadModels(): void
-  readAnalytics(query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport>
-  readQuota(ref: string): Promise<GoUsage>
   setEnabled(next: boolean): void
   setModelEnabled(id: string, next: boolean): void
 }
@@ -240,11 +236,6 @@ export class OpencodeGoSectionController {
     private readonly executeAccountCommand: ExecuteAccountCommand = async command => {
       const result = await ctx.remote.opencodeGoAccounts.execute(command)
       return result.ok ? result.value : 'unknown'
-    },
-    private readonly readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport> = async () => {
-      throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
-        code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
-      })
     },
   ) {
     this.syncAccounts()
@@ -361,7 +352,7 @@ export class OpencodeGoSectionController {
   inject(): OpencodeGoSectionFace {
     this.face ??= {
       hooks: { opencodeGo: this.store },
-      loadModels: () => this.loadModels(), readAnalytics: (query, signal) => this.readAnalytics(query, signal), readQuota: ref => this.readUsage(ref),
+      loadModels: () => this.loadModels(),
       setEnabled: next => { void this.setEnabled(next) }, setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
       edit: (field, text) => this.edit(field, { kind: 'text', text }),
       editModelLimits: value => this.edit('modelLimits', { kind: 'limits', value: structuredClone(value) }),
@@ -443,6 +434,7 @@ export class OpencodeGoSectionController {
     if (!accountsOf(this.scope.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) return
     this.accountEpoch++
     this.accountRows.delete(ref)
+    this.publish()
     if (this.accountsLoaded) void this.refreshAccounts()
   }
 

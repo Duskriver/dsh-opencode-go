@@ -1,6 +1,6 @@
 /** Settings cards, account editors, model capacities and accessible field help. */
 import css from './Section.module.css'
-import themeCss from './ThemePicker.module.css'
+import usageCss from './UsagePill.module.css'
 import {
   Tooltip,
   IconQuestionOutlineRegular,
@@ -11,12 +11,8 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   type en,
-  GO_THEMES,
-  GO_THEME_LABELS,
-  GO_THEME_TOKENS,
-  setGoTheme,
-  useGoTheme,
-  useHostScheme,
+  useGoThemeTokens,
+  themeStyle,
 } from './presentation.ts'
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type {
@@ -45,12 +41,8 @@ import {
   type InputModality,
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
-  type AnalyticsQuery,
-  type AnalyticsReport,
-  type GoUsage,
 } from '../contracts.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { AnalyticsDialog } from './AnalyticsDialog.tsx'
 
 export function HintMark(props: { hint: string }) {
   return <Tooltip label={props.hint} side="bottom" maxWidth={280}>
@@ -62,48 +54,6 @@ export function HintMark(props: { hint: string }) {
 
 export function HintText(props: { id: string; hint: string }) {
   return <p id={props.id} className={css.visuallyHidden}>{props.hint}</p>
-}
-
-/**
- * The one place a style is chosen: four previews, each a miniature of the
- * surface it selects, on the Settings page. The picker lives here rather than in
- * the pill or the dashboard so a working session never changes its own look.
- * @param props.t - copy lookup.
- */
-export function ThemePicker({ t }: { t: (key: keyof typeof en) => string }) {
-  const active = useGoTheme()
-  const scheme = useHostScheme()
-  return <div className={themeCss.group} role="group" aria-label={t('themeLabel')}>
-    {GO_THEMES.map(id => {
-      const tokens = GO_THEME_TOKENS[id][scheme]
-      const name = t(GO_THEME_LABELS[id])
-      return <button
-        key={id}
-        type="button"
-        className={themeCss.option}
-        aria-pressed={active === id}
-        data-theme={id}
-        title={name}
-        onClick={() => { setGoTheme(id) }}
-      >
-        {/* A four-line sketch of one panel: its surface, its accent and two text
-            tones. Inline because each tile paints a different palette. */}
-        <span
-          className={themeCss.swatch}
-          aria-hidden="true"
-          style={{ background: tokens.surface, borderColor: tokens.border }}
-        >
-          <span className={themeCss.swatchRow}>
-            <span className={themeCss.swatchDot} style={{ background: tokens.accent }} />
-            <span className={themeCss.swatchBar} style={{ background: tokens.accent, opacity: .5, width: '18px' }} />
-          </span>
-          <span className={themeCss.swatchBar} style={{ background: tokens.muted, opacity: .5 }} />
-          <span className={themeCss.swatchBar} style={{ background: tokens.muted, opacity: .28, width: '62%' }} />
-        </span>
-        <span className={themeCss.name}>{name}</span>
-      </button>
-    })}
-  </div>
 }
 
 type AccountTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string
@@ -673,7 +623,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
   </details>
 }
 
-/** The tuning fields the advanced card owns, in the order it renders them. */
+/** The tuning fields covered by the advanced parameter reset, in display order. */
 const ADVANCED_FIELDS = [
   'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
@@ -791,6 +741,70 @@ function ValueField(props: ValueFieldProps) {
   )
 }
 
+/** Appearance has its own reset; previews share the actual input indicator's styles. */
+function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
+  state: OpencodeGoSectionState
+  t: SectionTranslate
+  disabled: boolean
+  onEdit: (field: TextField, text: string) => void
+  onReset: (field: EditableField) => void
+}) {
+  const tokens = useGoThemeTokens()
+  const locked = disabled || state.saving
+  const styleId = 'opencode-go-usage-pill-style'
+  const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
+  return <section className={css.appearanceGroup} aria-labelledby="opencode-go-appearance-title">
+    <div className={`${css.groupHead} ${css.appearanceHead}`}>
+      <h4 id="opencode-go-appearance-title" className={css.appearanceTitle}>{t('usageAppearanceLabel')}</h4>
+      <button type="button" className={css.reset}
+        disabled={locked || !APPEARANCE_FIELDS.some(field => state[field].overridden || state[field].invalid)}
+        onClick={() => {
+          for (const field of APPEARANCE_FIELDS) {
+            if (state[field].overridden || state[field].invalid) onReset(field)
+          }
+        }}>{t('usageAppearanceReset')}</button>
+    </div>
+    <div className={css.appearanceToggle}>
+      <div className={css.appearanceCopy}>
+        <div className={css.rowLabel}>
+          <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
+          <HintMark hint={t('showSidebarQuotaHint')} />
+        </div>
+        <p className={css.appearanceHint}>{t('showSidebarQuotaSummary')}</p>
+      </div>
+      <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
+        title={t('showSidebarQuotaHint')} disabled={locked}
+        onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
+    </div>
+    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
+      aria-describedby={describedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
+      <legend className={css.appearanceLegend}>
+        <span id={`${styleId}-label`} className={css.rowTitle}>{t('usagePillStyleLabel')}</span>
+        <HintMark hint={t('usagePillStyleHint')} />
+      </legend>
+      <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
+      <div className={css.appearanceChoices}>
+        {USAGE_PILL_STYLES.map(value => <label key={value} className={css.appearanceChoice}
+          data-selected={state.usagePillStyle.text === value} data-disabled={locked}>
+          <span className={css.appearanceChoiceHead}>
+            <span>{t(`usagePillStyle_${value}`)}</span>
+            <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
+              checked={state.usagePillStyle.text === value} disabled={locked} aria-describedby={describedBy}
+              onChange={() => { onEdit('usagePillStyle', value) }} />
+          </span>
+          <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
+            <span className={`${usageCss.trigger} ${value === 'plain' ? usageCss.plain : ''} ${css.appearanceSample}`}>
+              {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
+            </span>
+          </span>
+        </label>)}
+      </div>
+      {state.usagePillStyle.invalid
+        ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+    </fieldset>
+  </section>
+}
+
 /**
  * The gateway's model listing in the state the page last read.
  * @param props.models - the listing state the controller published.
@@ -863,9 +877,6 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       loadModels={loadModels}
       setEnabled={setEnabled}
       setModelEnabled={setModelEnabled}
-      readAnalytics={props.readAnalytics}
-      readQuota={props.readQuota}
-      getLocale={props.getLocale}
       accountActions={{
         loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
         resetAddition: props.resetAddition, removeAccount: props.removeAccount, selectAccount: props.selectAccount,
@@ -888,9 +899,6 @@ function Loaded(props: {
   loadModels: () => void
   setEnabled: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
-  readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
-  readQuota?: (ref: string) => Promise<GoUsage>
-  getLocale?: () => string
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
@@ -900,11 +908,6 @@ function Loaded(props: {
   const [modelsOpen, setModelsOpen] = useState(false)
   const [modelSource, setModelSource] = useState<ModelSource>('go')
   const models = modelsForSource(state.models, modelSource)
-  // The analytics card unfolds into two rows — the dashboard entry and the only
-  // place a style is chosen — and the dialog is its own modal on top of that.
-  const [analyticsOpen, setAnalyticsOpen] = useState(false)
-  const [analyticsPanel, setAnalyticsPanel] = useState(false)
-  const theme = useGoTheme()
   // What the card has to report — the listing's own diagnostics and a refused
   // switch write — is not part of the fold. A failure the reader cannot see is
   // worse than a folded list, and the connection switch that can fail lives in
@@ -961,72 +964,6 @@ function Loaded(props: {
         </div>
       </section>
       {accountCard}
-      <section className={css.card}>
-        <div className={css.cardHead}>
-          <h3 className={css.cardTitle}>{t('usageAppearanceLabel')}</h3>
-          <button type="button" className={css.reset}
-            disabled={disabled || !APPEARANCE_FIELDS.some(field => state[field].overridden || state[field].invalid)}
-            onClick={() => {
-              for (const field of APPEARANCE_FIELDS) {
-                if (state[field].overridden || state[field].invalid) props.resetField(field)
-              }
-            }}>{t('usageAppearanceReset')}</button>
-        </div>
-        <div className={css.cardBody}>
-          <div className={css.rows}>
-            <div className={css.row}>
-              <div className={css.rowLabel}>
-                <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
-                <HintMark hint={t('showSidebarQuotaHint')} />
-              </div>
-              <div className={`${css.rowControl} ${css.toggleControl}`}>
-                <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
-                  title={t('showSidebarQuotaHint')} disabled={disabled || state.saving}
-                  onChange={next => { props.edit('showSidebarQuota', String(next)) }} />
-              </div>
-            </div>
-            <ValueField id="opencode-go-usage-pill-style" label={t('usagePillStyleLabel')} hint={t('usagePillStyleHint')}
-              field={state.usagePillStyle} options={USAGE_PILL_STYLES.map(value => ({ value, label: t(`usagePillStyle_${value}`) }))}
-              {...fieldProps} onEdit={text => { props.edit('usagePillStyle', text) }} />
-          </div>
-        </div>
-      </section>
-      {/* The card unfolds like the model and advanced cards: its first row opens
-          the dashboard, its second is the only place a style is chosen — the pill
-          and the dashboard themselves never change their own look. Folded, it
-          still names the active style, so the row answers "which one am I on". */}
-      {props.readAnalytics ? <section className={css.card}>
-        <button
-          type="button"
-          className={css.cardTrigger}
-          aria-expanded={analyticsPanel}
-          aria-controls="opencode-go-analytics"
-          onClick={() => { setAnalyticsPanel(!analyticsPanel) }}
-        >
-          <span className={css.cardTitle}>{t('analyticsCardTitle')}</span>
-          <span className={css.cardSub}>{t(GO_THEME_LABELS[theme])}</span>
-          <ChevronDown className={analyticsPanel ? css.chevronOpen : css.chevron} />
-        </button>
-        {analyticsPanel ? <div id="opencode-go-analytics" className={css.analyticsPanel}>
-          <div className={css.analyticsSection}>
-            <div className={css.analyticsCopy}>
-              <span className={css.analyticsLabel}>{t('analyticsBoardLabel')}</span>
-              <p className={css.hint}>{t('analyticsCardHint')}</p>
-            </div>
-            <Button variant="outline" size="md" onClick={() => { setAnalyticsOpen(true) }}>
-              {t('analyticsOpenBoard')}
-            </Button>
-          </div>
-          <div className={css.analyticsDivider} />
-          <div className={css.analyticsSection}>
-            <div className={css.analyticsCopy}>
-              <span className={css.analyticsLabel}>{t('themeLabel')}</span>
-              <p className={css.hint}>{t('themeHint')}</p>
-            </div>
-            <ThemePicker t={t} />
-          </div>
-        </div> : null}
-      </section> : null}
       {/* The model card takes whatever height the page has left: its list and its
           parameter card are the reason the page is open. It folds away exactly
           like the tuning card does, and the listing's own refresh sits with the
@@ -1101,8 +1038,7 @@ function Loaded(props: {
             <div id="opencode-go-advanced" className={css.cardBody}>
               <div className={css.advancedHead}>
                 <p className={css.hint}>{t('advancedHint')}</p>
-                {/* One reset for the card: the rows carry no badges of their own, so
-                    this is the only place a value returns to its inherited default. */}
+                {/* Parameter defaults and appearance keep their separate reset scopes. */}
                 <button
                   type="button"
                   className={css.reset}
@@ -1127,6 +1063,7 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={text => { props.edit('usageDisplay', text) }}
                 />
+                <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={props.edit} onReset={props.resetField} />
                 <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-base-url"
@@ -1234,16 +1171,6 @@ function Loaded(props: {
         </a>
         {state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
       </div>
-      {props.readAnalytics ? <AnalyticsDialog
-        open={analyticsOpen}
-        onClose={() => { setAnalyticsOpen(false) }}
-        readAnalytics={props.readAnalytics}
-        readQuota={props.readQuota && state.accounts
-          ? () => props.readQuota!(state.accounts!.activeRef)
-          : undefined}
-        t={t}
-        getLocale={props.getLocale}
-      /> : null}
     </div>
   )
 }

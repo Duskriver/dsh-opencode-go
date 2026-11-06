@@ -1,4 +1,4 @@
-/** Gateway text tariffs and UTC multiplier conditions, shared with analytics. */
+/** Strict gateway tariff validation for model discovery and Free eligibility. */
 import type { ModelCost } from './sdk-types.ts'
 import { validReleaseDate } from './contracts.ts'
 
@@ -50,27 +50,6 @@ function condition(value: unknown, depth = 0): PricingCondition {
     }
   }
   return row as PricingCondition
-}
-
-function compare(value: string, rule: Comparison<string>): boolean {
-  return Object.entries(rule).every(([op, expected]) => op === 'in' ? (expected as string[]).includes(value)
-    : op === 'eq' ? value === expected : op === 'gt' ? value > expected : op === 'gte' ? value >= expected
-      : op === 'lt' ? value < expected : value <= expected)
-}
-
-export function matchesPricingCondition(rule: PricingCondition, at: number): boolean {
-  if (!Number.isFinite(at)) return false
-  const date = new Date(at)
-  if (!Number.isFinite(date.getTime())) return false
-  return (!rule.all || rule.all.every(item => matchesPricingCondition(item, at)))
-    && (!rule.any || rule.any.some(item => matchesPricingCondition(item, at)))
-    && (!rule.utc_days || compare(DAYS[date.getUTCDay()]!, rule.utc_days))
-    && (!rule.utc_hours || compare(date.toISOString().slice(11, 16), rule.utc_hours))
-    && (!rule.date || compare(date.toISOString().slice(0, 10), rule.date))
-}
-
-export function priceMultiplierAt(multipliers: readonly PriceMultiplier[] | undefined, at: number): number {
-  return (multipliers ?? []).reduce((factor, item) => matchesPricingCondition(item.when, at) ? factor * item.factor : factor, 1)
 }
 
 export interface ParsedCost { cost: ModelCost; multipliers?: PriceMultiplier[]; free: boolean }

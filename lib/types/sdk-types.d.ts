@@ -1571,7 +1571,7 @@ interface AnthropicOptions extends StreamOptions {
     client?: Anthropic;
 }
 
-/** Gateway text tariffs and UTC multiplier conditions, shared with analytics. */
+/** Strict gateway tariff validation for model discovery and Free eligibility. */
 
 type Comparison<T> = {
     in?: T[];
@@ -1591,124 +1591,6 @@ interface PricingCondition {
 interface PriceMultiplier {
     when: PricingCondition;
     factor: number;
-}
-
-/** Local session scanning, in-memory reuse and Go plan cost estimates. */
-
-/** Why an analytics read failed. */
-type AnalyticsFailureReason = 'no-session-query' | 'invalid-range' | 'scan-failed';
-/** One dashboard read. Dates are Unix epoch milliseconds. */
-interface AnalyticsQuery {
-    /** Inclusive start. */
-    from: number;
-    /** Exclusive end. */
-    to: number;
-    /** IANA timezone used to bucket days. */
-    timeZone: string;
-    /** Session scan cap, 1..2000; the Host default applies when absent. */
-    maxSessions?: number;
-}
-/** Totals over the requested range. */
-interface AnalyticsTotals {
-    requests: number;
-    unsettledAttempts: number;
-    summaries: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-    estimatedMicroUsd: number;
-    pricedRequests: number;
-    unpricedRequests: number;
-    missingUsage: number;
-}
-/** One model's share of the range. */
-interface AnalyticsModelRow {
-    model: string;
-    name?: string;
-    requests: number;
-    missingUsage: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-    estimatedMicroUsd: number;
-    pricedRequests: number;
-    unpricedRequests: number;
-    /** Go monthly limit in USD; null when unlimited or unknown. */
-    limitGoUsd: number | null;
-    /** Go Plus monthly limit in USD; null when unlimited or unknown. */
-    limitGoPlusUsd: number | null;
-    limitNote?: 'unlimited' | 'limited-time' | 'unknown';
-}
-/** One local calendar day. */
-interface AnalyticsDayRow {
-    /** YYYY-MM-DD in the query timezone. */
-    day: string;
-    requests: number;
-    tokens: number;
-    estimatedMicroUsd: number;
-}
-/** Coverage and budget limits for this report. */
-interface AnalyticsCoverage {
-    listedSessions: number;
-    scannedSessions: number;
-    matchedSessions: number;
-    failedSessions: number;
-    eventsScanned: number;
-    summaries: number;
-    legacyRequests: number;
-    missingUsage: number;
-    truncated: boolean;
-    truncation?: 'sessions' | 'events' | 'time';
-    scanMs: number;
-    timeZoneFallback?: true;
-    /**
-     * Sessions listed but never scanned because the slice cap or a budget
-     * stopped first (review P16/P18/M1). Observability only — this never
-     * implies the requested range was fully covered.
-     */
-    unreadSessions?: number;
-    /**
-     * Cache entries the end-of-run trim dropped after this report was computed
-     * from run-local results; the next run re-reads them (review P3/S1).
-     */
-    evictedSessions?: number;
-    /**
-     * Model calls in range with no usable routing header or model id, counted
-     * for visibility only — never in tokens or cost (review P12).
-     */
-    unattributedRequests?: number;
-    /** Session listing wall time; scanMs excludes it (review S6). */
-    listMs?: number;
-    /** Pricing harvest wall time; scanMs excludes it (review S6/P4). */
-    pricingMs?: number;
-}
-/** Where the prices came from. */
-interface AnalyticsPricing {
-    source: 'OpenCode /models';
-    updatedAt?: number;
-    /**
-     * True only when the whole price table was unavailable; unpricedModels then
-     * lists every model that actually appeared in the range (review P15). A
-     * table that loaded but lacks a model leaves this unset and lists the model.
-     */
-    unavailable?: true;
-    unpricedModels: string[];
-}
-/** One complete dashboard response. */
-interface AnalyticsReport {
-    generatedAt: number;
-    range: {
-        from: number;
-        to: number;
-    };
-    timeZone: string;
-    totals: AnalyticsTotals;
-    byModel: AnalyticsModelRow[];
-    byDay: AnalyticsDayRow[];
-    coverage: AnalyticsCoverage;
-    pricing: AnalyticsPricing;
 }
 
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
@@ -1803,7 +1685,51 @@ type AccountCommand = {
     value: boolean;
 };
 type SettingsWriteResult = 'applied' | 'rejected' | 'unknown';
-
+type AnalyticsRange = 'today' | '7d' | '30d' | '90d';
+interface AnalyticsQuery {
+    accountRef: string;
+    range: AnalyticsRange;
+    refresh?: boolean;
+}
+/** Exact nonnegative integers on the wire; one USD is 100,000,000 micro cents. */
+interface AnalyticsTotals {
+    requests: string;
+    inputTokens: string;
+    outputTokens: string;
+    cacheReadTokens: string;
+    cacheWrite5mTokens: string;
+    cacheWrite1hTokens: string;
+    cacheWriteTokens: string;
+    tokens: string;
+    costMicroCents: string;
+}
+interface AnalyticsModelRow extends AnalyticsTotals {
+    provider: string;
+    model: string;
+}
+interface AnalyticsDayRow extends AnalyticsTotals {
+    day: string;
+}
+interface AnalyticsReport {
+    accountRef: string;
+    /** Opaque account, credential and network identity; contains no credential material. */
+    source: string;
+    generatedAt: number;
+    period: AnalyticsRange;
+    range: {
+        from: number;
+        to: number;
+    };
+    timeZone: 'UTC';
+    totals: AnalyticsTotals;
+    byModel: AnalyticsModelRow[];
+    byDay: AnalyticsDayRow[];
+}
+interface AnalyticsExport {
+    filename: string;
+    csv: string;
+}
+type AnalyticsFailureReason = 'invalid-query' | 'unknown-account' | 'missing-credential' | 'credential-unavailable' | 'unsupported-gateway' | 'invalid-proxy' | 'permission-denied' | 'upstream' | 'network' | 'timeout' | 'invalid-response';
 declare module '@deepseek-ai/dsh-typert-protocol' {
     interface TypertRemoteNamespaceMap {
         opencodeGoModels: {
@@ -1839,11 +1765,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
         'opencode-go/analytics-unavailable': {
             readonly reason: AnalyticsFailureReason;
             readonly retryable: boolean;
+            readonly retainPrevious?: boolean;
+            readonly source?: string;
         };
     }
     interface TypertRemoteNamespaceMap {
         opencodeGoAnalytics: {
             read(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsReport>>;
+            exportCsv(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsExport>>;
         };
     }
 }

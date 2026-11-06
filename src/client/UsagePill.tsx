@@ -17,6 +17,7 @@ import {
   type GoAccountSwitch,
   type AnalyticsQuery,
   type AnalyticsReport,
+  type AnalyticsExport,
 } from '../contracts.ts'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { OpencodeGoSettings } from './controller.ts'
@@ -27,8 +28,10 @@ export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
   settings: ConfigForm<OpencodeGoSettings>
   readUsage: () => Promise<GoUsage>
+  readAccountUsage?: (ref: string) => Promise<GoUsage>
   /** Optional so an embedded/test render can omit the dashboard. */
   readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
+  exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>
   t: (key: string) => string
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>
@@ -38,7 +41,6 @@ export interface UsagePillProps {
 /** A root sidebar entry receives its width mode from the host slot owner. */
 export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {
   wide: boolean
-  readAccountUsage?: (ref: string) => Promise<GoUsage>
 }
 
 type UsageVariant = 'pill' | 'sidebar' | 'sidebar-icon'
@@ -126,7 +128,7 @@ export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
 /** The sidebar's viewed account is independent of the profile's request order. */
 function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, ...props }:
   Omit<UsagePillProps, 'directory'> & {
-    variant: UsageVariant; provider?: string; readAccountUsage?: SidebarQuotaProps['readAccountUsage']
+    variant: UsageVariant; provider?: string
   }) {
   // The Host scope is a class instance whose methods read their own state, so
   // React has to reach them through this receiver: a reference handed over as a
@@ -154,9 +156,15 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   const viewedAccount = variant !== 'pill' && readAccountUsage
     ? accounts.find(account => account.id === viewedAccountId) ?? accounts[0] : undefined
   const viewedRef = viewedAccount?.apiKeyEnv
-  const activeRef = viewedRef ?? accountRefOf(config.value ?? {})
+  const callingRef = accountRefOf(config.value ?? {})
+  const activeRef = viewedRef ?? callingRef
   const readSidebarUsage = useCallback(() => viewedRef && readAccountUsage
     ? readAccountUsage(viewedRef) : props.readUsage(), [viewedRef, readAccountUsage, props.readUsage])
+  const readDialogQuota = useCallback((ref: string): Promise<GoUsage> => {
+    if (readAccountUsage) return readAccountUsage(ref)
+    if (ref === callingRef) return props.readUsage()
+    return Promise.reject(new Error('Quota is unavailable for the selected account'))
+  }, [readAccountUsage, callingRef, props.readUsage])
   useEffect(() => {
     if (!visible || !viewedAccount) return
     setViewedAccountId(viewedAccount.id)
@@ -177,8 +185,11 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
       analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling. */}
-    {variant === 'pill' && props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
-      readAnalytics={props.readAnalytics} readQuota={props.readUsage} t={props.t} getLocale={props.getLocale} /> : null}
+    {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
+      readAnalytics={props.readAnalytics} exportAnalytics={props.exportAnalytics} readQuota={readDialogQuota}
+      accounts={accounts} activeRef={callingRef}
+      contextKey={JSON.stringify([credentialRevision, config.value?.baseURL, config.value?.proxyURL])}
+      t={props.t} getLocale={props.getLocale} /> : null}
   </> : null
 }
 
@@ -252,6 +263,9 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', click); document.removeEventListener('keydown', key) }
   }, [open])
+  useEffect(() => {
+    if (open && view === 'accounts') root.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
+  }, [open, view])
   const current = snapshot?.reader === readUsage ? snapshot : null
   const usage = current?.usage
   const failure = failed?.reader === readUsage ? failed.failure : null
@@ -297,13 +311,15 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
     </>
   const triggerClass = variant === 'sidebar' ? css.sidebarCard : variant === 'sidebar-icon' ? css.sidebarIcon
     : [css.trigger, pillStyle === 'plain' ? css.plain : undefined].filter(Boolean).join(' ')
-  const Trigger = sidebar ? 'span' : 'button'
+  const iconOpensHistory = variant === 'sidebar-icon' && readAnalytics !== undefined
+  const Trigger = !sidebar || iconOpensHistory ? 'button' : 'span'
   return <span className={[css.root, sidebar ? css.sidebarRoot : undefined].filter(Boolean).join(' ')}
     data-wide={sidebar ? String(variant === 'sidebar') : undefined} ref={root} style={themeStyle(tokens)}>
-    <Trigger type={sidebar ? undefined : 'button'} role={sidebar ? 'group' : undefined} className={triggerClass}
-      aria-expanded={sidebar ? undefined : open} aria-haspopup={sidebar ? undefined : 'dialog'} data-fallback={notice ? '' : undefined}
-      aria-label={`${t('usageTitle')}: ${label}`} title={label}
-      onClick={sidebar ? undefined : () => { setOpen(!open); setView('usage') }}>
+    <Trigger type={!sidebar || iconOpensHistory ? 'button' : undefined} role={sidebar && !iconOpensHistory ? 'group' : undefined} className={triggerClass}
+      aria-expanded={iconOpensHistory ? analyticsOpen : sidebar ? undefined : open}
+      aria-haspopup={!sidebar || iconOpensHistory ? 'dialog' : undefined} data-fallback={notice ? '' : undefined}
+      aria-label={iconOpensHistory ? t('sidebarAnalytics') : `${t('usageTitle')}: ${label}`} title={label}
+      onClick={iconOpensHistory ? () => { onAnalyticsOpenChange(true) } : sidebar ? undefined : () => { setOpen(!open); setView('usage') }}>
       {variant === 'sidebar' ? <>
         <span className={css.sidebarHead}>
           <strong>OpenCode Go</strong>
@@ -319,12 +335,16 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           <strong>{usage ? `${usage[key].percent}%` : failure ? '—' : '…'}</strong>
         </span>)}
         {failure ? <span className={css.sidebarStatus} role="status" title={failure.message}>{t('usageUnavailable')}</span> : null}
-      </> : variant === 'sidebar-icon' ? <ChartIcon /> : segments}
+        {readAnalytics ? <button type="button" className={css.sidebarHistory} aria-label={t('sidebarAnalytics')} aria-haspopup="dialog"
+          onClick={() => { onAnalyticsOpenChange(true) }}>
+          <ChartIcon /><span>{t('analyticsOpen')}</span><ChevronRight />
+        </button> : null}
+      </> : variant === 'sidebar-icon' ? <ChartIcon /> : <>
+        <span className={css.pillStatus} data-warning={failure || notice ? '' : undefined} aria-hidden="true" />{segments}
+      </>}
     </Trigger>
     {!sidebar && open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
-      {/* The frosted material is a dedicated child, the way the host's own
-          MenuSurface paints it, so the panel's content and the body's scrolling
-          never share the filtered element. */}
+      {/* Keep the surface separate from the scroller so its border stays fixed. */}
       <div className={css.material} aria-hidden="true" />
       <div className={css.body}>
       {accountsView ? <>
@@ -338,11 +358,12 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           onKeyDown={event => {
             if (event.key === 'Escape') { event.stopPropagation(); setView('usage'); return }
             const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
-            if (step === 0) return
+            if (step === 0 && event.key !== 'Home' && event.key !== 'End') return
             event.preventDefault()
             const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'))
             const at = options.indexOf(document.activeElement as HTMLButtonElement)
-            options[(at + step + options.length) % options.length]?.focus()
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (at + step + options.length) % options.length
+            options[next]?.focus()
           }}>
           {accounts.map((account, index) => <Fragment key={account.id}>
             {index ? <div className={css.divider} /> : null}

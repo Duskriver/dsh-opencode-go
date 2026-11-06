@@ -1,1139 +1,393 @@
-/** Local session scanning, in-memory reuse and Go plan cost estimates. */
-import { PROVIDER_ID, FREE_PROVIDER_ID, modelSettingsKey, type ModelSource, parseAnalyticsQuery } from './contracts.ts'
-import { priceMultiplierAt, type PriceMultiplier } from './pricing.ts'
+/** Official Console history: bounded CSV reads and exact UTC aggregates. */
+import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import {
+  assertProxyURL, parseAnalyticsQuery, validReleaseDate,
+  type AnalyticsQuery, type AnalyticsRange, type AnalyticsTotals, type AnalyticsReport,
+  type AnalyticsExport, type AnalyticsFailureReason,
+} from './contracts.ts'
+import { ProxyTransport, readUsageError, transportFailure, waitWithSignal } from './transport.ts'
 
-/**
- * OpenCode Go plan snapshot: monthly limits. Text tariffs and UTC multipliers
- * come from each gateway model directory.
- *
- * Source: https://opencode.ai/v2/docs/console/go/ (Go and Go Plus tables).
- * The snapshot is reviewed when the model list or the plan changes; the report
- * shows {@link GO_PLAN_AS_OF}, so a stale table is visible rather than silent.
- *
- */
+export const ANALYTICS_MAX_BYTES = 16 * 1024 * 1024
+const CACHE_MS = 30_000
+const REQUEST_TIMEOUT_MS = 30_000
+const CONSOLE_ORIGIN = 'https://opencode.ai'
+const DAY_MS = 86_400_000
+const CSV_COLUMNS = ['day', 'user_type', 'user_id', 'user_name', 'provider', 'model', 'requests',
+  'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_5m_tokens',
+  'cache_write_1h_tokens', 'cost_micro_cents', 'cost_usd'] as const
+const TOTAL_FIELDS: readonly (keyof AnalyticsTotals)[] = ['requests', 'inputTokens', 'outputTokens',
+  'cacheReadTokens', 'cacheWrite5mTokens', 'cacheWrite1hTokens', 'cacheWriteTokens', 'tokens', 'costMicroCents']
 
-/** Date the limits below were read from the official plan page. */
-export const GO_PLAN_AS_OF = '2026-11-02'
-
-/** Human-readable source for the limit snapshot. */
-export const GO_PLAN_SOURCE = 'https://opencode.ai/v2/docs/console/go/'
-
-/** Why a row has no numeric limit. */
-export type GoLimitNote = 'unlimited' | 'limited-time'
-
-/** One model's monthly allowance on each plan (USD), or a note instead. */
-export interface GoMonthlyLimit {
-  /** Go plan monthly limit in USD; null when the row is unlimited. */
-  readonly go: number | null
-  /** Go Plus plan monthly limit in USD; null when the row is unlimited. */
-  readonly goPlus: number | null
-  readonly note?: GoLimitNote
-}
-
-const UNLIMITED: GoMonthlyLimit = { go: null, goPlus: null, note: 'unlimited' }
-
-/**
- * Monthly limits by model id. Promo rows use the effective (post-strike-through)
- * value and carry {@link GoLimitNote} 'limited-time'; free rows are unlimited.
- */
-export const GO_MONTHLY_LIMITS: Readonly<Record<string, GoMonthlyLimit>> = {
-  'glm-5.3-flash': { go: 60, goPlus: 180 },
-  'glm-5.3': { go: 15, goPlus: 120 },
-  'glm-5.2': { go: 60, goPlus: 180 },
-  'kimi-k3.1-pro': { go: 15, goPlus: 60 },
-  'kimi-k3': { go: 15, goPlus: 60 },
-  'kimi-k2.7-code': { go: 60, goPlus: 180 },
-  'longcat-2.0': { go: 60, goPlus: 240 },
-  'step-5-preview': { go: 15, goPlus: 60 },
-  'beam-free': UNLIMITED,
-  'iceman-contributor-free': UNLIMITED,
-  'mimo-v2.6-flash': { go: 60, goPlus: 120 },
-  'mimo-v2.6-pro': { go: 15, goPlus: 60 },
-  'mimo-v2.5': { go: 60, goPlus: 120 },
-  'mimo-v2.5-pro': { go: 15, goPlus: 60 },
-  'minimax-m3.1-flash': { go: 20, goPlus: 80 },
-  'minimax-m3': { go: 60, goPlus: 180 },
-  'muse-spark-1.3-contributor': { go: 60, goPlus: 120 },
-  'muse-spark-1.2-contributor': { go: 60, goPlus: 120 },
-  'qwen3.8-max': { go: 15, goPlus: 60 },
-  'qwen3.8-flash': { go: 30, goPlus: 90 },
-  'qwen3.7-plus': { go: 60, goPlus: 180 },
-  'deepseek-v4.1-flash': { go: 100, goPlus: 200 },
-  'deepseek-v4-pro': { go: 15, goPlus: 60 },
-  'hy4-preview': { go: 30, goPlus: 120 },
-  'hy3': { go: 60, goPlus: 240 },
-  'grok-4.7': { go: 15, goPlus: 60 },
-  'gpt-6-luna': { go: 15, goPlus: 60 },
-  'gpt-5.6-luna': { go: 15, goPlus: 60 },
-  'claude-haiku-5-5': { go: 15, goPlus: 60 },
-  'gemini-4-argon': { go: 30, goPlus: 120, note: 'limited-time' },
-}
-
-/**
- * Read one model's limit snapshot.
- * @param model - catalog model id.
- * @returns the row, or undefined when the plan page lists no such model.
- */
-export function goMonthlyLimit(model: string): GoMonthlyLimit | undefined {
-  return Object.hasOwn(GO_MONTHLY_LIMITS, model) ? GO_MONTHLY_LIMITS[model] : undefined
-}
-
-/** The four billable rates, in USD per one million tokens. */
-export interface CostRates {
-  readonly input: number
-  readonly output: number
-  readonly cacheRead: number
-  readonly cacheWrite: number
-}
-
-/** One context-length tier; the highest matching threshold prices the attempt. */
-export interface CostTier extends CostRates {
-  readonly inputTokensAbove: number
-}
-
-/** Structural face of the catalog's ModelCost. */
-export interface ModelCostLike extends CostRates {
-  readonly tiers?: readonly CostTier[]
-  readonly multipliers?: readonly PriceMultiplier[]
-}
-
-/** The token components one request reported. */
-export interface UsageCounts {
-  readonly input: number
-  readonly output: number
-  readonly cacheRead: number
-  readonly cacheWrite: number
-}
-
-/**
- * Billed input tokens: reported input plus cache reads and writes.
- * @param usage - one request's token components.
- * @returns the total the tier threshold is compared against.
- */
-export function billedInput(usage: UsageCounts): number {
-  return usage.input + usage.cacheRead + usage.cacheWrite
-}
-
-/**
- * Whether every rate of a model is zero (a free row).
- * @param cost - the model's catalog cost.
- * @returns true when no component could ever charge.
- */
-export function isFreeCost(cost: ModelCostLike): boolean {
-  const free = (rates: CostRates): boolean =>
-    rates.input === 0 && rates.output === 0 && rates.cacheRead === 0 && rates.cacheWrite === 0
-  return free(cost) && (cost.tiers === undefined || cost.tiers.every(free))
-}
-
-function tierOf(cost: ModelCostLike, billed: number): CostRates {
-  let chosen: CostRates = cost
-  let threshold = -1
-  for (const tier of cost.tiers ?? []) {
-    if (billed > tier.inputTokensAbove && tier.inputTokensAbove >= threshold) {
-      chosen = tier
-      threshold = tier.inputTokensAbove
-    }
-  }
-  return chosen
-}
-
-/**
- * Price one settled request.
- * @param model - the model id that served the request.
- * @param usage - its token components.
- * @param cost - the catalog cost for that model.
- * @param at - request start time, used to evaluate gateway multiplier conditions.
- * @returns the estimated cost in integer micro-USD.
- */
-export function priceUsage(_model: string, usage: UsageCounts, cost: ModelCostLike, at: number): number {
-  const rates = tierOf(cost, billedInput(usage))
-  const micro = Math.round(usage.input * rates.input)
-    + Math.round(usage.output * rates.output)
-    + Math.round(usage.cacheRead * rates.cacheRead)
-    + Math.round(usage.cacheWrite * rates.cacheWrite)
-  return Math.round(micro * priceMultiplierAt(cost.multipliers, at))
-}
-
-/** Route id used by this plugin before 0.1.16. */
-export const LEGACY_PROVIDER_ID = 'opencode-go'
-
-/** 0.1.16 isolated the plugin route; later legacy-id records belong to DSH native. */
-export const LEGACY_ROUTE_CUTOFF_MS = Date.parse('2026-09-30T00:00:00Z')
-
-/** Minimal structural event face; the Host owns the real session types. */
-export interface AnalyticsEventLike {
-  readonly type: string
-  readonly seq: number
-  readonly time: number
-  readonly data?: unknown
-}
-
-/** Minimal structural snapshot returned by readSession. */
-export interface AnalyticsSnapshotLike {
-  readonly inheritedEventCount: number
-  readonly events: readonly AnalyticsEventLike[]
-}
-
-/** One model request that the dashboard can price. */
-export interface RequestFact {
-  /** Request start, Unix epoch milliseconds. */
-  readonly at: number
-  readonly model: string
-  readonly input: number
-  readonly output: number
-  readonly cacheRead: number
-  readonly cacheWrite: number
-  /** The request was recorded under the pre-0.1.16 route id. */
-  readonly legacy: boolean
-  readonly source?: ModelSource
-  readonly kind: 'message' | 'summary'
-  /** The request settled without a usable usage report. */
-  readonly missingUsage: boolean
-}
-
-/** Everything one session contributes, before date filtering. */
-export interface FoldedSession {
-  readonly facts: RequestFact[]
-  /** Start times of attempts that committed no surface message. */
-  readonly attempts: number[]
-  /** Model calls with no usable routing header or model id. */
-  readonly unattributed: number[]
-  /** Events that passed the fork-prefix filter — never the inherited prefix (review P11). */
-  readonly events: number
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown> : undefined
-}
-
-function count(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
-}
-
-function usageOf(value: unknown): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
-  const usage = record(value)
-  if (usage === undefined) return undefined
-  const input = count(usage.inputTokens)
-  const output = count(usage.outputTokens)
-  // Field-level degradation (review P8): a present-but-malformed component only
-  // degrades that component to 0 so partially valid tokens still reach the
-  // report; the whole usage counts as missing when input AND output are both
-  // missing or malformed. The safe-integer sum check runs on the degraded
-  // values and still rejects the report when they could overflow.
-  if (input === undefined && output === undefined) return undefined
-  const cacheRead = (usage.cacheReadTokens === undefined ? 0 : count(usage.cacheReadTokens)) ?? 0
-  const cacheWrite = (usage.cacheWriteTokens === undefined ? 0 : count(usage.cacheWriteTokens)) ?? 0
-  const sum = (input ?? 0) + (output ?? 0) + cacheRead + cacheWrite
-  if (!Number.isSafeInteger(sum)) return undefined
-  return { input: input ?? 0, output: output ?? 0, cacheRead, cacheWrite }
-}
-
-function stepKey(data: Record<string, unknown> | undefined): string | undefined {
-  const turn = count(data?.turn)
-  const step = count(data?.step)
-  return turn === undefined || step === undefined ? undefined : turn + ':' + step
-}
-
-/**
- * Whether a recorded provider id belongs to this plugin.
- * @param provider - the provider id in a request header or summary event.
- * @param at - the request start time.
- * @param cutoff - legacy route cutoff, overridable in tests.
- * @returns true when the request is this plugin's.
- */
-export function isPluginRoute(provider: unknown, at: number, cutoff = LEGACY_ROUTE_CUTOFF_MS): boolean {
-  return provider === PROVIDER_ID || provider === FREE_PROVIDER_ID || provider === LEGACY_PROVIDER_ID && at < cutoff
-}
-
-/**
- * Fold one session snapshot.
- * @param snapshot - complete raw event log plus its fork-inherited prefix length.
- * @param options - test seams; the cutoff defaults to the 0.1.16 release.
- * @returns the session's priceable facts and counters.
- */
-export function foldSession(
-  snapshot: AnalyticsSnapshotLike,
-  options: { cutoff?: number } = {},
-): FoldedSession {
-  const inherited = count(snapshot.inheritedEventCount) ?? 0
-  const cutoff = options.cutoff ?? LEGACY_ROUTE_CUTOFF_MS
-  const facts: RequestFact[] = []
-  const attempts: number[] = []
-  const unattributed: number[] = []
-  const stepStarts = new Map<string, number>()
-  let lastStart: number | undefined
-  let header: { provider: string; model?: string } | undefined
-  let ownEvents = 0
-
-  // Half-open ownership, matching the host's isOwnSeq (dsh-session
-  // lib/index.js:1192-1194: `seq >= this.inheritedEventCount && seq < this.seq`):
-  // the boundary slot seq === inheritedEventCount belongs to this session, and
-  // only the prefix strictly below it is inherited. Skipping `seq <= inherited`
-  // here would drop the session's first own event.
-  for (const event of snapshot.events) {
-    const seq = count(event.seq)
-    if (seq === undefined || seq < inherited) continue
-    ownEvents++
-    const eventTime = count(event.time)
-    const data = record(event.data)
-
-    if (event.type === 'request/header') {
-      const config = record(record(data?.header)?.config)
-      const provider = typeof config?.provider === 'string' ? config.provider : undefined
-      const model = typeof config?.model === 'string' && config.model ? config.model : undefined
-      header = provider === undefined ? undefined : { provider, ...(model === undefined ? {} : { model }) }
-      continue
-    }
-
-    if (event.type === 'step/start' || event.type === 'step/end') {
-      const key = stepKey(data)
-      if (event.type === 'step/start') {
-        if (eventTime === undefined) continue
-        if (key !== undefined) stepStarts.set(key, eventTime)
-        // Track the latest start even when the key is malformed (review P10):
-        // legacy, damaged and truncated logs omit turn/step, and falling back
-        // to the completion time double-counts peak pricing, shifts day
-        // buckets and flips the legacy-route cutoff.
-        lastStart = eventTime
-      } else if (key !== undefined) {
-        stepStarts.delete(key)
-      }
-      continue
-    }
-
-    if (event.type === 'assistant/message') {
-      const at = stepStarts.get(stepKey(data) ?? '') ?? lastStart ?? eventTime
-      if (at === undefined) continue
-      if (header === undefined) { unattributed.push(at); continue }
-      if (!isPluginRoute(header.provider, at, cutoff)) continue
-      const messageModel = record(data?.message)?.model
-      const model = typeof messageModel === 'string' && messageModel ? messageModel : header.model
-      if (model === undefined) { unattributed.push(at); continue }
-      const usage = usageOf(data?.usage)
-      facts.push({
-        at, model, kind: 'message', legacy: header.provider === LEGACY_PROVIDER_ID,
-        ...header.provider === FREE_PROVIDER_ID ? { source: 'free' as const } : {},
-        missingUsage: usage === undefined,
-        input: usage?.input ?? 0, output: usage?.output ?? 0,
-        cacheRead: usage?.cacheRead ?? 0, cacheWrite: usage?.cacheWrite ?? 0,
-      })
-      continue
-    }
-
-    if (event.type === 'compaction/summary') {
-      if (eventTime === undefined) continue
-      const provider = data?.provider
-      if (typeof provider !== 'string' || !isPluginRoute(provider, eventTime, cutoff)) continue
-      const model = typeof data?.model === 'string' && data.model ? data.model : undefined
-      if (model === undefined) { unattributed.push(eventTime); continue }
-      const usage = usageOf(data?.usage)
-      facts.push({
-        at: eventTime, model, kind: 'summary', legacy: provider === LEGACY_PROVIDER_ID,
-        ...provider === FREE_PROVIDER_ID ? { source: 'free' as const } : {},
-        missingUsage: usage === undefined,
-        input: usage?.input ?? 0, output: usage?.output ?? 0,
-        cacheRead: usage?.cacheRead ?? 0, cacheWrite: usage?.cacheWrite ?? 0,
-      })
-      continue
-    }
-
-    if (event.type === 'assistant/attempt') {
-      // Contract: the host defines assistant/attempt as one model attempt that
-      // "committed no surface message" (dsh-session lib/types/types.d.ts:318-327;
-      // shape {turn, step, stream} — no usage, no message), so every settled
-      // model call surfaces as either an assistant/message or an
-      // assistant/attempt, never both. We collect unconditionally and do not
-      // de-duplicate against facts: a double count would require the host to
-      // violate its own contract, and silently dropping one side would hide
-      // exactly that violation.
-      const at = stepStarts.get(stepKey(data) ?? '') ?? lastStart ?? eventTime
-      if (at === undefined) continue
-      // A headless attempt cannot be attributed to a route, but it must not
-      // vanish without a trace (review U14 / P12 scan half): record its time
-      // as unattributed instead of an attempt.
-      if (header === undefined) { unattributed.push(at); continue }
-      if (isPluginRoute(header.provider, at, cutoff)) attempts.push(at)
-    }
-  }
-
-  return { facts, attempts, unattributed, events: ownEvents }
-}
-
-/** Why an analytics read failed. */
-export type AnalyticsFailureReason = 'no-session-query' | 'invalid-range' | 'scan-failed'
-
-/** One dashboard read. Dates are Unix epoch milliseconds. */
-export interface AnalyticsQuery {
-  /** Inclusive start. */
-  from: number
-  /** Exclusive end. */
-  to: number
-  /** IANA timezone used to bucket days. */
-  timeZone: string
-  /** Session scan cap, 1..2000; the Host default applies when absent. */
-  maxSessions?: number
-}
-
-/** Totals over the requested range. */
-export interface AnalyticsTotals {
-  requests: number
-  unsettledAttempts: number
-  summaries: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  estimatedMicroUsd: number
-  pricedRequests: number
-  unpricedRequests: number
-  missingUsage: number
-}
-
-/** One model's share of the range. */
-export interface AnalyticsModelRow {
-  model: string
-  name?: string
-  requests: number
-  missingUsage: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  estimatedMicroUsd: number
-  pricedRequests: number
-  unpricedRequests: number
-  /** Go monthly limit in USD; null when unlimited or unknown. */
-  limitGoUsd: number | null
-  /** Go Plus monthly limit in USD; null when unlimited or unknown. */
-  limitGoPlusUsd: number | null
-  limitNote?: 'unlimited' | 'limited-time' | 'unknown'
-}
-
-/** One local calendar day. */
-export interface AnalyticsDayRow {
-  /** YYYY-MM-DD in the query timezone. */
-  day: string
-  requests: number
-  tokens: number
-  estimatedMicroUsd: number
-}
-
-/** Coverage and budget limits for this report. */
-export interface AnalyticsCoverage {
-  listedSessions: number
-  scannedSessions: number
-  matchedSessions: number
-  failedSessions: number
-  eventsScanned: number
-  summaries: number
-  legacyRequests: number
-  missingUsage: number
-  truncated: boolean
-  truncation?: 'sessions' | 'events' | 'time'
-  scanMs: number
-  timeZoneFallback?: true
-  /**
-   * Sessions listed but never scanned because the slice cap or a budget
-   * stopped first (review P16/P18/M1). Observability only — this never
-   * implies the requested range was fully covered.
-   */
-  unreadSessions?: number
-  /**
-   * Cache entries the end-of-run trim dropped after this report was computed
-   * from run-local results; the next run re-reads them (review P3/S1).
-   */
-  evictedSessions?: number
-  /**
-   * Model calls in range with no usable routing header or model id, counted
-   * for visibility only — never in tokens or cost (review P12).
-   */
-  unattributedRequests?: number
-  /** Session listing wall time; scanMs excludes it (review S6). */
-  listMs?: number
-  /** Pricing harvest wall time; scanMs excludes it (review S6/P4). */
-  pricingMs?: number
-}
-
-/** Where the prices came from. */
-export interface AnalyticsPricing {
-  source: 'OpenCode /models'
-  updatedAt?: number
-  /**
-   * True only when the whole price table was unavailable; unpricedModels then
-   * lists every model that actually appeared in the range (review P15). A
-   * table that loaded but lacks a model leaves this unset and lists the model.
-   */
-  unavailable?: true
-  unpricedModels: string[]
-}
-
-/** One complete dashboard response. */
-export interface AnalyticsReport {
-  generatedAt: number
-  range: { from: number; to: number }
-  timeZone: string
-  totals: AnalyticsTotals
-  byModel: AnalyticsModelRow[]
-  byDay: AnalyticsDayRow[]
-  coverage: AnalyticsCoverage
-  pricing: AnalyticsPricing
-}
-
-/** Structural face of one sessionQuery record. */
-export interface AnalyticsSessionRecord {
-  readonly header?: { readonly id?: string; readonly createdAt?: number }
-  readonly live?: boolean
-  readonly persisted?: boolean
-}
-
-/** The subset of ctx.sessionQuery this service needs. */
-export interface AnalyticsSessionQuery {
-  listSessions(signal?: AbortSignal): Promise<readonly AnalyticsSessionRecord[]>
-  readSession(id: string): Promise<AnalyticsSnapshotLike>
-}
-
-/** Structural face of one catalog model. */
-export interface AnalyticsPricingModel {
-  readonly multipliers?: readonly PriceMultiplier[]
-  readonly id?: string
-  readonly name?: string
-  readonly cost?: ModelCostLike
-}
-
-/** Pricing data and its last update, when known. */
-export interface AnalyticsPriceBook {
-  readonly models: ReadonlyMap<string, AnalyticsPricingModel>
-  readonly updatedAt?: number
-}
-
-/** Structural face of the catalog data the price book builder consumes. */
-export interface AnalyticsCatalogSnapshotLike {
-  readonly source?: ModelSource
-  readonly models: ReadonlyMap<string, AnalyticsPricingModel>
-  readonly details?: ReadonlyMap<string, { readonly costKnown?: false }>
-  readonly updatedAtMs?: number
-}
-
-/** Construction options; tests inject fakes for every seam. */
 export interface AnalyticsOptions {
-  query: () => AnalyticsSessionQuery | undefined
-  pricing: () => Promise<AnalyticsPriceBook | undefined>
+  baseURL: () => string
+  proxyURL?: () => string
+  transport?: ProxyTransport
+  resolveApiKey: (ref: string) => Promise<string | undefined>
+  accountRefs: () => readonly string[]
   now?: () => number
-  budgetMs?: number
-  maxSessions?: number
-  maxEvents?: number
-  maxFacts?: number
-  /**
-   * Maximum concurrent session reads (review P1/S3). One or less scans
-   * serially — the rollback path for a Host whose readSession cannot run
-   * concurrently.
-   */
-  maxConcurrency?: number
-
+  fetch?: typeof globalThis.fetch
 }
 
-const DEFAULT_BUDGET_MS = 12_000
+type BigTotals = Record<keyof AnalyticsTotals, bigint>
+interface HistoryRow { day: string; provider: string; model: string; totals: BigTotals; fields: string[] }
+interface ParsedCsv { header: string[]; rows: HistoryRow[] }
+interface Identity { accountRef: string; baseURL: string; proxyURL: string; key: string; source: string }
+interface Dataset extends ParsedCsv { csv: string; generatedAt: number; day: string; source: string }
+interface Pending { promise: Promise<Dataset>; controller: AbortController; consumers: number; source: string }
 
-const DEFAULT_MAX_SESSIONS = 500
+function invalidCsv(): never { throw new SyntaxError('Invalid official usage CSV') }
 
-const DEFAULT_MAX_EVENTS = 500_000
-
-const DEFAULT_MAX_FACTS = 200_000
-
-const DEFAULT_MAX_CONCURRENCY = 8
-
-const MAX_CACHE_SESSIONS = 2000
-
-const PRICING_TIMEOUT_MS = 4000
-
-/** Bound reuse when a live or closed log has no durable freshness token. */
-const UNVERSIONED_REUSE_MS = 5000
-
-interface CachedSession {
-  readonly facts: FoldedSession
-  readonly live: boolean
-  /** When the fold was stored; bounds reuse without a durable revision. */
-  readonly storedAt: number
-}
-
-interface ModelAccumulator {
-  readonly model: string
-  requests: number
-  missingUsage: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  estimatedMicroUsd: number
-  pricedRequests: number
-  unpricedRequests: number
-}
-
-interface DayAccumulator {
-  requests: number
-  tokens: number
-  estimatedMicroUsd: number
-}
-
-/** A budget deadline or caller cancellation beat the wrapped promise. */
-class AnalyticsDeadlineError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'AnalyticsDeadlineError'
+/** RFC 4180 fields, including quoted CRLF, commas and doubled quotes. */
+function csvRecords(raw: string): string[][] {
+  const csv = raw.replace(/^\uFEFF/, '')
+  if (!csv || csv.includes('\0')) return invalidCsv()
+  const records: string[][] = []
+  let row: string[] = [], field = ''
+  let state: 'start' | 'bare' | 'quoted' | 'closed' = 'start'
+  let ended = false
+  for (let index = 0; index < csv.length; index++) {
+    const char = csv[index]
+    ended = false
+    if (state === 'quoted') {
+      if (char === '"') {
+        if (csv[index + 1] === '"') { field += '"'; index++ }
+        else state = 'closed'
+      } else field += char
+      continue
+    }
+    if (char === ',') { row.push(field); field = ''; state = 'start'; continue }
+    if (char === '\r' || char === '\n') {
+      if (char === '\r') {
+        if (csv[index + 1] !== '\n') return invalidCsv()
+        index++
+      }
+      row.push(field)
+      records.push(row)
+      row = []; field = ''; state = 'start'; ended = true
+      continue
+    }
+    if (state === 'closed') return invalidCsv()
+    if (char === '"') {
+      if (state !== 'start') return invalidCsv()
+      state = 'quoted'
+    } else { field += char; state = 'bare' }
   }
+  if (state === 'quoted') return invalidCsv()
+  if (!ended) { row.push(field); records.push(row) }
+  return records
 }
 
-function idOf(record: AnalyticsSessionRecord): string | undefined {
-  const id = record.header?.id
-  return typeof id === 'string' && id.length > 0 ? id : undefined
+function exactInteger(value: string): bigint {
+  if (!/^\d{1,100}$/.test(value)) return invalidCsv()
+  return BigInt(value)
 }
 
-function createdAtOf(record: AnalyticsSessionRecord): number {
-  const createdAt = record.header?.createdAt
-  return typeof createdAt === 'number' && Number.isSafeInteger(createdAt) && createdAt >= 0 ? createdAt : 0
+function zero(): BigTotals {
+  return { requests: 0n, inputTokens: 0n, outputTokens: 0n, cacheReadTokens: 0n,
+    cacheWrite5mTokens: 0n, cacheWrite1hTokens: 0n, cacheWriteTokens: 0n, tokens: 0n, costMicroCents: 0n }
 }
 
-function abortOf(signal: AbortSignal): unknown {
-  return signal.reason ?? new Error('analytics read aborted')
+function add(target: BigTotals, value: BigTotals): void {
+  for (const field of TOTAL_FIELDS) target[field] += value[field]
 }
 
-/**
- * Reject when `ms` elapses first, and reject as soon as `signal` aborts
- * (review M4). The underlying promise is not cancelled — nothing awaits it
- * after this settles, and the caller's own abort handling stops the scan.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string, signal?: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false
-    const timer = setTimeout(() => { settle(new AnalyticsDeadlineError(message)) }, ms)
-    const onAbort = (): void => { settle(abortOf(signal!)) }
-    const detach = (): void => {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onAbort)
+function strings(value: BigTotals): AnalyticsTotals {
+  return Object.fromEntries(TOTAL_FIELDS.map(field => [field, value[field].toString()])) as unknown as AnalyticsTotals
+}
+
+function parseCsv(csv: string): ParsedCsv {
+  const [header, ...records] = csvRecords(csv)
+  if (!header || header.length !== CSV_COLUMNS.length || new Set(header).size !== header.length
+    || CSV_COLUMNS.some(column => !header.includes(column))) return invalidCsv()
+  const columns = Object.fromEntries(header.map((column, index) => [column, index]))
+  const rows = records.map(fields => {
+    if (fields.length !== header.length) return invalidCsv()
+    const get = (column: typeof CSV_COLUMNS[number]): string => fields[columns[column]]
+    const day = get('day'), provider = get('provider'), model = get('model')
+    if (!validReleaseDate(day) || !provider.trim() || !model.trim() || provider.length > 1024 || model.length > 1024
+      || /[\u0000-\u001f\u007f]/.test(provider + model)) return invalidCsv()
+    const totals: BigTotals = {
+      requests: exactInteger(get('requests')), inputTokens: exactInteger(get('input_tokens')),
+      outputTokens: exactInteger(get('output_tokens')), cacheReadTokens: exactInteger(get('cache_read_tokens')),
+      cacheWrite5mTokens: exactInteger(get('cache_write_5m_tokens')), cacheWrite1hTokens: exactInteger(get('cache_write_1h_tokens')),
+      cacheWriteTokens: 0n, tokens: 0n, costMicroCents: exactInteger(get('cost_micro_cents')),
     }
-    const settle = (error: unknown): void => {
-      if (settled) return
-      settled = true
-      detach()
-      reject(error)
-    }
-    promise.then(value => {
-      if (settled) return
-      settled = true
-      detach()
-      resolve(value)
-    }, error => { settle(error) })
-    if (signal?.aborted === true) onAbort()
-    else signal?.addEventListener('abort', onAbort, { once: true })
-    ;(timer as { unref?: () => void }).unref?.()
+    totals.cacheWriteTokens = totals.cacheWrite5mTokens + totals.cacheWrite1hTokens
+    totals.tokens = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+    // The optional display precision never overrides the exact billed integer.
+    const usd = get('cost_usd')
+    if (!/^\d{1,100}(?:\.\d{1,100})?$/.test(usd)) return invalidCsv()
+    return { fields, day, provider, model, totals }
   })
+  return { header, rows }
 }
 
-function resolveTimeZone(value: string): { name: string; fallback: boolean } {
-  try {
-    new Intl.DateTimeFormat('en-CA', { timeZone: value }).format(0)
-    return { name: value, fallback: false }
-  } catch {
-    return { name: 'UTC', fallback: true }
+function utcDay(now: number): string { return new Date(now).toISOString().slice(0, 10) }
+
+function rangeOf(period: AnalyticsRange, now: number): { from: number; to: number } {
+  const days = period === 'today' ? 1 : Number(period.slice(0, -1))
+  return { from: Math.floor(now / DAY_MS) * DAY_MS - (days - 1) * DAY_MS, to: now }
+}
+
+function rowsIn(data: Dataset, period: AnalyticsRange): HistoryRow[] {
+  const range = rangeOf(period, data.generatedAt)
+  const from = utcDay(range.from), to = utcDay(range.to)
+  return data.rows.filter(row => row.day >= from && row.day <= to)
+}
+
+function aggregate(data: Dataset, query: AnalyticsQuery): AnalyticsReport {
+  const totals = zero()
+  const models = new Map<string, { provider: string; model: string; totals: BigTotals }>()
+  const days = new Map<string, BigTotals>()
+  const range = rangeOf(query.range, data.generatedAt)
+  for (let time = range.from; time <= Math.floor(range.to / DAY_MS) * DAY_MS; time += DAY_MS) days.set(utcDay(time), zero())
+  for (const row of rowsIn(data, query.range)) {
+    add(totals, row.totals)
+    add(days.get(row.day)!, row.totals)
+    const id = JSON.stringify([row.provider, row.model])
+    let model = models.get(id)
+    if (!model) { model = { provider: row.provider, model: row.model, totals: zero() }; models.set(id, model) }
+    add(model.totals, row.totals)
+  }
+  return {
+    accountRef: query.accountRef, source: data.source, generatedAt: data.generatedAt,
+    period: query.range, range, timeZone: 'UTC', totals: strings(totals),
+    byModel: [...models.values()].sort((a, b) => a.totals.costMicroCents > b.totals.costMicroCents ? -1
+      : a.totals.costMicroCents < b.totals.costMicroCents ? 1 : a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model))
+      .map(row => ({ provider: row.provider, model: row.model, ...strings(row.totals) })),
+    byDay: [...days].map(([day, value]) => ({ day, ...strings(value) })),
   }
 }
 
-function dayKey(at: number, formatter: Intl.DateTimeFormat): string {
-  const parts = formatter.formatToParts(new Date(at))
-  const value = (type: string): string => parts.find(part => part.type === type)?.value ?? ''
-  return value('year') + '-' + value('month') + '-' + value('day')
+function encodeCsv(rows: readonly (readonly string[])[]): string {
+  return rows.map(row => row.map(value => /[",\r\n]/.test(value) ? '"' + value.replaceAll('"', '""') + '"' : value).join(',')).join('\r\n') + '\r\n'
 }
 
-/**
- * One query timezone's day boundaries over [from, to): the first instant of
- * each local date and its YYYY-MM-DD key (review M3). Built once per query —
- * at most one entry per day of the capped 366-day range — so per-fact
- * formatToParts calls disappear. Local dates are monotone in time (a DST
- * repeat stays inside one date; a gap jumps to the next), so a fact's bucket
- * is exactly what a per-fact formatter call would return.
- */
-interface DayBuckets {
-  readonly starts: number[]
-  readonly keys: string[]
-}
-
-function nextDay(day: string): string {
-  // Shift the calendar date by one UTC day; the UTC calendar has no DST.
-  return new Date(Date.parse(day + 'T00:00:00Z') + 86_400_000).toISOString().slice(0, 10)
-}
-
-/** First instant whose local date is `day`, by binary search (review M3). */
-function firstInstantOf(day: string, formatter: Intl.DateTimeFormat): number {
-  // Every real zone offset lies in [-12h, +14h], so the first instant of a
-  // local date lies in this window around the day's UTC midnight; `low` is
-  // always the previous local date and `high` never before `day`.
-  const midnight = Date.parse(day + 'T00:00:00Z')
-  let low = midnight - 14 * 3_600_000
-  let high = midnight + 15 * 3_600_000
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2)
-    if (dayKey(mid, formatter) >= day) high = mid
-    else low = mid + 1
-  }
-  return low
-}
-
-function localDayBuckets(from: number, to: number, formatter: Intl.DateTimeFormat): DayBuckets {
-  const starts: number[] = []
-  const keys: string[] = []
-  let day = dayKey(from, formatter)
-  while (starts.length < 367) {
-    const start = firstInstantOf(day, formatter)
-    if (start >= to) break
-    starts.push(start)
-    keys.push(day)
-    day = nextDay(day)
-  }
-  return { starts, keys }
-}
-
-/** The bucket index of `at`; callers only pass instants inside [from, to). */
-function bucketIndexOf(buckets: DayBuckets, at: number): number {
-  let low = 0
-  let high = buckets.starts.length - 1
-  let index = 0
-  while (low <= high) {
-    const mid = (low + high) >> 1
-    if (buckets.starts[mid] <= at) { index = mid; low = mid + 1 } else high = mid - 1
-  }
-  return index
-}
-
-/**
- * M3: order a fold's facts by `at` ascending so every query binary-searches
- * its range. The fold order was never contractual and every aggregate output
- * is re-sorted, so the array shared with the cache is sorted in place once.
- */
-function sortedFacts(folded: FoldedSession): FoldedSession {
-  const facts = folded.facts
-  let ordered = true
-  for (let index = 1; index < facts.length; index++) {
-    if (facts[index].at < facts[index - 1].at) { ordered = false; break }
-  }
-  if (!ordered) facts.sort((left, right) => left.at - right.at)
-  return folded
-}
-
-function lowerBound(facts: readonly RequestFact[], from: number): number {
-  let low = 0
-  let high = facts.length
-  while (low < high) {
-    const mid = (low + high) >> 1
-    if (facts[mid].at < from) low = mid + 1
-    else high = mid
-  }
-  return low
-}
-
-function factUsage(fact: RequestFact): UsageCounts {
-  return { input: fact.input, output: fact.output, cacheRead: fact.cacheRead, cacheWrite: fact.cacheWrite }
-}
-
-/**
- * Build the analytics price book from one catalog snapshot (review P14 core
- * half). A model the metadata marked `costKnown: false` — upstream published
- * no cost block, or a malformed one whose fabricated zeros are
- * indistinguishable from a genuinely free model — is entered without a cost,
- * so its requests land in the unpriced bucket instead of being priced at 0.
- * A published block with legal components stays priced even when all zero.
- */
-export function analyticsPriceBook(...snapshots: AnalyticsCatalogSnapshotLike[]): AnalyticsPriceBook {
-  const models = new Map<string, AnalyticsPricingModel>()
-  for (const snapshot of snapshots) for (const [id, model] of snapshot.models) {
-    models.set(modelSettingsKey({ id, source: snapshot.source }), {
-      ...(model.id === undefined ? {} : { id: model.id }),
-      ...(model.name === undefined ? {} : { name: snapshot.source === 'free' ? `${model.name} · OpenCode Free` : model.name }),
-      ...(snapshot.details?.get(id)?.costKnown === false || model.cost === undefined ? {}
-        : { cost: { ...model.cost, ...model.multipliers === undefined ? {} : { multipliers: model.multipliers } } }),
-    })
-  }
-  const times = snapshots.flatMap(snapshot => snapshot.updatedAtMs === undefined ? [] : [snapshot.updatedAtMs])
-  return { models, ...times.length === 0 ? {} : { updatedAt: Math.min(...times) } }
-}
-
-/** One mount owns the scan cache; multiple dashboard opens share it. */
+/** The Host retains the official CSV; ordinary reads expose only aggregate numbers. */
 export class GoAnalyticsService extends TypertRemoteService {
-  private readonly cache = new Map<string, CachedSession>()
-  private readonly pending = new Map<string, Promise<AnalyticsReport>>()
-  /** The most recent successful price table; stale-on-error fallback (review P4/S4). */
-  private lastPriceBook: AnalyticsPriceBook | undefined
-  private factTotal = 0
+  private readonly identities = new Map<string, Identity>()
+  private readonly cache = new Map<string, Dataset>()
+  private readonly pending = new Map<string, Pending>()
+  private readonly active = new Set<Pending>()
+  private readonly transport: ProxyTransport
 
   constructor(ctx: Context, private readonly options: AnalyticsOptions) {
     super(ctx, 'opencodeGoAnalytics')
+    this.transport = options.transport ?? new ProxyTransport()
+    ctx.effect(() => () => {
+      for (const pending of this.active) pending.controller.abort()
+      this.active.clear()
+      this.pending.clear(); this.cache.clear(); this.identities.clear()
+      if (!options.transport) return this.transport.dispose()
+    })
   }
 
-  /**
-   * Read one aggregate report.
-   * @param raw - the validated query from the RPC codec.
-   * @param signal - caller cancellation, injected by the gateway after the
-   *   business parameters and never carried on the wire.
-   * @returns the report; failures carry a reason in the domain error details.
-   */
   async read(raw: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> {
-    let query: AnalyticsQuery
-    try {
-      query = parseAnalyticsQuery(raw)
-    } catch (error: unknown) {
-      throw new RemoteError('opencode-go/analytics-unavailable', 'Invalid analytics range', {
-        reason: 'invalid-range', retryable: false,
-      }, { cause: error })
+    const query = this.query(raw)
+    return aggregate(await this.dataset(query, signal), query)
+  }
+
+  async exportCsv(raw: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsExport> {
+    const query = this.query(raw)
+    const data = await this.dataset(query, signal)
+    return {
+      filename: 'opencode-usage-' + query.range + '-' + data.day + '.csv',
+      csv: encodeCsv([data.header, ...rowsIn(data, query.range).map(row => row.fields)]),
     }
-    const key = JSON.stringify(query)
-    const shared = this.pending.get(key)
-    if (shared !== undefined) return shared
-    // In-flight dedup, not a result cache: the first caller's signal drives the
-    // shared run; a caller joining an in-flight read shares its fate.
-    const pending = this.run(query, signal).finally(() => { this.pending.delete(key) })
-    this.pending.set(key, pending)
-    return pending
   }
 
-  private now(): number {
-    return this.options.now?.() ?? Date.now()
+  private now(): number { return this.options.now?.() ?? Date.now() }
+
+  private query(raw: AnalyticsQuery): AnalyticsQuery {
+    try { return parseAnalyticsQuery(raw) }
+    catch { throw this.failure('invalid-query', 'Invalid official usage history query', false) }
   }
 
-  private limitOf(name: 'budgetMs' | 'maxSessions' | 'maxEvents' | 'maxFacts' | 'maxConcurrency', fallback: number): number {
-    const value = this.options[name]
-    return value === undefined ? fallback : value
+  private failure(reason: AnalyticsFailureReason, message: string, retryable: boolean, source?: string, retainPrevious = retryable): RemoteError {
+    return new RemoteError('opencode-go/analytics-unavailable', message, {
+      reason, retryable, retainPrevious, ...(source ? { source } : {}),
+    })
   }
 
-  private async run(query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> {
-    const queryService = this.options.query()
-    if (queryService === undefined) {
-      throw new RemoteError('opencode-go/analytics-unavailable', 'Session history is unavailable on this Host', {
-        reason: 'no-session-query', retryable: false,
+  private forget(identity: Identity): void {
+    this.identities.delete(identity.accountRef)
+    for (const [key, data] of this.cache) if (data.source === identity.source) this.cache.delete(key)
+    for (const pending of this.active) if (pending.source === identity.source) pending.controller.abort()
+    for (const [key, pending] of this.pending) if (pending.source === identity.source) this.pending.delete(key)
+  }
+
+  private network(): { baseURL: string; proxyURL: string } {
+    let baseURL: string
+    try {
+      const url = new URL(this.options.baseURL())
+      if (url.origin !== CONSOLE_ORIGIN || url.username || url.password || url.search || url.hash) throw new Error()
+      baseURL = url.href
+    } catch {
+      throw this.failure('unsupported-gateway', 'Official usage history is only available with the official OpenCode gateway', false)
+    }
+    let proxyURL: string
+    try { proxyURL = assertProxyURL(this.options.proxyURL?.()) }
+    catch { throw this.failure('invalid-proxy', 'The OpenCode proxy address is invalid', false) }
+    return { baseURL, proxyURL }
+  }
+
+  private assertCurrentNetwork(identity: Pick<Identity, 'baseURL' | 'proxyURL' | 'source'>): void {
+    const current = this.network()
+    if (current.baseURL !== identity.baseURL || current.proxyURL !== identity.proxyURL) {
+      throw this.failure('network', 'The OpenCode connection changed; retry the usage history request', true, identity.source, false)
+    }
+  }
+
+  private async identity(query: AnalyticsQuery, signal?: AbortSignal): Promise<Identity> {
+    signal?.throwIfAborted()
+    const refs = this.options.accountRefs()
+    for (const identity of this.identities.values()) if (!refs.includes(identity.accountRef)) this.forget(identity)
+    if (!refs.includes(query.accountRef)) throw this.failure('unknown-account', 'The selected OpenCode account no longer exists', false)
+    let baseURL: string, proxyURL: string
+    try { ({ baseURL, proxyURL } = this.network()) }
+    catch (error) {
+      const old = this.identities.get(query.accountRef)
+      if (old) this.forget(old)
+      throw error
+    }
+    let key: string | undefined
+    try { key = await waitWithSignal(() => this.options.resolveApiKey(query.accountRef), signal) }
+    catch (error) {
+      signal?.throwIfAborted()
+      const old = this.identities.get(query.accountRef)
+      if (old) this.forget(old)
+      const missing = error !== null && typeof error === 'object' && 'code' in error && error.code === 'MISSING_CREDENTIAL'
+      throw this.failure(missing ? 'missing-credential' : 'credential-unavailable',
+        missing ? 'The selected OpenCode account has no API key' : 'Could not resolve the selected OpenCode account API key', !missing, undefined, false)
+    }
+    signal?.throwIfAborted()
+    try { this.assertCurrentNetwork({ baseURL, proxyURL, source: '' }) }
+    catch (error) {
+      const old = this.identities.get(query.accountRef)
+      if (old) this.forget(old)
+      throw error
+    }
+    if (!this.options.accountRefs().includes(query.accountRef)) {
+      const old = this.identities.get(query.accountRef)
+      if (old) this.forget(old)
+      throw this.failure('unknown-account', 'The selected OpenCode account no longer exists', false)
+    }
+    if (!key || !key.trim() || /[\r\n\0]/.test(key)) {
+      const old = this.identities.get(query.accountRef)
+      if (old) this.forget(old)
+      throw this.failure('missing-credential', 'The selected OpenCode account has no usable API key', false)
+    }
+    let identity = this.identities.get(query.accountRef)
+    if (!identity || identity.baseURL !== baseURL || identity.proxyURL !== proxyURL || identity.key !== key) {
+      if (identity) this.forget(identity)
+      identity = { accountRef: query.accountRef, baseURL, proxyURL, key, source: randomUUID() }
+      this.identities.set(query.accountRef, identity)
+    }
+    return identity
+  }
+
+  private async dataset(query: AnalyticsQuery, signal?: AbortSignal): Promise<Dataset> {
+    const identity = await this.identity(query, signal)
+    const now = this.now(), day = utcDay(now)
+    for (const [key, cached] of this.cache) {
+      if (cached.day !== day || now < cached.generatedAt || now - cached.generatedAt >= CACHE_MS) this.cache.delete(key)
+    }
+    const period = query.range === 'today' ? '7d' : query.range
+    const cacheKey = identity.source + ':' + day + ':' + period
+    const cached = this.cache.get(cacheKey)
+    if (!query.refresh && cached) return cached
+    let pending = query.refresh ? undefined : this.pending.get(cacheKey)
+    if (!pending || pending.controller.signal.aborted) {
+      const controller = new AbortController()
+      const task: Pending = { controller, consumers: 0, source: identity.source, promise: undefined as never }
+      this.active.add(task)
+      task.promise = this.fetchDataset(identity, period, now, controller.signal).then(data => {
+        if (this.pending.get(cacheKey) === task && this.identities.get(query.accountRef) === identity
+          && this.options.accountRefs().includes(query.accountRef)) this.cache.set(cacheKey, data)
+        return data
+      }).catch(error => {
+        if (this.pending.get(cacheKey) === task && error instanceof RemoteError
+          && error.details && typeof error.details === 'object'
+          && 'retryable' in error.details && error.details.retryable === false) this.cache.delete(cacheKey)
+        throw error
+      }).finally(() => {
+        this.active.delete(task)
+        if (this.pending.get(cacheKey) === task) this.pending.delete(cacheKey)
       })
+      this.pending.set(cacheKey, task)
+      pending = task
     }
-    const listStarted = this.now()
-    let listed: readonly AnalyticsSessionRecord[]
-    try {
-      listed = await queryService.listSessions(signal)
-    } catch (error: unknown) {
-      if (signal?.aborted === true) throw abortOf(signal)
-      throw new RemoteError('opencode-go/analytics-unavailable', 'Could not list local sessions', {
-        reason: 'scan-failed', retryable: true,
-      }, { cause: error })
-    }
-    const listMs = Math.max(0, this.now() - listStarted)
-
-    const zone = resolveTimeZone(query.timeZone)
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: zone.name, year: 'numeric', month: '2-digit', day: '2-digit',
-    })
-    const started = this.now()
-    const budgetMs = this.limitOf('budgetMs', DEFAULT_BUDGET_MS)
-    const maxEvents = this.limitOf('maxEvents', DEFAULT_MAX_EVENTS)
-    const maxSessionCount = Math.min(query.maxSessions ?? this.limitOf('maxSessions', DEFAULT_MAX_SESSIONS), 2000)
-    const ordered = [...listed].sort((left, right) => {
-      const live = Number(right.live === true) - Number(left.live === true)
-      return live !== 0 ? live : createdAtOf(right) - createdAtOf(left)
-    })
-    const targets = ordered.slice(0, maxSessionCount)
-
-    // S1/P3/C3: every fold result this run may report, keyed by session id and
-    // including cache hits — aggregation never reads the evictable cache, so a
-    // concurrent run's remember()/trim() cannot subtract a session from this
-    // report. Keys are unique, which also folds any duplicate host ids (U10).
-    const local = new Map<string, FoldedSession>()
-    let scanned = 0
-    let events = 0
-    let newEvents = 0
-    let failed = 0
-    let stopped: 'time' | 'events' | undefined
-    let abortReason: { reason: unknown } | undefined
-
-    // S4/P4: pricing does not depend on the scan — start it now, harvest after
-    // the loop, so a cold catalog overlaps the reads instead of extending them.
-    const pricingStarted = this.now()
-    const pricingPromise = this.options.pricing()
-    // A run that aborts before harvesting must not leave an unhandled rejection.
-    pricingPromise.catch(() => {})
-
-    const scanRecord = async (record: AnalyticsSessionRecord): Promise<void> => {
-      const id = idOf(record)
-      if (id === undefined) { scanned++; failed++; return }
-      const live = record.live === true
-      const cached = this.cache.get(id)
-      const reusable = cached !== undefined && live === cached.live
-        && this.now() - cached.storedAt < UNVERSIONED_REUSE_MS
-      if (reusable && cached !== undefined) {
-        // LRU touch (P2/M2): a hit moves the entry to the tail.
-        this.cache.delete(id)
-        this.cache.set(id, cached)
-        scanned++
-        events += cached.facts.events
-        local.set(id, sortedFacts(cached.facts))
-        return
+    const task = pending
+    task.consumers++
+    try { return await waitWithSignal(() => task.promise, signal) }
+    finally {
+      task.consumers--
+      if (!task.consumers) {
+        task.controller.abort()
+        if (this.pending.get(cacheKey) === task) this.pending.delete(cacheKey)
       }
-      if (this.now() - started > budgetMs) { stopped = 'time'; return }
-      if (newEvents > maxEvents) { stopped = 'events'; return }
-      // C2: each read carries its own remaining share of the budget, so one
-      // hung read cannot stretch the scan past it.
-      const remaining = budgetMs - (this.now() - started)
+    }
+  }
+
+  private async fetchDataset(identity: Identity, period: Exclude<AnalyticsRange, 'today'>, now: number, caller: AbortSignal): Promise<Dataset> {
+    const signal = AbortSignal.any([caller, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+    const url = CONSOLE_ORIGIN + '/console/api/v2/usage/export?range=' + period
+    const fetcher = this.options.fetch ?? this.transport.forProxy(identity.proxyURL) ?? globalThis.fetch
+    let response: Response | undefined
+    try {
+      response = await waitWithSignal(async () => {
+        this.assertCurrentNetwork(identity)
+        if (!this.options.accountRefs().includes(identity.accountRef)) {
+          throw this.failure('unknown-account', 'The selected OpenCode account no longer exists', false)
+        }
+        const result = await fetcher(url, {
+          method: 'GET', headers: { ...attributionHeaders(), Authorization: 'Bearer ' + identity.key,
+            Accept: 'text/csv', 'Accept-Encoding': 'identity' }, redirect: 'error', signal,
+        })
+        if (signal.aborted) { void result.body?.cancel().catch(() => {}); signal.throwIfAborted() }
+        return result
+      }, signal)
+      if (!response.ok) {
+        const reason = await readUsageError(response, {
+          apiKey: identity.key, baseURL: identity.baseURL, proxyURL: identity.proxyURL, signal,
+        })
+        signal.throwIfAborted()
+        const retryable = response.status === 408 || response.status === 429 || response.status >= 500
+        throw this.failure(response.status === 401 || response.status === 403 ? 'permission-denied' : 'upstream',
+          'Official usage history unavailable (HTTP ' + response.status + ')' + (reason ? ': ' + reason : ''), retryable, identity.source)
+      }
+      if (!/^text\/csv(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) throw new SyntaxError('Expected CSV')
+      const bytes: Uint8Array[] = []
+      let size = 0
+      const reader = response.body?.getReader()
+      if (!reader) throw new SyntaxError('Missing CSV')
       try {
-        const snapshot = await withTimeout(
-          queryService.readSession(id), Math.max(1, remaining), 'session read timed out', signal)
-        const facts = foldSession(snapshot)
-        scanned++
-        events += facts.events
-        newEvents += facts.events
-        this.remember(id, facts, live, this.now())
-        local.set(id, sortedFacts(facts))
-      } catch (error: unknown) {
-        // Aborted in flight: neither scanned nor failed — the session lands in
-        // unreadSessions, and the run rethrows once the pool drains.
-        if (signal?.aborted === true) { abortReason = { reason: abortOf(signal) }; return }
-        scanned++
-        failed++
-        if (error instanceof AnalyticsDeadlineError) { stopped = 'time'; return }
-      }
-    }
-
-    // S3/P1: at most `maxConcurrency` reads in flight; targets are issued in
-    // list order. The budget check runs between issues, so it can drift by at
-    // most the in-flight window (review S3 premise e).
-    const poolSize = Math.max(1, Math.min(
-      this.limitOf('maxConcurrency', DEFAULT_MAX_CONCURRENCY), targets.length))
-    let cursor = 0
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        if (signal?.aborted === true) {
-          abortReason ??= { reason: abortOf(signal) }
-          return
+        while (true) {
+          const part = await waitWithSignal(() => reader.read(), signal)
+          signal.throwIfAborted()
+          if (part.done) break
+          if (part.value.byteLength > ANALYTICS_MAX_BYTES - size) throw new RangeError('CSV response too large')
+          size += part.value.byteLength
+          bytes.push(part.value)
         }
-        if (stopped !== undefined || abortReason !== undefined) return
-        const index = cursor
-        if (index >= targets.length) return
-        cursor++
-        await scanRecord(targets[index])
-      }
-    }
-    const workers: Promise<void>[] = []
-    for (let index = 0; index < poolSize; index++) workers.push(worker())
-    await Promise.all(workers)
-    if (abortReason !== undefined) throw abortReason.reason
-    // S6/U2/P4: scanMs measures the scan loop only — the pricing wait and the
-    // listing are reported separately.
-    const scanMs = Math.max(0, this.now() - started)
-    let priceBook: AnalyticsPriceBook | undefined
-    let pricingUnavailable = false
-    try {
-      priceBook = await withTimeout(pricingPromise, PRICING_TIMEOUT_MS, 'pricing request timed out', signal)
-      if (priceBook === undefined) pricingUnavailable = true
-    } catch (error: unknown) {
-      if (signal?.aborted === true) throw abortOf(signal)
-      pricingUnavailable = true
-    }
-    const pricingMs = Math.max(0, this.now() - pricingStarted)
-    if (pricingUnavailable && this.lastPriceBook !== undefined) {
-      // S4/P4 stale-on-error: price with the last successful table; its own
-      // updatedAt keeps the table's age visible to the client.
-      priceBook = this.lastPriceBook
-      pricingUnavailable = false
-    } else if (!pricingUnavailable) {
-      this.lastPriceBook = priceBook
-    }
-
-    const totals: AnalyticsTotals = {
-      requests: 0, unsettledAttempts: 0, summaries: 0,
-      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
-      estimatedMicroUsd: 0, pricedRequests: 0, unpricedRequests: 0, missingUsage: 0,
-    }
-    const models = new Map<string, ModelAccumulator>()
-    const days = new Map<string, DayAccumulator>()
-    const unpriced = new Set<string>()
-    let matchedSessions = 0
-    let legacyRequests = 0
-    let unattributedRequests = 0
-    let buckets: DayBuckets | undefined
-
-    // Second pass over run-local results only (S1/P3); M3: each session's
-    // facts ascend by `at`, so the range is located by binary search and the
-    // day key comes from the precomputed query-timezone bucket table.
-    for (const folded of local.values()) {
-      const facts = folded.facts
-      let matched = false
-      for (let index = lowerBound(facts, query.from); index < facts.length; index++) {
-        const fact = facts[index]
-        if (fact.at >= query.to) break
-        matched = true
-        const model = modelSettingsKey({ id: fact.model, source: fact.source })
-        let row = models.get(model)
-        if (row === undefined) {
-          row = {
-            model, requests: 0, missingUsage: 0, inputTokens: 0, outputTokens: 0,
-            cacheReadTokens: 0, cacheWriteTokens: 0, estimatedMicroUsd: 0,
-            pricedRequests: 0, unpricedRequests: 0,
-          }
-          models.set(model, row)
-        }
-        row.requests++
-        totals.requests++
-        if (fact.kind === 'summary') totals.summaries++
-        if (fact.legacy) legacyRequests++
-        let tokens = 0
-        let micro = 0
-        if (fact.missingUsage) {
-          totals.missingUsage++
-          row.missingUsage++
-        } else {
-          tokens = fact.input + fact.output + fact.cacheRead + fact.cacheWrite
-          totals.inputTokens += fact.input
-          totals.outputTokens += fact.output
-          totals.cacheReadTokens += fact.cacheRead
-          totals.cacheWriteTokens += fact.cacheWrite
-          row.inputTokens += fact.input
-          row.outputTokens += fact.output
-          row.cacheReadTokens += fact.cacheRead
-          row.cacheWriteTokens += fact.cacheWrite
-          const cost = priceBook?.models.get(model)?.cost
-          if (cost === undefined) {
-            totals.unpricedRequests++
-            row.unpricedRequests++
-            // P15: the models that actually appeared belong in the list even
-            // when the whole table was unavailable — an empty list next to
-            // unpricedRequests > 0 must mean "everything was priced or free".
-            unpriced.add(model)
-          } else {
-            micro = priceUsage(model, factUsage(fact), cost, fact.at)
-            totals.estimatedMicroUsd += micro
-            totals.pricedRequests++
-            row.estimatedMicroUsd += micro
-            row.pricedRequests++
-          }
-        }
-        buckets ??= localDayBuckets(query.from, query.to, formatter)
-        const day = buckets.keys[bucketIndexOf(buckets, fact.at)]
-        let bucket = days.get(day)
-        if (bucket === undefined) { bucket = { requests: 0, tokens: 0, estimatedMicroUsd: 0 }; days.set(day, bucket) }
-        bucket.requests++
-        bucket.tokens += tokens
-        bucket.estimatedMicroUsd += micro
-      }
-      for (const at of folded.attempts) {
-        if (at < query.from || at >= query.to) continue
-        matched = true
-        totals.unsettledAttempts++
-      }
-      for (const at of folded.unattributed) {
-        // P12: a visibility counter only — these buckets can hold traffic this
-        // plugin skipped (fork prefixes), so nothing enters tokens or cost.
-        if (at >= query.from && at < query.to) unattributedRequests++
-      }
-      if (matched) matchedSessions++
-    }
-
-    const byModel: AnalyticsModelRow[] = [...models.values()].map((row) => {
-      const limit = goMonthlyLimit(row.model)
-      const priced = priceBook?.models.get(row.model)
-      const note: AnalyticsModelRow['limitNote'] = limit?.note
-        ?? (limit === undefined
-          ? (priced?.cost !== undefined && isFreeCost(priced.cost) ? 'unlimited' : 'unknown')
-          : undefined)
-      const result: AnalyticsModelRow = {
-        model: row.model,
-        ...(priced?.name === undefined ? {} : { name: priced.name }),
-        requests: row.requests,
-        missingUsage: row.missingUsage,
-        inputTokens: row.inputTokens,
-        outputTokens: row.outputTokens,
-        cacheReadTokens: row.cacheReadTokens,
-        cacheWriteTokens: row.cacheWriteTokens,
-        estimatedMicroUsd: row.estimatedMicroUsd,
-        pricedRequests: row.pricedRequests,
-        unpricedRequests: row.unpricedRequests,
-        limitGoUsd: limit?.go ?? null,
-        limitGoPlusUsd: limit?.goPlus ?? null,
-        ...(note === undefined ? {} : { limitNote: note }),
-      }
-      return result
-    }).sort((left, right) => right.estimatedMicroUsd - left.estimatedMicroUsd
-      || right.requests - left.requests || left.model.localeCompare(right.model))
-
-    const byDay: AnalyticsDayRow[] = [...days.entries()]
-      .map(([day, row]) => ({ day, requests: row.requests, tokens: row.tokens, estimatedMicroUsd: row.estimatedMicroUsd }))
-      .sort((left, right) => left.day.localeCompare(right.day))
-
-    // S1/P2: the one eviction point — after this run's aggregation is done, so
-    // it can never subtract from the report that was just built (the count
-    // says how many sessions the next run will have to re-read).
-    const evictedSessions = this.trim()
-    const truncation = stopped ?? (ordered.length > targets.length ? 'sessions' as const : undefined)
-    const truncated = truncation !== undefined
-    const report: AnalyticsReport = {
-      generatedAt: this.now(),
-      range: { from: query.from, to: query.to },
-      timeZone: zone.name,
-      totals,
-      byModel,
-      byDay,
-      coverage: {
-        listedSessions: listed.length,
-        scannedSessions: scanned,
-        matchedSessions,
-        failedSessions: failed,
-        eventsScanned: events,
-        summaries: totals.summaries,
-        legacyRequests,
-        missingUsage: totals.missingUsage,
-        truncated,
-        ...(truncation === undefined ? {} : { truncation }),
-        scanMs,
-        ...(zone.fallback ? { timeZoneFallback: true as const } : {}),
-        // P16/P18/M1: sessions listed but never scanned — the slice cap or a
-        // budget stopped first. Observability only: this never implies the
-        // range was covered.
-        unreadSessions: Math.max(0, listed.length - scanned),
-        // P3/S1: entries the end-of-run trim dropped; they were counted in
-        // this report from run-local results, but the next run re-reads them.
-        evictedSessions,
-        // P12: unattributed model calls in range, counted for visibility only.
-        unattributedRequests,
-        // S6: segmented timing (list / scan / pricing).
-        listMs,
-        pricingMs,
-      },
-      pricing: {
-        source: 'OpenCode /models',
-        ...(priceBook?.updatedAt === undefined ? {} : { updatedAt: priceBook.updatedAt }),
-        ...(pricingUnavailable ? { unavailable: true as const } : {}),
-        unpricedModels: [...unpriced].sort().slice(0, 64),
-      },
-    }
-    return report
-  }
-
-  private remember(id: string, facts: FoldedSession, live: boolean, storedAt: number): void {
-    const previous = this.cache.get(id)
-    if (previous !== undefined) this.factTotal -= previous.facts.facts.length
-    // Delete-then-set moves an updated entry to the tail: the cache is LRU
-    // (review P2/M2), and eviction is deferred to trim() at the end of a run.
-    this.cache.delete(id)
-    this.cache.set(id, { facts, live, storedAt })
-    this.factTotal += facts.facts.length
-  }
-
-  /** The one eviction point; returns how many entries it dropped (review S1/P2). */
-  private trim(): number {
-    const maxFacts = this.limitOf('maxFacts', DEFAULT_MAX_FACTS)
-    let evicted = 0
-    while (this.cache.size > MAX_CACHE_SESSIONS || this.factTotal > maxFacts) {
-      const first = this.cache.keys().next().value as string | undefined
-      if (first === undefined) break
-      const entry = this.cache.get(first)
-      if (entry !== undefined) this.factTotal -= entry.facts.facts.length
-      this.cache.delete(first)
-      evicted++
-    }
-    return evicted
+      } catch (error) { void reader.cancel(error).catch(() => {}); throw error }
+      finally { reader.releaseLock() }
+      const csv = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(bytes, size))
+      const parsed = parseCsv(csv)
+      signal.throwIfAborted()
+      return { ...parsed, csv, generatedAt: now, day: utcDay(now), source: identity.source }
+    } catch (error) {
+      caller.throwIfAborted()
+      if (error instanceof RemoteError) throw error
+      if (signal.aborted) throw this.failure('timeout', 'Official usage history request timed out', true, identity.source)
+      const invalid = error instanceof SyntaxError || error instanceof RangeError
+        || error instanceof TypeError && 'code' in error && error.code === 'ERR_ENCODING_INVALID_ENCODED_DATA'
+      throw this.failure(invalid ? 'invalid-response' : 'network',
+        invalid ? 'Official usage history returned invalid or oversized CSV' : 'Could not read official usage history: ' + transportFailure(error),
+        !invalid, identity.source)
+    } finally { void response?.body?.cancel().catch(() => {}) }
   }
 }

@@ -2,107 +2,56 @@
 
 [Back to README](../README.en.md) · [简体中文](usage-analytics.md)
 
-This page documents what the `dsh-opencode-go` usage dashboard counts, how it prices requests, and what it deliberately leaves out.
+The dashboard shows official history for the workspace belonging to the selected OpenCode key. It can include calls from other clients and does not attribute calls to this plugin. Coverage of anonymous Free calls is not guaranteed.
 
-## Entry points
+## Entry points and accounts
 
-- the **Usage analytics** row at the bottom of the pill's expanded panel, styled like the account row above it;
-- the **Usage analytics** card on the settings page: the same folding card the model and advanced sections use. Unfolded it has two rows — **Dashboard**, which opens the dashboard, and **Theme**, which picks the style. Folded, its trailing note names the style in force.
+Open it from the conversation's expanded usage pill or the sidebar dashboard button. Settings no longer include a usage analytics card or theme picker.
 
-## Data source
+The dashboard has an independent viewing-account selector, defaulting to the account currently used for inference. Changing it only changes the dashboard scope; it does not switch the account for subsequent conversations or combine all saved accounts. The dashboard's five-hour, weekly and monthly quota windows follow the selected account and use official quota percentages.
 
-The Host reads DSH's `ctx.sessionQuery`:
+## Official data source
 
-- `listSessions()` lists sessions newest-first;
-- `readSession(id)` returns the complete event log, including closed sessions;
-- only events are scanned; the dashboard never parses compressed logs on disk or makes a session live. After an app restart, the Host reads session events again; the plugin does not keep an on-disk fold cache.
+The Host uses the selected account's key to request the official daily CSV:
 
-The browser receives aggregate numbers only: no session ids, titles, content, working directories, or credentials.
+```text
+https://opencode.ai/console/api/v2/usage/export?range=7d|30d|90d
+```
 
-Session scanning and aggregation run locally, but model and pricing metadata may refresh from each gateway’s `/models` endpoint. That request carries no conversation content, account keys or per-request analytics. Normal inference and quota requests still reach your configured model gateway; there is no additional telemetry or analytics service.
+Totals, daily charts and model detail all come from one CSV snapshot, avoiding differences between endpoints queried at different times. Ranges are today, 7 days, 30 days and 90 days; today filters the 7-day CSV to the current UTC date. All dates use UTC, with missing dates filled with zero to keep the daily series continuous. Official daily aggregates may be delayed, so refreshing may not immediately include a recently completed call.
 
-## What is counted
+The Host stores and uses keys. Normal reports send the browser only aggregate numbers and grouping fields such as provider, model and day, without conversation content, member fields or keys. An official CSV explicitly downloaded by the user may contain official member fields.
 
-### Included
+History queries require an official model gateway configuration before the Host sends a key to the `opencode.ai` Console. Third-party gateways show an unsupported state and their keys are not sent to Console. Queries retain the configured proxy path, cancellation, timeouts and response-size limits.
 
-- `assistant/message` events on the `dsh-opencode-go` route (one settled model request each);
-- `compaction/summary` events on the same route (the summarization request);
-- the pre-0.1.16 `opencode-go` route, but only for requests before 2026-09-30 UTC. Later `opencode-go` records belong to DSH's native route and are excluded.
+## Accounting
 
-### Excluded
+| Metric | Source |
+| --- | --- |
+| Requests | Sum of official CSV request counts |
+| Input / output tokens | Official input and output fields, summed separately |
+| Cache-read tokens | Sum of the official cache-read field |
+| Cache-write tokens | Sum of official 5-minute and 1-hour cache-write fields |
+| Total tokens | Input + output + cache read + both cache-write fields |
+| Official usage amount | Exact sum of `cost_micro_cents`; `1 USD = 100,000,000 cost_micro_cents` |
+| Model grouping | Provider + model; identical model names from different providers stay separate |
 
-- DSH's native OpenCode Go route and every other provider;
-- fork-inherited prefixes (sequence numbers strictly below `inheritedEventCount`; the boundary slot belongs to this session, matching the host's half-open `isOwnSeq`);
-- model calls that never enter the session log (for example some title generation);
-- model calls that cannot be attributed to this plugin's route (the log lacks a routing header or model name) — the footer counts them as unattributed activity, without tokens or cost;
-- failed requests whose gateway charge is not represented by a usage record; they appear only as unsettled attempts.
+The amount comes directly from official records and is labeled **official usage amount**. It does not mean an additional charge beyond the Go subscription. The dashboard does not reprice history using the current model catalog or derive quota percentages from amounts.
 
-### Request time and range
+Only source-supported metrics are shown. Local session coverage, summary-call counts, unsettled attempts and unattributed activity are not reported or filled with misleading zeros. UTC zero-filling only means the official CSV contains no records for that day.
 
-The request start comes from the matching `step/start` event; when that key is absent (legacy or damaged logs) the session's most recent `step/start` is used, and the message event time is the fallback only when a session recorded no start at all. The legacy-route judgment follows the request start time. Summaries use their own event time. The range is half-open `[from, to)` and days are bucketed in the browser's IANA timezone.
+## Presentation and refresh
 
-### Tokens
+- A wide-screen dialog becomes full-screen on narrow screens, with stacked daily token bars or daily request bars, model rankings and detail.
+- The pill, expanded sidebar and dashboard share one ink-blue / cool-white palette with cobalt accents, following the Host's light/dark mode. There is no theme picker. Account management and model settings retain Host components.
+- History queries run only when opening the dashboard, changing the viewing account or range, or refreshing manually. There is no background history polling; closing the dashboard cancels its active query.
+- The Host caches official reports and CSVs for 30 seconds, isolated by credential, account, network configuration, range and UTC date. A forced manual refresh bypasses the cache.
+- Authentication, permission, network and data-format errors show an explicit failure, without falling back to local session scans or fabricated zero usage.
 
-- input, output, cache read, and cache write are tracked separately;
-- billed input = input + cache read + cache write (pi-ai's input excludes caches);
-- usage degrades per field: a present-but-malformed component zeroes only itself while the valid components still count; a request counts as missing usage only when input and output are both missing or malformed, and missing usage is never zero-filled into the estimate;
-- cache hit rate = cache read / (input + cache read + cache write): output tokens never enter the denominator, matching the repository's existing session statistic; a zero denominator shows 0.0%.
-
-### Estimate
-
-- current rates from the Go and Free gateway `/models` directories (USD per 1M tokens) — all history is estimated at the rates in force at query time (the directories publish no historical rates);
-- the highest matching context tier prices the whole request;
-- each model’s `cost.multipliers` dynamically applies UTC weekday/hour and date conditions; Go and Free requests retain separate tariffs even for overlapping IDs;
-- a model whose upstream cost block is missing or malformed is treated as unpriced: it adds no cost, is counted separately, and its cost cell shows an **unpriced** tag; such models were previously priced at zero silently — the new display is louder but honest. A genuinely free model with a published, legal (including all-zero) cost block still prices at zero;
-- the lead sentence only states an amount when at least one request was priced: with `pricedRequests === 0` it puts `—` where the amount would go (the same meaning as the KPI's `-`), so "cannot be priced" is never rendered as `$0.00`;
-- when the price table fails or times out (at most a 4-second wait) the last successful table is used; with no usable table at all, every model that appeared is listed as unpriced;
-- amounts accumulate as integer micro-USD; this is an estimate, not an invoice.
-
-## Model detail
-
-Each model row shows only the display name plus requests, input, output, cache read, cost, and cost share; the invocation id and the Go / Go Plus monthly limits are no longer rendered (the snapshot data remains in `src/analytics.ts`).
-
-The cost cell has three states: priced requests render the estimate (even when some requests in the same row are unpriced); `pricedRequests === 0` with `unpricedRequests > 0` renders the **unpriced** tag; a row whose requests all lack usage (both pricing counters are zero) renders `—`, meaning the row carries no usable data rather than "free". The share cell renders `—` whenever there is no amount, and the composition note's "also free or unpriced" line only lists genuinely unpriced models, no longer mixing in missing-usage rows.
-
-The official `/usage` five-hour, weekly, and monthly percentages remain authoritative; the dashboard never derives them from the estimate. The quota row now shows only the window name, percentage, bar, reset time and the near-limit tick — the "plenty left / near limit" wording and the remaining-percentage line are gone.
-
-The daily view is pointer-interactive: hovering a calendar cell (or within 5px of one) or any point on the trend shows that day's estimate, request count and tokens, highlights the same bucket in both views and draws a vertical guide. Selection is computed from the distance to the nearest cell: moving more than 5px away from every cell — into the gaps between cells — clears it immediately instead of holding the previous bucket, and leaving the chart area clears it too. Per-model, per-day breakdowns are not part of the current contract, so the tooltip reports the day's totals.
-
-The calendar is laid out densely by calendar date across the selected range (a 30-day range always fills 30 cells, capped at 366): dates missing from `byDay` become zero-value cells, so every cell always sits under its true weekday instead of drifting when activity skips dates. Days without activity are hoverable too and report $0.00 / 0 requests; the trend shares this dense series, so the hover index matches in both views. The daily average is computed over the range's calendar days (including days without activity), the same denominator as the KPI band.
-
-## Themes and the pill
-
-- Four styles: **Silent Black**, **Graphite** (default), **Sea Salt**, and **Warm Sand**. Each has a dark and a light variant that follows DSH's color scheme.
-- The only switch is the **Theme** row inside the settings page's Usage analytics card, where each option previews its own surface, accent and text colors. The choice is stored in the browser, not in the settings document.
-- The pill popover and the dashboard no longer carry a switch; they render whatever style is selected.
-- The pill no longer carries the `Go ·` prefix; with multiple accounts it shows the active account's full name, truncated with an ellipsis when long, with the complete name kept in the button title and accessible label while the expanded panel still offers every account. Account switching is unchanged, and pill rebuilds triggered by account or connection changes no longer close an open dashboard.
-- The settings page keeps DSH's own appearance and is not affected by these themes.
-
-## Scan limits and performance
-
-- by default, at most **500 sessions**, **500,000 events**, and **12 seconds**, read with up to eight concurrent session reads (falling back to serial for a Host that cannot read concurrently);
-- exceeding a limit marks the report incomplete with its cause (session slice / event budget / time budget); the footer also reports how many sessions were left unread when the budget or cap stopped the scan, without implying the range was fully covered;
-- **Scan more history** raises the session cap to 1,000 then 2,000; the choice is stored in the browser and survives reopening the panel;
-- session folds are cached in memory under an LRU policy for at most five seconds; live sessions are re-read on closing, and restarting clears the cache. Eviction happens after scanning, while each report uses its own scan results;
-- the price table is fetched in parallel with the scan, waiting at most 4 seconds;
-- the footer splits list / scan / pricing timings;
-- within one open, the window end is taken once at open time, so re-entering the same range does not rescan; **Refresh** forces a new scan;
-- without a reusable in-memory cache, the scan reads target sessions under those budgets; sessions are read again after restarting or after the five-second reuse window;
-- a range already seen in this open renders its previous report immediately and revalidates in the background, explicitly labeled as the previous scan while loading;
-- closing the dialog aborts the running scan; there is no background polling.
-
-## Query and report contracts
-
-`src/contracts.ts` validates query dates, timezone and scan limits. Report types and aggregation live in `src/analytics.ts`. RPC checks the response envelope without manually revalidating every aggregate field. The host and client ship in the same package.
-
-## Known limitations
-
-- session request headers carry no account identity, so history cannot be split per account; the dashboard totals every saved account;
-- a request that fails or is canceled before usage may still be billed by the gateway but adds no cost;
-- summaries count as requests, so the request total includes them;
-- device or gateway clock skew can move a request across a peak boundary or a day boundary;
-- OpenCode /models rates and the official plan page can drift; the footer shows the price update time.
+The usage pill's existing quota refresh is independent of history queries.
 
 ## Verification
 
-Phase one checks peak/off-peak and tiered pricing, event folding, five-second memory reuse, Go / Go Plus limit data, and the full AnalyticsDialog rendering and interactions. Checks use synthetic sessions and fake query services without reading real user logs. Existing test paths and removed internal contracts will be migrated together in phase two.
+An existing manual check on 2026-11-06 used the current desktop key without Cookie or organization headers. All four official Console history endpoints returned HTTP 200, with matching 30-day totals of **7,064 requests, 1,105,009,939 tokens and 3,152,640,453 cost_micro_cents**. This established that the daily CSV supplies the dashboard data; it does not establish identical permissions for every account or complete anonymous Free coverage.
+
+See [verification notes](verification.md) for this implementation's automated tests, build and UI checks. Unfinished checks are marked separately.

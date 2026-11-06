@@ -1,15 +1,5 @@
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import type {
-  AnalyticsFailureReason,
-  AnalyticsQuery,
-  AnalyticsTotals,
-  AnalyticsModelRow,
-  AnalyticsDayRow,
-  AnalyticsCoverage,
-  AnalyticsPricing,
-  AnalyticsReport,
-} from './analytics.ts'
 
 /** Public DSH route and the private SDK transport have separate identities. */
 export const PROVIDER_ID = 'dsh-opencode-go'
@@ -535,21 +525,62 @@ export const accountsRemote: TypertRemoteContribution = {
 
 export type SettingsWriteResult = 'applied' | 'rejected' | 'unknown'
 
-export type { AnalyticsFailureReason, AnalyticsQuery, AnalyticsTotals, AnalyticsModelRow, AnalyticsDayRow, AnalyticsCoverage, AnalyticsPricing, AnalyticsReport } from './analytics.ts'
+export type AnalyticsRange = 'today' | '7d' | '30d' | '90d'
 
-const MAX_TIME = 8_640_000_000_000_000
+export interface AnalyticsQuery {
+  accountRef: string
+  range: AnalyticsRange
+  refresh?: boolean
+}
 
-const MAX_RANGE_MS = 366 * 86_400_000
+/** Exact nonnegative integers on the wire; one USD is 100,000,000 micro cents. */
+export interface AnalyticsTotals {
+  requests: string
+  inputTokens: string
+  outputTokens: string
+  cacheReadTokens: string
+  cacheWrite5mTokens: string
+  cacheWrite1hTokens: string
+  cacheWriteTokens: string
+  tokens: string
+  costMicroCents: string
+}
 
-const MAX_SESSIONS = 2000
+export interface AnalyticsModelRow extends AnalyticsTotals { provider: string; model: string }
+
+export interface AnalyticsDayRow extends AnalyticsTotals { day: string }
+
+export interface AnalyticsReport {
+  accountRef: string
+  /** Opaque account, credential and network identity; contains no credential material. */
+  source: string
+  generatedAt: number
+  period: AnalyticsRange
+  range: { from: number; to: number }
+  timeZone: 'UTC'
+  totals: AnalyticsTotals
+  byModel: AnalyticsModelRow[]
+  byDay: AnalyticsDayRow[]
+}
+
+export interface AnalyticsExport { filename: string; csv: string }
+
+export type AnalyticsFailureReason = 'invalid-query' | 'unknown-account' | 'missing-credential'
+  | 'credential-unavailable' | 'unsupported-gateway' | 'invalid-proxy' | 'permission-denied'
+  | 'upstream' | 'network' | 'timeout' | 'invalid-response'
+
+const ANALYTICS_RANGES: readonly AnalyticsRange[] = ['today', '7d', '30d', '90d']
+
+const ANALYTICS_TOTAL_FIELDS = ['requests', 'inputTokens', 'outputTokens', 'cacheReadTokens',
+  'cacheWrite5mTokens', 'cacheWrite1hTokens', 'cacheWriteTokens', 'tokens', 'costMicroCents'] as const
 
 function object(value: unknown, field: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid analytics ' + field)
   return value as Record<string, unknown>
 }
 
-function integer(value: unknown, field: string, min = 0, max = MAX_TIME): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
+function integer(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 8_640_000_000_000_000) {
     throw new Error('Invalid analytics ' + field)
   }
   return value
@@ -563,31 +594,60 @@ function text(value: unknown, field: string, max = 128): string {
 }
 
 /**
- * Validate one query. Unknown fields are ignored so a newer client can add
- * optional knobs without breaking an older Host.
+ * Validate one account-scoped official history query.
  * @param value - raw RPC argument.
  * @returns the validated query.
  */
 export function parseAnalyticsQuery(value: unknown): AnalyticsQuery {
   const row = object(value, 'query')
-  const from = integer(row.from, 'query.from')
-  const to = integer(row.to, 'query.to', 1)
-  if (from >= to) throw new Error('Invalid analytics range')
-  if (to - from > MAX_RANGE_MS) throw new Error('Invalid analytics range')
-  const timeZone = text(row.timeZone, 'query.timeZone', 64)
-  if (!/^[A-Za-z0-9_+\-/]+$/.test(timeZone)) throw new Error('Invalid analytics timezone')
-  const maxSessions = row.maxSessions === undefined
-    ? undefined : integer(row.maxSessions, 'query.maxSessions', 1, MAX_SESSIONS)
-  return { from, to, timeZone, ...(maxSessions === undefined ? {} : { maxSessions }) }
+  const accountRef = parseRef(row.accountRef)
+  if (!ANALYTICS_RANGES.includes(row.range as AnalyticsRange)) throw new Error('Invalid analytics range')
+  if (row.refresh !== undefined && typeof row.refresh !== 'boolean') throw new Error('Invalid analytics refresh')
+  return { accountRef, range: row.range as AnalyticsRange, ...(row.refresh === undefined ? {} : { refresh: row.refresh }) }
 }
 
-/** Check the response envelope; the host constructs typed aggregate rows. */
+function analyticsTotals(value: unknown): AnalyticsTotals {
+  const row = object(value, 'totals')
+  const totals = {} as AnalyticsTotals
+  for (const field of ANALYTICS_TOTAL_FIELDS) {
+    if (typeof row[field] !== 'string' || !/^(?:0|[1-9]\d*)$/.test(row[field] as string)) {
+      throw new Error('Invalid analytics ' + field)
+    }
+    totals[field] = row[field] as string
+  }
+  return totals
+}
+
+/** Keep the browser wire response limited to validated aggregate fields. */
 export function parseAnalyticsReport(value: unknown): AnalyticsReport {
   const row = object(value, 'report')
-  if (!row.totals || !row.coverage || !row.pricing || !Array.isArray(row.byModel) || !Array.isArray(row.byDay)) {
+  const range = object(row.range, 'range')
+  const from = integer(range.from, 'range.from'), to = integer(range.to, 'range.to')
+  if (from > to || row.timeZone !== 'UTC' || !ANALYTICS_RANGES.includes(row.period as AnalyticsRange)
+    || !Array.isArray(row.byModel) || !Array.isArray(row.byDay)) {
     throw new Error('Invalid analytics report')
   }
-  return value as AnalyticsReport
+  return {
+    accountRef: parseRef(row.accountRef), source: text(row.source, 'source'),
+    generatedAt: integer(row.generatedAt, 'generatedAt'), period: row.period as AnalyticsRange,
+    range: { from, to }, timeZone: 'UTC', totals: analyticsTotals(row.totals),
+    byModel: row.byModel.map(value => {
+      const model = object(value, 'model')
+      return { provider: text(model.provider, 'provider', 1024), model: text(model.model, 'model', 1024), ...analyticsTotals(model) }
+    }),
+    byDay: row.byDay.map(value => {
+      const day = object(value, 'day')
+      if (!validReleaseDate(day.day)) throw new Error('Invalid analytics day')
+      return { day: day.day, ...analyticsTotals(day) }
+    }),
+  }
+}
+
+export function parseAnalyticsExport(value: unknown): AnalyticsExport {
+  const row = object(value, 'export')
+  const filename = text(row.filename, 'filename', 256)
+  if (!/^[A-Za-z0-9_.-]+\.csv$/.test(filename) || typeof row.csv !== 'string') throw new Error('Invalid analytics export')
+  return { filename, csv: row.csv }
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -595,11 +655,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'opencode-go/analytics-unavailable': {
       readonly reason: AnalyticsFailureReason
       readonly retryable: boolean
+      readonly retainPrevious?: boolean
+      readonly source?: string
     }
   }
   interface TypertRemoteNamespaceMap {
     opencodeGoAnalytics: {
       read(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsReport>>
+      exportCsv(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsExport>>
     }
   }
 }
@@ -618,6 +681,13 @@ const reportCodec = {
   create: () => ({ parse: parseAnalyticsReport }),
 }
 
+const exportCodec = {
+  mode: 'strict' as const,
+  typeSymbol: 'dsh-opencode-go#AnalyticsExport',
+  schema: { parse: parseAnalyticsExport },
+  create: () => ({ parse: parseAnalyticsExport }),
+}
+
 /** The dashboard endpoint, mounted with the other plugin remotes. */
 export const analyticsRemote: TypertRemoteContribution = {
   package: 'dsh-opencode-go',
@@ -628,11 +698,14 @@ export const analyticsRemote: TypertRemoteContribution = {
     method: 'read',
     invocation: { kind: 'direct' },
     parameters: [{ name: 'query', wire: 'query', source: 'json', codec: queryCodec }],
-    // Review M4: the signal is injected after the business parameters and
-    // never enters the wire args, so single-argument callers keep working
-    // (precedent: dsh-llm discoverModels, typert.remote-client.js:62).
     cancellation: { parameter: 'signal' },
     result: reportCodec,
+  }, {
+    id: 'dsh-opencode-go#opencodeGoAnalytics/exportCsv',
+    service: 'opencodeGoAnalytics', namespace: 'opencodeGoAnalytics', method: 'exportCsv',
+    invocation: { kind: 'direct' },
+    parameters: [{ name: 'query', wire: 'query', source: 'json', codec: queryCodec }],
+    cancellation: { parameter: 'signal' }, result: exportCodec,
   }],
 }
 

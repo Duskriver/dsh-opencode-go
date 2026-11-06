@@ -1,5 +1,5 @@
-/** English and Chinese copy, palette tokens and local theme preferences. */
-import { useEffect, useState, useSyncExternalStore, type CSSProperties } from 'react'
+/** English and Chinese copy and the shared, Host-following presentation tokens. */
+import { useEffect, useState, type CSSProperties } from 'react'
 
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
 
@@ -32,6 +32,7 @@ export const en = {
   accountSwitchHint: 'This account moves to the first position and serves later requests in this profile. The other accounts keep their relative order.',
   accountSwitchFailed: 'Could not switch account. Please retry.',
   sidebarNextAccount: 'View the next account’s quota',
+  sidebarAnalytics: 'Open usage history',
   accountFallbackQuota: 'The current account reached its quota; switched to',
   accountFallbackCredential: 'The current key was unavailable or rejected; switched to',
   accountsSummary: '{count} accounts · Current {name}',
@@ -47,7 +48,7 @@ export const en = {
   usageResetDays: 'resets in {days} d',
   usageResetDue: 'resets now',
   usageResetUnknown: 'reset time unknown',
-  usageTitle: 'OpenCode Go usage',
+  usageTitle: 'OpenCode Go quota',
   usageRollingShort: '5h',
   usageWeekShort: 'week',
   usage_rolling: '5 hours',
@@ -65,10 +66,10 @@ export const en = {
   usageRetry: 'Retry now',
   usageRefresh: 'Refresh quota',
   usageRefreshing: 'Refreshing…',
-  analyticsOpen: 'Usage analytics',
-  analyticsTitle: 'Usage analytics',
-  analyticsSubtitle: 'This plugin’s requests · includes closed sessions · estimates, not an invoice',
-  analyticsClose: 'Close usage analytics',
+  analyticsOpen: 'Usage history',
+  analyticsTitle: 'Usage history',
+  analyticsSubtitle: 'Official OpenCode Console usage for the selected account.',
+  analyticsClose: 'Close usage history',
   analyticsRange: 'Date range',
   analyticsRangeToday: 'Today',
   analyticsRange7d: '7 days',
@@ -76,53 +77,23 @@ export const en = {
   analyticsRange90d: '90 days',
   analyticsRefresh: 'Refresh',
   analyticsRetry: 'Retry',
-  analyticsLoading: 'Scanning local sessions…',
-  analyticsEmpty: 'No requests from this plugin in the selected range.',
-  analyticsUnsupported: 'This DSH version cannot read local session history.',
-  analyticsFailed: 'Could not read usage analytics.',
+  analyticsLoading: 'Loading usage history…',
+  analyticsEmpty: 'No usage for this account in the selected range.',
+  analyticsFailed: 'Could not read usage history.',
   analyticsRequests: 'Requests',
   analyticsTokens: 'Tokens',
-  analyticsSpend: 'Estimated spend',
-  analyticsCoverage: 'Coverage',
-  analyticsSessions: 'sessions',
-  analyticsSeconds: 'scan',
-  analyticsSummaries: 'summaries',
-  analyticsUnsettled: 'unsettled',
+  analyticsSpend: 'Cost',
   analyticsByModel: 'By model',
   analyticsByDay: 'By day',
   analyticsInput: 'in',
   analyticsOutput: 'out',
   analyticsCacheRead: 'cache',
-  analyticsPriced: 'priced',
-  analyticsUnpriced: 'unpriced',
-  analyticsMissing: 'missing usage',
-  analyticsFailedSessions: 'unreadable',
-  analyticsUnattributed: 'Unattributed activity:',
-  analyticsUnread: 'Sessions left unread at the budget or cap:',
-  analyticsScanSegments: 'Time spent in ms, list / scan / pricing:',
-  analyticsStaleResults: 'Showing the previous scan; the new one is running.',
-  analyticsTruncated: 'Only the most recent history was scanned.',
-  analyticsScanMore: 'Scan more history',
-  analyticsPriceSource: 'Prices:',
-  analyticsNotInvoice: 'Estimates are not an invoice; official percentages remain authoritative; spend applies current OpenCode /models prices across all history.',
-  analyticsPricingUnavailable: 'prices unavailable',
-  analyticsLegacy: 'Includes pre-0.1.16 route requests:',
-  analyticsCardTitle: 'Usage analytics',
-  analyticsCardHint: 'Requests from this plugin, including closed sessions, with per-model cost estimates. Opening scans local sessions; nothing is uploaded.',
-  analyticsBoardLabel: 'Dashboard',
-  analyticsOpenBoard: 'Open dashboard',
   analyticsQuota: 'Quota',
-  analyticsQuotaHint: 'Official percentages · refreshed every minute',
+  analyticsQuotaHint: 'Official account limits',
   analyticsQuotaFailed: 'Quota is temporarily unavailable; usage statistics are still shown.',
   analyticsChartSpend: 'Cost',
   analyticsChartTokens: 'Tokens',
-  analyticsKicker: 'Usage report',
-  analyticsLead: 'In the selected range, this plugin made {requests} requests, used {tokens} tokens and an estimated {spend}.',
-  analyticsLeadTop: '{model} accounts for {share} of that estimate.',
-  analyticsComposition: 'Spend composition',
-  analyticsCompositionHint: 'Estimated amount · priced models only',
-  analyticsCompositionOther: 'Other {count}',
-  analyticsCompositionFree: 'Also free or unpriced:',
+  analyticsKicker: 'OpenCode Console',
   analyticsModel: 'Model',
   analyticsCost: 'Cost',
   analyticsShare: 'Share',
@@ -130,12 +101,6 @@ export const en = {
   analyticsDailyAverage: 'Daily avg',
   analyticsPeak: 'Peak',
   analyticsTotal: 'Total',
-  themeLabel: 'Theme',
-  themeSilentBlack: 'Silent Black',
-  themeGraphite: 'Graphite',
-  themeSeaSalt: 'Sea Salt',
-  themeWarmSand: 'Warm Sand',
-  themeHint: 'Applies to the pill and the dashboard only.',
   nav: 'OpenCode Go',
   title: 'OpenCode Go',
   titleLabel: 'OpenCode Go',
@@ -215,15 +180,17 @@ export const en = {
   limitsEmpty: 'Read the model list first; capacities are edited per model the gateway serves.',
   limitsContextLabel: 'Context window for {name}',
   limitsOutputLabel: 'Max output for {name}',
-  advancedResetAll: 'Reset all to defaults',
+  advancedResetAll: 'Reset parameter defaults',
   advancedLabel: 'Advanced settings',
   groupUsage: 'Usage settings',
   usageAppearanceLabel: 'Quota appearance',
   usageAppearanceReset: 'Reset appearance',
   showSidebarQuotaLabel: 'Show quota in the sidebar',
+  showSidebarQuotaSummary: 'View account quotas in the sidebar, independently of the input indicator.',
   showSidebarQuotaHint: 'Shows a quota card in the expanded sidebar and an icon when collapsed. Click the account name to cycle through account quotas without changing request order; the viewed account is remembered on this device. Refreshes every minute, independently of the input indicator.',
   usagePillStyleLabel: 'Input quota style',
   usagePillStyleHint: 'Choose a bordered badge or a plain, transparent quota indicator in the conversation input.',
+  usagePillStylePreviewHint: 'Sample usage is shown below. Save to apply your chosen style.',
   usagePillStyle_badge: 'Badge (default)',
   usagePillStyle_plain: 'Plain',
   groupConnection: 'Connection',
@@ -295,6 +262,7 @@ export const zh: typeof en = {
   accountSwitchHint: '切换后，该账号移至首位，供本 profile 的后续请求使用；其他账号的相对顺序保持不变。',
   accountSwitchFailed: '账号切换未生效，请重试。',
   sidebarNextAccount: '查看下一个账号的额度',
+  sidebarAnalytics: '打开用量历史',
   accountFallbackQuota: '当前账号额度耗尽，已自动切换为：',
   accountFallbackCredential: '当前 Key 不可用或被拒绝，已自动切换为：',
   accountsSummary: '{count} 个 · 当前 {name}',
@@ -310,7 +278,7 @@ export const zh: typeof en = {
   usageResetDays: '{days} 天后重置',
   usageResetDue: '即将重置',
   usageResetUnknown: '重置时间未知',
-  usageTitle: 'OpenCode Go 用量',
+  usageTitle: 'OpenCode Go 额度',
   usageRollingShort: '5小时',
   usageWeekShort: '周',
   usage_rolling: '5 小时',
@@ -328,10 +296,10 @@ export const zh: typeof en = {
   usageRetry: '立即重试',
   usageRefresh: '刷新额度',
   usageRefreshing: '正在刷新…',
-  analyticsOpen: '用量统计',
-  analyticsTitle: '用量统计',
-  analyticsSubtitle: '本插件请求 · 含已关闭会话 · 估算金额非账单',
-  analyticsClose: '关闭用量统计',
+  analyticsOpen: '用量历史',
+  analyticsTitle: '用量历史',
+  analyticsSubtitle: '所选账号的 OpenCode Console 官方用量。',
+  analyticsClose: '关闭用量历史',
   analyticsRange: '时间范围',
   analyticsRangeToday: '今天',
   analyticsRange7d: '7 天',
@@ -339,53 +307,23 @@ export const zh: typeof en = {
   analyticsRange90d: '90 天',
   analyticsRefresh: '刷新',
   analyticsRetry: '重试',
-  analyticsLoading: '正在扫描本地会话…',
-  analyticsEmpty: '所选区间内没有本插件的请求。',
-  analyticsUnsupported: '当前 DSH 版本无法读取本地会话历史。',
-  analyticsFailed: '未能读取用量统计。',
+  analyticsLoading: '正在读取用量历史…',
+  analyticsEmpty: '该账号在所选区间内没有用量。',
+  analyticsFailed: '未能读取用量历史。',
   analyticsRequests: '请求',
   analyticsTokens: 'Token',
-  analyticsSpend: '估算花费',
-  analyticsCoverage: '覆盖',
-  analyticsSessions: '个会话',
-  analyticsSeconds: '扫描',
-  analyticsSummaries: '压缩摘要',
-  analyticsUnsettled: '未结算',
+  analyticsSpend: '花费',
   analyticsByModel: '按模型',
   analyticsByDay: '按天',
   analyticsInput: '输入',
   analyticsOutput: '输出',
   analyticsCacheRead: '缓存',
-  analyticsPriced: '已计价',
-  analyticsUnpriced: '未计价',
-  analyticsMissing: '缺用量',
-  analyticsFailedSessions: '读取失败',
-  analyticsUnattributed: '未归属活动：',
-  analyticsUnread: '预算或上限截止时未读取的会话：',
-  analyticsScanSegments: '耗时毫秒，列表 / 扫描 / 定价：',
-  analyticsStaleResults: '以下为上一轮结果，新一轮扫描进行中。',
-  analyticsTruncated: '仅扫描了最近的部分历史。',
-  analyticsScanMore: '扫描更多历史',
-  analyticsPriceSource: '价格来源：',
-  analyticsNotInvoice: '估算金额非账单；官方额度百分比仍为权威值；费用按当前 /models 价目对全部历史请求估算。',
-  analyticsPricingUnavailable: '价格暂不可用',
-  analyticsLegacy: '含 0.1.16 之前的旧路由请求：',
-  analyticsCardTitle: '用量统计',
-  analyticsCardHint: '统计本插件的请求（含已关闭会话），按模型估算金额。打开时扫描本地会话，不上传。',
-  analyticsBoardLabel: '看板',
-  analyticsOpenBoard: '打开看板',
   analyticsQuota: '额度',
-  analyticsQuotaHint: '官方百分比 · 每分钟刷新',
+  analyticsQuotaHint: '官方账号限额',
   analyticsQuotaFailed: '额度暂不可用，统计结果仍会显示。',
   analyticsChartSpend: '金额',
   analyticsChartTokens: 'Token',
-  analyticsKicker: '用量报告',
-  analyticsLead: '所选区间内，本插件发起了 {requests} 次请求，消耗 {tokens} Token，估算 {spend}。',
-  analyticsLeadTop: '其中 {model} 占 {share}。',
-  analyticsComposition: '花费构成',
-  analyticsCompositionHint: '按估算金额 · 仅含已计价模型',
-  analyticsCompositionOther: '其他 {count}',
-  analyticsCompositionFree: '另有免费或未计价模型：',
+  analyticsKicker: 'OpenCode Console',
   analyticsModel: '模型',
   analyticsCost: '花费',
   analyticsShare: '占比',
@@ -393,12 +331,6 @@ export const zh: typeof en = {
   analyticsDailyAverage: '日均',
   analyticsPeak: '峰值',
   analyticsTotal: '合计',
-  themeLabel: '主题',
-  themeSilentBlack: '寂静黑',
-  themeGraphite: '石墨',
-  themeSeaSalt: '海盐青',
-  themeWarmSand: '暖砂',
-  themeHint: '仅作用于额度胶囊和用量看板。',
   nav: 'OpenCode Go',
   title: 'OpenCode Go',
   titleLabel: 'OpenCode Go',
@@ -478,15 +410,17 @@ export const zh: typeof en = {
   limitsEmpty: '请先读取模型列表；容量按网关提供的模型逐个编辑。',
   limitsContextLabel: '{name} 的上下文窗口',
   limitsOutputLabel: '{name} 的最大输出',
-  advancedResetAll: '全部恢复默认',
+  advancedResetAll: '恢复参数默认值',
   advancedLabel: '高级设置',
   groupUsage: '用量设置',
   usageAppearanceLabel: '额度外观',
   usageAppearanceReset: '恢复默认外观',
   showSidebarQuotaLabel: '在侧边栏显示额度',
+  showSidebarQuotaSummary: '在侧边栏查看各账号额度，独立于输入栏显示。',
   showSidebarQuotaHint: '侧边栏展开时显示额度卡片，收起时显示图标。点击账号名循环查看各账号额度，不改变请求顺序，并在本机记住查看对象。开启后每分钟刷新，独立于输入栏额度显示。',
   usagePillStyleLabel: '输入栏额度样式',
   usagePillStyleHint: '选择带边框的徽章，或无边框透明的精简额度样式。',
+  usagePillStylePreviewHint: '下方为示例额度，保存后应用所选样式。',
   usagePillStyle_badge: '徽章（默认）',
   usagePillStyle_plain: '精简',
   groupConnection: '连接',
@@ -531,7 +465,7 @@ export const zh: typeof en = {
 /** Every copy key this page's dictionaries must supply. */
 export type OpencodeGoKey = keyof typeof en
 
-/** One palette's six theme colors plus the neutral surface steps. */
+/** Shared ink-blue/cool-white surfaces and restrained semantic colors. */
 export interface GoThemeTokens {
   readonly bg: string
   readonly surface: string
@@ -546,118 +480,18 @@ export interface GoThemeTokens {
   readonly danger: string
 }
 
-/** The four selectable styles. */
-export const GO_THEMES = ['silent-black', 'graphite', 'sea-salt', 'warm-sand'] as const
-
-export type GoThemeId = typeof GO_THEMES[number]
-
-/** Graphite is the default: it is the quietest match for the Host chrome. */
-export const DEFAULT_GO_THEME: GoThemeId = 'graphite'
-
-/** Locale key carrying each theme's display name. */
-export const GO_THEME_LABELS: Record<GoThemeId, keyof typeof en> = {
-  'silent-black': 'themeSilentBlack',
-  graphite: 'themeGraphite',
-  'sea-salt': 'themeSeaSalt',
-  'warm-sand': 'themeWarmSand',
-}
-
-/** Each style in both Host color schemes. */
-export const GO_THEME_TOKENS: Record<GoThemeId, { dark: GoThemeTokens; light: GoThemeTokens }> = {
-  'silent-black': {
-    dark: {
-      bg: '#101010', surface: '#181818', surface2: '#202020', border: '#2b2b2b',
-      text: '#e8e8e8', muted: '#8c8c8c', accent: '#4098f8', accent2: '#8b5cf6',
-      success: '#40b870', warning: '#f88830', danger: '#e5484d',
-    },
-    light: {
-      bg: '#f8f8f8', surface: '#ffffff', surface2: '#f0f0f0', border: '#e4e4e4',
-      text: '#1c1c1c', muted: '#757575', accent: '#0878f8', accent2: '#8250df',
-      success: '#188838', warning: '#e07800', danger: '#d9363e',
-    },
+/** One visual language in the Host's two color schemes; no separate preference. */
+export const GO_THEME_TOKENS: Record<'dark' | 'light', GoThemeTokens> = {
+  dark: {
+    bg: '#0b1220', surface: '#111b2d', surface2: '#19263b', border: '#2b3950',
+    text: '#e6edf8', muted: '#a0afc5', accent: '#719bff', accent2: '#8ca3c5',
+    success: '#7fab99', warning: '#c9a971', danger: '#d58a96',
   },
-  graphite: {
-    dark: {
-      bg: '#111214', surface: '#181a1e', surface2: '#202329', border: '#2a2e36',
-      text: '#edeff3', muted: '#9aa1ac', accent: '#6e8bff', accent2: '#a371f7',
-      success: '#3fb950', warning: '#d29922', danger: '#f85149',
-    },
-    light: {
-      bg: '#f6f7f9', surface: '#ffffff', surface2: '#f0f2f5', border: '#e3e6ea',
-      text: '#1f2328', muted: '#6e7781', accent: '#4f6bed', accent2: '#8250df',
-      success: '#1a7f37', warning: '#9a6700', danger: '#cf222e',
-    },
+  light: {
+    bg: '#f3f6fb', surface: '#ffffff', surface2: '#edf2f8', border: '#d6e0ed',
+    text: '#182941', muted: '#61738b', accent: '#2d63d7', accent2: '#718aaf',
+    success: '#537e70', warning: '#94713a', danger: '#ad596a',
   },
-  'sea-salt': {
-    dark: {
-      bg: '#0b1416', surface: '#111d20', surface2: '#182a2e', border: '#24383c',
-      text: '#e6f0f1', muted: '#8fa6ab', accent: '#2dd4bf', accent2: '#60a5fa',
-      success: '#34d399', warning: '#fbbf24', danger: '#fb7185',
-    },
-    light: {
-      bg: '#f3f8f8', surface: '#ffffff', surface2: '#eaf3f3', border: '#d8e6e6',
-      text: '#13262b', muted: '#5f7478', accent: '#0e8c8f', accent2: '#3b82f6',
-      success: '#2f9e6b', warning: '#c98a2b', danger: '#d9534f',
-    },
-  },
-  'warm-sand': {
-    dark: {
-      bg: '#14110e', surface: '#1d1915', surface2: '#27211a', border: '#352d24',
-      text: '#f4eee6', muted: '#a99c8d', accent: '#e08a62', accent2: '#7c9eff',
-      success: '#4ade80', warning: '#fbbf24', danger: '#fb7185',
-    },
-    light: {
-      bg: '#f7f3ec', surface: '#fffdf9', surface2: '#f1eae0', border: '#e6dccd',
-      text: '#241f1a', muted: '#7a6f63', accent: '#c96f4a', accent2: '#4f7cff',
-      success: '#3e8e63', warning: '#c98a2b', danger: '#c0504d',
-    },
-  },
-}
-
-const STORAGE_KEY = 'dsh-opencode-go.theme'
-
-const listeners = new Set<() => void>()
-
-function isGoTheme(value: unknown): value is GoThemeId {
-  return typeof value === 'string' && (GO_THEMES as readonly string[]).includes(value)
-}
-
-function readStored(): GoThemeId {
-  try {
-    const value = globalThis.localStorage?.getItem(STORAGE_KEY)
-    return isGoTheme(value) ? value : DEFAULT_GO_THEME
-  } catch {
-    return DEFAULT_GO_THEME
-  }
-}
-
-let currentTheme: GoThemeId = readStored()
-
-/** The selected style, stable until the next write. */
-export function getGoTheme(): GoThemeId {
-  return currentTheme
-}
-
-/**
- * Select a style and persist it for this browser.
- * @param id - one of {@link GO_THEMES}; unknown ids are ignored.
- */
-export function setGoTheme(id: GoThemeId): void {
-  if (!isGoTheme(id) || id === currentTheme) return
-  currentTheme = id
-  try { globalThis.localStorage?.setItem(STORAGE_KEY, id) } catch { /* private mode */ }
-  for (const listener of listeners) listener()
-}
-
-/** Subscribe to style changes (for useSyncExternalStore). */
-export function subscribeGoTheme(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
-
-/** Read the selected style in a component. */
-export function useGoTheme(): GoThemeId {
-  return useSyncExternalStore(subscribeGoTheme, getGoTheme, () => DEFAULT_GO_THEME)
 }
 
 /**
@@ -666,7 +500,8 @@ export function useGoTheme(): GoThemeId {
  * theme updates the surfaces without a reload.
  */
 export function useHostScheme(): 'dark' | 'light' {
-  const [scheme, setScheme] = useState<'dark' | 'light'>('dark')
+  const [scheme, setScheme] = useState<'dark' | 'light'>(() =>
+    typeof document === 'undefined' || document.body?.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light')
   useEffect(() => {
     if (typeof document === 'undefined') return
     const body = document.body
@@ -684,11 +519,10 @@ export function useHostScheme(): 'dark' | 'light' {
   return scheme
 }
 
-/** The active style's tokens for the Host's current scheme. */
+/** The unified tokens for the Host's current scheme. */
 export function useGoThemeTokens(): GoThemeTokens {
-  const id = useGoTheme()
   const scheme = useHostScheme()
-  return GO_THEME_TOKENS[id][scheme]
+  return GO_THEME_TOKENS[scheme]
 }
 
 /**
@@ -709,5 +543,6 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-success': tokens.success,
     '--go-warning': tokens.warning,
     '--go-danger': tokens.danger,
+    '--go-number-font': '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
   } as CSSProperties
 }

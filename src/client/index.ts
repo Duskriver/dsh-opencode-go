@@ -10,6 +10,7 @@ import {
   type GoUsage,
   type AnalyticsQuery,
   type AnalyticsReport,
+  type AnalyticsExport,
   goRemote,
   accountsOf,
 } from '../contracts.ts'
@@ -81,15 +82,6 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
       return result.value
     }
   })
-  // Read the cancellable Host analytics endpoint.
-  let readAnalytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
-  ctx.inject(['remote.opencodeGoAnalytics'], ready => {
-    readAnalytics = async (query, signal) => {
-      const result = await (ready as ClientContext).remote.opencodeGoAnalytics.read(query, signal)
-      if (!result.ok) throw result.error
-      return result.value
-    }
-  })
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
@@ -99,12 +91,7 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     // of reaching for a context that never injected it.
     if (readAccount === undefined) throw new Error('OpenCode Go account usage is unavailable in this session')
     return readAccount(ref)
-  }, executeAccountCommand, async (query, signal) => {
-    if (readAnalytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
-      code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
-    })
-    return readAnalytics(query, signal)
-  })
+  }, executeAccountCommand)
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
   const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t, getLocale: () => ctx.locale.getLocale().active })
@@ -162,18 +149,28 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
     // Keep both quota placements available while analytics activates.
     // Cancellation is injected by the descriptor, outside the wire arguments.
     let analytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
+    let exportCsv: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>) | undefined
     ready.inject(['remote.opencodeGoAnalytics'], withAnalytics => {
       analytics = async (query, signal) => {
         const result = await withAnalytics.remote.opencodeGoAnalytics.read(query, signal)
         if (!result.ok) throw result.error
         return result.value
       }
+      exportCsv = async (query, signal) => {
+        const result = await withAnalytics.remote.opencodeGoAnalytics.exportCsv(query, signal)
+        if (!result.ok) throw result.error
+        return result.value
+      }
     })
     const readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> => {
       if (analytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
-        code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
+        code: 'opencode-go/analytics-unavailable', details: { reason: 'unavailable', retryable: false },
       })
       return analytics(query, signal)
+    }
+    const exportAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsExport> => {
+      if (exportCsv === undefined) throw new Error('OpenCode Console export is unavailable in this session')
+      return exportCsv(query, signal)
     }
     const translate = ready.locale.bind('settings.opencode-go')
     const usageProps = (): Omit<UsagePillProps, 'directory'> => ({
@@ -185,7 +182,9 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
         return selectAccount ? selectAccount(ref).catch(() => false) : false
       },
       readUsage,
+      readAccountUsage,
       readAnalytics,
+      exportAnalytics,
       getLocale: () => ready.locale.getLocale().active,
       t: (key: string) => translate(key as OpencodeGoKey),
     })

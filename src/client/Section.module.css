@@ -253,10 +253,8 @@
    into a paragraph. */
 .rowTitle { min-width: 0; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-primary); }
 .rowControl { display: flex; align-items: center; min-width: 0; }
-.toggleControl { justify-content: flex-end; }
 .rowControl > .input { width: 100%; box-sizing: border-box; }
-/* The card's own first line: what it holds, and the single reset that returns every
-   row to its inherited default. */
+/* The card's first line describes its parameters and resets their defaults. */
 .advancedHead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
 .advancedHead .hint { flex: 1 1 auto; min-width: 0; }
 .advancedHead .reset { flex: none; }
@@ -269,6 +267,27 @@
 .groupHead { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; font-size: 11.5px; line-height: 1.5; letter-spacing: .04em; color: var(--dsw-alias-label-tertiary); }
 .groupHead:first-child { margin-top: 4px; }
 .groupHead::after { content: ''; flex: 1; height: 0.5px; background: var(--dsw-alias-border-l2); }
+
+/* Appearance sits in the same list; only the two selectable previews are framed. */
+.appearanceGroup { min-width: 0; margin-top: 10px; }
+.appearanceHead::after { order: 1; }
+.appearanceHead .reset { order: 2; flex: none; letter-spacing: normal; }
+.appearanceTitle { margin: 0; font: inherit; }
+.appearanceToggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0 16px; }
+.appearanceCopy { min-width: 0; }
+.appearanceHint { margin: 4px 0 0; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-tertiary); }
+.appearanceStyles { min-width: 0; margin: 0; padding: 0 0 4px; border: 0; }
+.appearanceLegend { display: flex; align-items: center; gap: 7px; padding: 0; }
+.appearanceChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.appearanceChoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 9px; cursor: pointer; }
+.appearanceChoice:hover:not([data-disabled='true']) { border-color: var(--dsw-alias-border-l4); background: color-mix(in srgb, var(--dsw-alias-bg-layer-3) 40%, transparent); }
+.appearanceChoice[data-selected='true'] { border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 65%, var(--dsw-alias-border-l2)); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 5%, transparent); }
+.appearanceChoice:has(:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.appearanceChoice[data-disabled='true'] { opacity: .5; cursor: default; }
+.appearanceChoiceHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-primary); }
+.appearanceRadio { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--dsw-alias-brand-primary); cursor: inherit; }
+.appearancePreview { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 42px; border-radius: 6px; background: var(--go-bg); color: var(--go-text); }
+.appearanceSample { max-width: 100%; box-sizing: border-box; overflow: hidden; pointer-events: none; }
 
 /* The hint mark a label carries: the Host's own question glyph, its own bubble. */
 .info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; line-height: 1; color: var(--dsw-alias-label-tertiary); cursor: help; }
@@ -397,44 +416,6 @@
   flex-direction: column;
   gap: 8px;
   padding: 4px 14px 0;
-}
-
-/* The analytics card's two rows: the dashboard entry, then the style picker. A
-   label column takes the slack and the control keeps its own width, so both
-   rows start their text on the same x. */
-.analyticsPanel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 8px;
-  padding: 10px 14px 4px;
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-}
-
-.analyticsSection {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px 18px;
-}
-
-.analyticsCopy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.analyticsLabel {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--dsw-alias-label-primary);
-}
-
-.analyticsDivider {
-  height: 0.5px;
-  background: var(--dsw-alias-border-l2);
 }
 
 .cardBody > .input {
@@ -653,6 +634,15 @@
 
 .modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 0.5px solid var(--dsw-alias-border-l2); }
 .modelPanel { display: flex; flex-direction: column; gap: 16px; width: 100%; min-width: 0; }
+.freeHeader { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 20px 0; }
+.freeActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.freeSelect { min-width: 120px; max-width: 100%; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px;
+  background: var(--dsw-alias-background-primary); color: var(--dsw-alias-label-primary); font: inherit; }
+.freeDetails { font-size: 12px; }
+.freeDetails summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
+.freeFacts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; line-height: 1.5; }
+.freeFacts dt { color: var(--dsw-alias-label-secondary); }
+.freeFacts dd { margin: 0; overflow-wrap: anywhere; }
 .modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-right: 6px; }
 .modelRow + .modelRow { border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .modelRowSelected { background: var(--dsw-alias-bg-layer-3); border-radius: 6px; border-top-color: transparent; }
@@ -693,8 +683,7 @@
 @container (max-width: 440px) {
   /* One column cannot stretch: each row stacks its control under its label. */
   .row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .analyticsSection { grid-template-columns: minmax(0, 1fr); }
-  .analyticsSection > :last-child { justify-self: start; }
+  .appearanceChoices { grid-template-columns: minmax(0, 1fr); }
   /* One column cannot stretch: the list and the card stack, and each keeps its
      own ceiling. */
   .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); }
