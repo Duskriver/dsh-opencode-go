@@ -31,6 +31,7 @@ import {
   validateGoConfig,
 } from './config.ts'
 import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
+import { GoStatusService } from './status.ts'
 import { GoAnalyticsService } from './analytics.ts'
 import { accountsOf, accountRefOf, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
 import { ProxyTransport } from './transport.ts'
@@ -117,6 +118,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     activeRef: () => accountRefOf(current()),
     accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
     lastSwitch: () => accountManager.lastSwitch(),
+  })
+  // The status feed is public: it shares the proxy transport but never a credential.
+  ctx.plugin(GoStatusService, {
+    transport,
+    proxyURL: () => current().proxyURL,
   })
   const logger = {
     fallback: ({ url, error }: { url: string; error: unknown; kept: number }): void => {

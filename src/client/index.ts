@@ -8,6 +8,7 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   PROFILE_ENTRY_ID,
   type GoUsage,
+  type GoStatusReport,
   type AnalyticsQuery,
   type AnalyticsReport,
   type AnalyticsExport,
@@ -172,8 +173,18 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
       if (exportCsv === undefined) throw new Error('OpenCode Console export is unavailable in this session')
       return exportCsv(query, signal)
     }
+    // The status feed is public, so its namespace activates independently of
+    // credentials; until it does the pill simply omits the status block.
+    let readStatus: (() => Promise<GoStatusReport>) | undefined
+    ready.inject(['remote.opencodeGoStatus'], withStatus => {
+      readStatus = async () => {
+        const result = await withStatus.remote.opencodeGoStatus.read()
+        if (!result.ok) throw result.error
+        return result.value
+      }
+    })
     const translate = ready.locale.bind('settings.opencode-go')
-    const usageProps = (): Omit<UsagePillProps, 'directory'> => ({
+    const usageProps = (): Omit<UsagePillProps, 'directory' | 'readStatus'> => ({
       settings,
       credentialChanges,
       selectAccount: async ref => {
@@ -195,7 +206,7 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
     ready.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
       scope.slots.inject('conversation.input.right', () => scope.slots.register({
         name: 'conversation.input.right', id: 'opencode-go-usage', order: 1000,
-        inject: sessionId => ({ ...usageProps(), directory: scope.modelDirectories.directoryFor(sessionId as SessionId).store }),
+        inject: sessionId => ({ ...usageProps(), readStatus, directory: scope.modelDirectories.directoryFor(sessionId as SessionId).store }),
       }, UsagePill))
     })
   })

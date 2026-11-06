@@ -18,6 +18,7 @@ DSH already supports OpenCode Go natively. This plugin focuses on usage inside c
 - **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. Free shares saved keys and uses public access when none is usable.
 - **Free rate-limit protection**: honors upstream `Retry-After` and pauses new requests during cooldown. Shared Free quota/IP limits do not rotate Go accounts.
 - **Usage at a glance**: see usage beside the conversation input, then open the panel for five-hour, weekly, and monthly percentages and reset times.
+- **Model service status**: the panel also shows a live snapshot from the official OpenCode status page (status.opencode.ai): the Go plan's overall health, per-model health labels and speed readings (first-token latency / throughput), with the model you are using tagged as current and degraded models listed first. The snapshot refreshes quietly every 5 minutes from the public feed and carries no credentials.
 - **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
 - **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
 

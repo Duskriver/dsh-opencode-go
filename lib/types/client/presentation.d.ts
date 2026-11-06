@@ -64,6 +64,17 @@ export declare const en: {
     usageRetry: string;
     usageRefresh: string;
     usageRefreshing: string;
+    statusTitle: string;
+    statusServiceGo: string;
+    statusOperational: string;
+    statusDegraded: string;
+    statusUpdatedAt: string;
+    statusStale: string;
+    statusUnavailable: string;
+    statusReasonUpstream: string;
+    statusReasonLatency: string;
+    statusReasonErrors: string;
+    statusCurrentModel: string;
     analyticsOpen: string;
     analyticsTitle: string;
     analyticsSubtitle: string;

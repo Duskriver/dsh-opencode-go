@@ -77,6 +77,26 @@
 .window progress.high, .sidebarWindow progress.high { --go-progress: var(--go-warning); }
 .window progress.limited, .sidebarWindow progress.limited { --go-progress: var(--go-danger); }
 .limitedText { margin-top: 5px; color: var(--go-danger); font-size: 11px; }
+
+/* Service status comes from the public feed; degraded rows lead and the feed's
+   reason shows once at the tile level, while speeds are readings, not promises. */
+.dot[data-degraded] { background: var(--go-warning); }
+.status { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.statusHead { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.statusName { flex: none; font-size: 12.5px; font-weight: 600; }
+.statusState { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--go-muted); }
+.statusTime { flex: none; font-size: 10.5px; color: var(--go-muted); }
+.statusReason { font-size: 11px; line-height: 1.6; color: var(--go-warning); }
+.statusRows { display: flex; flex-direction: column; }
+.statusRow { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; }
+.statusRow .dot { width: 6px; height: 6px; }
+.statusModel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusRow[data-current] .statusModel { font-weight: 650; }
+.statusCurrent { flex: none; padding: 0 6px; border-radius: 999px; border: .5px solid color-mix(in srgb, var(--go-accent) 45%, transparent);
+  color: var(--go-accent); font-size: 10px; line-height: 1.7; }
+.statusSpeed { flex: none; font-size: 11px; color: var(--go-muted); font-variant-numeric: tabular-nums; }
+.statusRow[data-degraded] .statusSpeed { color: var(--go-warning); }
+
 .foot { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding-top: 10px; color: var(--go-muted); font-size: 11px; line-height: 1.6; }
 .foot > span { min-width: 0; }
 .analyticsEntry { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; margin-top: 3px; padding: 0;
