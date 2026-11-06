@@ -33,7 +33,7 @@ function transport(maxConcurrent?: number) {
 
 describe('standalone Bun Free transport', () => {
   it('resolves the pinned official binary without an install script or OpenCode', () => {
-    expect(resolveFreeRuntime()).toMatch(/[\\/]node_modules[\\/](?:@oven[\\/]bun-|bun[\\])/)
+    expect(resolveFreeRuntime()).toMatch(/[\\/]node_modules[\\/](?:@oven[\\/]bun-|bun[\\/])/)
     expect(execFileSync(resolveFreeRuntime(), ['--version'], { encoding: 'utf8' }).trim()).toBe('1.4.4')
   })
 
