@@ -65,7 +65,9 @@ function csvRecords(raw: string): string[][] {
         index++
       }
       row.push(field)
-      records.push(row)
+      // Official exports may contain or end with empty lines; a record with no
+      // fields at all carries no data and must not fail the whole history.
+      if (row.some(value => value !== '')) records.push(row)
       row = []; field = ''; state = 'start'; ended = true
       continue
     }
@@ -76,7 +78,10 @@ function csvRecords(raw: string): string[][] {
     } else { field += char; state = 'bare' }
   }
   if (state === 'quoted') return invalidCsv()
-  if (!ended) { row.push(field); records.push(row) }
+  if (!ended) {
+    row.push(field)
+    if (row.some(value => value !== '')) records.push(row)
+  }
   return records
 }
 
@@ -104,8 +109,12 @@ function parseCsv(csv: string): ParsedCsv {
     || CSV_COLUMNS.some(column => !header.includes(column))) return invalidCsv()
   const columns = Object.fromEntries(header.map((column, index) => [column, index]))
   const rows = records.map(fields => {
-    if (fields.length !== header.length) return invalidCsv()
-    const get = (column: typeof CSV_COLUMNS[number]): string => fields[columns[column]]
+    // Trailing gateway-only columns cannot be addressed by the official header;
+    // align the row to the header instead of failing the export. A row shorter
+    // than the header is still fatal: its required totals would silently shrink.
+    const aligned = fields.length > header.length ? fields.slice(0, header.length) : fields
+    if (aligned.length !== header.length) return invalidCsv()
+    const get = (column: typeof CSV_COLUMNS[number]): string => aligned[columns[column]]
     const day = get('day'), provider = get('provider'), model = get('model')
     if (!validReleaseDate(day) || !provider.trim() || !model.trim() || provider.length > 1024 || model.length > 1024
       || /[\u0000-\u001f\u007f]/.test(provider + model)) return invalidCsv()
@@ -117,10 +126,10 @@ function parseCsv(csv: string): ParsedCsv {
     }
     totals.cacheWriteTokens = totals.cacheWrite5mTokens + totals.cacheWrite1hTokens
     totals.tokens = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
-    // The optional display precision never overrides the exact billed integer.
-    const usd = get('cost_usd')
-    if (!/^\d{1,100}(?:\.\d{1,100})?$/.test(usd)) return invalidCsv()
-    return { fields, day, provider, model, totals }
+    // cost_usd is display-only precision: the billed amount is the exact
+    // cost_micro_cents integer above. Its formatting varies by export, so never
+    // reject an otherwise usable history over it.
+    return { fields: aligned, day, provider, model, totals }
   })
   return { header, rows }
 }

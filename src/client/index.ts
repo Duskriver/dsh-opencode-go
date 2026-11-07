@@ -48,13 +48,14 @@ export { OPENCODE_GO_NS } from './controller.ts'
 export type { OpencodeGoKey } from './presentation.ts'
 
 /**
- * Required services (cordis fiber inject). The target slot is declared by
- * ui-settings' apply, whose activation order relative to this one is NOT
- * constrained; registration depends on each slot through `slots.inject()`.
- * `remote.llm` is the discovery namespace the page reads the model listing
- * through.
+ * Required top-level services (cordis fiber inject): the slot ledger, the locale
+ * registry, the remote transport and the credential describe namespace. The
+ * settings/model/analytics namespaces and `configForms` are mounted later with
+ * their own `ctx.inject` waits, and every target slot is reached through
+ * `slots.inject()`, whose declaration order relative to this one is not
+ * constrained.
  */
-export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remote.llm']
+export const inject = ['slots', 'locale', 'remote', 'remote.credentials']
 
 /**
  * Register the section once the `settings.section` declaration is on the
@@ -192,7 +193,9 @@ export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoS
       name: 'sidebar.footer.action', id: 'opencode-go-sidebar-quota', order: 1000,
       inject: () => ({ ...usageProps(), readAccountUsage }),
     }, SidebarQuota))
-    ready.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
+    // The session id and the composer slot contract are already available at
+    // registration; only the model-directory service is read from this scope.
+    ready.inject(['modelDirectories'], scope => {
       scope.slots.inject('conversation.input.right', () => scope.slots.register({
         name: 'conversation.input.right', id: 'opencode-go-usage', order: 1000,
         inject: sessionId => ({ ...usageProps(), directory: scope.modelDirectories.directoryFor(sessionId as SessionId).store }),

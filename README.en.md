@@ -81,6 +81,7 @@ Once enabled:
 - **Reuses saved accounts**: Free shares the account roster, prefers usable saved keys, and follows the Automatic fallback setting.
 - **Anonymous public access without a key**: with no usable key it sends `Bearer public`.
 - **Official CLI identity**: requests use the official OpenCode CLI user agent (`opencode/latest/2.2.5/cli`) instead of DSH's own attribution.
+- **Separate Bun runtime**: Free inference runs in its own HTTP worker started from the `bun@1.4.4` optional dependency. The `bun` package ships a `postinstall` that may download or unpack the platform binary; with `--ignore-scripts`, or without the optional dependency, Free can report `MISSING_BUN_RUNTIME` while Go keeps working (see the FAQ).
 - **Rate-limit protection**: honors upstream `Retry-After`; new calls during cooldown fail fast with `FREE_COOLDOWN`, and shared Free quota/IP limits never rotate Go accounts.
 
 > ⚠️ **Risk**: the Free channel relies on the upstream public Free access point and an impersonated client user agent. It may violate OpenCode/upstream terms of service and may trigger rate limiting, risk controls, or account restrictions. Use it only if you understand and accept that risk; it is not intended for production or large-scale automation.
@@ -161,6 +162,8 @@ Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reope
 
 **Where is DSH OpenCode Free?** The Free route is an explicit opt-in and is off by default. Enable it in **Settings → OpenCode Go → Advanced settings → Free channel** and save; only then does the plugin register the route, fetch its catalog, and show Free models. See [Free channel](#free-channel-opt-in-off-by-default) for behavior and risks.
 
+**Why does Free need a separate Bun runtime?** Free inference runs through the `bun@1.4.4` optional dependency. Its `postinstall` copies, or when the platform package is missing downloads and unpacks, the native binary into `bun/bin`. `--ignore-scripts` skips that step, and the plugin then falls back to the `@oven/bun-<platform>` package installed with the optional dependency. If no runtime remains available (for example `--omit=optional` or a failed install), Free reports `MISSING_BUN_RUNTIME`; reinstall the plugin with optional dependencies enabled. Go is unaffected.
+
 **What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. Account actions run in a serial host queue; unsuccessful operations can be retried. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving).
 
 **What if a long conversation keeps returning 400?** Check the output allowance and context window in the error, then run `/compact` or lower that model's **Max output** before retrying. Explicit context overflow is passed to DSH's recovery mechanism; an unexplained 400 keeps its classification and includes troubleshooting guidance. Failed attempts without measured tokens omit zero usage so they do not report an empty context.
@@ -187,7 +190,7 @@ The source is organized by domain:
 | Browser registration and typed state | `client/index.ts`, `client/controller.ts` |
 | Host settings, account/model controls, usage and copy | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
 
-The browser uses DSH's `configForms`; capacities remain typed objects while editing. Images use per-request count and encoded-byte budgets, with at most four preparations per request. The package keeps its `.` and `./client` exports. Development dependencies pin DSH `0.2.1-rc.5` and Cordis `4.0.5`; runtime Cordis requires `~4.0.5`.
+The `x-opencode-session` header carries a stable form of the conversation ID for gateway cache affinity: printable ASCII IDs pass through unchanged, and only non-printable or plugin-reserved IDs are hashed (sha256 + base64url); neither form contains message content. The browser uses DSH's `configForms`; capacities remain typed objects while editing. Images use per-request count and encoded-byte budgets, with at most four preparations per request. The package keeps its `.` and `./client` exports. Development dependencies pin DSH `0.2.1-rc.5` and Cordis `4.0.5`; runtime Cordis requires `^4.0.5`.
 
 Use Node.js `^22.19.0 || >=24.0.0`:
 
@@ -196,6 +199,7 @@ npm ci
 npm test
 npm run typecheck
 npm run check:dist
+npm run check:pack
 npm run verify
 ```
 

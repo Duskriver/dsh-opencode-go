@@ -144,22 +144,41 @@ describe('official usage history aggregates', () => {
     expect((await h.service.read(QUERY)).totals.requests).toBe('3')
   })
 
+  it('tolerates blank lines, display-only cost_usd formats and trailing extra fields', async () => {
+    const h = harness()
+    h.fetcher.mockResolvedValueOnce(response(csv([
+      record({ cost_usd: '' }),
+      [], // an empty line between records
+      record({ cost_usd: '1.23456789e-2' }),
+      [...record(), 'gateway-extra-column'],
+      record({ cost_usd: '-0.01' }),
+    ]) + '\r\n')) // trailing blank line
+    const report = await h.service.read(QUERY)
+    expect(report.totals.requests).toBe('12')
+    expect(report.totals.costMicroCents).toBe(String(1234567n * 4n))
+    const exported = await h.service.exportCsv(QUERY)
+    const lines = exported.csv.trimEnd().split('\r\n')
+    expect(lines).toHaveLength(5) // header + four usable records
+    expect(exported.csv).toContain('1.23456789e-2')
+    expect(exported.csv).not.toContain('gateway-extra-column')
+    const headerOnly = harness()
+    headerOnly.fetcher.mockResolvedValueOnce(response(HEADER.join(',') + '\r\n\r\n'))
+    expect((await headerOnly.service.read(QUERY)).totals.requests).toBe('0')
+  })
+
   it.each([
     ['missing required header', csv().replace('cache_write_1h_tokens,', '')],
     ['duplicate header', csv().replace('cache_write_1h_tokens', 'cache_write_5m_tokens')],
     ['missing row field', csv([record().slice(0, -1)])],
-    ['extra row field', csv([[...record(), 'extra']])],
     ['unclosed quote', csv().trimEnd() + ',"'],
     ['quote in bare field', csv().replace('Fixture User', 'Fixture"User')],
     ['text following closing quote', csv().replace('Fixture User', '"Fixture"oops')],
     ['bare CR', csv().replaceAll('\r\n', '\r')],
-    ['blank record', csv() + '\r\n'],
     ['invalid day', csv([record({ day: '2026-02-30' })])],
     ['missing numeric field', csv([record({ requests: '' })])],
     ['negative tokens', csv([record({ input_tokens: '-1' })])],
     ['fractional tokens', csv([record({ cache_write_5m_tokens: '1.5' })])],
     ['numeric exponent', csv([record({ requests: '1e3' })])],
-    ['malformed display USD', csv([record({ cost_usd: 'NaN' })])],
     ['empty provider', csv([record({ provider: '' })])],
     ['empty model', csv([record({ model: '' })])],
   ])('rejects %s instead of inventing zero totals', async (_name, body) => {

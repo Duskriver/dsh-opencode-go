@@ -27,10 +27,14 @@ export declare const Config: z<Partial<OpencodeGoConfig>, LiveConfig>;
 /** Keep the Loader's references: reparsing them would detach live updates. */
 export declare function readConfig(config: LiveConfig): OpencodeGoConfig;
 /**
- * Accept only an http(s) base without a query or fragment. Runs at load for
- * the composition layer and as the settings section's write validator, so a
- * bad URL fails where it is written, never at first request.
+ * Accept only an http(s) base without embedded credentials, query or fragment.
+ * Runs at load for the composition layer and as the settings section's write
+ * validator, so a bad URL fails where it is written, never at first request.
+ * Credentials never belong in this URL: `fetch` rejects such URLs outright and
+ * any failure diagnostic could otherwise carry them, so the value is refused
+ * before it can reach a request or a log line.
  * @param raw - the configured base URL.
+ * @param field - configuration field name for the diagnostic.
  * @returns the current gateway base URL without trailing slashes.
  */
 export declare function assertBaseURL(raw: string, field?: 'baseURL' | 'freeBaseURL'): string;

@@ -311,13 +311,15 @@ describe("model availability and picker visibility", () => {
       expect(screen.queryByText('Configuration missing')).toBeNull()
     })
 
-    it('carries a refused switch write while the model card is still folded', async () => {
+    it('carries a refused provider-switch write while the model card is still folded', async () => {
       const { host } = await mount()
       host.set.mockRejectedValueOnce(new Error('write refused'))
       // The switch that can fail on its own lives in the connection card, above
-      // the fold: its refusal has to reach the reader without opening the list.
+      // the fold: its refusal has to reach the reader without opening the list,
+      // and it must not be reported as a model-visibility failure.
       await act(async () => { fireEvent.click(screen.getByRole('switch', { name: en.enabledLabel })) })
-      expect(screen.getByRole('alert').textContent).toBe(en.pickerFailed)
+      expect(screen.getByRole('alert').textContent).toBe(en.enabledFailed)
+      expect(screen.queryByText(en.pickerFailed)).toBeNull()
       expect(document.getElementById('opencode-go-models')).toBeNull()
     })
 

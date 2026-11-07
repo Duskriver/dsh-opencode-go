@@ -72,6 +72,13 @@ export type GoAccount = {
 
 export const MAX_ACCOUNTS = 20
 
+/**
+ * Upper bound for one configured thinking budget, in tokens. Shared with the
+ * browser form so a stored value always fits a model's advertised ceiling while
+ * staying far below any tokenizer/timer limit.
+ */
+export const MAX_THINKING_BUDGET_TOKENS = 1_000_000
+
 export const ACCOUNT_REF_PREFIX = 'DSH_OPENCODE_GO_ACCOUNT_'
 
 export const DEFAULT_ACCOUNT_REF = 'OPENCODE_API_KEY'

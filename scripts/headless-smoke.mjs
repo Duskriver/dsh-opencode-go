@@ -7,7 +7,13 @@ import { resolve, join } from 'node:path'
 import { writeFile, rm, mkdtemp, mkdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
-const root = resolve(process.argv[2] ?? '.')
+const consumer = process.argv[2]
+if (consumer === undefined || consumer.trim() === '') {
+  console.error('Usage: node scripts/headless-smoke.mjs <consumer>')
+  console.error('  <consumer> is the directory of an installed consumer that contains the official DSH CLI (node_modules/.bin/dsh) and dsh-opencode-go.')
+  process.exit(2)
+}
+const root = resolve(consumer)
 const scratch = await mkdtemp(join(tmpdir(), 'dsh-go-headless-'))
 const patch = join(scratch, 'smoke.patch.yml')
 const requests = []

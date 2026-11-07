@@ -9,6 +9,7 @@ The development and full-acceptance baseline is DSH `0.2.1-rc.5`, Cordis `4.0.5`
 | `npm run typecheck` | Check the host and browser TypeScript projects |
 | `npm run compile` | Rebuild the host bundle, browser factory and declarations in `lib/` |
 | `npm run check:dist` | Compare an independent rebuild with every shipped artifact |
+| `npm run check:pack` | Assert the npm tarball contains every required runtime, docs and notice file |
 | `npm test` | Run the Vitest suite |
 | `npm run test:ci` | Check artifacts, then run the Vitest suite |
 | `npm run verify:installed -- /path/to/consumer` | Exercise a built package through the consumer's real Cordis resolver; defaults to this checkout |
@@ -29,6 +30,7 @@ Vitest tests are organized by domain. Results for the history-dashboard migratio
 | `free-channel.spec.ts`, `free-transport.spec.ts` | Free failure classification, Retry-After/backoff, cancellation, transport isolation and coexistence with Go |
 | `pricing.spec.ts` | Catalog tariff validation and Free-model eligibility; historical amounts come from official CSV |
 | `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
+| `config-validation.spec.ts` | Base-URL credential rejection with redacted diagnostics, proxy userinfo acceptance and thinking-budget schema bounds |
 | `adapter.spec.ts` | Requests, capacity limits, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |
@@ -80,3 +82,7 @@ The `.` and `./client` exports continue to point to the built host entry and bro
 The Google transport bridge is version-guarded for pi-ai 1.5.0 and `@google/genai@2.21.0`. `src/google.ts` delegates simple streaming to the upstream adapter through the request-scoped fetch binding; pi-ai now selects discrete thinking levels for Gemini 4 natively.
 
 SDK declarations bundle pi-schema in place of TypeBox. `scripts/licenses/pi-1.5.0-LICENSE` supplies the pi packages' upstream MIT license omitted from their npm distributions. pi-schema's format checks and value conversion rules include code adapted from TypeBox 1.3.27 (MIT); the build appends the package's `LICENSES/typebox-LICENSE` to its pi-schema notice in `lib/vendor-licenses.txt`.
+
+## Publishing
+
+`npm publish` is guarded by two lifecycle hooks. `prepack` re-runs `npm run check:dist`, so a stale `lib/` fails before a tarball is produced; `prepublishOnly` runs `npm run typecheck && npm run test:ci` (artifact comparison plus the complete Vitest suite). `verify:installed` is deliberately absent from both hooks because it needs a consumer installation; run it separately before a release when one is available. `npm run check:pack` (also a CI step) runs `npm pack --dry-run --json --ignore-scripts` and asserts the tarball contains the runtime entries, types, docs, examples, icons and third-party notice files. `lib/build-info.json` records the package version, so bumping `package.json` requires rebuilding `lib/` before release. The tarball ships `scripts/licenses/pi-1.5.0-LICENSE` next to `lib/vendor-licenses.txt` so the reference in `THIRD_PARTY_NOTICES.md` resolves inside the installed package.

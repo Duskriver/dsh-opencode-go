@@ -36,7 +36,8 @@
     "cordis.patch.yml",
     "THIRD_PARTY_NOTICES.md",
     "docs",
-    "examples"
+    "examples",
+    "scripts/licenses"
   ],
   "dsh": {
     "bundle": {
@@ -55,9 +56,12 @@
   "scripts": {
     "compile": "node scripts/build.mjs",
     "check:dist": "node scripts/build.mjs --check",
+    "check:pack": "node scripts/check-pack.mjs",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
     "test:ci": "npm run check:dist && npm test",
+    "prepack": "npm run check:dist",
+    "prepublishOnly": "npm run typecheck && npm run test:ci",
     "verify:installed": "node --expose-internals scripts/installed-smoke.mjs",
     "verify:headless": "node scripts/headless-smoke.mjs",
     "verify": "npm run typecheck && npm run test:ci && npm run verify:installed"

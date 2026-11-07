@@ -1,6 +1,9 @@
 /** Executed by standalone Bun. One request, then raw response bytes until EOF. */
 import type { FreeHttpRequest, FreeHttpResponse } from './free-protocol.ts'
 
+/** Mirrors MAX_PACKET_BYTES in free-transport.ts; stdin is bounded before JSON.parse. */
+const MAX_PACKET_BYTES = 256 * 1024 * 1024
+
 let headersSent = false
 function write(bytes: string | Uint8Array): Promise<void> {
   return new Promise((resolve, reject) => process.stdout.write(bytes, error => error ? reject(error) : resolve()))
@@ -8,7 +11,14 @@ function write(bytes: string | Uint8Array): Promise<void> {
 
 try {
   const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  let stdinBytes = 0
+  for await (const chunk of process.stdin) {
+    const bytes = Buffer.from(chunk)
+    stdinBytes += bytes.byteLength
+    // Bound the packet before JSON.parse can retain another copy of it.
+    if (stdinBytes > MAX_PACKET_BYTES) throw new RangeError('Free HTTP worker input exceeds the 256 MiB limit')
+    chunks.push(bytes)
+  }
   const input = JSON.parse(Buffer.concat(chunks).toString()) as FreeHttpRequest
   const options: RequestInit & { proxy?: string } = {
     method: input.method, headers: input.headers, redirect: input.redirect,

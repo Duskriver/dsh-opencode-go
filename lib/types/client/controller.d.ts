@@ -5,9 +5,9 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
 import { type ModelSource, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
-export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
@@ -21,14 +21,27 @@ export interface FormActions {
     save(): void;
     discard(): void;
 }
+/** Settings-document availability, as the Host ConfigForm reports it. */
+export type SettingsStatus = 'loading' | 'ready' | 'unavailable';
 interface FormShell {
-    available: boolean;
+    status: SettingsStatus;
     writable: boolean;
     dirty: boolean;
     invalid: boolean;
     saving: boolean;
     failed: boolean;
 }
+/**
+ * Numeric bounds mirrored from the Host settings schema (`src/config.ts`), so an
+ * out-of-range draft is marked invalid here instead of being refused after Save
+ * with no field-level explanation. `MAX_TIMER_DELAY_MS` is the Host's own constant.
+ */
+export interface NumericFieldLimit {
+    integer: boolean;
+    min: number;
+    max?: number;
+}
+export declare const NUMERIC_FIELD_LIMITS: Partial<Record<TextField, NumericFieldLimit>>;
 /** The gateway's model listing as the page reports it. */
 export type OpencodeGoModels = 
 /** Not asked for yet; the page asks once it mounts. */
@@ -105,11 +118,15 @@ export interface OpencodeGoSectionState extends FormShell {
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;
     pickerFailed: boolean;
+    /** The provider `enabled` switch write failed; separate from model visibility. */
+    enabledFailed: boolean;
     baseURL: FieldState;
     freeBaseURL: FieldState;
     proxyURL: FieldState;
     refreshMinutes: FieldState;
     streamIdleTimeoutMs: FieldState;
+    requestPreparationTimeoutMs: FieldState;
+    requestTimeoutMs: FieldState;
     maxImages: FieldState;
     maxRequestImageBytes: FieldState;
     requestImagePixelBudget: FieldState;
@@ -140,6 +157,7 @@ export declare class OpencodeGoSectionController {
     private failed;
     private pickerSaving;
     private pickerFailed;
+    private enabledFailed;
     private models;
     private modelsRequest;
     private face;

@@ -7,6 +7,7 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import {
   GoModelsService, GoCatalogManager, discoverSettingsModels, OpencodeGoCatalog,
   discoverCatalogModels, readLiveModelIds, readModelDirectory, reasoningChoices, modelBaseURL,
+  reasoningBudgetRange, reasoningIntent,
   catalogCachePath, catalogETag, readCatalogCache, writeCatalogCache, MODEL_LISTING_MAX_BYTES,
 } from '../src/catalog.ts'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
@@ -61,6 +62,30 @@ describe('gateway directory parsing', () => {
     const result = readModelDirectory(modelsDocument({ valid: modelEntry(), invalid: modelEntry(invalid) }), url)
     expect([...result.models.keys()]).toEqual(['valid'])
     expect(result.errors.get('invalid')).toEqual(expect.any(String))
+  })
+  it('drops unusable configured thinking budgets instead of making the model unresolvable', () => {
+    const budgetModel = model('budget-model', modelEntry({ api: protocolEntry('messages'), limit: { context: 10000, output: 5000 },
+      capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1500, max: 4500 } } } }))
+    expect(reasoningBudgetRange(budgetModel)).toEqual({ min: 1500, max: 3976 })
+    // Out-of-range, non-integer and oversized values are user data: drop them.
+    expect(reasoningChoices({ ...budgetModel, reasoningBudgetPresets: [1, 1024, 3977, 6000, 1.5, NaN, 2048] }))
+      .toEqual([{ id: 'off', name: 'Off' }, { id: 'low', name: '2,048 tokens' }])
+    expect(() => reasoningChoices({ ...budgetModel, reasoningBudgetPresets: [Number.MAX_SAFE_INTEGER] })).not.toThrow()
+    expect(reasoningChoices({ ...budgetModel, reasoningBudgetPresets: [3000, 3000] })).toEqual([
+      { id: 'off', name: 'Off' }, { id: 'low', name: '2,048 tokens' }, { id: 'budget:3000', name: '3,000 tokens' },
+    ])
+    // A model too small for the declared floor loses the control but survives.
+    const tooSmall = { ...budgetModel, maxTokens: 1024 }
+    expect(reasoningBudgetRange(tooSmall)).toBeUndefined()
+    expect(() => reasoningChoices(tooSmall)).not.toThrow()
+  })
+  it('clamps stale budget selections into the usable range', () => {
+    const budgetModel = model('budget-model', modelEntry({ api: protocolEntry('messages'), limit: { context: 10000, output: 5000 },
+      capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1500, max: 4500 } } } }))
+    expect(reasoningIntent(budgetModel, 'budget:2048')).toEqual({ kind: 'budget', min: 1500, tokens: 2048 })
+    expect(reasoningIntent(budgetModel, 'budget:6000')).toEqual({ kind: 'budget', min: 1500, tokens: 3976 })
+    expect(reasoningIntent(budgetModel, 'budget:1')).toEqual({ kind: 'budget', min: 1500, tokens: 1500 })
+    expect(reasoningIntent(budgetModel, 'budget:not-a-number')).toEqual({ kind: 'budget', min: 1500, tokens: 1500 })
   })
   it('normalizes MIME and short modalities, preserving all display modalities in stable order', () => {
     const result = readModelDirectory(modelsDocument({ mime: modelEntry({ modalities: {
@@ -412,6 +437,32 @@ describe('directory transport and manager', () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout')
     await catalog(url, { fetcher: async () => Response.json({ data: [] }) }).snapshot(true)
     expect(timeout).toHaveBeenCalledWith(30_000)
+  })
+  it('refuses directory redirects, reports the diagnostic URL and does not follow them', async () => {
+    const requests: (RequestInit | undefined)[] = []
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(init)
+      return new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:1/models' } })
+    }) as typeof fetch
+    const onFallback = vi.fn()
+    const snapshot = await catalog(url, { fetcher, onFallback }).snapshot(true)
+    expect(snapshot.live).toBe(false)
+    expect(snapshot.failure).toMatchObject({ code: 'DISCOVERY_FAILED', message: expect.stringContaining('HTTP 302') })
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(requests[0]?.redirect).toBe('error')
+    expect(onFallback).toHaveBeenCalledOnce()
+    expect(onFallback.mock.calls[0]?.[0]?.url).toBe(`${url}/models`)
+  })
+  it('never reports a credential-bearing directory URL through the fallback channel', async () => {
+    const onFallback = vi.fn()
+    // Base URL validation rejects embedded credentials before any request.
+    expect(() => catalog('https://user:directory-secret@gateway.example/v1')).toThrow(/must not embed credentials/)
+    try { catalog('https://user:directory-secret@gateway.example/v1') } catch (error) {
+      expect(String(error)).not.toContain('directory-secret')
+    }
+    await catalog(url, { fetcher: async () => { throw Object.assign(new Error('offline'), { code: 'ECONNRESET' }) }, onFallback }).snapshot(true)
+    expect(onFallback.mock.calls[0]?.[0]?.url).toBe(`${url}/models`)
+    expect(onFallback.mock.calls[0]?.[0]?.url).not.toContain('@')
   })
   it('rebuilds only the changed source and ignores late refresh notifications from replaced catalogs', async () => {
     const release = Promise.withResolvers<Response>(), onRefresh = vi.fn()

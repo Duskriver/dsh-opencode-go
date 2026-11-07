@@ -1,7 +1,7 @@
 /** Request snapshots, SDK dispatch, deadlines and seamless account fallback. */
 import { type OpencodeGoModelLimits, type GoAccountSwitch, type ModelSource } from './contracts.ts';
 import { type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
-import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
+import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment';
 import type { Api, Model, Provider } from './sdk-types.ts';
 import { type OpencodeGoConfig } from './config.ts';
 import { ProxyTransport } from './transport.ts';
@@ -55,7 +55,14 @@ export declare class OpencodeGoRequestExecutor {
     private readonly options;
     private readonly transport;
     private readonly freeTransport;
+    private readonly ownsFreeTransport;
     constructor(options: OpencodeGoRequestExecutorOptions, transport: ProxyTransport, freeTransport?: FreeBunTransport);
+    /**
+     * Release a Free transport this executor created itself. An injected
+     * transport is released by its owner, so a direct construction is the only
+     * caller for which this performs work.
+     */
+    dispose(): Promise<void>;
     /** One account, one SDK attempt; host recovery still owns failures after output. */
     stream(options: GenerateOptions, snapshot: OpencodeGoRequestSnapshot): AsyncIterable<StreamChunk>;
     private attempt;
@@ -71,7 +78,11 @@ export interface GoAccountSettlement {
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptions {
     source?: ModelSource;
-    /** Shared with Host usage reads for this plugin mount. */
+    /**
+     * Transport shared with the Host composition (usage reads, analytics and the
+     * other route). Injected ownership stays with the caller: {@link OpencodeGoAdapter.dispose}
+     * releases only this adapter's Free transport in that case.
+     */
     transport?: ProxyTransport;
     /** Mount-owned discovery; direct construction supplies its own manager. */
     catalog?: (config: OpencodeGoConfig) => OpencodeGoCatalog;
@@ -111,6 +122,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly source;
     private readonly resolveCatalog;
     private readonly transport;
+    /** An injected transport is shared with the Host and must not be disposed here. */
+    private readonly ownsTransport;
     private readonly requestExecutor;
     private readonly freeTransport;
     private readonly freeChannel;
@@ -122,6 +135,12 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private callSeq;
     private nextCallSequence;
     constructor(options: OpencodeGoAdapterOptions);
+    /**
+     * Release this adapter's own resources. The Host composition shares one
+     * ProxyTransport across both adapters and its services, so only an
+     * adapter-created transport is disposed here; the per-adapter Free transport
+     * (Bun workers and SOCKS tunnels) always is.
+     */
     dispose(): Promise<void>;
     /**
      * The catalog resolver for one configuration, rebuilding on the facts it
@@ -135,6 +154,14 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
         id: string;
         name: string;
     };
+    /**
+     * Report the exact request-image projection this route serializes: the
+     * configured pixel budget decides the dimensions and the configured
+     * encoded-byte target caps the bytes, matching conversion.ts's per-request
+     * target. The token meter must price what is sent, not the normalized source.
+     * Synchronous by contract; the live configuration is readable without I/O.
+     */
+    imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget;
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(_provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     /** Capture limits and protocol before discovery can yield to a settings update. */

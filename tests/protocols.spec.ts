@@ -195,7 +195,13 @@ describe('reasoning through Harness and SDK', () => {
       capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1500, max: 4500 } } } }))
     expect(reasoningBudgetRange(model)).toEqual({ min: 1500, max: 3976 })
     expect(reasoningChoices(model).map(choice => choice.name)).toEqual(['Off', '2,048 tokens'])
-    for (const tokens of [1, 1024, 3977, 6000, 1.5, NaN]) expect(() => reasoningChoices({ ...model, reasoningBudgetPresets: [tokens] })).toThrow(/between 1500 and 3976/)
+    // Unusable configured budgets are filtered instead of failing the model;
+    // only valid presets are offered as extra choices.
+    for (const tokens of [1, 1024, 3977, 6000, 1.5, NaN]) {
+      expect(() => reasoningChoices({ ...model, reasoningBudgetPresets: [tokens] })).not.toThrow()
+    }
+    expect(reasoningChoices({ ...model, reasoningBudgetPresets: [1, 1024, 2048, 3977, 6000, 1.5, NaN] }))
+      .toEqual([{ id: 'off', name: 'Off' }, { id: 'low', name: '2,048 tokens' }])
     for (const tokens of [0, -1, 1.5, NaN]) expect(() => PlainConfig({ modelLimits: { budget: { thinkingBudgets: [tokens] } } })).toThrow()
     const request = reasoningRequest({ kind: 'budget', tokens: 3000, min: 1500 })
     expect(request.onPayload({ thinking: { type: 'enabled', budget_tokens: 2000 }, max_tokens: 3500 })).toMatchObject({ thinking: { budget_tokens: 2000 } })

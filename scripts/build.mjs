@@ -178,5 +178,13 @@ async function compile(output) {
       if (item.external && !external.includes(item.path)) throw new Error(`Unsupported DSH client external: ${item.path}`)
     }
   }
-  await writeFile(join(output, 'build-info.json'), JSON.stringify({ clientExternals: external, hostExternals, sdkVersion: sdk.version }, null, 2) + '\n')
+  // Record the package version, not a git revision: check:dist rebuilds before
+  // the release commit and again from the committed tree, so a HEAD hash would
+  // make the committed artifact differ from every later rebuild.
+  await writeFile(join(output, 'build-info.json'), JSON.stringify({
+    version: pkg.version,
+    clientExternals: external,
+    hostExternals,
+    sdkVersion: sdk.version,
+  }, null, 2) + '\n')
 }

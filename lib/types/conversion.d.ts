@@ -1,7 +1,7 @@
 /** Request history, durable images, provider replay and stream conversion. */
 import { type Message as HistoryMessage, type ReplayEnvelope, type RequestMessage as Message, type GenerateOptions, type ImageAttachmentAccessResolver, type FinishReason, type StreamChunk, type TokenUsage } from '@deepseek-ai/dsh-llm';
 import type { Api, AssistantMessage, Usage as PiUsage, Context as PiContext, AssistantMessageEvent } from './sdk-types.ts';
-import { type ImageAttachmentRef, type AttachmentStore } from '@deepseek-ai/dsh-attachment';
+import { type ImageAttachmentRef, type AttachmentStore, type ImageRequestTarget } from '@deepseek-ai/dsh-attachment';
 /** Per-block half of the pi-ai replay envelope, one entry per content block. */
 export type PiAiReplayBlock = {
     type: 'text';
@@ -92,6 +92,18 @@ export interface PiImageRequestBudget {
     /** Encoded-byte target for one request image. */
     maxBytes: number;
 }
+/**
+ * Deterministic request target for one source under the route budgets.
+ *
+ * The single projection both request serialization and the adapter's
+ * `LlmAdapter.imageRequestTarget` report use: the token meter must price the
+ * exact dimensions and encoded-byte target this route sends, not the
+ * normalized source image.
+ * @param ref - durable normalized image reference.
+ * @param budget - route pixel and encoded-byte budgets.
+ * @returns the target width, height and encoded-byte cap, plus the budgets.
+ */
+export declare function requestImageTargetFor(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget & PiImageRequestBudget;
 /**
  * Convert text-only harness history to a synchronous pi-ai Context. Tool
  * result names are recovered from preceding assistant tool calls.

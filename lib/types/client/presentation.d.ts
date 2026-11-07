@@ -109,6 +109,7 @@ export declare const en: {
     enabledHint: string;
     enabledOff: string;
     enabledUnavailable: string;
+    enabledFailed: string;
     keyLabel: string;
     keyHint: string;
     keyConfigured: string;
@@ -215,6 +216,10 @@ export declare const en: {
     refreshMinutesHint: string;
     streamIdleTimeoutMsLabel: string;
     streamIdleTimeoutMsHint: string;
+    requestPreparationTimeoutMsLabel: string;
+    requestPreparationTimeoutMsHint: string;
+    requestTimeoutMsLabel: string;
+    requestTimeoutMsHint: string;
     maxImagesLabel: string;
     maxImagesHint: string;
     maxRequestImageBytesLabel: string;
@@ -231,6 +236,7 @@ export declare const en: {
     saving: string;
     savedFailed: string;
     readOnly: string;
+    settingsLoading: string;
     unavailable: string;
 };
 /** Chinese copy; the key set mirrors {@link en}. */

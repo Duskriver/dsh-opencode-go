@@ -48,7 +48,7 @@ socks5://127.0.0.1:1080
 
 Free 共用账号列表，优先使用已配置的可用 Key，并遵循多账号自动切换设置；没有可用 Key 时使用 `Bearer public`。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
 
-Free 推理通过插件附带的独立 Bun 1.4.4 HTTP worker 直接发送 API 请求；不依赖本机 OpenCode。模型发现、消息和工具转换、响应解析仍由现有 Node SDK 负责，Go 沿用原传输。Free 使用实测的 `opencode/latest/2.2.5/cli` UA（即官方 OpenCode CLI 身份，而非 DSH 自身的归属 UA），保留宿主会话 ID 的原有规范化，不注入占位工具或抓包中的账号、项目和会话值。这些兼容行为不保证上游开放免费服务。
+Free 推理通过插件附带的独立 Bun 1.4.4 HTTP worker 直接发送 API 请求；不依赖本机 OpenCode。模型发现、消息和工具转换、响应解析仍由现有 Node SDK 负责，Go 沿用原传输。Free 使用实测的 `opencode/latest/2.2.5/cli` UA（即官方 OpenCode CLI 身份，而非 DSH 自身的归属 UA），并沿用宿主会话 ID 的原有规范化：常见可打印 ASCII 会话 ID 原样透传，仅非可打印 ASCII 或占用插件内部保留前缀的 ID 才做 sha256 + base64url 单向散列（两种形式都不含对话正文）；不注入占位工具或抓包中的账号、项目和会话值。这些兼容行为不保证上游开放免费服务。
 
 > ⚠️ **风险**：Free 通道默认关闭且不是受支持的稳定能力。开启后请求会以官方 CLI 身份发往平台公共免费入口，可能违反 OpenCode / 上游服务条款，也可能触发上游风控、限流或账号限制；是否开启以及使用频度由用户自行判断并自行承担风险，不建议用于生产环境或大规模自动化调用。
 
@@ -56,9 +56,9 @@ Free 请求自动处理限流：`FreeUsageLimitError` 返回 `FREE_QUOTA`，普�
 
 对共享免费限制及网络、超时、服务端错误，优先遵循 `Retry-After` 秒数或 HTTP 日期（不会把数小时的退避缩短成几分钟）；没有有效头时，从 60 秒开始指数退避，最多 15 分钟。冷却按免费网关与代理配置隔离，冷却期间新调用返回 `FREE_COOLDOWN`，不发送推理请求，也不自动定时重试。到期后可由用户重试；成功请求重置本地退避计数。退避计数只保存在当前插件实例内，重启后清空。
 
-Bun 通过 npm 可选依赖安装对应平台的二进制；禁用安装脚本仍可使用，但不能省略可选依赖。若缺少运行时，Free 会报告 `MISSING_BUN_RUNTIME`，可重新安装插件并启用 optional dependencies；Go 不受影响。当前平台包支持的系统和 CPU 以 Bun 的官方发行包为准。
+Bun 通过 npm 可选依赖 `bun@1.4.4` 安装对应平台的二进制。`bun` 包自带 `postinstall`：正常安装时它会把平台二进制复制到 `bun/bin`，缺少平台包时还可能联网下载并解包；`--ignore-scripts` 只会跳过该 postinstall，插件会回退到随可选依赖安装的 `@oven/bun-<platform>` 平台包。若运行时仍不可用（例如可选依赖被 `--omit=optional` 省略或安装失败），Free 会报告 `MISSING_BUN_RUNTIME`，可重新安装插件并启用 optional dependencies；Go 通道不受影响。当前平台包支持的系统和 CPU 以 Bun 的官方发行包为准。
 
-每个 Free HTTP 请求使用一个 worker，默认最多并发 4 个，其余请求可排队或取消。请求通过标准输入传递，响应头和原始 SSE 字节通过标准输出返回；Key 不进入命令行参数或临时文件。消费者停止、超时、取消或卸载插件都会终止相关请求并回收 worker。IPC 请求上限为编码后 256 MiB。HTTP/HTTPS 代理由 Bun 连接；SOCKS5 使用该请求专属、带随机认证凭据的本机字节隧道，目标 TLS 握手仍由 Bun 完成。代理失败不会回退到直连。
+每个 Free HTTP 请求使用一个 worker，默认最多并发 4 个，其余请求可排队或取消。请求通过标准输入传递，响应头和原始 SSE 字节通过标准输出返回；Key 不进入命令行参数或临时文件。消费者停止、超时、取消或卸载插件都会终止相关请求并回收 worker。单个请求体上限为 64 MiB，base64 编码后的 worker IPC 包上限为 256 MiB；worker 自身在读取 stdin 时也会累计校验该包上限。HTTP/HTTPS 代理由 Bun 连接；SOCKS5 使用该请求专属、带随机认证凭据的本机字节隧道，目标 TLS 握手仍由 Bun 完成。代理失败不会回退到直连。
 
 协议、能力、思考控制与价格直接来自各自的 `/models` 条目。官方网关优先使用条目声明的协议地址；自定义网关保留配置的前缀。两个模型源分别缓存到 `~/.dsh/cache/dsh-opencode-go/go.models.json` 与 `free.models.json`，支持 ETag 与离线保留；缓存带有网关来源标记，不会用于其他地址。
 

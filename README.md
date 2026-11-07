@@ -112,6 +112,7 @@ Key 留在 Host；常规报告只向浏览器传递聚合数字与 provider / mo
 - **复用已存账号**：Free 与 Go 共用账号列表，优先使用已配置的可用 Key，并遵循“自动使用备用账号”设置。
 - **无 Key 时匿名公共访问**：没有可用 Key 时以 `Bearer public` 发起匿名公共访问。
 - **官方 CLI 身份**：请求以官方 OpenCode CLI 的 `opencode/latest/2.2.5/cli` User-Agent 发出，而不是 DSH 自身的归属 UA。
+- **独立 Bun 运行时**：Free 推理通过 optional dependency `bun@1.4.4` 启动独立 HTTP worker；`bun` 包自带 `postinstall`，安装期可能下载 / 解包平台原生二进制。禁用安装脚本或缺少可选依赖时的表现见下方 FAQ。
 - **限流保护**：遵循上游 `Retry-After`，冷却期间新请求直接返回 `FREE_COOLDOWN`；共享免费额度 / IP 限制不会触发 Go 换号。
 
 > ⚠️ **风险提示**：Free 通道依赖上游公开的免费入口并以官方 CLI 身份发出请求，可能违反 OpenCode / 上游服务条款，也可能触发上游风控、限流或账号限制。是否开启以及使用频度由你自行判断并承担风险；请勿在生产环境或大规模自动化调用中使用。
@@ -144,7 +145,7 @@ src/
 账号操作在内存串行队列中直接更新凭据与设置。模型容量草稿始终保留为对象；图片按单次请求限制数量、编码字节及最多四路并行准备。宿主仅使用 DSH `0.2.1-rc.5` 起提供的设置与图片卸载接口。包的 `.` 与 `./client` 导出路径保持不变。
 
 ### 为什么必须要携带 `x-opencode-session`？
-OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插件会自动将你的 DSH 对话 ID 经过单向哈希（保留可读字符并在需要时转为安全散列），以稳定的形式放入 `x-opencode-session` 请求头中。这样不仅能让多轮对话始终落在同一推理节点上，还能最大化命中网关的 Prompt Cache，显著节省思考与生成时间。
+OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插件会把 DSH 对话 ID 规范化为稳定的 `x-opencode-session` 请求头：常见的可打印 ASCII 会话 ID **原样透传**，只有包含非常规字符（非可打印 ASCII）或恰好占用插件内部保留前缀的 ID 才会做 sha256 + base64url 单向散列；两种形式都不含对话正文。目的只是让多轮对话始终落在同一推理节点上，最大化命中网关的 Prompt Cache，显著节省思考与生成时间。
 
 ---
 
@@ -185,6 +186,12 @@ OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插�
 <summary><strong>Q: 为什么在模型选择器里找不到 DSH OpenCode Free 模型？</strong></summary>
 
 Free 通道默认关闭（显式 opt-in）。请到 **设置 → OpenCode Go → 高级设置 → 免费通道** 打开开关并保存；只有开启后插件才会注册 Free 路由、拉取 Free 模型目录并在模型选择器中显示。Free 与 Go 共用账号，但请求会以官方 OpenCode CLI 的 User-Agent 发出，可能触发上游风控 / 限流，也可能违反上游条款，请自行评估并承担风险。
+</details>
+
+<details>
+<summary><strong>Q: Free 通道为什么需要额外的 Bun 运行时？</strong></summary>
+
+Free 推理通过 `optionalDependencies` 中的 `bun@1.4.4` 启动独立 HTTP worker。`bun` 包自带 `postinstall`，正常安装时会把对应平台的原生二进制复制到 `bun/bin`（缺少平台包时还可能联网下载并解包）；安装时若禁用脚本（`--ignore-scripts`），插件会回退到随可选依赖安装的 `@oven/bun-<platform>` 平台包。若运行时仍不可用（例如可选依赖被 `--omit=optional` 省略或安装失败），Free 会报 `MISSING_BUN_RUNTIME`，重新安装插件并启用 optional dependencies 即可恢复；Go 通道完全不受影响。
 </details>
 
 <details>
@@ -229,13 +236,14 @@ dsh plugin --profile web remove dsh-opencode-go
 
 ## 🧪 开发与验证
 
-使用 Node.js `^22.19.0 || >=24.0.0`，开发依赖锁定 DSH `0.2.1-rc.5`、Cordis `4.0.5`；宿主 Cordis 要求 `~4.0.5`。
+使用 Node.js `^22.19.0 || >=24.0.0`，开发依赖锁定 DSH `0.2.1-rc.5`、Cordis `4.0.5`；宿主 Cordis 要求 `^4.0.5`。
 
 ```sh
 npm ci
 npm test
 npm run typecheck
 npm run check:dist
+npm run check:pack
 npm run verify
 ```
 

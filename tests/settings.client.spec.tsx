@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { apply, accountCommands } from '../src/client/index.ts'
+import { apply, accountCommands, inject as clientInject } from '../src/client/index.ts'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { bindSnapshotSelector, createConfigForm, acceptFormWrites, defaultClientSettings, translator } from './support/client.tsx'
@@ -7,15 +7,18 @@ import * as store from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { OpencodeGoSection, type OpencodeGoSectionProps, type OpencodeGoSectionState } from '../src/client/Section.tsx'
 import {
+  NUMERIC_FIELD_LIMITS,
   OpencodeGoSectionController,
   editableKeys,
   type OpencodeGoSettings,
+  type TextField,
 } from '../src/client/controller.ts'
 import { en, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
-import type { AnalyticsQuery } from '../src/contracts.ts'
+import { MAX_THINKING_BUDGET_TOKENS, type AnalyticsQuery } from '../src/contracts.ts'
 import { createAnalyticsReport } from './support/analytics.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import * as React from 'react'
 import * as jsx from 'react/jsx-runtime'
@@ -38,13 +41,14 @@ describe("settings page and typed capacity editing", () => {
   }
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
+    | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
     | 'usageDisplay' | 'usagePillStyle' | 'showSidebarQuota' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
 
   const settled: Omit<OpencodeGoSectionState, SectionField> = {
-    available: true,
+    status: 'ready',
     writable: true,
     dirty: false,
     invalid: false,
@@ -54,6 +58,7 @@ describe("settings page and typed capacity editing", () => {
     modelVisibility: {},
     pickerSaving: false,
     pickerFailed: false,
+    enabledFailed: false,
     accounts: { entries: [], activeRef: 'OPENCODE_API_KEY', autoSwitch: false, busy: false, blocked: false, refreshing: false },
   }
 
@@ -80,6 +85,8 @@ describe("settings page and typed capacity editing", () => {
       proxyURL: field(''),
       refreshMinutes: field('60'),
       streamIdleTimeoutMs: field('300000'),
+      requestPreparationTimeoutMs: field('60000'),
+      requestTimeoutMs: field('1800000'),
       maxImages: field(''),
       maxRequestImageBytes: field('20971520'),
       requestImagePixelBudget: field('4194304'),
@@ -337,9 +344,18 @@ describe("settings page and typed capacity editing", () => {
       expect(container.innerHTML).toBe('')
     })
 
+    it('shows the loading posture instead of the unavailable one while the Host is answering', () => {
+      const reading = actions()
+      renderSection(stateOf({ status: 'loading' }), reading)
+      expect(screen.getByRole('status').textContent).toBe(en.settingsLoading)
+      expect(screen.queryByText(en.unavailable)).toBeNull()
+      // Nothing is known yet, so there is no listing to ask the gateway for.
+      expect(reading.loadModels).not.toHaveBeenCalled()
+    })
+
     it('shows the unavailable posture while the namespace is not served', () => {
       const reading = actions()
-      renderSection(stateOf({ available: false }), reading)
+      renderSection(stateOf({ status: 'unavailable' }), reading)
       expect(screen.getByText(en.unavailable)).toBeTruthy()
       // Nothing is served, so there is no listing to ask the gateway for.
       expect(reading.loadModels).not.toHaveBeenCalled()
@@ -778,6 +794,30 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.getByText(en.invalidValue)).toBeTruthy()
     })
 
+    it('mirrors the Host schema bounds on every numeric input', () => {
+      renderSection(stateOf())
+      openAdvanced()
+      const fields: readonly (readonly [label: string, name: TextField])[] = [
+        [en.refreshMinutesLabel, 'refreshMinutes'],
+        [en.streamIdleTimeoutMsLabel, 'streamIdleTimeoutMs'],
+        [en.requestPreparationTimeoutMsLabel, 'requestPreparationTimeoutMs'],
+        [en.requestTimeoutMsLabel, 'requestTimeoutMs'],
+        [en.maxImagesLabel, 'maxImages'],
+        [en.maxRequestImageBytesLabel, 'maxRequestImageBytes'],
+        [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget'],
+        [en.requestImageMaxBytesLabel, 'requestImageMaxBytes'],
+      ]
+      for (const [label, name] of fields) {
+        const limit = NUMERIC_FIELD_LIMITS[name]!
+        expect(limit).toBeDefined()
+        const input = screen.getByLabelText(label) as HTMLInputElement
+        expect(input.type).toBe('number')
+        expect(input.step).toBe(limit.integer ? '1' : 'any')
+        expect(input.min).toBe(String(limit.min))
+        expect(input.max).toBe(limit.max === undefined ? '' : String(limit.max))
+      }
+    })
+
     it('returns only the customized rows from the card reset', () => {
       const edits = actions()
       renderSection(stateOf({
@@ -873,6 +913,33 @@ describe("settings page and typed capacity editing", () => {
         expect(host.form.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: null } })
         fireEvent.click(screen.getByRole('button', { name: 'Effort Model' }))
         expect(screen.queryByText(en.thinkingBudgets)).toBeNull()
+      } finally { controller.dispose() }
+    })
+
+    it('caps a thinking budget by the Host schema ceiling', async () => {
+      const host = createConfigForm<OpencodeGoSettings>()
+      acceptFormWrites(host)
+      const controller = new OpencodeGoSectionController(host.form, { remote: {
+        credentials: { describe: async () => ({ ok: true, value: {} }) },
+      } } as never, async () => ({ ok: true, value: { stale: false, models: [
+        { id: 'big', name: 'Big Budget', maxTokens: 4_000_000, reasoningBudget: { min: 1024, max: 2_000_000 } },
+      ] } }))
+      host.publish({ status: 'ready', writable: true, value: {}, user: {} })
+      render(<OpencodeGoSection {...controller.inject()} t={t}
+        useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
+      try {
+        await act(async () => { await Promise.resolve() })
+        openModelLimits()
+        fireEvent.click(screen.getByText(en.thinkingBudgets))
+        const input = screen.getByLabelText<HTMLInputElement>(t('thinkingBudgetAddLabel', { name: 'Big Budget' }))
+        const add = () => screen.getByRole<HTMLButtonElement>('button', { name: en.thinkingBudgetAdd })
+        expect(input.max).toBe(String(MAX_THINKING_BUDGET_TOKENS))
+        fireEvent.change(input, { target: { value: String(MAX_THINKING_BUDGET_TOKENS + 1) } })
+        expect(input.getAttribute('aria-invalid')).toBe('true')
+        expect(add().disabled).toBe(true)
+        fireEvent.change(input, { target: { value: String(MAX_THINKING_BUDGET_TOKENS) } })
+        expect(input.getAttribute('aria-invalid')).toBe('false')
+        expect(add().disabled).toBe(false)
       } finally { controller.dispose() }
     })
 
@@ -1385,7 +1452,8 @@ describe('typed ConfigForm drafts and writes', () => {
 
   it.each(['baseURL', 'freeBaseURL'] as const)('validates %s drafts before saving', async field => {
     const { host, controller, actions, snapshot } = setup()
-    for (const value of ['invalid', 'ftp://gateway.example', 'https://gateway.example/v1?key=x', 'https://gateway.example/v1#fragment']) {
+    for (const value of ['invalid', 'ftp://gateway.example', 'https://gateway.example/v1?key=x', 'https://gateway.example/v1#fragment',
+      'https://gateway-user:gateway-super-secret@gateway.example/v1']) {
       actions.edit(field, value)
       expect(snapshot()[field].invalid).toBe(true)
       await controller.save()
@@ -1452,6 +1520,73 @@ describe('typed ConfigForm drafts and writes', () => {
     expect(snapshot()).toMatchObject({ dirty: false, invalid: false })
   })
 
+  const invalidNumericDrafts: ReadonlyArray<readonly [TextField, string]> = [
+    ['refreshMinutes', '0'], ['refreshMinutes', '-1'], ['refreshMinutes', '1.5'], ['refreshMinutes', '10081'], ['refreshMinutes', 'abc'],
+    ['streamIdleTimeoutMs', '0'], ['streamIdleTimeoutMs', '-1'], ['streamIdleTimeoutMs', '2147483648'], ['streamIdleTimeoutMs', 'Infinity'],
+    ['requestPreparationTimeoutMs', '0'], ['requestPreparationTimeoutMs', '-1'], ['requestPreparationTimeoutMs', '1.5'],
+    ['requestPreparationTimeoutMs', '2147483648'],
+    ['requestTimeoutMs', '0'], ['requestTimeoutMs', '-1'], ['requestTimeoutMs', '1.5'], ['requestTimeoutMs', '2147483648'],
+    ['maxImages', '0'], ['maxImages', '-1'], ['maxImages', '1.5'], ['maxImages', '9007199254740992'],
+    ['maxRequestImageBytes', '0'], ['maxRequestImageBytes', '1.5'],
+    ['requestImagePixelBudget', '0'], ['requestImagePixelBudget', '1.5'],
+    ['requestImageMaxBytes', '0'], ['requestImageMaxBytes', '1.5'],
+  ]
+
+  it.each(invalidNumericDrafts)('marks %s=%s invalid and blocks Save', async (field, text) => {
+    const { host, controller, actions, snapshot } = setup()
+    actions.edit(field, text)
+    expect(snapshot()[field]).toMatchObject({ invalid: true })
+    expect(snapshot()).toMatchObject({ dirty: true, invalid: true })
+    await controller.save()
+    expect(host.mutate).not.toHaveBeenCalled()
+    actions.discard()
+    expect(snapshot()[field].invalid).toBe(false)
+  })
+
+  const validNumericDrafts: ReadonlyArray<readonly [TextField, string, number]> = [
+    ['refreshMinutes', '1', 1], ['refreshMinutes', '10080', 10080],
+    ['streamIdleTimeoutMs', '0.5', 0.5], ['streamIdleTimeoutMs', '2147483647', 2147483647],
+    ['requestPreparationTimeoutMs', '1', 1], ['requestTimeoutMs', '2147483647', 2147483647],
+    ['maxImages', '1', 1], ['maxImages', '9007199254740991', Number.MAX_SAFE_INTEGER],
+    ['maxRequestImageBytes', '1', 1], ['requestImagePixelBudget', '1', 1], ['requestImageMaxBytes', '1', 1],
+  ]
+
+  it.each(validNumericDrafts)('accepts the in-range draft %s=%s', async (field, text, expected) => {
+    const { host, controller, actions, snapshot } = setup()
+    actions.edit(field, text)
+    expect(snapshot()[field].invalid).toBe(false)
+    await controller.save()
+    expect(host.form.getSnapshot().value?.[field]).toBe(expected)
+  })
+
+  it('projects the Host namespace status through loading, ready and unavailable', () => {
+    const host = createConfigForm<OpencodeGoSettings>()
+    const controller = new OpencodeGoSectionController(host.form, {} as never)
+    controllers.push(controller)
+    const snapshot = controller.inject().hooks.opencodeGo.getSnapshot
+    expect(snapshot()).toMatchObject({ status: 'loading' })
+    host.publish({ status: 'ready', writable: true, value: {} })
+    expect(snapshot()).toMatchObject({ status: 'ready' })
+    host.publish({ status: 'unavailable' })
+    expect(snapshot()).toMatchObject({ status: 'unavailable' })
+  })
+
+  it('reports a refused provider switch separately from a refused model visibility', async () => {
+    const host = createConfigForm(defaultClientSettings)
+    const controller = new OpencodeGoSectionController(host.form, {} as never,
+      async () => ({ ok: true, value: { stale: false, models: [] } }))
+    controllers.push(controller)
+    const face = controller.inject()
+    host.set.mockResolvedValueOnce(false)
+    render(<OpencodeGoSection {...face} t={translator('en')} useOpencodeGo={bindSnapshotSelector(face.hooks.opencodeGo)} />)
+    const provider = screen.getByRole<HTMLButtonElement>('switch', { name: en.enabledLabel })
+    await act(async () => { fireEvent.click(provider) })
+    expect(host.set).toHaveBeenCalledExactlyOnceWith('enabled', false)
+    expect(face.hooks.opencodeGo.getSnapshot()).toMatchObject({ enabledFailed: true, pickerFailed: false })
+    expect(screen.getByRole('alert').textContent).toBe(en.enabledFailed)
+    expect(screen.queryByText(en.pickerFailed)).toBeNull()
+  })
+
   it('previews inherited resets, and treats structurally equal capacity maps as clean', async () => {
     const { host, controller, actions, snapshot } = setup({ refreshMinutes: 15, modelLimits: { m: { maxTokens: 8192 } } })
     host.publish({ base: { refreshMinutes: 60 }, user: { refreshMinutes: 15 } })
@@ -1509,9 +1644,11 @@ describe('client registration and remote lifecycle', () => {
     const analyticsRead = vi.fn(async (query: AnalyticsQuery, _signal?: AbortSignal) => ({ ok: true, value: createAnalyticsReport(query) }))
     const analyticsExport = vi.fn(async (_query: AnalyticsQuery, _signal?: AbortSignal) => ({ ok: true, value: { filename: 'usage.csv', csv: 'date,requests\n2026-11-05,12\n' } }))
     const configForms = { get: vi.fn(() => settings.form) }
+    const serviceRequests: string[][] = []
     const ctx = {
       configForms,
       inject: (services: string[], install: (ready: unknown) => void) => {
+        serviceRequests.push([...services])
         if (services.every(path => path.split('.').reduce<unknown>((value, key) =>
           value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined, ctx))) install(ctx)
       },
@@ -1528,7 +1665,7 @@ describe('client registration and remote lifecycle', () => {
       },
       slots: { inject: slotsInject, register: slotsRegister },
     }
-    return { ctx, settings, slotsRegister, slotsInject, localeRegister, configForms, analyticsRead, analyticsExport, listeners,
+    return { ctx, settings, slotsRegister, slotsInject, localeRegister, configForms, analyticsRead, analyticsExport, listeners, serviceRequests,
       dispose: async () => { for (const effect of effects.splice(0).reverse()) { const dispose = await effect; if (typeof dispose === 'function') dispose() } },
     }
   }
@@ -1542,8 +1679,10 @@ describe('client registration and remote lifecycle', () => {
       groups: [], failures: [], status: 'ready', error: null })
     const window = { status: 'ok', percent: 10, resetsAt: '2026-12-01T00:00:00Z' }
     const read = vi.fn(async () => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
-    Object.assign(harness.ctx, { sessions: {}, modelDirectories: { directoryFor: () => ({ store: directory }) } })
-    Object.assign(harness.ctx.remote, { session: {}, opencodeGoUsage: { read, readAccount: read } })
+    // Only the model directory is read from this scope: the slot itself supplies the
+    // session id, so the session and session-remote services are not dependencies.
+    Object.assign(harness.ctx, { modelDirectories: { directoryFor: () => ({ store: directory }) } })
+    Object.assign(harness.ctx.remote, { opencodeGoUsage: { read, readAccount: read } })
     apply(harness.ctx as never)
     const entries = harness.slotsRegister.mock.calls as unknown as Array<[{ id: string; inject: (session: string) => UsagePillProps }]>
     const props = entries.find(([entry]) => entry.id === 'opencode-go-usage')![0].inject('session-a')
@@ -1568,6 +1707,33 @@ describe('client registration and remote lifecycle', () => {
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)
     expect(harness.settings.listenerCount()).toBe(0)
+  })
+
+  it('declares only the client services the browser half actually uses', async () => {
+    const harness = conversationHarness()
+    try {
+      // Top-level fiber inject: every name here stops apply() until the host provides
+      // it, so it must stay at the services apply() itself reads.
+      expect(clientInject).toEqual(['slots', 'locale', 'remote', 'remote.credentials'])
+      const nested = [...new Set(harness.serviceRequests.map(services => [...services].sort().join(',')))].sort()
+      expect(nested).toEqual([
+        'configForms,remote.opencodeGoModels',
+        'modelDirectories',
+        'remote.opencodeGoAccounts',
+        'remote.opencodeGoAnalytics',
+        'remote.opencodeGoUsage',
+      ].sort())
+      // Anti-drift guard: a declared service that is never read anywhere else only
+      // gates the whole surface on a dependency nobody needs.
+      const declared = new Set<string>([...clientInject, ...harness.serviceRequests.flat()])
+      const sources = ['index.ts', 'controller.ts', 'Section.tsx', 'UsagePill.tsx', 'AnalyticsDialog.tsx', 'presentation.ts', 'dashboard-copy.ts']
+        .map(name => readFileSync(resolve('src/client', name), 'utf8'))
+        .map(text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''))
+        .join('\n')
+      for (const service of declared) {
+        expect(sources.split(service).length - 1, `${service} must be read, not only injected`).toBeGreaterThanOrEqual(2)
+      }
+    } finally { await harness.dispose() }
   })
 
   it('forwards account-scoped history and CSV queries with cancellation through the conversation pill', async () => {

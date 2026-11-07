@@ -33,6 +33,8 @@ import {
 } from '@deepseek-ai/dsh-attachment'
 import { Config, DEFAULT_CONFIG, normalizeConfig, type LiveConfig } from '../src/config.ts'
 import { OpencodeGoCatalog } from '../src/catalog.ts'
+import { FreeBunTransport } from '../src/free-transport.ts'
+import { ProxyTransport } from '../src/transport.ts'
 import { modelsDocument, modelEntry } from './support/data.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -95,6 +97,32 @@ describe("route lifecycle", () => {
         expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id, 'new-model'])
       } finally {
         metadata.resolve(Response.json(modelsDocument()))
+        await ctx.fiber.dispose()
+      }
+    })
+
+    it('releases both adapters and their Free transports when the plugin unloads', async () => {
+      vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      const freeTransportDispose = vi.spyOn(FreeBunTransport.prototype, 'dispose')
+      const transportDispose = vi.spyOn(ProxyTransport.prototype, 'dispose')
+      try {
+        apply(ctx, configOf(gateway.url, { freeEnabled: true }))
+        await expect.poll(() => ctx.llm.listProviders().map(provider => provider.id).sort())
+          .toEqual(['dsh-opencode-free', 'dsh-opencode-go'])
+
+        await ctx.fiber.dispose()
+
+        // Each adapter owns one Free transport (Bun workers and SOCKS tunnels).
+        expect(freeTransportDispose).toHaveBeenCalledTimes(2)
+        // The Host owns the shared ProxyTransport; the adapters must not
+        // dispose a transport they did not create.
+        expect(transportDispose).toHaveBeenCalledTimes(1)
+      } finally {
+        freeTransportDispose.mockRestore()
+        transportDispose.mockRestore()
         await ctx.fiber.dispose()
       }
     })

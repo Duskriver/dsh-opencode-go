@@ -11,6 +11,12 @@ export declare const NATIVE_THINKING_FLAGS: ReadonlySet<string>;
 export declare function supportsThinkingBudget(api: Api, compat: Model<Api>['compat']): boolean;
 export declare function reasoningBudgetRange(model: Model<Api>): ThinkingBudgetRange | undefined;
 export declare function unsupportedThinkingLevels(): ThinkingLevelMap;
+/**
+ * Selectable reasoning choices, configured budgets included. Configured budgets
+ * are user data: unusable entries (outside the model's range, non-integers or
+ * above {@link MAX_THINKING_BUDGET_TOKENS}) are dropped rather than throwing,
+ * so a stale setting can never make its model unresolvable.
+ */
 export declare function reasoningChoices(model: Model<Api>): readonly {
     id: string;
     name: string;

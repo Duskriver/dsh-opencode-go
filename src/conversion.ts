@@ -476,7 +476,7 @@ async function prepareRequestImages(
       while (next < orderedRefs.length) {
         preparationSignal.throwIfAborted()
         const ref = orderedRefs[next++]!
-        const image = await waitWithSignal(() => attachments.readImageRequest(ref, requestImageTarget(ref, budget), preparationSignal), preparationSignal)
+        const image = await waitWithSignal(() => attachments.readImageRequest(ref, requestImageTargetFor(ref, budget), preparationSignal), preparationSignal)
         preparationSignal.throwIfAborted()
         versions.set(ref.attachmentId, image)
         encodedBytes += Math.ceil(image.bytes / 3) * 4 * occurrences.get(ref.attachmentId)!
@@ -623,8 +623,18 @@ export interface PiImageRequestBudget {
   maxBytes: number
 }
 
-/** Deterministic request target for one source under the route budgets. */
-function requestImageTarget(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget & PiImageRequestBudget {
+/**
+ * Deterministic request target for one source under the route budgets.
+ *
+ * The single projection both request serialization and the adapter's
+ * `LlmAdapter.imageRequestTarget` report use: the token meter must price the
+ * exact dimensions and encoded-byte target this route sends, not the
+ * normalized source image.
+ * @param ref - durable normalized image reference.
+ * @param budget - route pixel and encoded-byte budgets.
+ * @returns the target width, height and encoded-byte cap, plus the budgets.
+ */
+export function requestImageTargetFor(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget & PiImageRequestBudget {
   return {
     ...requestImageDimensions(ref.width, ref.height, budget.maxPixels),
     maxPixels: budget.maxPixels,

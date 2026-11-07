@@ -29,6 +29,7 @@ import {
   type GoModelCatalog,
   DISPLAY_NAME,
   SDK_PROVIDER_ID,
+  MAX_THINKING_BUDGET_TOKENS,
   assertProxyURL,
 } from './contracts.ts'
 import { randomUUID } from 'node:crypto'
@@ -59,21 +60,29 @@ export function supportsThinkingBudget(api: Api, compat: Model<Api>['compat']): 
 
 export function reasoningBudgetRange(model: Model<Api>): ThinkingBudgetRange | undefined {
   if (!model.reasoning || !model.reasoningBudget) return undefined
-  return { min: model.reasoningBudget.min, max: Math.min(model.reasoningBudget.max, model.maxTokens - 1024) }
+  const max = Math.min(model.reasoningBudget.max, model.maxTokens - 1024)
+  // A gateway declaring a ceiling below the floor (or a model too small for the
+  // floor) has no usable numeric budget; omit the control instead of throwing
+  // later, which would make the whole model unresolvable.
+  return max >= model.reasoningBudget.min ? { min: model.reasoningBudget.min, max } : undefined
 }
 
 export function unsupportedThinkingLevels(): ThinkingLevelMap {
   return Object.fromEntries(THINKING_LEVELS.map(level => [level, null]))
 }
 
+/**
+ * Selectable reasoning choices, configured budgets included. Configured budgets
+ * are user data: unusable entries (outside the model's range, non-integers or
+ * above {@link MAX_THINKING_BUDGET_TOKENS}) are dropped rather than throwing,
+ * so a stale setting can never make its model unresolvable.
+ */
 export function reasoningChoices(model: Model<Api>): readonly { id: string; name: string }[] {
   if (!model.reasoning) return []
   const range = reasoningBudgetRange(model)
-  const presets = model.reasoningBudgetPresets ?? []
-  const valid = (tokens: number): boolean => range !== undefined && Number.isSafeInteger(tokens) && tokens >= range.min && tokens <= range.max
-  if (range && presets.some(tokens => !valid(tokens))) {
-    throw new LlmError(`opencode-go model "${model.id}" thinking budgets must be integers between ${range.min} and ${range.max} tokens`, 'INVALID_REQUEST')
-  }
+  const valid = (tokens: number): boolean => range !== undefined && Number.isSafeInteger(tokens)
+    && tokens >= range.min && tokens <= range.max && tokens <= MAX_THINKING_BUDGET_TOKENS
+  const presets = [...new Set(model.reasoningBudgetPresets ?? [])].filter(valid).sort((a, b) => a - b)
   if (range && model.reasoningControl === 'budget') {
     const choices: { id: string; tokens: number }[] = Object.entries(BUDGET_PRESETS).filter(([, tokens]) => valid(tokens))
       .map(([id, tokens]) => ({ id, tokens }))
@@ -90,7 +99,7 @@ export function reasoningChoices(model: Model<Api>): readonly { id: string; name
     // Keep the durable high ID of the old switch, but describe its actual meaning.
     name: model.reasoningControl === 'toggle' && id === 'high' ? 'On'
       : `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
-  })), ...range === undefined ? [] : [...new Set(presets)].sort((a, b) => a - b)
+  })), ...range === undefined ? [] : presets
     .map(tokens => ({ id: `budget:${tokens}`, name: `${tokens.toLocaleString('en-US')} tokens` }))]
 }
 
@@ -101,13 +110,26 @@ export type ReasoningIntent =
   | { kind: 'effort'; level: Exclude<ModelThinkingLevel, 'off'> }
   | { kind: 'budget'; tokens: number; min: number }
 
+/** Clamp a stale or malformed budget selection into the model's usable range. */
+function clampThinkingBudget(range: ThinkingBudgetRange, requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested)) return range.min
+  return Math.min(Math.max(Math.round(requested), range.min), range.max)
+}
+
 /** Called after validation against the model's choices. */
 export function reasoningIntent(model: Model<Api>, level: string | undefined): ReasoningIntent {
   if (level === undefined) return { kind: 'default' }
   if (level === 'off') return { kind: 'off' }
   const range = reasoningBudgetRange(model)
-  if (range && (model.reasoningControl === 'budget' || level.startsWith('budget:'))) return { kind: 'budget', min: range.min,
-    tokens: level.startsWith('budget:') ? Number(level.slice(7)) : BUDGET_PRESETS[level as keyof typeof BUDGET_PRESETS] }
+  if (range && (model.reasoningControl === 'budget' || level.startsWith('budget:'))) {
+    const requested = level.startsWith('budget:') ? Number(level.slice(7))
+      : BUDGET_PRESETS[level as keyof typeof BUDGET_PRESETS] as number | undefined
+    // A persisted selection can outlive the catalog or its configured presets;
+    // degrade to the nearest usable budget instead of failing the request.
+    const tokens = requested !== undefined && Number.isSafeInteger(requested) && requested >= range.min && requested <= range.max
+      ? requested : clampThinkingBudget(range, requested)
+    return { kind: 'budget', min: range.min, tokens }
+  }
   return model.reasoningControl === 'toggle' ? { kind: 'on' }
     : { kind: 'effort', level: level as Exclude<ModelThinkingLevel, 'off'> }
 }
@@ -487,6 +509,9 @@ export class OpencodeGoCatalog {
         method: 'GET', cache: 'no-cache', headers: { ...attributionHeaders(), accept: 'application/json',
           ...this.cached?.etag === undefined ? {} : { 'if-none-match': this.cached.etag } },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        // Discovery is unauthenticated but must not be steered elsewhere: a
+        // redirect to loopback or a metadata address is a failure, not a source.
+        redirect: 'error',
       }, MODEL_LISTING_MAX_BYTES, 'gzip', this.fetcher)
       const notModified = response.status === 304 && this.cached !== undefined
       if (!notModified && !response.ok) throw new LlmError(`HTTP ${response.status}`, 'DISCOVERY_FAILED')
@@ -505,7 +530,7 @@ export class OpencodeGoCatalog {
       const failure = new LlmError(`could not refresh ${diagnosticURL(this.url)}: ${detail}`, 'DISCOVERY_FAILED', { cause: error })
       snapshot = { ...(this.served ?? this.empty()), live: false, failure, fetchedAtMs: Date.now() }
       this.failures = Math.min(this.failures + 1, 5)
-      try { this.onFallback({ url: this.url, error: failure, kept: snapshot.models.size }) } catch { /* Diagnostics cannot reject discovery. */ }
+      try { this.onFallback({ url: diagnosticURL(this.url), error: failure, kept: snapshot.models.size }) } catch { /* Diagnostics cannot reject discovery. */ }
     }
     this.served = snapshot
     this.refreshAtMs = snapshot.fetchedAtMs + (this.failures === 0 ? this.refreshMs : Math.min(this.refreshMs, 5000 * 2 ** (this.failures - 1), 60_000))

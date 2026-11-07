@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 # Compatibility coverage (deliberate scope):
-# - `core` is the full acceptance path (typecheck, check:dist, 886 Vitest tests,
+# - `core` is the full acceptance path (typecheck, check:dist, the full Vitest suite,
 #   installed-package smoke) against the pinned development baseline
 #   DSH 0.2.1-rc.5 / Cordis 4.0.5 / Schemastery 3.18.5.
 # - The installed DSH 0.2.2-rc.1 runtime (Cordis 4.1.0, Schemastery 3.19.0) has
@@ -40,3 +40,4 @@ jobs:
           cache: npm
       - run: npm ci --strict-peer-deps
       - run: npm run verify
+      - run: npm run check:pack

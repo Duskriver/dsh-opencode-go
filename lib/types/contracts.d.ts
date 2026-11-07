@@ -35,6 +35,12 @@ export type GoAccount = {
     apiKeyEnv: string;
 };
 export declare const MAX_ACCOUNTS = 20;
+/**
+ * Upper bound for one configured thinking budget, in tokens. Shared with the
+ * browser form so a stored value always fits a model's advertised ceiling while
+ * staying far below any tokenizer/timer limit.
+ */
+export declare const MAX_THINKING_BUDGET_TOKENS = 1000000;
 export declare const ACCOUNT_REF_PREFIX = "DSH_OPENCODE_GO_ACCOUNT_";
 export declare const DEFAULT_ACCOUNT_REF = "OPENCODE_API_KEY";
 /** A credential reference is a bare environment variable name, never empty or decorated. */

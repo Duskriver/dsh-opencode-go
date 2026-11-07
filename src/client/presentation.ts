@@ -111,6 +111,7 @@ export const en = {
   enabledHint: 'Enables the Free route; Go also requires a usable API key. Turning this off withdraws both routes immediately.',
   enabledOff: 'OpenCode Go and Free are off: their models are withdrawn from every picker.',
   enabledUnavailable: 'This deployment pins the switch on in its composition, so it cannot be changed here.',
+  enabledFailed: 'Could not update the OpenCode Go switch. Please retry.',
   keyLabel: 'API key',
   keyHint: 'From your OpenCode Go subscription (opencode.ai). Leaving this blank keeps the key already saved, and a saved key applies to the next request without a restart.',
   keyConfigured: 'Key saved',
@@ -217,6 +218,10 @@ export const en = {
   refreshMinutesHint: 'How long the model catalog is cached; opening this page or refreshing re-checks it immediately.',
   streamIdleTimeoutMsLabel: 'Stream idle timeout (ms)',
   streamIdleTimeoutMsHint: 'The longest silence between stream events; a longer gap fails the request.',
+  requestPreparationTimeoutMsLabel: 'Request preparation timeout (ms)',
+  requestPreparationTimeoutMsHint: 'Bounds route discovery and each attempt\'s credential and image preparation before dispatch.',
+  requestTimeoutMsLabel: 'Request timeout (ms)',
+  requestTimeoutMsHint: 'The whole dispatch deadline, including discovery, image preparation and account fallback.',
   maxImagesLabel: 'Request image count cap (maxImages)',
   maxImagesHint: 'Leave empty to inherit the base configuration (uncapped only when the base sets none); above the cap the oldest images become text placeholders.',
   maxRequestImageBytesLabel: 'Request image payload cap (bytes)',
@@ -233,6 +238,7 @@ export const en = {
   saving: 'Saving…',
   savedFailed: 'The last save did not land as staged; correct the values or discard.',
   readOnly: 'The settings document is read-only in this deployment.',
+  settingsLoading: 'Reading the OpenCode Go settings…',
   unavailable: 'The OpenCode Go settings are not served in this deployment.',
 }
 
@@ -345,6 +351,7 @@ export const zh: typeof en = {
   enabledHint: '开启后启用 Free 路由；Go 路由还需要可用的 API Key。关闭后立即撤下两个路由。',
   enabledOff: 'OpenCode Go 与 Free 已关闭：两个路由的模型均已从选择器撤下。',
   enabledUnavailable: '此部署在组合层固定开启了该开关，无法在此修改。',
+  enabledFailed: 'OpenCode Go 开关未更新，请重试。',
   keyLabel: 'API key',
   keyHint: '来自你的 OpenCode Go 订阅（opencode.ai）。留空表示保持已保存的 key；保存后下一次请求即生效，无需重启。',
   keyConfigured: '已配置 key',
@@ -451,6 +458,10 @@ export const zh: typeof en = {
   refreshMinutesHint: '模型目录的缓存时长；打开本页或点击刷新会立即重新核对。',
   streamIdleTimeoutMsLabel: '流空闲超时（毫秒）',
   streamIdleTimeoutMsHint: '流事件之间的最大静默间隔，超出则请求失败。',
+  requestPreparationTimeoutMsLabel: '请求准备超时（毫秒）',
+  requestPreparationTimeoutMsHint: '限制路由发现以及每次尝试在派发前的凭据与图片准备时间。',
+  requestTimeoutMsLabel: '请求总超时（毫秒）',
+  requestTimeoutMsHint: '整个派发期限，包括路由发现、图片准备与账号回退。',
   maxImagesLabel: '请求图片数量上限（maxImages）',
   maxImagesHint: '留空继承基础配置（基础未设上限时才不限制张数）；超限时最旧的图片会被替换为文字占位。',
   maxRequestImageBytesLabel: '请求图片载荷上限（字节）',
@@ -467,6 +478,7 @@ export const zh: typeof en = {
   saving: '保存中…',
   savedFailed: '上次保存未按草稿生效；请修正数值或放弃修改。',
   readOnly: '此部署中设置文档为只读。',
+  settingsLoading: '正在读取 OpenCode Go 设置…',
   unavailable: '此部署未提供 OpenCode Go 设置。',
 }
 

@@ -8,7 +8,7 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `^4.0.5`. The Host
 
 | Surface | DSH / Cordis / Schemastery | Verification | Status |
 | --- | --- | --- | --- |
-| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:dist`, 899 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the Free opt-in change (886 tests at the original 2026-11-06 baseline) |
+| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:dist`, 964 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the P0/P1 hardening batches (886 tests at the original 2026-11-06 baseline) |
 | Installed desktop CLI, Host side | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | rebuilt plugin loaded in an isolated headless profile; one loopback inference completed | Partial: headless Host smoke only, recorded before the dashboard migration |
 | Web/client surface (`dsh.client`) | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | settings page, usage pill, model picker and history dashboard against a running 0.2.2 Web profile | **Not covered / pending** |
 
@@ -51,7 +51,7 @@ The daily CSV at `https://opencode.ai/console/api/v2/usage/export?range=30d` sup
 | Credential/account/network/date cache isolation, force refresh, proxy path, cancellation, timeout and response limits | Pass: Host service and RPC tests, including independent cancellation and connection-change races |
 | Key/member-field boundary, third-party gateway rejection and explicit upstream failures | Pass: report excludes member fields and keys; explicit permission, credential, gateway and malformed-response failures |
 | Dashboard account/range/refresh, selected-account quotas and responsive light/dark UI | Pass: browser interaction tests plus real-browser 1280×1000 dark / 390×844 light checks, Chinese and English |
-| `npm test` | Pass: 17 files, 899 tests; zero failures or skipped tests |
+| `npm test` | Pass: 18 files, 964 tests; zero failures or skipped tests |
 | `npm run typecheck` / `npm run compile` | Pass: Host and browser types and distribution build |
 | `npm run check:dist` | Pass: all 31 shipped artifacts match an independent rebuild |
 | `npm run verify` | Pass: types, build comparison, all tests and installed-package smoke |

@@ -18,7 +18,7 @@ import { closeMockGateways, listingBody, mockGateway, textEvents, fullLiveListin
 import { modelsDocument, modelEntry } from './support/data.ts'
 import SessionStore from '@deepseek-ai/dsh-session'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { AttachmentId, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { AttachmentId, ImageVariantId, type ImageAttachmentRef, type ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
 import { randomUUID } from 'node:crypto'
 
 describe("requests and deadlines", () => {
@@ -57,6 +57,18 @@ describe("requests and deadlines", () => {
       config: () => configOf(url),
       resolveApiKey: () => Promise.resolve(apiKey),
     })
+  }
+
+  function finishOf(chunks: readonly StreamChunk[]): Extract<StreamChunk, { type: 'finish' }> {
+    const finish = chunks.find((chunk): chunk is Extract<StreamChunk, { type: 'finish' }> => chunk.type === 'finish')
+    if (finish === undefined) throw new Error('missing finish chunk')
+    return finish
+  }
+
+  function errorFailure(chunks: readonly StreamChunk[]): { code: string; status?: number; providerRetryAfterMs?: number } {
+    const reason = finishOf(chunks).reason
+    if (reason.kind !== 'error') throw new Error(`expected an error finish, got ${reason.kind}`)
+    return reason.failure
   }
 
   afterEach(async () => {
@@ -439,6 +451,44 @@ describe("requests and deadlines", () => {
       })
     })
 
+    it('reports the provider HTTP status and Retry-After wait on an error finish', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({
+        status: 429,
+        headers: { 'retry-after': '120' },
+        body: JSON.stringify({ error: { type: 'RateLimitError', message: 'slow down' } }),
+      })
+      const adapter = await adapterFor(gateway.url)
+
+      const failure = errorFailure(await drain(adapter.stream(requestOf())))
+
+      expect(failure).toMatchObject({ code: 'RATE_LIMIT', status: 429 })
+      expect(failure.providerRetryAfterMs).toBeGreaterThan(100_000)
+      expect(failure.providerRetryAfterMs).toBeLessThanOrEqual(120_000)
+    })
+
+    it('does not invent a Retry-After wait for a 429 without the header', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({ status: 429, body: JSON.stringify({ error: { type: 'RateLimitError', message: 'slow down' } }) })
+      const adapter = await adapterFor(gateway.url)
+
+      const failure = errorFailure(await drain(adapter.stream(requestOf())))
+
+      expect(failure).toMatchObject({ code: 'RATE_LIMIT', status: 429 })
+      expect(failure).not.toHaveProperty('providerRetryAfterMs')
+    })
+
+    it('omits Retry-After facts the failed response did not provide', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({ status: 503, body: JSON.stringify({ error: { message: 'unavailable' } }) })
+      const adapter = await adapterFor(gateway.url)
+
+      const failure = errorFailure(await drain(adapter.stream(requestOf())))
+
+      expect(failure).toMatchObject({ code: 'SERVER', status: 503 })
+      expect(failure).not.toHaveProperty('providerRetryAfterMs')
+    })
+
     it('degrades unusable replay state to provider-neutral history and reports it', async () => {
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       gateway.pushCompletions({ events: textEvents })
@@ -673,6 +723,68 @@ describe("requests and deadlines", () => {
         .toMatchObject({ error: { code: 'TIMEOUT' } })
     } finally { release.resolve('late-key'); await outcome }
     expect(gateway.bodies).toHaveLength(0)
+  })
+
+  describe('image request target', () => {
+    const image: ImageAttachmentRef = {
+      attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`),
+      mediaType: 'image/png',
+      bytes: 4_000_000,
+      width: 4096,
+      height: 4096,
+    }
+
+    function imageRequest(adapter: OpencodeGoAdapter): Promise<StreamChunk[]> {
+      return drain(adapter.stream(requestOf({ messages: [createUserMessage({
+        content: [{ type: 'image', attachment: image }],
+        source: { kind: 'plugin', plugin: 'test' },
+      })] })))
+    }
+
+    it('reports the same resized target conversion serializes under live budgets', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({ events: textEvents })
+      let requestImagePixelBudget = 2048 * 2048
+      let requestImageMaxBytes = 300_000
+      const targets: ImageRequestTarget[] = []
+      const store = {
+        readImageRequest: vi.fn(async (ref: ImageAttachmentRef, target: ImageRequestTarget) => {
+          targets.push(target)
+          return {
+            variantId: ImageVariantId(`sha256:${'d'.repeat(64)}`),
+            attachment: ref,
+            data: Uint8Array.of(1),
+            mediaType: ref.mediaType,
+            bytes: 1,
+            width: target.width,
+            height: target.height,
+            depth: 'uchar',
+            space: 'srgb',
+            hasAlpha: false,
+          }
+        }),
+      }
+      const adapter = new OpencodeGoAdapter({
+        config: () => configOf(gateway.url, { requestImagePixelBudget, requestImageMaxBytes }),
+        resolveApiKey: async () => 'test-key',
+        imageAccess: { resolveAttachments: () => store as never, resolveImageAccess: () => undefined },
+      })
+
+      await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
+      const reported = adapter.imageRequestTarget(PROVIDER_ID, 'deepseek-v4.1-flash', image)
+      expect(reported).toEqual({ width: 2048, height: 2048, maxBytes: requestImageMaxBytes })
+
+      expect(finishOf(await imageRequest(adapter)).reason).toMatchObject({ kind: 'stop' })
+      expect(targets).toHaveLength(1)
+      const serialized = targets[0]!
+      expect({ width: serialized.width, height: serialized.height, maxBytes: serialized.maxBytes }).toEqual(reported)
+
+      // A live settings edit moves the serialized target and the reported one together.
+      requestImagePixelBudget = 1024 * 1024
+      requestImageMaxBytes = 100_000
+      expect(adapter.imageRequestTarget(PROVIDER_ID, 'deepseek-v4.1-flash', image))
+        .toEqual({ width: 1024, height: 1024, maxBytes: 100_000 })
+    })
   })
 })
 

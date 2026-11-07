@@ -4,6 +4,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   modelSettingsKey,
@@ -33,7 +34,8 @@ export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } 
 export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
 export const TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'showSidebarQuota', 'freeEnabled', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
-  'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes'] as const
+  'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget',
+  'requestImageMaxBytes'] as const
 
 export type TextField = typeof TEXT_FIELDS[number]
 
@@ -51,13 +53,41 @@ export interface FormActions {
   discard(): void
 }
 
-interface FormShell { available: boolean; writable: boolean; dirty: boolean; invalid: boolean; saving: boolean; failed: boolean }
+/** Settings-document availability, as the Host ConfigForm reports it. */
+export type SettingsStatus = 'loading' | 'ready' | 'unavailable'
+
+interface FormShell {
+  status: SettingsStatus
+  writable: boolean
+  dirty: boolean
+  invalid: boolean
+  saving: boolean
+  failed: boolean
+}
 
 type Draft = { kind: 'text'; text: string } | { kind: 'limits'; value: OpencodeGoModelLimits } | { kind: 'clear' }
 
 interface PlannedWrite { field: EditableField; draft: Draft; write: FieldWrite | undefined }
 
 type FieldWrite = { kind: 'set'; value: OpencodeGoConfig[EditableField] } | { kind: 'clear' }
+
+/**
+ * Numeric bounds mirrored from the Host settings schema (`src/config.ts`), so an
+ * out-of-range draft is marked invalid here instead of being refused after Save
+ * with no field-level explanation. `MAX_TIMER_DELAY_MS` is the Host's own constant.
+ */
+export interface NumericFieldLimit { integer: boolean; min: number; max?: number }
+
+export const NUMERIC_FIELD_LIMITS: Partial<Record<TextField, NumericFieldLimit>> = {
+  refreshMinutes: { integer: true, min: 1, max: 7 * 24 * 60 },
+  streamIdleTimeoutMs: { integer: false, min: Number.MIN_VALUE, max: MAX_TIMER_DELAY_MS },
+  requestPreparationTimeoutMs: { integer: true, min: 1, max: MAX_TIMER_DELAY_MS },
+  requestTimeoutMs: { integer: true, min: 1, max: MAX_TIMER_DELAY_MS },
+  maxImages: { integer: true, min: 1, max: Number.MAX_SAFE_INTEGER },
+  maxRequestImageBytes: { integer: true, min: 1 },
+  requestImagePixelBudget: { integer: true, min: 1 },
+  requestImageMaxBytes: { integer: true, min: 1 },
+}
 
 function formatField(field: TextField, value: unknown): string {
   if (field === 'usageDisplay') return typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY
@@ -79,12 +109,18 @@ function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'baseURL' || field === 'freeBaseURL') {
     try {
       const url = new URL(trimmed)
-      return ['http:', 'https:'].includes(url.protocol) && !url.search && !url.hash ? { kind: 'set', value: trimmed } : undefined
+      // The Host rejects embedded credentials without echoing them; refusing here
+      // keeps the draft field-level invalid instead of failing the whole Save.
+      return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash
+        ? { kind: 'set', value: trimmed } : undefined
     } catch { return undefined }
   }
+  const limit = NUMERIC_FIELD_LIMITS[field]
+  if (limit === undefined) return undefined
   const value = Number(trimmed)
-  return Number.isFinite(value) && (field !== 'maxImages' || Number.isSafeInteger(value) && value > 0)
-    ? { kind: 'set', value } : undefined
+  if (!Number.isFinite(value) || limit.integer && !Number.isSafeInteger(value)
+    || value < limit.min || limit.max !== undefined && value > limit.max) return undefined
+  return { kind: 'set', value }
 }
 
 /** Structural comparison keeps model capacities as objects throughout editing and saving. */
@@ -180,11 +216,15 @@ export interface OpencodeGoSectionState extends FormShell {
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
+  /** The provider `enabled` switch write failed; separate from model visibility. */
+  enabledFailed: boolean
   baseURL: FieldState
   freeBaseURL: FieldState
   proxyURL: FieldState
   refreshMinutes: FieldState
   streamIdleTimeoutMs: FieldState
+  requestPreparationTimeoutMs: FieldState
+  requestTimeoutMs: FieldState
   maxImages: FieldState
   maxRequestImageBytes: FieldState
   requestImagePixelBudget: FieldState
@@ -210,6 +250,7 @@ export class OpencodeGoSectionController {
   private failed = false
   private pickerSaving = false
   private pickerFailed = false
+  private enabledFailed = false
   private models: OpencodeGoModels = { status: 'idle' }
   private modelsRequest = 0
   private face: OpencodeGoSectionFace | undefined
@@ -299,11 +340,12 @@ export class OpencodeGoSectionController {
     const snapshot = this.scope.getSnapshot()
     const plan = this.plan()
     return {
-      available: snapshot.status === 'ready', writable: snapshot.writable,
+      status: snapshot.status, writable: snapshot.writable,
       dirty: plan.length > 0, invalid: plan.some(item => !item.write), saving: this.saving || this.accountBusy, failed: this.failed,
       accounts: this.accountState(), enabled: snapshot.value?.enabled ?? true,
       ...Object.fromEntries(TEXT_FIELDS.map(field => [field, this.field(field)])) as Record<TextField, FieldState>,
       modelVisibility: snapshot.value?.modelVisibility ?? {}, pickerSaving: this.pickerSaving, pickerFailed: this.pickerFailed,
+      enabledFailed: this.enabledFailed,
       models: this.models,
       modelLimits: { overridden: this.drafts.get('modelLimits')?.kind === 'limits' || !this.drafts.has('modelLimits') && this.stored('modelLimits'), invalid: false },
       modelLimitDraft: modelLimitsOf(this.value('modelLimits')),
@@ -343,11 +385,19 @@ export class OpencodeGoSectionController {
   private async writePickerSetting(field: 'enabled' | 'modelVisibility', value: boolean | Record<string, boolean>): Promise<void> {
     if (this.blocked() || this.accountBusy || !this.scope.getSnapshot().writable) return
     this.pickerSaving = true
-    this.pickerFailed = false
+    // The provider switch and a model-visibility toggle fail into separate slots:
+    // one alert must never claim the other control is what did not update.
+    if (field === 'enabled') this.enabledFailed = false
+    else this.pickerFailed = false
     this.publish()
-    try { this.pickerFailed = !await this.scope.set(field, value) }
-    catch { this.pickerFailed = true }
-    finally { this.pickerSaving = false; this.publish() }
+    try {
+      const accepted = await this.scope.set(field, value)
+      if (field === 'enabled') this.enabledFailed = !accepted
+      else this.pickerFailed = !accepted
+    } catch {
+      if (field === 'enabled') this.enabledFailed = true
+      else this.pickerFailed = true
+    } finally { this.pickerSaving = false; this.publish() }
   }
 
   inject(): OpencodeGoSectionFace {

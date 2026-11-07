@@ -315,13 +315,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     ctx.logger.error(`llm-opencode-go: not registering model discovery for "${name}" (${String(error)})`)
   }
   ctx.effect(() => () => {
-    /* v8 ignore start -- plugin unload never runs in tests: no Context disposal API is exercised */
     registration?.()
     registration = undefined
     freeRegistration?.()
     freeRegistration = undefined
     undiscover()
-    /* v8 ignore stop */
+    // Adapters own their per-route Free transports (Bun workers and SOCKS
+    // tunnels); each dispose releases those. The shared ProxyTransport belongs
+    // to the Host effect registered above, and the adapters know not to
+    // dispose an injected transport.
+    return Promise.all([adapter.dispose(), freeAdapter.dispose()]).then(() => {})
   })
   installHostSettings(ctx)
   ctx.on('loader/volatile-update', syncRoute)

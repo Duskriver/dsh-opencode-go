@@ -27,9 +27,10 @@ import type {
   OpencodeGoSectionFace,
   OpencodeGoSectionState,
 } from './controller.ts'
-import { modelsForSource } from './controller.ts'
+import { modelsForSource, NUMERIC_FIELD_LIMITS } from './controller.ts'
 import {
   MAX_ACCOUNTS,
+  MAX_THINKING_BUDGET_TOKENS,
   modelSettingsKey,
   FREE_PROVIDER_ID,
   type ModelSource,
@@ -599,7 +600,10 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 }) {
   const [text, setText] = useState('')
   const range = model.reasoningBudget!
-  const max = Math.min(range.max, (limit?.maxTokens ?? model.maxTokens ?? range.max + 1024) - 1024)
+  // Output room and the Host schema both cap a budget; the input and the Add
+  // button use the effective floor of the three so neither can stage a value the
+  // Host will refuse.
+  const max = Math.min(range.max, MAX_THINKING_BUDGET_TOKENS, (limit?.maxTokens ?? model.maxTokens ?? range.max + 1024) - 1024)
   const values = limit?.thinkingBudgets ?? []
   const tokens = Number(text)
   const valid = text.trim() !== '' && Number.isSafeInteger(tokens) && tokens >= range.min && tokens <= max
@@ -628,9 +632,25 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 /** The tuning fields covered by the advanced parameter reset, in display order. */
 const ADVANCED_FIELDS = [
   'freeEnabled', 'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
-  'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
-  'requestImagePixelBudget', 'requestImageMaxBytes',
+  'refreshMinutes', 'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs',
+  'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
+
+/**
+ * Mirror the Host schema bounds onto one numeric input. The parse side enforces the
+ * same table, so what the browser offers and what Save accepts cannot disagree.
+ * @param field - the numeric settings field.
+ * @returns the ValueField props for its number input.
+ */
+function numericBounds(field: TextField): { numeric: true; min?: number; max?: number; step: number | 'any' } {
+  const limit = NUMERIC_FIELD_LIMITS[field]
+  return {
+    numeric: true,
+    ...(limit !== undefined && limit.min !== undefined ? { min: limit.min } : {}),
+    ...(limit?.max === undefined ? {} : { max: limit.max }),
+    step: limit !== undefined && !limit.integer ? 'any' : 1,
+  }
+}
 
 const APPEARANCE_FIELDS = ['showSidebarQuota', 'usagePillStyle'] as const
 
@@ -658,6 +678,10 @@ interface ValueFieldProps {
   invalidLabel: string
   disabled: boolean
   numeric?: boolean
+  /** Browser-side bounds mirrored from the Host schema; only used for number inputs. */
+  min?: number
+  max?: number
+  step?: number | 'any'
   placeholder?: string
   options?: readonly { value: string; label: string }[]
   onEdit: (text: string) => void
@@ -731,6 +755,9 @@ function ValueField(props: ValueFieldProps) {
           className={props.field.invalid ? css.inputInvalid : css.input}
           type={props.numeric === true ? 'number' : 'text'}
           {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
+          {...props.numeric === true && props.min !== undefined ? { min: props.min } : {}}
+          {...props.numeric === true && props.max !== undefined ? { max: props.max } : {}}
+          {...props.numeric === true && props.step !== undefined ? { step: props.step } : {}}
           {...props.field.invalid ? { 'aria-invalid': true } : {}}
           value={props.field.text}
           disabled={props.disabled}
@@ -933,9 +960,14 @@ function Loaded(props: {
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
-    if (state.available && state.models.status === 'idle') loadModels()
-  }, [state.available, state.models.status, loadModels])
-  if (!state.available) {
+    if (state.status === 'ready' && state.models.status === 'idle') loadModels()
+  }, [state.status, state.models.status, loadModels])
+  // Loading and unavailable are different states: before the Host has answered,
+  // the page must not claim the deployment does not serve these settings.
+  if (state.status === 'loading') {
+    return <div className={css.page} style={themeStyle(tokens)}><p className={css.intro} role="status">{t('settingsLoading')}</p></div>
+  }
+  if (state.status === 'unavailable') {
     return <div className={css.page} style={themeStyle(tokens)}><p className={css.intro}>{t('unavailable')}</p></div>
   }
   const disabled = !state.writable
@@ -974,6 +1006,7 @@ function Loaded(props: {
             onChange={props.setEnabled}
           />
         </div>
+        {state.enabledFailed ? <p className={css.failedNote} role="alert">{t('enabledFailed')}</p> : null}
       </section>
       {accountCard}
       {/* Source controls share one row; failures remain visible when folded. */}
@@ -1129,7 +1162,7 @@ function Loaded(props: {
                   label={t('refreshMinutesLabel')}
                   hint={t('refreshMinutesHint')}
                   field={state.refreshMinutes}
-                  numeric
+                  {...numericBounds('refreshMinutes')}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('refreshMinutes', text) }}
                 />
@@ -1138,9 +1171,27 @@ function Loaded(props: {
                   label={t('streamIdleTimeoutMsLabel')}
                   hint={t('streamIdleTimeoutMsHint')}
                   field={state.streamIdleTimeoutMs}
-                  numeric
+                  {...numericBounds('streamIdleTimeoutMs')}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
+                />
+                <ValueField
+                  id="opencode-go-request-preparation-timeout"
+                  label={t('requestPreparationTimeoutMsLabel')}
+                  hint={t('requestPreparationTimeoutMsHint')}
+                  field={state.requestPreparationTimeoutMs}
+                  {...numericBounds('requestPreparationTimeoutMs')}
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('requestPreparationTimeoutMs', text) }}
+                />
+                <ValueField
+                  id="opencode-go-request-timeout"
+                  label={t('requestTimeoutMsLabel')}
+                  hint={t('requestTimeoutMsHint')}
+                  field={state.requestTimeoutMs}
+                  {...numericBounds('requestTimeoutMs')}
+                  {...fieldProps}
+                  onEdit={(text) => { props.edit('requestTimeoutMs', text) }}
                 />
                 <div className={css.groupHead}>{t('groupImages')}</div>
                 <ValueField
@@ -1148,7 +1199,7 @@ function Loaded(props: {
                   label={t('maxImagesLabel')}
                   hint={t('maxImagesHint')}
                   field={state.maxImages}
-                  numeric
+                  {...numericBounds('maxImages')}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('maxImages', text) }}
                 />
@@ -1157,7 +1208,7 @@ function Loaded(props: {
                   label={t('maxRequestImageBytesLabel')}
                   hint={t('maxRequestImageBytesHint')}
                   field={state.maxRequestImageBytes}
-                  numeric
+                  {...numericBounds('maxRequestImageBytes')}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('maxRequestImageBytes', text) }}
                 />
@@ -1166,7 +1217,7 @@ function Loaded(props: {
                   label={t('requestImagePixelBudgetLabel')}
                   hint={t('requestImagePixelBudgetHint')}
                   field={state.requestImagePixelBudget}
-                  numeric
+                  {...numericBounds('requestImagePixelBudget')}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImagePixelBudget', text) }}
                 />
@@ -1175,7 +1226,7 @@ function Loaded(props: {
                   label={t('requestImageMaxBytesLabel')}
                   hint={t('requestImageMaxBytesHint')}
                   field={state.requestImageMaxBytes}
-                  numeric
+                  {...numericBounds('requestImageMaxBytes')}
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
                 />

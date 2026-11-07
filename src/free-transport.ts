@@ -10,6 +10,15 @@ import type { FreeHttpRequest, FreeHttpResponse } from './free-protocol.ts'
 export const OPENCODE_FREE_USER_AGENT = 'opencode/latest/2.2.5/cli'
 const MAX_METADATA_BYTES = 64 * 1024
 const MAX_PACKET_BYTES = 256 * 1024 * 1024
+/**
+ * Largest accepted request body, in bytes. The bound is checked twice: against a
+ * declared Content-Length before reading, and against the bytes actually read
+ * once the body arrives. 64 MiB keeps the worker IPC packet bounded after base64
+ * (4/3 growth) and JSON framing, so MAX_PACKET_BYTES stays a defense-in-depth
+ * backstop instead of the first check to run after the body already occupies
+ * memory as an ArrayBuffer, a Buffer, a base64 string and a JSON string.
+ */
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024
 
 /** Variables the standalone Bun worker may need to start and locate its own resources. */
 const POSIX_WORKER_ENVIRONMENT = ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ'] as const
@@ -61,9 +70,14 @@ export class FreeBunTransport {
     executable?: () => string
     workerPath?: () => string
     maxConcurrent?: number
+    maxRequestBodyBytes?: number
   } = {}) {
     if (options.maxConcurrent !== undefined && (!Number.isSafeInteger(options.maxConcurrent) || options.maxConcurrent < 1)) {
       throw new RangeError('Free transport concurrency must be a positive integer')
+    }
+    if (options.maxRequestBodyBytes !== undefined
+      && (!Number.isSafeInteger(options.maxRequestBodyBytes) || options.maxRequestBodyBytes < 1)) {
+      throw new RangeError('Free transport request body limit must be a positive integer')
     }
   }
 
@@ -109,12 +123,23 @@ export class FreeBunTransport {
     signal.throwIfAborted()
     const url = new URL(request.url)
     if (!['http:', 'https:'].includes(url.protocol)) throw new TypeError('Free transport requires an HTTP URL')
+    const maxBodyBytes = this.options.maxRequestBodyBytes ?? MAX_REQUEST_BODY_BYTES
+    // Reject an honestly declared oversized body before queueing or allocating.
+    const declaredLength = request.headers.get('content-length')
+    if (declaredLength !== null && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBodyBytes) {
+      throw new RangeError(`Free HTTP request body exceeds the ${maxBodyBytes} byte limit`)
+    }
     const release = await this.acquire(signal)
     let relay: Awaited<ReturnType<typeof openSocksTunnel>> | undefined
     let started = false
     try {
-      const body = ['GET', 'HEAD'].includes(request.method) ? undefined
-        : Buffer.from(await waitWithSignal(() => request.arrayBuffer(), signal)).toString('base64')
+      let body: string | undefined
+      if (!['GET', 'HEAD'].includes(request.method)) {
+        const bytes = Buffer.from(await waitWithSignal(() => request.arrayBuffer(), signal))
+        // Streamed bodies may omit or misstate Content-Length; enforce the real size.
+        if (bytes.byteLength > maxBodyBytes) throw new RangeError(`Free HTTP request body exceeds the ${maxBodyBytes} byte limit`)
+        body = bytes.toString('base64')
+      }
       signal.throwIfAborted()
       if (proxy.startsWith('socks5:')) relay = await openSocksTunnel(proxy, signal)
       signal.throwIfAborted()

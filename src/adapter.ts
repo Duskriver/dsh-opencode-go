@@ -24,7 +24,7 @@ import {
   type LlmModelInfo,
   type LlmResolvedModelInfo,
 } from '@deepseek-ai/dsh-llm'
-import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
 import { deadline, idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { Api, Model, Provider } from './sdk-types.ts'
 import {
@@ -33,7 +33,7 @@ import {
   assertBaseURL,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './config.ts'
-import { toPiContext, toStreamChunks, piContextUsageKey, type PiImageRequestContext } from './conversion.ts'
+import { toPiContext, toStreamChunks, piContextUsageKey, requestImageTargetFor, type PiImageRequestContext } from './conversion.ts'
 import { GatewayDiagnostics, waitWithSignal, ProxyTransport } from './transport.ts'
 import {
   reasoningChoices,
@@ -118,11 +118,28 @@ function resolveReasoningLevel(
 
 /** Shares the adapter's transport without owning its lifetime or retrying accounts. */
 export class OpencodeGoRequestExecutor {
+  private readonly freeTransport: FreeBunTransport
+  private readonly ownsFreeTransport: boolean
+
   constructor(
     private readonly options: OpencodeGoRequestExecutorOptions,
     private readonly transport: ProxyTransport,
-    private readonly freeTransport: FreeBunTransport = new FreeBunTransport(),
-  ) {}
+    freeTransport?: FreeBunTransport,
+  ) {
+    // An injected transport belongs to its caller (the adapter or the Host);
+    // only the executor's own default has no other owner to release it.
+    this.ownsFreeTransport = freeTransport === undefined
+    this.freeTransport = freeTransport ?? new FreeBunTransport()
+  }
+
+  /**
+   * Release a Free transport this executor created itself. An injected
+   * transport is released by its owner, so a direct construction is the only
+   * caller for which this performs work.
+   */
+  async dispose(): Promise<void> {
+    if (this.ownsFreeTransport) await this.freeTransport.dispose()
+  }
 
   /** One account, one SDK attempt; host recovery still owns failures after output. */
   async *stream(options: GenerateOptions, snapshot: OpencodeGoRequestSnapshot): AsyncIterable<StreamChunk> {
@@ -228,10 +245,29 @@ export class OpencodeGoRequestExecutor {
         estimatedContextTokens: estimateContextTokens(transcript).tokens,
       })
       onDiagnostics?.(diagnostics)
+      // GatewayDiagnostics classifies the HTTP response, but the finish failure
+      // contract also carries the provider status and Retry-After. Observe the
+      // non-ok status here; retryDeadline() already carries the parsed delay.
+      const diagnosticsFetch = diagnostics.fetch
+      let httpStatus: number | undefined
+      const observedFetch: typeof globalThis.fetch = async (input, init) => {
+        const response = await diagnosticsFetch(input, init)
+        if (!response.ok) httpStatus = response.status
+        return response
+      }
+      const failureFacts = (): { status?: number; providerRetryAfterMs?: number } => {
+        const retryAt = diagnostics.retryDeadline()
+        const retryAfterMs = retryAt === undefined ? undefined : retryAt - Date.now()
+        return {
+          ...httpStatus === undefined ? {} : { status: httpStatus },
+          ...retryAfterMs === undefined || !Number.isFinite(retryAfterMs) || retryAfterMs <= 0
+            ? {} : { providerRetryAfterMs: retryAfterMs },
+        }
+      }
       const reasoningOptions = reasoningRequest(reasoningIntent(model, reasoning))
       const events = provider.streamSimple(model, transcript, {
         apiKey,
-        fetch: diagnostics.fetch,
+        fetch: observedFetch,
         ...reasoningOptions,
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...maxTokens === undefined ? {} : { maxTokens },
@@ -269,7 +305,7 @@ export class OpencodeGoRequestExecutor {
             const code = await waitWithSignal(() => diagnostics.failureCode(failure.code), watchdog.signal)
             const finished: StreamChunk = { ...chunk, reason: options.signal?.aborted
               ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'opencode-go request aborted by caller' } }
-              : { ...chunk.reason, failure: { ...chunk.reason.failure, message, code } } }
+              : { ...chunk.reason, failure: { ...chunk.reason.failure, message, code, ...failureFacts() } } }
             yield finished
           } else {
             yield chunk
@@ -330,7 +366,11 @@ export interface GoAccountSettlement {
 /** Constructor inputs for {@link OpencodeGoAdapter}. */
 export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptions {
   source?: ModelSource
-  /** Shared with Host usage reads for this plugin mount. */
+  /**
+   * Transport shared with the Host composition (usage reads, analytics and the
+   * other route). Injected ownership stays with the caller: {@link OpencodeGoAdapter.dispose}
+   * releases only this adapter's Free transport in that case.
+   */
   transport?: ProxyTransport
   /** Mount-owned discovery; direct construction supplies its own manager. */
   catalog?: (config: OpencodeGoConfig) => OpencodeGoCatalog
@@ -406,6 +446,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
   private readonly source: ModelSource
   private readonly resolveCatalog: (config: OpencodeGoConfig) => OpencodeGoCatalog
   private readonly transport: ProxyTransport
+  /** An injected transport is shared with the Host and must not be disposed here. */
+  private readonly ownsTransport: boolean
   private readonly requestExecutor: OpencodeGoRequestExecutor
   private readonly freeTransport = new FreeBunTransport()
   private readonly freeChannel: FreeChannelState
@@ -424,6 +466,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
     super()
     this.source = options.source ?? 'go'
     this.freeChannel = options.freeChannel ?? new FreeChannelState()
+    this.ownsTransport = options.transport === undefined
     this.transport = options.transport ?? new ProxyTransport()
     this.requestExecutor = new OpencodeGoRequestExecutor({ ...options, freeChannel: this.freeChannel }, this.transport, this.freeTransport)
     const catalogs = options.catalog ? undefined : new GoCatalogManager({
@@ -433,7 +476,18 @@ export class OpencodeGoAdapter extends LlmAdapter {
     this.resolveCatalog = options.catalog ?? (config => catalogs!.forConfig(config, this.source))
   }
 
-  async dispose(): Promise<void> { await Promise.all([this.transport.dispose(), this.freeTransport.dispose()]) }
+  /**
+   * Release this adapter's own resources. The Host composition shares one
+   * ProxyTransport across both adapters and its services, so only an
+   * adapter-created transport is disposed here; the per-adapter Free transport
+   * (Bun workers and SOCKS tunnels) always is.
+   */
+  async dispose(): Promise<void> {
+    await Promise.all([
+      this.ownsTransport ? this.transport.dispose() : Promise.resolve(),
+      this.freeTransport.dispose(),
+    ])
+  }
 
   /**
    * The catalog resolver for one configuration, rebuilding on the facts it
@@ -448,6 +502,22 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   override providerInfo(provider: string): { id: string; name: string } {
     return { id: provider, name: this.source === 'go' ? DISPLAY_NAME : FREE_DISPLAY_NAME }
+  }
+
+  /**
+   * Report the exact request-image projection this route serializes: the
+   * configured pixel budget decides the dimensions and the configured
+   * encoded-byte target caps the bytes, matching conversion.ts's per-request
+   * target. The token meter must price what is sent, not the normalized source.
+   * Synchronous by contract; the live configuration is readable without I/O.
+   */
+  override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget {
+    const config = this.options.config()
+    const target = requestImageTargetFor(image, {
+      maxPixels: config.requestImagePixelBudget,
+      maxBytes: config.requestImageMaxBytes,
+    })
+    return { width: target.width, height: target.height, maxBytes: target.maxBytes }
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {

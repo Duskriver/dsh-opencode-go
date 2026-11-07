@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { connect, type Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { FreeBunTransport, freeWorkerEnvironment } from '../src/free-transport.ts'
+import { FreeBunTransport, MAX_REQUEST_BODY_BYTES, freeWorkerEnvironment } from '../src/free-transport.ts'
 import { resolveFreeRuntime } from '../src/free-runtime.ts'
 import { mockProxy } from './support/proxy.ts'
 
@@ -58,6 +58,12 @@ async function server(listener: RequestListener, secure = false) {
 
 function transport(maxConcurrent?: number) {
   const value = new FreeBunTransport({ maxConcurrent })
+  cleanups.push(() => value.dispose())
+  return value
+}
+
+function limitedTransport(maxRequestBodyBytes: number) {
+  const value = new FreeBunTransport({ maxRequestBodyBytes })
   cleanups.push(() => value.dispose())
   return value
 }
@@ -138,6 +144,30 @@ describe('standalone Bun Free transport', () => {
     })
     const response = await transport().forProxy()(gateway.url, { method: 'POST', body: payload })
     expect(Buffer.from(await response.arrayBuffer())).toEqual(payload)
+  })
+
+  it('rejects a declared oversized body before reading it and without spawning', async () => {
+    let reached = false
+    const gateway = await server((_request, response) => { reached = true; response.end('must not run') })
+    const fetch = limitedTransport(1024).forProxy()
+    const pending = fetch(gateway.url, { method: 'POST', body: 'x', headers: { 'content-length': String(1024 + 1) } })
+    await expect(pending).rejects.toBeInstanceOf(RangeError)
+    await expect(pending).rejects.toThrowError(/1024 byte limit/)
+    expect(reached).toBe(false)
+    expect(spawnProbe.calls).toHaveLength(0)
+  })
+
+  it('rejects a body whose real bytes exceed the limit and does not spawn', async () => {
+    let reached = false
+    const gateway = await server((_request, response) => { reached = true; response.end('must not run') })
+    const fetch = limitedTransport(4).forProxy()
+    await expect(fetch(gateway.url, { method: 'POST', body: Buffer.alloc(5) })).rejects.toThrowError(/4 byte limit/)
+    expect(reached).toBe(false)
+    expect(spawnProbe.calls).toHaveLength(0)
+  })
+
+  it('defaults the request body limit to 64 MiB', () => {
+    expect(MAX_REQUEST_BODY_BYTES).toBe(64 * 1024 * 1024)
   })
 
   it.each(['abort', 'cancel', 'dispose'] as const)('%s closes the upstream stream and reaps the worker', async kind => {

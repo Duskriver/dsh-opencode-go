@@ -1,5 +1,14 @@
 export declare const OPENCODE_FREE_USER_AGENT = "opencode/latest/2.2.5/cli";
 /**
+ * Largest accepted request body, in bytes. The bound is checked twice: against a
+ * declared Content-Length before reading, and against the bytes actually read
+ * once the body arrives. 64 MiB keeps the worker IPC packet bounded after base64
+ * (4/3 growth) and JSON framing, so MAX_PACKET_BYTES stays a defense-in-depth
+ * backstop instead of the first check to run after the body already occupies
+ * memory as an ArrayBuffer, a Buffer, a base64 string and a JSON string.
+ */
+export declare const MAX_REQUEST_BODY_BYTES: number;
+/**
  * Build the standalone worker's environment from an explicit allowlist. Bun is a
  * third-party native runtime, so Host credentials, proxy settings and TLS or
  * dynamic-linker overrides must not cross the process boundary even though the
@@ -22,6 +31,7 @@ export declare class FreeBunTransport {
         executable?: () => string;
         workerPath?: () => string;
         maxConcurrent?: number;
+        maxRequestBodyBytes?: number;
     });
     forProxy(raw?: string): typeof globalThis.fetch;
     private acquire;
