@@ -7,6 +7,8 @@ import {
   parseAccountSwitch,
   type GoUsage,
   type UsageWindow,
+  type GoStatusReport,
+  type GoModelSpeed,
   PROVIDER_ID,
   DEFAULT_USAGE_DISPLAY,
   DEFAULT_USAGE_PILL_STYLE,
@@ -32,6 +34,8 @@ export interface UsagePillProps {
   /** Optional so an embedded/test render can omit the dashboard. */
   readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>
+  /** Optional: without the Host status namespace the panel simply omits the block. */
+  readStatus?: () => Promise<GoStatusReport>
   t: (key: string) => string
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>
@@ -82,8 +86,8 @@ const usageRefreshTimeoutMs = 30_000
 
 const refreshTimedOut = Symbol('usage-refresh-timed-out')
 
-function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
-  return new Promise<GoUsage>((resolve, reject) => {
+function withRefreshTimeout<T>(read: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => reject(refreshTimedOut), usageRefreshTimeoutMs)
     read().then(
       value => { clearTimeout(timeout); resolve(value) },
@@ -96,6 +100,73 @@ function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
 function usageLevel(window: UsageWindow): string | undefined {
   if (window.status === 'rate-limited' || window.percent >= 100) return css.limited
   return window.percent >= 80 ? css.high : undefined
+}
+
+/** The status feed refreshes on the order of minutes; polling harder buys nothing. */
+const statusRefreshMs = 5 * 60_000
+
+function statusText(status: string, t: (key: string) => string): string {
+  return status === 'operational' ? t('statusOperational') : status === 'degraded' ? t('statusDegraded') : status
+}
+
+/** Known feed reasons get approved copy; unknown spellings stay visible as-is. */
+function reasonText(reason: string, t: (key: string) => string): string {
+  if (reason === 'upstream') return t('statusReasonUpstream')
+  if (reason === 'latency') return t('statusReasonLatency')
+  if (reason === 'errors') return t('statusReasonErrors')
+  return reason
+}
+
+function speedText(speed: GoModelSpeed | undefined): string {
+  return speed ? `${(speed.ttft / 1000).toFixed(1)}s · ${Math.round(speed.tps)} tps` : ''
+}
+
+interface ServiceStatusProps {
+  report: GoStatusReport | null
+  failed: boolean
+  currentModel?: string
+  t: (key: string) => string
+  getLocale?: () => string
+}
+
+/** The public feed's health for the Go service with per-model readings. The pill
+ *  serves the Go provider, so the 'go' component leads and the feed-wide state
+ *  is the fallback; a failed read only quiets this supplementary block. */
+function ServiceStatus({ report, failed, currentModel, t, getLocale }: ServiceStatusProps) {
+  if (!report) return failed ? <p className={css.hint} role="status">{t('statusUnavailable')}</p> : null
+  const service = report.services.find(entry => entry.service === 'go')
+  const status = service?.status ?? report.status
+  const degraded = status !== 'operational'
+  // Degraded models lead so an unhealthy model needs no scrolling to be seen.
+  const rows = [...(service?.breakdown ?? [])].sort((a, b) =>
+    (a.status === 'degraded' ? 0 : 1) - (b.status === 'degraded' ? 0 : 1) || a.id.localeCompare(b.id))
+  return <div className={css.tile}>
+    <div className={css.status}>
+      <div className={css.statusHead}>
+        <span className={css.dot} data-degraded={degraded ? '' : undefined} />
+        <span className={css.statusName}>{t('statusTitle')}</span>
+        <span className={css.statusState}>
+          {service ? `${t('statusServiceGo')} · ${statusText(status, t)}` : statusText(status, t)}
+        </span>
+        <span className={css.statusTime}>{t('statusUpdatedAt')} {new Date(report.updatedAt).toLocaleString(getLocale?.())}</span>
+      </div>
+      {service && degraded && service.reason !== 'none' ? <div className={css.statusReason}>
+        {reasonText(service.reason, t)}
+        {service.since !== undefined ? ` · ${new Date(service.since).toLocaleString(getLocale?.())}` : ''}
+      </div> : null}
+      {report.stale || failed ? <div className={css.hint}>{t('statusStale')}</div> : null}
+      {rows.length ? <div className={css.statusRows}>
+        {rows.map(row => <div key={row.id} className={css.statusRow}
+          data-current={row.id === currentModel ? '' : undefined}
+          data-degraded={row.status !== 'operational' ? '' : undefined}>
+          <span className={css.dot} data-degraded={row.status !== 'operational' ? '' : undefined} />
+          <span className={css.statusModel}>{row.id}</span>
+          {row.id === currentModel ? <span className={css.statusCurrent}>{t('statusCurrentModel')}</span> : null}
+          <span className={css.statusSpeed}>{speedText(row.speed)}</span>
+        </div>)}
+      </div> : null}
+    </div>
+  </div>
 }
 
 /** The panel's own glyphs: no host icon set is required, and each one carries its meaning in text. */
@@ -118,7 +189,8 @@ function Tick() {
 /** Only a visible, enabled input indicator mounts the usage poller. */
 export function UsagePill({ directory, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
-  return <UsageSurface {...props} variant="pill" provider={state.current?.provider} />
+  return <UsageSurface {...props} variant="pill" provider={state.current?.provider}
+    currentModel={state.current?.provider === PROVIDER_ID ? state.current?.model : undefined} />
 }
 
 export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
@@ -126,9 +198,9 @@ export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
 }
 
 /** The sidebar's viewed account is independent of the profile's request order. */
-function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, ...props }:
+function UsageSurface({ settings, credentialChanges, variant, provider, currentModel, readAccountUsage, ...props }:
   Omit<UsagePillProps, 'directory'> & {
-    variant: UsageVariant; provider?: string
+    variant: UsageVariant; provider?: string; currentModel?: string
   }) {
   // The Host scope is a class instance whose methods read their own state, so
   // React has to reach them through this receiver: a reference handed over as a
@@ -182,7 +254,8 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
       accounts={accounts} activeRef={activeRef} writable={config.writable}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
-      analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
+      analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen}
+      currentModel={variant === 'pill' ? currentModel : undefined} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling. */}
     {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
@@ -193,12 +266,13 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle }:
+function ActiveUsage({ readUsage, readStatus, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, currentModel }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
     onNextAccount?: () => void
     variant: UsageVariant; pillStyle: UsagePillStyle
+    currentModel?: string
   }) {
   const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
@@ -255,6 +329,35 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
       document.removeEventListener('visibilitychange', visible)
     }
   }, [readUsage, sidebar])
+  const [statusState, setStatusState] = useState<{ reader: NonNullable<typeof readStatus>; report: GoStatusReport } | null>(null)
+  const [statusFailed, setStatusFailed] = useState(false)
+  useEffect(() => {
+    if (!readStatus) return
+    let alive = true
+    const refresh = async () => {
+      if (document.visibilityState === 'hidden') return
+      try {
+        const report = await withRefreshTimeout(readStatus)
+        if (alive) {
+          setStatusState({ reader: readStatus, report })
+          setStatusFailed(false)
+        }
+      } catch {
+        // The block is supplementary: a failed read only flags it stale.
+        if (alive) setStatusFailed(true)
+      }
+    }
+    void refresh()
+    const timer = setInterval(() => { void refresh() }, statusRefreshMs)
+    const visible = () => { void refresh() }
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      alive = false
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [readStatus])
+  const status = statusState !== null && statusState.reader === readStatus ? statusState.report : null
   useEffect(() => {
     if (!open) return
     const click = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
@@ -419,6 +522,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
             </div>
           </Fragment>)}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
+        {readStatus ? <ServiceStatus report={status} failed={statusFailed} currentModel={currentModel} t={t} getLocale={getLocale} /> : null}
         {readAnalytics ? <button type="button" className={css.analyticsEntry} aria-haspopup="dialog"
           onClick={() => { setOpen(false); onAnalyticsOpenChange(true) }}>
           <ChartIcon />

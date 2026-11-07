@@ -221,6 +221,65 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }
 }
 export declare const usageRemote: TypertRemoteContribution;
+export declare const statusRemote: TypertRemoteContribution;
+/** Model access status, read from the public status feed; no credential is involved. */
+export declare const DEFAULT_STATUS_URL = "https://status.opencode.ai/api/status";
+export interface GoModelSpeed {
+    /** Median time to the first output token, in milliseconds. */
+    ttft: number;
+    /** Output tokens per second. */
+    tps: number;
+}
+export interface GoModelStatus {
+    /** Feed model id; matches the catalog GoModel.id of the same source. */
+    id: string;
+    /** Feed health label, e.g. 'operational' or 'degraded'. */
+    status: string;
+    /** Feed reason label, e.g. 'none', 'upstream', 'latency' or 'errors'. */
+    reason: string;
+    speed?: GoModelSpeed;
+}
+export interface GoDegradedModel {
+    id: string;
+    reason: string;
+}
+export interface GoServiceStatus {
+    /** Feed component key, e.g. 'go', 'payg', 'free', 'console', 'logs', 'inference'. */
+    service: string;
+    status: string;
+    reason: string;
+    /** Epoch milliseconds when this health state began. */
+    since?: number;
+    /** Models the feed currently flags while the service is degraded. */
+    models?: readonly GoDegradedModel[];
+    /** Per-model readings for the models this service serves. */
+    breakdown?: readonly GoModelStatus[];
+    /** Service-wide speed reading. */
+    speed?: GoModelSpeed;
+}
+export interface GoStatusReport {
+    /** Feed-wide health label. */
+    status: string;
+    /** Epoch milliseconds of the feed reading. */
+    updatedAt: number;
+    /** True when the feed itself reports its readings as outdated. */
+    stale: boolean;
+    services: readonly GoServiceStatus[];
+}
+/** Reject absent or malformed feed readings rather than inventing healthy states. */
+export declare function parseGoStatusReport(value: unknown): GoStatusReport;
+declare module '@deepseek-ai/dsh-typert-protocol' {
+    interface RemoteErrorDetailsMap {
+        'opencode-go/status-unavailable': {
+            readonly retryable: boolean;
+        };
+    }
+    interface TypertRemoteNamespaceMap {
+        opencodeGoStatus: {
+            read(): Promise<RemoteResult<GoStatusReport>>;
+        };
+    }
+}
 export type AccountCommand = {
     kind: 'add';
     id: string;

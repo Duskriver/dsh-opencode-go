@@ -471,6 +471,165 @@ export const usageRemote: TypertRemoteContribution = {
   }],
 }
 
+// Shared host/client descriptors use the host's typed RPC codecs.
+const statusCodec = {
+  mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#GoStatusReport',
+  schema: { parse: parseGoStatusReport }, create: () => ({ parse: parseGoStatusReport }),
+}
+
+export const statusRemote: TypertRemoteContribution = {
+  package: 'dsh-opencode-go',
+  descriptors: [{
+    id: 'dsh-opencode-go#opencodeGoStatus/read',
+    service: 'opencodeGoStatus', namespace: 'opencodeGoStatus', method: 'read',
+    invocation: { kind: 'direct' }, parameters: [],
+    result: statusCodec,
+  }],
+}
+
+/** Model access status, read from the public status feed; no credential is involved. */
+export const DEFAULT_STATUS_URL = 'https://status.opencode.ai/api/status'
+
+export interface GoModelSpeed {
+  /** Median time to the first output token, in milliseconds. */
+  ttft: number
+  /** Output tokens per second. */
+  tps: number
+}
+
+export interface GoModelStatus {
+  /** Feed model id; matches the catalog GoModel.id of the same source. */
+  id: string
+  /** Feed health label, e.g. 'operational' or 'degraded'. */
+  status: string
+  /** Feed reason label, e.g. 'none', 'upstream', 'latency' or 'errors'. */
+  reason: string
+  speed?: GoModelSpeed
+}
+
+export interface GoDegradedModel {
+  id: string
+  reason: string
+}
+
+export interface GoServiceStatus {
+  /** Feed component key, e.g. 'go', 'payg', 'free', 'console', 'logs', 'inference'. */
+  service: string
+  status: string
+  reason: string
+  /** Epoch milliseconds when this health state began. */
+  since?: number
+  /** Models the feed currently flags while the service is degraded. */
+  models?: readonly GoDegradedModel[]
+  /** Per-model readings for the models this service serves. */
+  breakdown?: readonly GoModelStatus[]
+  /** Service-wide speed reading. */
+  speed?: GoModelSpeed
+}
+
+export interface GoStatusReport {
+  /** Feed-wide health label. */
+  status: string
+  /** Epoch milliseconds of the feed reading. */
+  updatedAt: number
+  /** True when the feed itself reports its readings as outdated. */
+  stale: boolean
+  services: readonly GoServiceStatus[]
+}
+
+/** Health and reason labels are a small feed vocabulary, not a closed union:
+ *  the feed may add labels, so parsing keeps unknown spellings visible. */
+function parseStatusLabel(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 24) throw new Error('Invalid OpenCode status label')
+  return value
+}
+
+function parseSpeed(value: unknown): GoModelSpeed | undefined {
+  // The feed marks services without speed readings with an empty object
+  // (observed on console/logs/inference), not with a missing key.
+  if (value === undefined || value === null) return undefined
+  if (!value || typeof value !== 'object') throw new Error('Invalid OpenCode status speed')
+  const row = value as Record<string, unknown>
+  if (row.ttft === undefined && row.tps === undefined) return undefined
+  const ttft = row.ttft
+  const tps = row.tps
+  if (typeof ttft !== 'number' || !Number.isFinite(ttft) || ttft < 0
+    || typeof tps !== 'number' || !Number.isFinite(tps) || tps < 0) throw new Error('Invalid OpenCode status speed')
+  return { ttft, tps }
+}
+
+function parseModelStatus(value: unknown): GoModelStatus {
+  if (!value || typeof value !== 'object') throw new Error('Invalid OpenCode status model')
+  const row = value as Record<string, unknown>
+  if (typeof row.id !== 'string' || !row.id || row.id.length > 128) throw new Error('Invalid OpenCode status model')
+  const result: GoModelStatus = { id: row.id, status: parseStatusLabel(row.status), reason: parseStatusLabel(row.reason) }
+  const speed = parseSpeed(row.speed)
+  if (speed) result.speed = speed
+  return result
+}
+
+function parseServiceStatus(value: unknown): GoServiceStatus {
+  if (!value || typeof value !== 'object') throw new Error('Invalid OpenCode status service')
+  const row = value as Record<string, unknown>
+  if (typeof row.service !== 'string' || !row.service || row.service.length > 24) throw new Error('Invalid OpenCode status service')
+  const result: GoServiceStatus = { service: row.service, status: parseStatusLabel(row.status), reason: parseStatusLabel(row.reason) }
+  if (row.since !== undefined) {
+    if (typeof row.since !== 'number' || !Number.isSafeInteger(row.since) || row.since < 0) throw new Error('Invalid OpenCode status service')
+    result.since = row.since
+  }
+  if (row.models !== undefined) {
+    if (!Array.isArray(row.models)) throw new Error('Invalid OpenCode status service')
+    result.models = row.models.map(flagged => {
+      if (!flagged || typeof flagged !== 'object') throw new Error('Invalid OpenCode status service')
+      const entry = flagged as Record<string, unknown>
+      if (typeof entry.id !== 'string' || !entry.id || entry.id.length > 128
+        || typeof entry.reason !== 'string' || !entry.reason || entry.reason.length > 24) {
+        throw new Error('Invalid OpenCode status service')
+      }
+      return { id: entry.id, reason: entry.reason }
+    })
+  }
+  if (row.breakdown !== undefined) {
+    if (!Array.isArray(row.breakdown)) throw new Error('Invalid OpenCode status service')
+    result.breakdown = row.breakdown.map(parseModelStatus)
+  }
+  const speed = parseSpeed(row.speed)
+  if (speed) result.speed = speed
+  return result
+}
+
+/** Reject absent or malformed feed readings rather than inventing healthy states. */
+export function parseGoStatusReport(value: unknown): GoStatusReport {
+  if (!value || typeof value !== 'object') throw new Error('Invalid OpenCode status response')
+  const source = value as Record<string, unknown>
+  const updatedAt = source.updatedAt
+  const stale = source.stale
+  if (typeof updatedAt !== 'number' || !Number.isSafeInteger(updatedAt) || updatedAt < 0
+    || typeof stale !== 'boolean' || !Array.isArray(source.components)) {
+    throw new Error('Invalid OpenCode status response')
+  }
+  return {
+    status: parseStatusLabel(source.status),
+    updatedAt,
+    stale,
+    services: source.components.map(parseServiceStatus),
+  }
+}
+
+// Shared host/client descriptors use the host's typed RPC codecs.
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    'opencode-go/status-unavailable': {
+      readonly retryable: boolean
+    }
+  }
+  interface TypertRemoteNamespaceMap {
+    opencodeGoStatus: {
+      read(): Promise<RemoteResult<GoStatusReport>>
+    }
+  }
+}
+
 export type AccountCommand =
   | { kind: 'add'; id: string; name: string; key: string }
   | { kind: 'remove'; ref: string }
@@ -712,7 +871,7 @@ export const analyticsRemote: TypertRemoteContribution = {
 /** A registry owns one contribution per package; mount all plugin endpoints together. */
 export const goRemote: TypertRemoteContribution = {
   package: 'dsh-opencode-go',
-  descriptors: [...usageRemote.descriptors, ...modelsRemote.descriptors, ...accountsRemote.descriptors, ...analyticsRemote.descriptors],
+  descriptors: [...usageRemote.descriptors, ...modelsRemote.descriptors, ...accountsRemote.descriptors, ...analyticsRemote.descriptors, ...statusRemote.descriptors],
 }
 
 /** Default image budgets, overridable through the adapter configuration. */

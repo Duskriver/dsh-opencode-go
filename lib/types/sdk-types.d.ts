@@ -1657,6 +1657,48 @@ interface GoUsage {
     weekly: UsageWindow;
     monthly: UsageWindow;
 }
+interface GoModelSpeed {
+    /** Median time to the first output token, in milliseconds. */
+    ttft: number;
+    /** Output tokens per second. */
+    tps: number;
+}
+interface GoModelStatus {
+    /** Feed model id; matches the catalog GoModel.id of the same source. */
+    id: string;
+    /** Feed health label, e.g. 'operational' or 'degraded'. */
+    status: string;
+    /** Feed reason label, e.g. 'none', 'upstream', 'latency' or 'errors'. */
+    reason: string;
+    speed?: GoModelSpeed;
+}
+interface GoDegradedModel {
+    id: string;
+    reason: string;
+}
+interface GoServiceStatus {
+    /** Feed component key, e.g. 'go', 'payg', 'free', 'console', 'logs', 'inference'. */
+    service: string;
+    status: string;
+    reason: string;
+    /** Epoch milliseconds when this health state began. */
+    since?: number;
+    /** Models the feed currently flags while the service is degraded. */
+    models?: readonly GoDegradedModel[];
+    /** Per-model readings for the models this service serves. */
+    breakdown?: readonly GoModelStatus[];
+    /** Service-wide speed reading. */
+    speed?: GoModelSpeed;
+}
+interface GoStatusReport {
+    /** Feed-wide health label. */
+    status: string;
+    /** Epoch milliseconds of the feed reading. */
+    updatedAt: number;
+    /** True when the feed itself reports its readings as outdated. */
+    stale: boolean;
+    services: readonly GoServiceStatus[];
+}
 type AccountCommand = {
     kind: 'add';
     id: string;
@@ -1750,6 +1792,18 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
         opencodeGoUsage: {
             read(): Promise<RemoteResult<GoUsage>>;
             readAccount(ref: string): Promise<RemoteResult<GoUsage>>;
+        };
+    }
+}
+declare module '@deepseek-ai/dsh-typert-protocol' {
+    interface RemoteErrorDetailsMap {
+        'opencode-go/status-unavailable': {
+            readonly retryable: boolean;
+        };
+    }
+    interface TypertRemoteNamespaceMap {
+        opencodeGoStatus: {
+            read(): Promise<RemoteResult<GoStatusReport>>;
         };
     }
 }
