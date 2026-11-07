@@ -68,39 +68,62 @@ export const en = {
   usageRefreshing: 'Refreshing…',
   analyticsOpen: 'Usage history',
   analyticsTitle: 'Usage history',
-  analyticsSubtitle: 'Official OpenCode Console usage for the selected account.',
+  analyticsSubtitle: 'All workspace clients · UTC calendar days',
   analyticsClose: 'Close usage history',
   analyticsRange: 'Date range',
   analyticsRangeToday: 'Today',
   analyticsRange7d: '7 days',
   analyticsRange30d: '30 days',
   analyticsRange90d: '90 days',
-  analyticsRefresh: 'Refresh',
-  analyticsRetry: 'Retry',
-  analyticsLoading: 'Loading usage history…',
-  analyticsEmpty: 'No usage for this account in the selected range.',
-  analyticsFailed: 'Could not read usage history.',
+  analyticsAccount: 'Viewing account',
+  analyticsNoAccounts: 'Add an account to view workspace history.',
+  analyticsRefresh: 'Refresh history',
+  analyticsRetry: 'Try again',
+  analyticsLoading: 'Loading official workspace history…',
+  analyticsEmpty: 'No recorded usage in this range.',
+  analyticsFailed: 'Could not load workspace history.',
+  analyticsRefreshed: 'Updated',
+  analyticsRefreshing: 'Refreshing official history…',
+  analyticsStale: 'Refresh failed. Showing the last successful result for this account and range.',
   analyticsRequests: 'Requests',
   analyticsTokens: 'Tokens',
-  analyticsSpend: 'Cost',
-  analyticsByModel: 'By model',
-  analyticsByDay: 'By day',
-  analyticsInput: 'in',
-  analyticsOutput: 'out',
-  analyticsCacheRead: 'cache',
-  analyticsQuota: 'Quota',
-  analyticsQuotaHint: 'Official account limits',
-  analyticsQuotaFailed: 'Quota is temporarily unavailable; usage statistics are still shown.',
-  analyticsChartSpend: 'Cost',
-  analyticsChartTokens: 'Tokens',
-  analyticsKicker: 'OpenCode Console',
+  analyticsSpend: 'Usage amount',
+  analyticsCacheHit: 'Cache hit rate',
+  analyticsInput: 'Input',
+  analyticsOutput: 'Output',
+  analyticsCacheRead: 'Cache read',
+  analyticsCacheWrite: 'Cache write',
+  analyticsDailyAverage: 'Daily average',
+  analyticsModels: 'models',
+  analyticsActiveDays: 'active days',
+  analyticsPerDay: 'day',
+  analyticsByDay: 'Daily activity',
+  analyticsTrendHint: 'Select a day to inspect its usage.',
+  analyticsTokensMode: 'Token breakdown',
+  analyticsRequestsMode: 'Request count',
+  analyticsChartHelp: 'Arrow keys move between days. Click or tap to pin a day; Escape clears it.',
+  analyticsSelectDay: 'Hover, focus or tap a bar for daily details.',
+  analyticsByModel: 'Model distribution',
+  analyticsRankingHint: 'Compare models across this workspace.',
+  analyticsDetails: 'Model details',
   analyticsModel: 'Model',
-  analyticsCost: 'Cost',
-  analyticsShare: 'Share',
-  analyticsCacheHit: 'cache hit',
-  analyticsDailyAverage: 'Daily avg',
-  analyticsPeak: 'Peak',
-  analyticsTotal: 'Total',
+  analyticsShare: 'Token share',
+  analyticsAllModels: 'Show all models',
+  analyticsFewerModels: 'Show fewer models',
+  analyticsExport: 'Export CSV',
+  analyticsExporting: 'Exporting…',
+  analyticsExportFailed: 'Could not export this range. Please retry.',
+  analyticsPermission: 'This key cannot read history. Check its Usage read permission in OpenCode Console.',
+  analyticsCredentials: 'The selected account has no usable key. Update it in account settings.',
+  analyticsUnsupported: 'History is available for the official OpenCode gateway. This account uses another gateway.',
+  analyticsPending: 'OpenCode is still preparing daily summaries. Please try again shortly.',
+  analyticsInvalid: 'OpenCode returned an unreadable history response. Please retry.',
+  analyticsQuota: 'Current allowance',
+  analyticsQuotaFailed: 'Allowance unavailable',
+  analyticsAmountHint: 'Official usage amount is not a receipt or an extra charge for Go.',
+  analyticsLagHint: 'Daily summaries may lag recent requests. Anonymous Free usage may not appear.',
+  analyticsExportHint: 'CSV includes member and service-account fields supplied by Console.',
+  analyticsKicker: 'OpenCode Console',
   nav: 'OpenCode Go',
   title: 'OpenCode Go',
   titleLabel: 'OpenCode Go',
@@ -308,39 +331,62 @@ export const zh: typeof en = {
   usageRefreshing: '正在刷新…',
   analyticsOpen: '用量历史',
   analyticsTitle: '用量历史',
-  analyticsSubtitle: '所选账号的 OpenCode Console 官方用量。',
+  analyticsSubtitle: '包含工作区内所有客户端 · 按 UTC 日统计',
   analyticsClose: '关闭用量历史',
   analyticsRange: '时间范围',
   analyticsRangeToday: '今天',
   analyticsRange7d: '7 天',
   analyticsRange30d: '30 天',
   analyticsRange90d: '90 天',
-  analyticsRefresh: '刷新',
+  analyticsAccount: '查看账号',
+  analyticsNoAccounts: '添加账号后即可查看工作区的用量历史。',
+  analyticsRefresh: '刷新历史',
   analyticsRetry: '重试',
-  analyticsLoading: '正在读取用量历史…',
-  analyticsEmpty: '该账号在所选区间内没有用量。',
-  analyticsFailed: '未能读取用量历史。',
-  analyticsRequests: '请求',
+  analyticsLoading: '正在读取官方工作区历史…',
+  analyticsEmpty: '所选区间暂无已记录的用量。',
+  analyticsFailed: '无法读取工作区用量历史。',
+  analyticsRefreshed: '更新于',
+  analyticsRefreshing: '正在刷新官方历史…',
+  analyticsStale: '刷新失败，以下为当前账号与区间上次成功读取的结果。',
+  analyticsRequests: '请求数',
   analyticsTokens: 'Token',
-  analyticsSpend: '花费',
-  analyticsByModel: '按模型',
-  analyticsByDay: '按天',
+  analyticsSpend: '用量金额',
+  analyticsCacheHit: '缓存命中率',
   analyticsInput: '输入',
   analyticsOutput: '输出',
-  analyticsCacheRead: '缓存',
-  analyticsQuota: '额度',
-  analyticsQuotaHint: '官方账号限额',
-  analyticsQuotaFailed: '额度暂不可用，统计结果仍会显示。',
-  analyticsChartSpend: '金额',
-  analyticsChartTokens: 'Token',
-  analyticsKicker: 'OpenCode Console',
-  analyticsModel: '模型',
-  analyticsCost: '花费',
-  analyticsShare: '占比',
-  analyticsCacheHit: '缓存命中',
+  analyticsCacheRead: '缓存读',
+  analyticsCacheWrite: '缓存写',
   analyticsDailyAverage: '日均',
-  analyticsPeak: '峰值',
-  analyticsTotal: '合计',
+  analyticsModels: '个模型',
+  analyticsActiveDays: '个活跃日',
+  analyticsPerDay: '天',
+  analyticsByDay: '每日活动',
+  analyticsTrendHint: '选择一天，查看当日用量。',
+  analyticsTokensMode: 'Token 构成',
+  analyticsRequestsMode: '请求数',
+  analyticsChartHelp: '方向键切换日期；点击或轻触固定一天，Escape 取消选择。',
+  analyticsSelectDay: '悬停、聚焦或轻触柱形，查看当日明细。',
+  analyticsByModel: '模型用量分布',
+  analyticsRankingHint: '比较工作区内各模型的消耗。',
+  analyticsDetails: '模型明细',
+  analyticsModel: '模型',
+  analyticsShare: 'Token 占比',
+  analyticsAllModels: '展开全部模型',
+  analyticsFewerModels: '收起模型',
+  analyticsExport: '导出 CSV',
+  analyticsExporting: '正在导出…',
+  analyticsExportFailed: '导出失败，请重试。',
+  analyticsPermission: '该 Key 无法读取历史，请在 OpenCode Console 检查 Usage 读取权限。',
+  analyticsCredentials: '所选账号没有可用 Key，请在账号设置中更新。',
+  analyticsUnsupported: '历史查询仅支持 OpenCode 官方网关，当前账号使用了其他网关。',
+  analyticsPending: 'OpenCode 尚未生成每日汇总，请稍后重试。',
+  analyticsInvalid: 'OpenCode 返回的历史数据无法解析，请重试。',
+  analyticsQuota: '当前额度',
+  analyticsQuotaFailed: '额度暂不可用',
+  analyticsAmountHint: '官方用量金额不等同账单或 Go 套餐外的实际扣款。',
+  analyticsLagHint: '每日汇总可能延迟，匿名 Free 调用可能不在其中。',
+  analyticsExportHint: 'CSV 包含 Console 提供的成员和服务账号字段。',
+  analyticsKicker: 'OpenCode Console',
   nav: 'OpenCode Go',
   title: 'OpenCode Go',
   titleLabel: 'OpenCode Go',
@@ -491,6 +537,8 @@ export interface GoThemeTokens {
   readonly surface: string
   readonly surface2: string
   readonly border: string
+  /** Control boundary that keeps WCAG 1.4.11 3:1 against both surfaces. */
+  readonly borderStrong: string
   readonly text: string
   readonly muted: string
   readonly accent: string
@@ -505,20 +553,64 @@ export interface GoThemeTokens {
   readonly danger: string
 }
 
-/** One visual language in the Host's two color schemes; no separate preference. */
-export const GO_THEME_TOKENS: Record<'dark' | 'light', GoThemeTokens> = {
+/** Host color scheme followed by {@link GO_THEME_TOKENS}. */
+export type GoThemeScheme = 'dark' | 'light'
+
+/**
+ * Pure fallback values, used when a Host alias token is absent and as the static
+ * baseline for the WCAG contrast assertions. The chart series colors and the
+ * strong control border have no Host token, so these constants are painted as-is.
+ */
+export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   dark: {
-    bg: '#242422', surface: '#2d2c29', surface2: '#353430', border: '#49473f',
+    bg: '#242422', surface: '#2d2c29', surface2: '#353430', border: '#49473f', borderStrong: '#8a877d',
     text: '#eceae3', muted: '#b7b4a8', accent: '#e7a18a', accent2: '#b09a87',
     accentSoft: '#49342b', onAccent: '#382017', cacheRead: '#8f8678', cacheWrite: '#a5aa8c', shadow: '#00000040',
     success: '#9bc6a7', warning: '#d6b274', danger: '#e6a09c',
   },
   light: {
-    bg: '#faf9f5', surface: '#fffefb', surface2: '#f0eee7', border: '#dedbd2',
+    bg: '#faf9f5', surface: '#fffefb', surface2: '#f0eee7', border: '#dedbd2', borderStrong: '#736f66',
     text: '#30312e', muted: '#6b6a61', accent: '#a94e35', accent2: '#9f8b78',
-    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#b1a394', cacheWrite: '#858c6b', shadow: '#28261b18',
+    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#8a7a66', cacheWrite: '#858c6b', shadow: '#28261b18',
     success: '#38654c', warning: '#8c6526', danger: '#a83e42',
   },
+}
+
+/**
+ * One palette in the Host's two color schemes: surfaces, text, borders, the brand
+ * accent and the on-accent foreground read the Host alias tokens first and keep
+ * the local paper/charcoal values only as fallbacks. This lets third-party themes
+ * and the Host's font/color settings reach every plugin-owned surface.
+ * @param scheme - the Host's active color scheme.
+ * @returns the merged tokens.
+ */
+function hostTheme(scheme: GoThemeScheme): GoThemeTokens {
+  const fallback = GO_THEME_FALLBACKS[scheme]
+  return {
+    bg: `var(--dsw-alias-bg-base, ${fallback.bg})`,
+    surface: `var(--dsw-alias-bg-layer-1, ${fallback.surface})`,
+    surface2: `var(--dsw-alias-bg-layer-2, ${fallback.surface2})`,
+    border: `var(--dsw-alias-border-l1, ${fallback.border})`,
+    borderStrong: fallback.borderStrong,
+    text: `var(--dsw-alias-label-primary, ${fallback.text})`,
+    muted: `var(--dsw-alias-label-secondary, ${fallback.muted})`,
+    accent: `var(--dsw-alias-brand-primary, ${fallback.accent})`,
+    accent2: fallback.accent2,
+    accentSoft: `color-mix(in srgb, var(--dsw-alias-brand-primary, ${fallback.accent}) 16%, var(--dsw-alias-bg-base, ${fallback.bg}))`,
+    onAccent: `var(--dsw-alias-label-primary-foreground, ${fallback.onAccent})`,
+    cacheRead: fallback.cacheRead,
+    cacheWrite: fallback.cacheWrite,
+    shadow: fallback.shadow,
+    success: fallback.success,
+    warning: fallback.warning,
+    danger: fallback.danger,
+  }
+}
+
+/** The unified tokens for the Host's current scheme. */
+export const GO_THEME_TOKENS: Record<GoThemeScheme, GoThemeTokens> = {
+  dark: hostTheme('dark'),
+  light: hostTheme('light'),
 }
 
 /**
@@ -554,8 +646,8 @@ export function useGoThemeTokens(): GoThemeTokens {
 
 /**
  * Inline custom properties consumed by settings, quota surfaces and history.
- * Prefer installed Anthropic families; system fallbacks keep other machines
- * offline-capable without distributing the user's local font files.
+ * The Host's font settings come first and the local branded stacks stay as
+ * fallbacks; no font file is fetched, so offline machines keep their system fonts.
  * @param tokens - the active palette.
  * @returns a style object carrying every `--go-*` variable.
  */
@@ -565,6 +657,7 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-surface': tokens.surface,
     '--go-surface-2': tokens.surface2,
     '--go-border': tokens.border,
+    '--go-border-strong': tokens.borderStrong,
     '--go-text': tokens.text,
     '--go-muted': tokens.muted,
     '--go-accent': tokens.accent,
@@ -577,8 +670,8 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-success': tokens.success,
     '--go-warning': tokens.warning,
     '--go-danger': tokens.danger,
-    '--go-font': '"Anthropic Sans Web", "Anthropic Sans", "Styrene B", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+    '--go-font': 'var(--dsh-font-family-text, "Anthropic Sans Web", "Anthropic Sans", "Styrene B", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif)',
     '--go-display-font': '"Anthropic Serif Web", "Anthropic Serif", "Tiempos Text", Charter, "Songti SC", "Noto Serif SC", SimSun, Georgia, serif',
-    '--go-number-font': '"Anthropic Mono Web", "Anthropic Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
+    '--go-number-font': 'var(--dsh-font-family-code, "Anthropic Mono Web", "Anthropic Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace)',
   } as CSSProperties
 }

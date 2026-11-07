@@ -20,7 +20,7 @@
 .toolbar { display: flex; align-items: center; gap: 10px; padding: 0; flex-wrap: wrap; }
 .accountSelect { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .accountSelect > span { color: var(--go-muted); font-size: 12px; }
-.accountSelect select { color: var(--go-text); background: var(--go-surface); border: 1px solid var(--go-border); border-radius: 7px; height: 34px; padding: 0 26px 0 10px; min-width: 0; max-width: 205px; text-overflow: ellipsis; }
+.accountSelect select { color: var(--go-text); background: var(--go-surface); border: 1px solid var(--go-border-strong); border-radius: 7px; height: 34px; padding: 0 26px 0 10px; min-width: 0; max-width: 205px; text-overflow: ellipsis; }
 .rangeGroup, .segmented { display: inline-flex; align-items: center; gap: 3px; }
 .rangeGroup { margin-left: auto; }
 .rangeGroup button, .segmented button { border: 0; border-radius: 6px; min-height: 31px; padding: 5px 10px; background: transparent; color: var(--go-muted); font-size: 12px; white-space: nowrap; }
@@ -28,7 +28,7 @@
 .rangeGroup button[aria-pressed=true], .segmented button[aria-pressed=true] { background: var(--go-surface-2); color: var(--go-text); }
 .utc { color: var(--go-muted); font-size: 11px; font-family: var(--go-number-font); }
 .toolbarActions { display: flex; align-items: center; gap: 7px; }
-.exportButton { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; border: 1px solid var(--go-border); background: var(--go-surface); border-radius: 7px; padding: 6px 11px; font-size: 12px !important; }
+.exportButton { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; border: 1px solid var(--go-border-strong); background: var(--go-surface); border-radius: 7px; padding: 6px 11px; font-size: 12px !important; }
 .exportButton:hover { background: var(--go-surface-2); }
 .statusRow { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 14px; min-height: 35px; padding: 8px 0; font-size: 11px; color: var(--go-muted); }
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0 27px; }

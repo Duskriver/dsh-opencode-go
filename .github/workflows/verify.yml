@@ -16,12 +16,14 @@ permissions:
 # - The installed DSH 0.2.2-rc.1 runtime (Cordis 4.1.0, Schemastery 3.19.0) has
 #   only been exercised manually through the headless CLI; its Web/client
 #   surface is not covered by CI yet. See docs/verification.md.
-# - TODO(compat): add an advisory `compat` job (`continue-on-error: true`) once
-#   the official CLI install path is validated: pack this package, install it
-#   with @deepseek-ai/dsh@0.2.2-rc.1 into a temporary consumer, then run
-#   `node --expose-internals scripts/installed-smoke.mjs <consumer>` and
-#   `node scripts/headless-smoke.mjs <consumer>`. Keeping the job advisory
-#   preserves a green default run; docs/verification.md tracks the pending work.
+# - `compat-dsh-0.2.2` is an advisory probe of the installed DSH 0.2.2-rc.1 Host
+#   path: it packs this package, installs it with the official CLI and the
+#   pinned rc.1 host packages into a temporary consumer, then runs the same
+#   installed-package smoke. It is allowed to fail (`continue-on-error`) and runs
+#   on push/dispatch only, so a red run is a signal, not a merge blocker. Promote
+#   it to a required check once the official CLI install path has stayed green
+#   for a release cycle and a stable 0.2.2 host exists. The Web/client surface
+#   stays out of scope (docs/verification.md).
 
 jobs:
   core:
@@ -41,3 +43,47 @@ jobs:
       - run: npm ci --strict-peer-deps
       - run: npm run verify
       - run: npm run check:pack
+
+  compat-dsh-0.2.2:
+    # Advisory only: a red run is a compatibility signal, not a merge blocker.
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --strict-peer-deps
+      - run: npm run test:ci
+      - name: Install the packed plugin with the DSH 0.2.2-rc.1 host stack into a temporary consumer
+        run: |
+          set -euo pipefail
+          consumer="$(mktemp -d)"
+          echo "CONSUMER=$consumer" >> "$GITHUB_ENV"
+          tarball="$PWD/$(npm pack --ignore-scripts --silent | tail -n 1)"
+          cd "$consumer"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund --ignore-scripts --legacy-peer-deps \
+            "$tarball" \
+            @deepseek-ai/cordis@~4.1.0 \
+            @deepseek-ai/cordis-plugin-loader@~1.1.0 \
+            @deepseek-ai/dsh@0.2.2-rc.1 \
+            @deepseek-ai/dsh-llm@0.2.2-rc.1 \
+            @deepseek-ai/dsh-typert-protocol@0.2.2-rc.1 \
+            @deepseek-ai/dsh-typert-registry@0.2.2-rc.1 \
+            @deepseek-ai/dsh-api-gateway@0.2.2-rc.1 \
+            @deepseek-ai/dsh-api-remotes@0.2.2-rc.1 \
+            @deepseek-ai/dsh-api-settings-controller@0.2.2-rc.1 \
+            @deepseek-ai/dsh-attachment@0.2.2-rc.1 \
+            @deepseek-ai/dsh-brand@0.2.2-rc.1 \
+            @deepseek-ai/dsh-credentials@0.2.2-rc.1 \
+            @deepseek-ai/dsh-fs@0.2.2-rc.1 \
+            @deepseek-ai/dsh-launch-environment@0.2.2-rc.1 \
+            @deepseek-ai/dsh-settings@0.2.2-rc.1 \
+            @deepseek-ai/dsh-timeout@0.2.2-rc.1 \
+            @deepseek-ai/schemastery@^3.19.0
+      - name: Run the installed-package smoke against the temporary consumer
+        run: node --expose-internals scripts/installed-smoke.mjs "$CONSUMER"

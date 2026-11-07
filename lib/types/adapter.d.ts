@@ -9,6 +9,17 @@ import { OpencodeGoCatalog } from './catalog.ts';
 import { FreeBunTransport } from './free-transport.ts';
 import { FreeChannelState } from './free-channel.ts';
 /**
+ * Whether the Free route may reuse saved Go credentials. A saved key is bound
+ * to the endpoint it was configured for: the official platform gateway, or a
+ * free base sharing the Go gateway's origin (one self-hosted or reverse-proxy
+ * deployment serving both routes). Any other `freeBaseURL` gets public access
+ * only, so pointing it at a third party cannot forward a stored paid key.
+ * This is a local decision: no network probe is made and no credential is read.
+ * @param config - the mount configuration captured for this request.
+ * @returns true when Free may send saved account credentials.
+ */
+export declare function freeReusesSavedKeys(config: Pick<OpencodeGoConfig, 'baseURL' | 'freeBaseURL'>): boolean;
+/**
  * Cap large models at 64k unless the caller or settings specify an allowance.
  * Per-model settings continue to cap explicit caller values.
  */
@@ -111,6 +122,15 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
     onAccountSettled?: (event: GoAccountSettlement) => void;
     /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
     onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void;
+    /**
+     * Observe one Free request refusing to reuse saved credentials because its
+     * `freeBaseURL` is not bound to them. The detail carries origins only, never a
+     * credential; the Host may log it at info/debug level.
+     */
+    onFreeCredentialWithheld?: (detail: {
+        reason: 'unbound-free-endpoint';
+        freeBaseURL: string;
+    }) => void;
 }
 /**
  * One source's route adapter. The catalog snapshot freezes at each operation,

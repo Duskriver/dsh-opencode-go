@@ -8,7 +8,7 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `^4.0.5`. The Host
 
 | Surface | DSH / Cordis / Schemastery | Verification | Status |
 | --- | --- | --- | --- |
-| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:dist`, 964 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the P0/P1 hardening batches (886 tests at the original 2026-11-06 baseline) |
+| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:dist`, 999 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the P0/P1 hardening batches (886 tests at the original 2026-11-06 baseline) |
 | Installed desktop CLI, Host side | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | rebuilt plugin loaded in an isolated headless profile; one loopback inference completed | Partial: headless Host smoke only, recorded before the dashboard migration |
 | Web/client surface (`dsh.client`) | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | settings page, usage pill, model picker and history dashboard against a running 0.2.2 Web profile | **Not covered / pending** |
 
@@ -16,7 +16,7 @@ The Web/client surface is the part not yet verified on 0.2.2-rc.1. The client bu
 
 ### Pending
 
-- Advisory CI compatibility job, intentionally not enabled yet: pack this package, install it with the official `@deepseek-ai/dsh@0.2.2-rc.1` CLI into a temporary consumer, then run `node --expose-internals scripts/installed-smoke.mjs <consumer>` and `node scripts/headless-smoke.mjs <consumer>`. Keep it `continue-on-error: true` until the official CLI install path is validated; `.github/workflows/verify.yml` records the intended steps.
+- Advisory CI job `compat-dsh-0.2.2` (job-level `continue-on-error: true`, push/manual-dispatch only) probes the installed DSH `0.2.2-rc.1` Host path: it packs this package, installs it together with the official `@deepseek-ai/dsh@0.2.2-rc.1` CLI and the pinned rc.1 host packages into a temporary consumer, then runs `node --expose-internals scripts/installed-smoke.mjs <consumer>`. A red run is a compatibility signal, not a merge blocker; promote it to a required check once the install path has stayed green for a release cycle and a stable 0.2.2 host exists. This covers the Host path only — the Web/client row above remains pending.
 - Manual Web check on a 0.2.2-rc.1 server: enable the plugin, confirm the settings section and usage pill mount, then exercise the history dashboard with a real account.
 
 ## Recorded baseline before the dashboard migration
@@ -25,7 +25,7 @@ The Web/client surface is the part not yet verified on 0.2.2-rc.1. The client bu
 | --- | --- |
 | `npm test` | 17 test files, 913 tests, zero failures or skipped tests |
 | `npm run typecheck` | Host and browser TypeScript projects pass |
-| `npm run check:dist` | All 31 shipped build artifacts match an independent rebuild |
+| `npm run check:dist` | All 30 shipped build artifacts match an independent rebuild |
 | `npm run verify` | Types, artifact comparison, full Vitest suite and installed-package smoke pass |
 
 `verify` includes `typecheck`, `test:ci` and `verify:installed`; `test:ci` includes `check:dist` and `npm test`. CI runs this same acceptance path after `npm ci --strict-peer-deps` on Linux and Windows with Node 22.19 and 24. Those CI jobs are configured and enforce the 0.2.1-rc.5 baseline only; the baseline results above are from macOS. The 0.2.2-rc.1 matrix row is not part of CI yet.
@@ -51,9 +51,9 @@ The daily CSV at `https://opencode.ai/console/api/v2/usage/export?range=30d` sup
 | Credential/account/network/date cache isolation, force refresh, proxy path, cancellation, timeout and response limits | Pass: Host service and RPC tests, including independent cancellation and connection-change races |
 | Key/member-field boundary, third-party gateway rejection and explicit upstream failures | Pass: report excludes member fields and keys; explicit permission, credential, gateway and malformed-response failures |
 | Dashboard account/range/refresh, selected-account quotas and responsive light/dark UI | Pass: browser interaction tests plus real-browser 1280×1000 dark / 390×844 light checks, Chinese and English |
-| `npm test` | Pass: 18 files, 964 tests; zero failures or skipped tests |
+| `npm test` | Pass: 20 files, 999 tests; zero failures or skipped tests |
 | `npm run typecheck` / `npm run compile` | Pass: Host and browser types and distribution build |
-| `npm run check:dist` | Pass: all 31 shipped artifacts match an independent rebuild |
+| `npm run check:dist` | Pass: all 30 shipped artifacts match an independent rebuild |
 | `npm run verify` | Pass: types, build comparison, all tests and installed-package smoke |
 
 The user-facing Free status card, its copy/styles, status/probe RPCs and manual inference probe have been removed. Normal requests retain Free error classification and passive Retry-After/backoff, including account isolation, cancellation and coexistence with Go.

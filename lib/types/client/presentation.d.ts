@@ -73,32 +73,55 @@ export declare const en: {
     analyticsRange7d: string;
     analyticsRange30d: string;
     analyticsRange90d: string;
+    analyticsAccount: string;
+    analyticsNoAccounts: string;
     analyticsRefresh: string;
     analyticsRetry: string;
     analyticsLoading: string;
     analyticsEmpty: string;
     analyticsFailed: string;
+    analyticsRefreshed: string;
+    analyticsRefreshing: string;
+    analyticsStale: string;
     analyticsRequests: string;
     analyticsTokens: string;
     analyticsSpend: string;
-    analyticsByModel: string;
-    analyticsByDay: string;
+    analyticsCacheHit: string;
     analyticsInput: string;
     analyticsOutput: string;
     analyticsCacheRead: string;
-    analyticsQuota: string;
-    analyticsQuotaHint: string;
-    analyticsQuotaFailed: string;
-    analyticsChartSpend: string;
-    analyticsChartTokens: string;
-    analyticsKicker: string;
-    analyticsModel: string;
-    analyticsCost: string;
-    analyticsShare: string;
-    analyticsCacheHit: string;
+    analyticsCacheWrite: string;
     analyticsDailyAverage: string;
-    analyticsPeak: string;
-    analyticsTotal: string;
+    analyticsModels: string;
+    analyticsActiveDays: string;
+    analyticsPerDay: string;
+    analyticsByDay: string;
+    analyticsTrendHint: string;
+    analyticsTokensMode: string;
+    analyticsRequestsMode: string;
+    analyticsChartHelp: string;
+    analyticsSelectDay: string;
+    analyticsByModel: string;
+    analyticsRankingHint: string;
+    analyticsDetails: string;
+    analyticsModel: string;
+    analyticsShare: string;
+    analyticsAllModels: string;
+    analyticsFewerModels: string;
+    analyticsExport: string;
+    analyticsExporting: string;
+    analyticsExportFailed: string;
+    analyticsPermission: string;
+    analyticsCredentials: string;
+    analyticsUnsupported: string;
+    analyticsPending: string;
+    analyticsInvalid: string;
+    analyticsQuota: string;
+    analyticsQuotaFailed: string;
+    analyticsAmountHint: string;
+    analyticsLagHint: string;
+    analyticsExportHint: string;
+    analyticsKicker: string;
     nav: string;
     title: string;
     titleLabel: string;
@@ -249,6 +272,8 @@ export interface GoThemeTokens {
     readonly surface: string;
     readonly surface2: string;
     readonly border: string;
+    /** Control boundary that keeps WCAG 1.4.11 3:1 against both surfaces. */
+    readonly borderStrong: string;
     readonly text: string;
     readonly muted: string;
     readonly accent: string;
@@ -262,8 +287,16 @@ export interface GoThemeTokens {
     readonly warning: string;
     readonly danger: string;
 }
-/** One visual language in the Host's two color schemes; no separate preference. */
-export declare const GO_THEME_TOKENS: Record<'dark' | 'light', GoThemeTokens>;
+/** Host color scheme followed by {@link GO_THEME_TOKENS}. */
+export type GoThemeScheme = 'dark' | 'light';
+/**
+ * Pure fallback values, used when a Host alias token is absent and as the static
+ * baseline for the WCAG contrast assertions. The chart series colors and the
+ * strong control border have no Host token, so these constants are painted as-is.
+ */
+export declare const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
+/** The unified tokens for the Host's current scheme. */
+export declare const GO_THEME_TOKENS: Record<GoThemeScheme, GoThemeTokens>;
 /**
  * Follow the Host's light/dark scheme. The layout presenter marks a dark body
  * with `data-ds-dark-theme`; the attribute is observed so switching the Host
@@ -274,8 +307,8 @@ export declare function useHostScheme(): 'dark' | 'light';
 export declare function useGoThemeTokens(): GoThemeTokens;
 /**
  * Inline custom properties consumed by settings, quota surfaces and history.
- * Prefer installed Anthropic families; system fallbacks keep other machines
- * offline-capable without distributing the user's local font files.
+ * The Host's font settings come first and the local branded stacks stay as
+ * fallbacks; no font file is fetched, so offline machines keep their system fonts.
  * @param tokens - the active palette.
  * @returns a style object carrying every `--go-*` variable.
  */

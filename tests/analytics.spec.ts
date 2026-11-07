@@ -207,6 +207,20 @@ describe('official history identity and cache isolation', () => {
     expect(h.fetcher).toHaveBeenCalledTimes(3)
   })
 
+  it('caches parsed rows only instead of retaining the raw official CSV', async () => {
+    const h = harness()
+    await h.service.read(QUERY)
+    const cache = (h.service as unknown as { cache: Map<string, Record<string, unknown>> }).cache
+    expect(cache.size).toBe(1)
+    const entry = [...cache.values()][0]!
+    // The 16 MiB raw text has no consumer; only the parsed export rows stay.
+    expect(entry).not.toHaveProperty('csv')
+    expect(Array.isArray(entry.header)).toBe(true)
+    expect(Array.isArray(entry.rows)).toBe(true)
+    expect((await h.service.exportCsv(QUERY)).csv).toBe(csv())
+    expect(h.fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('changes opaque source on credential, account, proxy or gateway identity changes', async () => {
     const h = harness()
     const first = await h.service.read(QUERY)
@@ -222,6 +236,33 @@ describe('official history identity and cache isolation', () => {
     expect((await h.service.read(QUERY)).source).not.toBe(proxied.source)
     expect(h.fetcher).toHaveBeenCalledTimes(5)
     expect(JSON.stringify(first)).not.toContain('fixture-api-key')
+  })
+
+  it('classifies an identity-change cancellation for every concurrent consumer', async () => {
+    const h = harness()
+    const gate = Promise.withResolvers<Response>()
+    h.fetcher.mockReturnValueOnce(gate.promise)
+    const first = h.service.read(QUERY)
+    const second = h.service.read(QUERY)
+    await vi.waitFor(() => expect(h.fetcher).toHaveBeenCalledTimes(1))
+
+    // A credential change supersedes the shared task; the new call starts its
+    // own identity and succeeds.
+    h.key('second-fixture-key')
+    h.fetcher.mockResolvedValueOnce(response(csv([record({ requests: '7' })])))
+    expect((await h.service.read(QUERY)).totals.requests).toBe('7')
+
+    for (const consumer of [first, second]) {
+      const error = await consumer.catch(error => error)
+      expect(error).toMatchObject({
+        code: 'opencode-go/analytics-unavailable',
+        message: expect.stringContaining('superseded'),
+        details: { reason: 'network', retryable: true, retainPrevious: false },
+      })
+      // A raw carrier AbortError would bypass the analytics error vocabulary.
+      expect(error).not.toBeInstanceOf(DOMException)
+    }
+    gate.resolve(response())
   })
 
   it('does not reuse a cache across UTC midnight even when less than thirty seconds old', async () => {
@@ -372,6 +413,24 @@ describe('bounded and cancellable official history requests', () => {
     expect((await second).csv).toBe(csv())
     expect((await h.service.read(QUERY)).totals.requests).toBe('3')
     expect(h.fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('classifies a shared request cancelled by plugin teardown for its consumers', async () => {
+    const h = harness()
+    const gate = Promise.withResolvers<Response>()
+    h.fetcher.mockReturnValueOnce(gate.promise)
+    const pending = h.service.read(QUERY)
+    await vi.waitFor(() => expect(h.fetcher).toHaveBeenCalledTimes(1))
+
+    await h.ctx.fiber.dispose()
+
+    const error = await pending.catch(error => error)
+    expect(error).toMatchObject({
+      code: 'opencode-go/analytics-unavailable',
+      details: { reason: 'network', retryable: true, retainPrevious: false },
+    })
+    expect(error).not.toBeInstanceOf(DOMException)
+    gate.resolve(response())
   })
 
   it('keeps a superseded response from replacing a forced refresh snapshot', async () => {

@@ -52,6 +52,28 @@ import { FreeChannelState } from './free-channel.ts'
 
 const DEFAULT_MAX_TOKENS = 65_536
 
+/** Origin of a configured endpoint for diagnostics; never includes credentials. */
+function endpointOrigin(raw: string): string {
+  try { return new URL(raw).origin } catch { return '[invalid URL]' }
+}
+
+/**
+ * Whether the Free route may reuse saved Go credentials. A saved key is bound
+ * to the endpoint it was configured for: the official platform gateway, or a
+ * free base sharing the Go gateway's origin (one self-hosted or reverse-proxy
+ * deployment serving both routes). Any other `freeBaseURL` gets public access
+ * only, so pointing it at a third party cannot forward a stored paid key.
+ * This is a local decision: no network probe is made and no credential is read.
+ * @param config - the mount configuration captured for this request.
+ * @returns true when Free may send saved account credentials.
+ */
+export function freeReusesSavedKeys(config: Pick<OpencodeGoConfig, 'baseURL' | 'freeBaseURL'>): boolean {
+  let free: URL
+  try { free = new URL(config.freeBaseURL) } catch { return false }
+  if (free.hostname.toLowerCase() === 'opencode.ai') return true
+  try { return free.origin === new URL(config.baseURL).origin } catch { return false }
+}
+
 /**
  * Cap large models at 64k unless the caller or settings specify an allowance.
  * Per-model settings continue to cap explicit caller values.
@@ -395,6 +417,12 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
   onAccountSettled?: (event: GoAccountSettlement) => void
   /** Legacy notice observer. Hosts that persist selection should use onAccountSettled. */
   onAccountSwitch?: (notice: GoAccountSwitch | undefined, config: OpencodeGoConfig, seq: number) => void
+  /**
+   * Observe one Free request refusing to reuse saved credentials because its
+   * `freeBaseURL` is not bound to them. The detail carries origins only, never a
+   * credential; the Host may log it at info/debug level.
+   */
+  onFreeCredentialWithheld?: (detail: { reason: 'unbound-free-endpoint'; freeBaseURL: string }) => void
 }
 
 /** Configuration, model and provider captured together before discovery yields. */
@@ -639,6 +667,21 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   private async *streamAccounts(options: GenerateOptions, snapshot: OpencodeGoDispatchSnapshot, seq: number): AsyncIterable<StreamChunk> {
+    const streamPublic = () => this.requestExecutor.stream(options, { config: snapshot.config, model: snapshot.model,
+      provider: snapshot.catalog.provider, sessionId: snapshot.sessionId, apiKey: 'public' })
+    if (this.source === 'free' && !freeReusesSavedKeys(snapshot.config)) {
+      // A Free endpoint that is neither official nor the Go gateway's own origin
+      // must never receive saved account credentials: send public access only,
+      // and report why without reading or echoing any key.
+      try {
+        this.options.onFreeCredentialWithheld?.({
+          reason: 'unbound-free-endpoint',
+          freeBaseURL: endpointOrigin(snapshot.config.freeBaseURL),
+        })
+      } catch { /* Diagnostics must not fail the request. */ }
+      yield* streamPublic()
+      return
+    }
     const accounts = accountsOf(snapshot.config)
     if (this.source === 'go' && accounts.length === 0) throw new LlmError('OpenCode Go has no accounts', 'MISSING_CREDENTIAL')
     // The preferred reference resolves through accountRefOf: an empty string
@@ -666,8 +709,6 @@ export class OpencodeGoAdapter extends LlmAdapter {
     })
     const candidates = this.accountCandidates(snapshot.config, ordered, usable, options.signal)
     let candidate = await candidates.next()
-    const streamPublic = () => this.requestExecutor.stream(options, { config: snapshot.config, model: snapshot.model,
-      provider: snapshot.catalog.provider, sessionId: snapshot.sessionId, apiKey: 'public' })
     if (candidate.done) {
       if (this.source === 'free') yield* streamPublic()
       return

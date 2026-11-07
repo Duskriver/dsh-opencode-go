@@ -284,13 +284,14 @@ describe('standalone Bun Free transport', () => {
     expect(proxy.destinations).toEqual(['gateway.invalid:4321'])
   })
 
-  it('follows redirects over SOCKS and strips authorization across origins', async () => {
+  it('follows same-origin redirects through the SOCKS relay when the target host is allowed', async () => {
     const gateway = await server((request, response) => {
       if (request.url === '/start') {
         expect(request.headers.authorization).toBe('Bearer fixture-key')
-        response.writeHead(302, { location: 'http://second.invalid:4321/final' }).end()
+        response.writeHead(302, { location: 'http://first.invalid:4321/final' }).end()
       } else {
-        expect(request.headers.authorization).toBeUndefined()
+        // Same-origin redirects retain the caller's authorization.
+        expect(request.headers.authorization).toBe('Bearer fixture-key')
         response.end('redirected')
       }
     })
@@ -299,8 +300,23 @@ describe('standalone Bun Free transport', () => {
     const response = await transport().forProxy(proxy.url)('http://first.invalid:4321/start', { headers: { authorization: 'Bearer fixture-key' } })
     expect(await response.text()).toBe('redirected')
     expect(response.redirected).toBe(true)
+    expect(response.url).toBe('http://first.invalid:4321/final')
+    expect(new Set(proxy.destinations)).toEqual(new Set(['first.invalid:4321']))
+  })
+
+  it('refuses cross-host redirects through the SOCKS relay target allowlist', async () => {
+    const gateway = await server((_request, response) => {
+      response.writeHead(302, { location: 'http://second.invalid:4321/final' }).end()
+    })
+    const proxy = await mockProxy('socks5', { target: gateway.url })
+    cleanups.push(proxy.close)
+    // The redirected request is answered by the relay's allowlist check: Bun
+    // surfaces the relay's 403 as the final (non-retried) response.
+    const response = await transport().forProxy(proxy.url)('http://first.invalid:4321/start')
+    expect(response.status).toBe(403)
     expect(response.url).toBe('http://second.invalid:4321/final')
-    expect(proxy.destinations).toEqual(['first.invalid:4321', 'second.invalid:4321'])
+    // The relay refused the CONNECT for the second host before touching SOCKS.
+    expect(proxy.destinations).toEqual(['first.invalid:4321'])
   })
 
   it('never connects directly when a configured proxy is unavailable', async () => {

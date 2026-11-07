@@ -33,7 +33,7 @@ import {
 import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
 import { GoAnalyticsService } from './analytics.ts'
 import { accountsOf, accountRefOf, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
-import { ProxyTransport } from './transport.ts'
+import { ProxyTransport, waitWithSignal } from './transport.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -133,6 +133,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     freeRegistration?.replace([FREE_PROVIDER_ID])
   }
   let callSequence = 0
+  /** Free endpoint origins already reported as not reuse-bound for saved keys. */
+  const withheldFreeEndpoints = new Set<string>()
   const catalogs = new GoCatalogManager({
     transport, onFallback: logger.fallback, onOmitted: logger.omitted,
     onWarning: warning => { ctx.logger.warn(`llm-opencode-go: ${warning}`) },
@@ -152,6 +154,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
         hostPath => ctx.get('fs')?.processPathFromHostPath(hostPath),
         ref,
       ),
+    },
+    // One notice per withheld Free endpoint and mount: the Free route never
+    // reuses saved credentials for an endpoint the accounts are not bound to,
+    // and a request storm must not repeat the explanation. The value is the
+    // endpoint origin only, never a key.
+    onFreeCredentialWithheld: (detail: { reason: 'unbound-free-endpoint'; freeBaseURL: string }) => {
+      if (withheldFreeEndpoints.has(detail.freeBaseURL)) return
+      if (withheldFreeEndpoints.size >= 8) withheldFreeEndpoints.clear()
+      withheldFreeEndpoints.add(detail.freeBaseURL)
+      ctx.logger.info(`llm-opencode-go: not reusing saved credentials for the Free endpoint ${detail.freeBaseURL}; using public access`)
     },
     onReplayDegrade: (reason: string) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
@@ -287,7 +299,7 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   syncRoute()
   let undiscover: () => void = () => {}
   try {
-    undiscover = ctx.llm.registerModelDiscovery(name, async (request: LlmModelDiscoveryRequest) => {
+    undiscover = ctx.llm.registerModelDiscovery(name, async (request: LlmModelDiscoveryRequest, signal?: AbortSignal) => {
       if (request.provider !== PROVIDER_ID && request.provider !== FREE_PROVIDER_ID
         && !isOfficialEndpoint(request.baseURL)) {
         throw new LlmError(
@@ -306,7 +318,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
           'DISCOVERY_UNSUPPORTED',
         )
       }
-      return discoverCatalogModels(catalogs.forConfig(config, source))
+      signal?.throwIfAborted()
+      const discovery = discoverCatalogModels(catalogs.forConfig(config, source))
+      if (signal === undefined) return discovery
+      // `LlmModelDiscoveryRequest` carries no signal; the registration callback's
+      // second argument is the caller's cancellation and must be honored. The
+      // shared catalog helper has no cancellation parameter (its forced refresh
+      // is shared with other readers), so settle this call promptly instead of
+      // waiting for that one refresh; the shared refresh keeps running for the
+      // next reader, which can then answer from the same snapshot.
+      return await waitWithSignal(() => discovery, signal)
     })
   } catch (error: unknown) {
     // A duplicate mount may already own our discovery registration — the same

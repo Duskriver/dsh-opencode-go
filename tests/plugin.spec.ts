@@ -389,6 +389,46 @@ describe("route lifecycle", () => {
       expect(models.map(model => model.id)).toContain('deepseek-v4.1-flash')
     })
 
+    it('honors discovery cancellation while the shared catalog refresh continues', async () => {
+      vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      const original = globalThis.fetch
+      let modelsRequests = 0
+      const metadata = Promise.withResolvers<Response>()
+      vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input) !== `${gateway.url}/models`) return original(input, init)
+        modelsRequests += 1
+        return modelsRequests === 1 ? metadata.promise : Promise.resolve(Response.json(listingBody(fullLiveListing())))
+      })
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      apply(ctx, configOf(gateway.url))
+      try {
+        const controller = new AbortController()
+        const discovery = ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' }, controller.signal)
+        await vi.waitFor(() => expect(modelsRequests).toBe(1))
+        controller.abort(new Error('caller cancelled discovery'))
+        // The registration callback's signal settles the RPC promptly instead of
+        // waiting for the shared catalog refresh.
+        await expect(discovery).rejects.toThrow('caller cancelled discovery')
+        expect(modelsRequests).toBe(1)
+
+        // An already-aborted caller never starts a catalog request at all.
+        const preAborted = new AbortController()
+        preAborted.abort(new Error('already cancelled discovery'))
+        await expect(ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' }, preAborted.signal))
+          .rejects.toThrow('already cancelled discovery')
+        expect(modelsRequests).toBe(1)
+
+        // The shared refresh itself was not aborted: a later discovery answers.
+        metadata.resolve(Response.json(listingBody(fullLiveListing())))
+        await expect.poll(async () => (await ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' })).length)
+          .toBeGreaterThan(0)
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    })
+
     it('activates only Free until a usable credential enables Go', async () => {
       Reflect.deleteProperty(process.env, 'OPENCODE_API_KEY')
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })

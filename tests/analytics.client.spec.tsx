@@ -3,8 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AnalyticsQuery, AnalyticsReport, GoUsage } from '../src/contracts.ts'
 import { AnalyticsDialog, historyMoney, historyNumber, type AnalyticsDialogProps } from '../src/client/AnalyticsDialog.tsx'
-import { en } from '../src/client/presentation.ts'
-import { historyEn as copy, historyZh } from '../src/client/dashboard-copy.ts'
+import { en, zh } from '../src/client/presentation.ts'
 import css from '../src/client/AnalyticsDialog.module.css'
 import { analyticsCounts, createAnalyticsReport } from './support/analytics.ts'
 import './support/client.tsx'
@@ -25,12 +24,30 @@ describe('official history dashboard', () => {
     const p = props(); render(<AnalyticsDialog {...p} />)
     await screen.findAllByText('deepseek-v4.1-flash')
     expect(p.readAnalytics).toHaveBeenCalledWith({ accountRef: 'ACCOUNT_A', range: '30d' }, expect.any(AbortSignal))
-    expect(screen.getByText(copy.scope)).toBeTruthy()
+    expect(screen.getByText(en.analyticsSubtitle)).toBeTruthy()
     expect(screen.getByText('66.7')).toBeTruthy()
     expect(screen.getAllByText('$1.23').length).toBeGreaterThan(0)
-    expect(screen.getByText(copy.amountHint)).toBeTruthy()
+    expect(screen.getByText(en.analyticsAmountHint)).toBeTruthy()
     expect(document.querySelectorAll('[data-day]')).toHaveLength(2)
     expect(document.body.textContent).not.toMatch(/Scanning|unsettled|unpriced|session coverage/i)
+  })
+
+  it('renders the dashboard copy from the active locale dictionary in Chinese', async () => {
+    const translate = vi.fn((key: keyof typeof zh) => zh[key])
+    render(<AnalyticsDialog {...props({ t: translate, getLocale: () => 'zh' })} />)
+    await screen.findAllByText('deepseek-v4.1-flash')
+    expect(screen.getByText(zh.analyticsSubtitle)).toBeTruthy()
+    expect(screen.getByText(zh.analyticsByDay)).toBeTruthy()
+    expect(screen.getByText(zh.analyticsByModel)).toBeTruthy()
+    expect(screen.getByText(zh.analyticsDetails)).toBeTruthy()
+    expect(screen.getByText(zh.analyticsQuota)).toBeTruthy()
+    expect(screen.getByRole('group', { name: zh.analyticsChartHelp })).toBeTruthy()
+    expect(screen.queryByText(en.analyticsSubtitle)).toBeNull()
+    // Every visible dashboard string is a locale lookup; there is no private copy table.
+    expect(translate).toHaveBeenCalledWith('analyticsSubtitle')
+    expect(translate).toHaveBeenCalledWith('analyticsByDay')
+    expect(translate).toHaveBeenCalledWith('analyticsByModel')
+    expect(translate).toHaveBeenCalledWith('analyticsChartHelp')
   })
 
   it('switches viewing account, clears old data immediately and reads that account’s quota', async () => {
@@ -39,7 +56,7 @@ describe('official history dashboard', () => {
       .mockReturnValueOnce(new Promise<AnalyticsReport>(resolve => { resolveNext = resolve }))
     const p = props({ readAnalytics: read }); render(<AnalyticsDialog {...p} />)
     await screen.findAllByText('deepseek-v4.1-flash')
-    fireEvent.change(screen.getByRole('combobox', { name: copy.account }), { target: { value: 'ACCOUNT_B' } })
+    fireEvent.change(screen.getByRole('combobox', { name: en.analyticsAccount }), { target: { value: 'ACCOUNT_B' } })
     expect(screen.queryByText('$1.23')).toBeNull()
     await waitFor(() => expect(read).toHaveBeenLastCalledWith({ accountRef: 'ACCOUNT_B', range: '30d' }, expect.any(AbortSignal)))
     expect(p.readQuota).toHaveBeenLastCalledWith('ACCOUNT_B')
@@ -68,37 +85,37 @@ describe('official history dashboard', () => {
       .mockRejectedValueOnce(failure('network', true)).mockRejectedValueOnce(failure('network', true, 'new-key-identity'))
     render(<AnalyticsDialog {...props({ readAnalytics: read })} />)
     await screen.findAllByText('deepseek-v4.1-flash')
-    fireEvent.click(screen.getByRole('button', { name: copy.refresh }))
-    expect(await screen.findByText(copy.stale)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en.analyticsRefresh }))
+    expect(await screen.findByText(en.analyticsStale)).toBeTruthy()
     expect(read.mock.calls[1][0]).toEqual({ accountRef: 'ACCOUNT_A', range: '30d', refresh: true })
     expect(screen.getAllByText('$1.23').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: copy.refresh }))
-    await waitFor(() => expect(screen.queryByText(copy.stale)).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: en.analyticsRefresh }))
+    await waitFor(() => expect(screen.queryByText(en.analyticsStale)).toBeNull())
     expect(screen.queryByText('$1.23')).toBeNull()
-    expect(screen.getByText(copy.failed)).toBeTruthy()
+    expect(screen.getByText(en.analyticsFailed)).toBeTruthy()
   })
 
   it('replaces old data with an explicit permission error, never a fabricated zero', async () => {
     const read = vi.fn().mockResolvedValueOnce(createAnalyticsReport({ accountRef: 'ACCOUNT_A' })).mockRejectedValueOnce(failure('permission-denied'))
     render(<AnalyticsDialog {...props({ readAnalytics: read })} />)
     await screen.findAllByText('deepseek-v4.1-flash')
-    fireEvent.click(screen.getByRole('button', { name: copy.refresh }))
-    expect(await screen.findByText(copy.permission)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en.analyticsRefresh }))
+    expect(await screen.findByText(en.analyticsPermission)).toBeTruthy()
     expect(screen.queryByText('$1.23')).toBeNull()
     expect(screen.queryByText('$0.0000')).toBeNull()
   })
 
   it('keeps history usable when quota fails and localizes the new surface', async () => {
-    render(<AnalyticsDialog {...props({ readQuota: async () => { throw new Error('no quota') }, getLocale: () => 'zh-CN' })} />)
-    expect(await screen.findByText(historyZh.quotaUnavailable)).toBeTruthy()
-    expect(screen.getByText(historyZh.scope)).toBeTruthy()
+    render(<AnalyticsDialog {...props({ readQuota: async () => { throw new Error('no quota') }, t: key => zh[key], getLocale: () => 'zh-CN' })} />)
+    expect(await screen.findByText(zh.analyticsQuotaFailed)).toBeTruthy()
+    expect(screen.getByText(zh.analyticsSubtitle)).toBeTruthy()
     expect(screen.getAllByText('deepseek-v4.1-flash')).toHaveLength(2)
   })
 
   it('still shows official allowance when the key lacks history permission', async () => {
     render(<AnalyticsDialog {...props({ readAnalytics: async () => { throw failure('permission-denied') } })} />)
-    expect(await screen.findByText(copy.permission)).toBeTruthy()
-    expect(screen.getByRole('progressbar', { name: copy.monthly }).getAttribute('value')).toBe('82')
+    expect(await screen.findByText(en.analyticsPermission)).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: en.usage_monthly }).getAttribute('value')).toBe('82')
   })
 
   it('supports keyboard and pointer/touch selection, including zero-activity days', async () => {
@@ -115,7 +132,7 @@ describe('official history dashboard', () => {
     fireEvent.pointerLeave(document.querySelector(`.${css.plot}`)!)
     expect(document.querySelector(`.${css.dayDetail}`)?.textContent).toContain('$0.0000')
     fireEvent.keyDown(days[1], { key: 'Escape' })
-    expect(screen.getByText(copy.selectDay)).toBeTruthy()
+    expect(screen.getByText(en.analyticsSelectDay)).toBeTruthy()
     fireEvent.pointerEnter(days[0])
     expect(document.querySelector(`.${css.dayDetail}`)?.textContent).toContain('$1.23')
   })
@@ -147,7 +164,7 @@ describe('official history dashboard', () => {
       fireEvent.keyDown(days[1], { key: 'Escape' })
       expect(atDocument).not.toHaveBeenCalled()
       expect(onClose).not.toHaveBeenCalled()
-      expect(screen.getByText(copy.selectDay)).toBeTruthy()
+      expect(screen.getByText(en.analyticsSelectDay)).toBeTruthy()
       fireEvent.keyDown(days[1], { key: 'Escape' })
       expect(atDocument).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledTimes(1)
@@ -161,15 +178,15 @@ describe('official history dashboard', () => {
     ] }))
     render(<AnalyticsDialog {...props({ readAnalytics: read })} />)
     await screen.findAllByText('shared-model')
-    const trend = screen.getByRole('group', { name: copy.trend })
-    fireEvent.click(within(trend).getByRole('button', { name: copy.requestsMode }))
-    expect(within(trend).getByRole('button', { name: copy.requestsMode }).getAttribute('aria-pressed')).toBe('true')
-    const ranking = screen.getByRole('group', { name: copy.ranking })
-    fireEvent.click(within(ranking).getByRole('button', { name: copy.requests }))
+    const trend = screen.getByRole('group', { name: en.analyticsByDay })
+    fireEvent.click(within(trend).getByRole('button', { name: en.analyticsRequestsMode }))
+    expect(within(trend).getByRole('button', { name: en.analyticsRequestsMode }).getAttribute('aria-pressed')).toBe('true')
+    const ranking = screen.getByRole('group', { name: en.analyticsByModel })
+    fireEvent.click(within(ranking).getByRole('button', { name: en.analyticsRequests }))
     expect(document.querySelector(`.${css.rankIdentity}`)?.textContent).toContain('opencode')
     const table = screen.getByRole('table')
     expect(within(table).getAllByText('shared-model')).toHaveLength(2)
-    fireEvent.click(within(table).getByRole('button', { name: copy.requests }))
+    fireEvent.click(within(table).getByRole('button', { name: en.analyticsRequests }))
     expect(within(table).getByRole('columnheader', { name: /Requests/ }).getAttribute('aria-sort')).toBe('descending')
   })
 
@@ -181,7 +198,7 @@ describe('official history dashboard', () => {
     const exporter = vi.fn(async () => ({ filename: 'official.csv', csv: 'day,requests\r\n2026-11-06,12\r\n' }))
     render(<AnalyticsDialog {...props({ exportAnalytics: exporter })} />)
     await screen.findAllByText('deepseek-v4.1-flash')
-    fireEvent.click(screen.getByRole('button', { name: copy.export }))
+    fireEvent.click(screen.getByRole('button', { name: en.analyticsExport }))
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1))
     expect(exporter).toHaveBeenCalledWith({ accountRef: 'ACCOUNT_A', range: '30d' }, expect.any(AbortSignal))
     expect(createUrl).toHaveBeenCalledWith(expect.any(Blob))
@@ -201,7 +218,7 @@ describe('official history dashboard', () => {
   it('does not query without an account or while closed', () => {
     const p = props({ accounts: [] }); const view = render(<AnalyticsDialog {...p} />)
     expect(p.readAnalytics).not.toHaveBeenCalled()
-    expect(screen.getByText(copy.noAccounts)).toBeTruthy()
+    expect(screen.getByText(en.analyticsNoAccounts)).toBeTruthy()
     view.rerender(<AnalyticsDialog {...p} accounts={accounts} open={false} />)
     expect(p.readAnalytics).not.toHaveBeenCalled()
   })

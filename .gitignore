@@ -11,3 +11,10 @@ mockups/
 .upstream-watch/
 .archify/
 opencode-protocol-benchmark-*/
+
+# macOS / Windows OS metadata（不提交）
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini

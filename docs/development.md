@@ -31,6 +31,8 @@ Vitest tests are organized by domain. Results for the history-dashboard migratio
 | `pricing.spec.ts` | Catalog tariff validation and Free-model eligibility; historical amounts come from official CSV |
 | `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `config-validation.spec.ts` | Base-URL credential rejection with redacted diagnostics, proxy userinfo acceptance and thinking-budget schema bounds |
+| `socks-tunnel.spec.ts` | Loopback SOCKS relay: allowed-target enforcement, authentication, idle teardown and IPv4/IPv6 normalisation |
+| `theme.client.spec.ts` | Host-token fallbacks, host font inheritance and WCAG 1.4.11 contrast of chart series and control boundaries |
 | `adapter.spec.ts` | Requests, capacity limits, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |

@@ -109,7 +109,7 @@ Key 留在 Host；常规报告只向浏览器传递聚合数字与 provider / mo
 
 开启后：
 
-- **复用已存账号**：Free 与 Go 共用账号列表，优先使用已配置的可用 Key，并遵循“自动使用备用账号”设置。
+- **复用已存账号（受端点绑定约束）**：Free 与 Go 共用账号列表，但只有在 `freeBaseURL` 的 hostname 为 `opencode.ai`（官方平台地址），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才会复用已存账号 Key 并遵循“自动使用备用账号”设置；其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并记录不含密钥的诊断信息。
 - **无 Key 时匿名公共访问**：没有可用 Key 时以 `Bearer public` 发起匿名公共访问。
 - **官方 CLI 身份**：请求以官方 OpenCode CLI 的 `opencode/latest/2.2.5/cli` User-Agent 发出，而不是 DSH 自身的归属 UA。
 - **独立 Bun 运行时**：Free 推理通过 optional dependency `bun@1.4.4` 启动独立 HTTP worker；`bun` 包自带 `postinstall`，安装期可能下载 / 解包平台原生二进制。禁用安装脚本或缺少可选依赖时的表现见下方 FAQ。
@@ -168,7 +168,7 @@ OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插�
 
 - **网络代理**：支持填入 HTTP、HTTPS 或 SOCKS5 代理地址（如 `socks5://127.0.0.1:1080`），保存后即时应用于对话、用量查询与模型刷新。
 - **超时控制**：分别支持配置请求准备超时（`requestPreparationTimeoutMs`）、整轮请求超时（`requestTimeoutMs`）以及流空闲看门狗阈值（`streamIdleTimeoutMs`）。
-- **免费通道（opt-in）**：默认关闭；开启后注册 `DSH OpenCode Free` 路由、拉取平台免费模型，并复用已存账号 Key（无可用 Key 时匿名公共访问）；关闭后该路由撤回，进行中的请求允许完成。
+- **免费通道（opt-in）**：默认关闭；开启后注册 `DSH OpenCode Free` 路由、拉取平台免费模型；已存 Key 仅在 `freeBaseURL` 为官方域名或与 `baseURL` 同 origin 时复用，否则退回匿名公共访问；关闭后该路由撤回，进行中的请求允许完成。
 - **一键恢复默认**：点击每张卡片的“全部恢复默认”可一键清空自定义覆盖，不影响已保存的账号 Key。
 
 ---

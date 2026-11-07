@@ -75,33 +75,8 @@
 @media (max-width: 480px) { .accountUsage { grid-template-columns: 1fr; } }
 
 .page {
-  /* Recolor native primitives only inside this plugin's settings section. */
-  --dsw-alias-label-primary: var(--go-text);
-  --dsw-alias-label-secondary: var(--go-muted);
-  --dsw-alias-label-tertiary: var(--go-muted);
-  --dsw-alias-label-primary-foreground: var(--go-on-accent);
-  --dsw-alias-label-error: var(--go-danger);
-  --dsw-alias-label-warning: var(--go-warning);
-  --dsw-alias-label-success: var(--go-success);
-  --dsw-alias-brand-primary: var(--go-accent);
-  --dsw-alias-state-business-primary: var(--go-accent);
-  --dsw-alias-state-success-primary: var(--go-success);
-  --dsw-alias-state-warn-primary: var(--go-warning);
-  --dsw-alias-state-error-primary: var(--go-danger);
-  --dsw-alias-border-l2: var(--go-border);
-  --dsw-alias-border-l3: var(--go-border);
-  --dsw-alias-border-l4: var(--go-border);
-  --dsw-alias-bg-layer-3: var(--go-surface);
-  --dsw-alias-bg-module-platform: var(--go-surface-2);
-  --dsw-alias-button-primary-fill: var(--go-accent);
-  --dsw-alias-button-primary-hover: color-mix(in srgb, var(--go-accent) 92%, var(--go-text));
-  --dsw-alias-interactive-bg-hover: var(--go-surface-2);
-  --dsw-alias-interactive-bg-active: var(--go-accent-soft);
-  --dsw-alias-switch-thumb: var(--go-surface);
-  --dsw-focus-ring-color: var(--go-accent);
-  --dsw-focus-ring-width: 2px;
-  --dsw-radius-sm: 7px;
-  --dsw-radius-md: 8px;
+  /* The --go-* tokens already resolve to the Host's alias tokens; native
+     primitives inside this section keep their own Host tokens as-is. */
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -236,7 +211,9 @@
 .input {
   height: 36px;
   padding: 0 12px;
-  border: 1px solid var(--go-border);
+  /* The Host's hairline border is decorative; a control boundary needs WCAG
+     1.4.11 3:1, so inputs use the plugin's contrast-checked strong border. */
+  border: 1px solid var(--go-border-strong);
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-3);
   font: inherit;

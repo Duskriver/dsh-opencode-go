@@ -12,7 +12,7 @@ export interface AnalyticsOptions {
     now?: () => number;
     fetch?: typeof globalThis.fetch;
 }
-/** The Host retains the official CSV; ordinary reads expose only aggregate numbers. */
+/** The Host retains parsed official rows for export; ordinary reads expose only aggregate numbers. */
 export declare class GoAnalyticsService extends TypertRemoteService {
     private readonly options;
     private readonly identities;
@@ -26,6 +26,8 @@ export declare class GoAnalyticsService extends TypertRemoteService {
     private now;
     private query;
     private failure;
+    /** A shared task superseded by an identity/network change is not a caller cancellation. */
+    private cancelled;
     private forget;
     private network;
     private assertCurrentNetwork;

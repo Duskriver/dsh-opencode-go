@@ -35,10 +35,15 @@ type BigTotals = Record<keyof AnalyticsTotals, bigint>
 interface HistoryRow { day: string; provider: string; model: string; totals: BigTotals; fields: string[] }
 interface ParsedCsv { header: string[]; rows: HistoryRow[] }
 interface Identity { accountRef: string; baseURL: string; proxyURL: string; key: string; source: string }
-interface Dataset extends ParsedCsv { csv: string; generatedAt: number; day: string; source: string }
+interface Dataset extends ParsedCsv { generatedAt: number; day: string; source: string }
 interface Pending { promise: Promise<Dataset>; controller: AbortController; consumers: number; source: string }
 
 function invalidCsv(): never { throw new SyntaxError('Invalid official usage CSV') }
+
+/** True for a bare AbortError, which is a cancellation only when the caller's own signal is untouched. */
+function isAbortReason(error: unknown): boolean {
+  return error !== null && typeof error === 'object' && 'name' in error && String(error.name) === 'AbortError'
+}
 
 /** RFC 4180 fields, including quoted CRLF, commas and doubled quotes. */
 function csvRecords(raw: string): string[][] {
@@ -175,7 +180,7 @@ function encodeCsv(rows: readonly (readonly string[])[]): string {
   return rows.map(row => row.map(value => /[",\r\n]/.test(value) ? '"' + value.replaceAll('"', '""') + '"' : value).join(',')).join('\r\n') + '\r\n'
 }
 
-/** The Host retains the official CSV; ordinary reads expose only aggregate numbers. */
+/** The Host retains parsed official rows for export; ordinary reads expose only aggregate numbers. */
 export class GoAnalyticsService extends TypertRemoteService {
   private readonly identities = new Map<string, Identity>()
   private readonly cache = new Map<string, Dataset>()
@@ -187,7 +192,7 @@ export class GoAnalyticsService extends TypertRemoteService {
     super(ctx, 'opencodeGoAnalytics')
     this.transport = options.transport ?? new ProxyTransport()
     ctx.effect(() => () => {
-      for (const pending of this.active) pending.controller.abort()
+      for (const pending of this.active) pending.controller.abort(this.cancelled(pending.source))
       this.active.clear()
       this.pending.clear(); this.cache.clear(); this.identities.clear()
       if (!options.transport) return this.transport.dispose()
@@ -221,10 +226,17 @@ export class GoAnalyticsService extends TypertRemoteService {
     })
   }
 
+  /** A shared task superseded by an identity/network change is not a caller cancellation. */
+  private cancelled(source: string): RemoteError {
+    return this.failure('network',
+      'The official usage history request was superseded by an account, credential or connection change; retry it',
+      true, source, false)
+  }
+
   private forget(identity: Identity): void {
     this.identities.delete(identity.accountRef)
     for (const [key, data] of this.cache) if (data.source === identity.source) this.cache.delete(key)
-    for (const pending of this.active) if (pending.source === identity.source) pending.controller.abort()
+    for (const pending of this.active) if (pending.source === identity.source) pending.controller.abort(this.cancelled(pending.source))
     for (const [key, pending] of this.pending) if (pending.source === identity.source) this.pending.delete(key)
   }
 
@@ -331,8 +343,18 @@ export class GoAnalyticsService extends TypertRemoteService {
     }
     const task = pending
     task.consumers++
-    try { return await waitWithSignal(() => task.promise, signal) }
-    finally {
+    try {
+      return await waitWithSignal(() => task.promise, signal)
+    } catch (error) {
+      // The caller's own signal aborts a wait with its own reason (cancel
+      // semantics). A shared task cancelled by an identity, account, network
+      // or teardown change must surface the analytics failure vocabulary, not a
+      // bare AbortError, to every other concurrent consumer.
+      if (signal?.aborted) throw error
+      if (isAbortReason(error)) throw this.failure('network',
+        'The official usage history request was cancelled; retry it', true, identity.source, false)
+      throw error
+    } finally {
       task.consumers--
       if (!task.consumers) {
         task.controller.abort()
@@ -387,7 +409,7 @@ export class GoAnalyticsService extends TypertRemoteService {
       const csv = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(bytes, size))
       const parsed = parseCsv(csv)
       signal.throwIfAborted()
-      return { ...parsed, csv, generatedAt: now, day: utcDay(now), source: identity.source }
+      return { ...parsed, generatedAt: now, day: utcDay(now), source: identity.source }
     } catch (error) {
       caller.throwIfAborted()
       if (error instanceof RemoteError) throw error

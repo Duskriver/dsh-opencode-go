@@ -1726,7 +1726,7 @@ describe('client registration and remote lifecycle', () => {
       // Anti-drift guard: a declared service that is never read anywhere else only
       // gates the whole surface on a dependency nobody needs.
       const declared = new Set<string>([...clientInject, ...harness.serviceRequests.flat()])
-      const sources = ['index.ts', 'controller.ts', 'Section.tsx', 'UsagePill.tsx', 'AnalyticsDialog.tsx', 'presentation.ts', 'dashboard-copy.ts']
+      const sources = ['index.ts', 'controller.ts', 'Section.tsx', 'UsagePill.tsx', 'AnalyticsDialog.tsx', 'presentation.ts']
         .map(name => readFileSync(resolve('src/client', name), 'utf8'))
         .map(text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''))
         .join('\n')

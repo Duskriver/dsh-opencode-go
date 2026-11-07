@@ -1,6 +1,6 @@
 /** Conversation and sidebar quota indicators, account selection and analytics. */
 import css from './UsagePill.module.css'
-import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import {
@@ -76,11 +76,14 @@ function usageFailure(error: unknown): UsageFailure {
 }
 
 /** A hung readUsage must not hold the refresh latch forever: after this long the
- *  cycle gives up silently, leaving the displayed state untouched so the minute
+ *  cycle gives up, keeping the last reading but flagging it stale, so the minute
  *  timer and visibility refreshes regain their turn. */
 const usageRefreshTimeoutMs = 30_000
 
 const refreshTimedOut = Symbol('usage-refresh-timed-out')
+
+/** Descendants a non-modal popover may hand focus to when it opens. */
+const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
   return new Promise<GoUsage>((resolve, reject) => {
@@ -203,19 +206,36 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
   const [failed, setFailed] = useState<{ reader: typeof readUsage; failure: UsageFailure } | null>(null)
+  const [stale, setStale] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [open, setOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
+  const [rovingIndex, setRovingIndex] = useState(0)
   const tokens = useGoThemeTokens()
   const root = useRef<HTMLSpanElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const panelId = useId()
   const retry = useRef<() => void>(() => {})
+  const focusTrigger = useCallback(() => { triggerRef.current?.focus() }, [])
+  const current = snapshot?.reader === readUsage ? snapshot : null
+  const usage = current?.usage
+  const failure = failed?.reader === readUsage ? failed.failure : null
+  const notice = usage?.lastSwitch ?? failure?.lastSwitch
+  const accountName = accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')
+  // The account list is the user's own choice of which account to spend, not the
+  // fallback order the Settings page owns: it stays a drill-down inside the panel.
+  const accountsView = view === 'accounts' && accounts.length > 1
+  const selectedIndex = Math.max(0, accounts.findIndex(account => account.apiKeyEnv === activeRef))
+  const roving = Math.min(rovingIndex, Math.max(0, accounts.length - 1))
   useEffect(() => {
     let alive = true
     let busy = false
     setSnapshot(null)
     setFailed(null)
+    setStale(false)
     setRefreshing(false)
     const refresh = async (manual = false) => {
       if (busy || !manual && document.visibilityState === 'hidden') return
@@ -226,17 +246,22 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
         if (alive) {
           setSnapshot({ reader: readUsage, usage: value, updatedAt: Date.now() })
           setFailed(null)
+          setStale(false)
         }
       } catch (error: unknown) {
-        // A timed-out pill read only frees the latch, keeping its snapshot.
-        // The sidebar marks its viewed account unavailable instead.
-        if (error === refreshTimedOut && !sidebar) return
         if (alive) {
-          const failure = usageFailure(error)
-          setFailed({ reader: readUsage, failure })
-          setSnapshot(previous => !sidebar && previous?.reader === readUsage && failure.retainPrevious
-            && typeof previous.usage.source === 'string' && previous.usage.source.length > 0
-            && previous.usage.source === failure.source ? previous : null)
+          if (error === refreshTimedOut) {
+            // A timed-out read is not a failure: keep the last successful reading
+            // (when there is one) and mark it stale until a later read succeeds.
+            setStale(true)
+          } else {
+            const failure = usageFailure(error)
+            setFailed({ reader: readUsage, failure })
+            setSnapshot(previous => !sidebar && previous?.reader === readUsage && failure.retainPrevious
+              && typeof previous.usage.source === 'string' && previous.usage.source.length > 0
+              && previous.usage.source === failure.source ? previous : null)
+            setStale(false)
+          }
         }
       } finally {
         busy = false
@@ -257,35 +282,58 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   }, [readUsage, sidebar])
   useEffect(() => {
     if (!open) return
-    const click = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
-    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    const click = (event: MouseEvent) => {
+      if (root.current?.contains(event.target as Node)) return
+      setOpen(false)
+      focusTrigger()
+    }
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      focusTrigger()
+    }
     document.addEventListener('mousedown', click)
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', click); document.removeEventListener('keydown', key) }
+  }, [open, focusTrigger])
+  // The popover is non-modal, but opening it must land focus inside: on the first
+  // action of the reading view, or on the current account of the drill-down list.
+  useEffect(() => {
+    if (!open) return
+    const panel = panelRef.current
+    if (!panel) return
+    const first = panel.querySelector<HTMLElement>(focusableSelector)
+    ;(first ?? panel).focus()
   }, [open])
   useEffect(() => {
-    if (open && view === 'accounts') root.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
-  }, [open, view])
-  const current = snapshot?.reader === readUsage ? snapshot : null
-  const usage = current?.usage
-  const failure = failed?.reader === readUsage ? failed.failure : null
-  const notice = usage?.lastSwitch ?? failure?.lastSwitch
-  const accountName = accounts.find(account => account.apiKeyEnv === activeRef)?.name || t('accountDefault')
-  // The account list is the user's own choice of which account to spend, not the
-  // fallback order the Settings page owns: it stays a drill-down inside the panel.
-  const accountsView = view === 'accounts' && accounts.length > 1
+    if (!open || !accountsView) return
+    const panel = panelRef.current
+    if (!panel) return
+    const options = Array.from(panel.querySelectorAll<HTMLElement>('[role="option"]'))
+    const index = Math.max(0, Math.min(selectedIndex, options.length - 1))
+    setRovingIndex(index)
+    ;(options[index] ?? panel).focus()
+  }, [open, accountsView, selectedIndex])
   const switchable = accounts.length > 1 && writable && selectAccount !== undefined
   const switchTo = (ref: string): void => {
-    if (ref === activeRef) { setView('usage'); return }
+    if (ref === activeRef) { setView('usage'); focusTrigger(); return }
     setSwitching(true)
     setSwitchFailed(false)
     void selectAccount?.(ref).then(accepted => {
       setSwitchFailed(!accepted)
       if (accepted) setView('usage')
-    }).catch(() => { setSwitchFailed(true) }).finally(() => { setSwitching(false) })
+      // The activated option is unmounted (success) or busy (failure); a keyboard
+      // user goes back to the trigger instead of losing focus to the document.
+      focusTrigger()
+    }).catch(() => { setSwitchFailed(true); focusTrigger() }).finally(() => { setSwitching(false) })
   }
+  /** A timed-out refresh keeps the last reading but must say when it was taken.
+   *  Existing copy only: the panel's own `usageLastUpdated` label plus a clock time. */
+  const staleUpdated = stale && !failure && current
+    ? ` · ${t('usageLastUpdated')} ${new Date(current.updatedAt).toLocaleTimeString(getLocale?.(), { hour: '2-digit', minute: '2-digit' })}`
+    : ''
   const label = usage
-    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${sidebar ? ` · ${t('usage_monthly')} ${usage.monthly.percent}%` : ''}${failure ? ` · ${t('usageStaleShort')}` : ''}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${sidebar ? ` · ${t('usage_monthly')} ${usage.monthly.percent}%` : ''}${failure || stale ? ` · ${t('usageStaleShort')}` : ''}${staleUpdated}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
     : `${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
   /** The pill's segments concatenate to exactly `label`: the two readings, the optional stale and
    *  fallback wording, and the active account's full name once a second account exists. The
@@ -295,12 +343,12 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
    *  in every tier. */
   const segments = usage
     ? <>
-      <span className={css.reading} data-stale={failure ? '' : undefined}>
+      <span className={css.reading} data-stale={failure || stale ? '' : undefined}>
         <span className={css.unit}>{t('usageRollingShort')} </span>{usage.rolling.percent}%
         {' · '}
         <span className={css.unit}>{t('usageWeekShort')} </span>{usage.weekly.percent}%
       </span>
-      {failure ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
+      {failure || stale ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
       {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
       {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
     </>
@@ -315,11 +363,16 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   const Trigger = !sidebar || iconOpensHistory ? 'button' : 'span'
   return <span className={[css.root, sidebar ? css.sidebarRoot : undefined].filter(Boolean).join(' ')}
     data-wide={sidebar ? String(variant === 'sidebar') : undefined} ref={root} style={themeStyle(tokens)}>
-    <Trigger type={!sidebar || iconOpensHistory ? 'button' : undefined} role={sidebar && !iconOpensHistory ? 'group' : undefined} className={triggerClass}
+    <Trigger type={!sidebar || iconOpensHistory ? 'button' : undefined} role={sidebar && !iconOpensHistory ? 'group' : undefined}
+      ref={!sidebar ? triggerRef : undefined} className={triggerClass}
       aria-expanded={iconOpensHistory ? analyticsOpen : sidebar ? undefined : open}
+      aria-controls={!sidebar ? panelId : undefined}
       aria-haspopup={!sidebar || iconOpensHistory ? 'dialog' : undefined} data-fallback={notice ? '' : undefined}
+      data-stale={failure || stale ? '' : undefined}
       aria-label={iconOpensHistory ? t('sidebarAnalytics') : `${t('usageTitle')}: ${label}`} title={label}
-      onClick={iconOpensHistory ? () => { onAnalyticsOpenChange(true) } : sidebar ? undefined : () => { setOpen(!open); setView('usage') }}>
+      onClick={iconOpensHistory ? () => { onAnalyticsOpenChange(true) } : sidebar ? undefined : () => {
+        if (open) { setOpen(false); focusTrigger() } else { setView('usage'); setOpen(true) }
+      }}>
       {variant === 'sidebar' ? <>
         <span className={css.sidebarHead}>
           <strong>OpenCode Go</strong>
@@ -335,34 +388,43 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           <strong>{usage ? `${usage[key].percent}%` : failure ? '—' : '…'}</strong>
         </span>)}
         {failure ? <span className={css.sidebarStatus} role="status" title={failure.message}>{t('usageUnavailable')}</span> : null}
+        {!failure && stale && current ? <span className={css.sidebarStatus} data-stale="">{t('usageStaleShort')}</span> : null}
         {readAnalytics ? <button type="button" className={css.sidebarHistory} aria-label={t('sidebarAnalytics')} aria-haspopup="dialog"
           onClick={() => { onAnalyticsOpenChange(true) }}>
           <ChartIcon /><span>{t('analyticsOpen')}</span><ChevronRight />
         </button> : null}
       </> : variant === 'sidebar-icon' ? <ChartIcon /> : <>
-        <span className={css.pillStatus} data-warning={failure || notice ? '' : undefined} aria-hidden="true" />{segments}
+        <span className={css.pillStatus} data-warning={failure || stale || notice ? '' : undefined} aria-hidden="true" />{segments}
       </>}
     </Trigger>
-    {!sidebar && open && <div className={css.panel} role="dialog" aria-label={t('usageTitle')} aria-busy={refreshing}>
+    {!sidebar && open && <div className={css.panel} id={panelId} ref={panelRef} role="dialog"
+      aria-label={t('usageTitle')} aria-busy={refreshing} tabIndex={-1}>
       {/* Keep the surface separate from the scroller so its border stays fixed. */}
       <div className={css.material} aria-hidden="true" />
       <div className={css.body}>
       {accountsView ? <>
         <div className={css.panelHead}>
-          <button type="button" className={css.back} aria-label={t('accountSwitchBack')} onClick={() => { setView('usage') }}>
+          <button type="button" className={css.back} aria-label={t('accountSwitchBack')}
+            onClick={() => { setView('usage'); focusTrigger() }}>
             <ChevronLeft />
           </button>
           <strong>{t('accountSwitchTitle')}</strong>
         </div>
-        <div className={css.tile} role="listbox" aria-label={t('accountSwitchTitle')}
+        <div className={css.tile} role="listbox" aria-label={t('accountSwitchTitle')} aria-orientation="vertical"
           onKeyDown={event => {
-            if (event.key === 'Escape') { event.stopPropagation(); setView('usage'); return }
-            const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
-            if (step === 0 && event.key !== 'Home' && event.key !== 'End') return
-            event.preventDefault()
+            if (event.key === 'Escape') { event.stopPropagation(); setView('usage'); focusTrigger(); return }
             const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'))
-            const at = options.indexOf(document.activeElement as HTMLButtonElement)
-            const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (at + step + options.length) % options.length
+            if (!options.length) return
+            const focused = options.findIndex(option => option === document.activeElement)
+            const at = focused >= 0 ? focused : Math.min(roving, options.length - 1)
+            const next = event.key === 'ArrowDown' ? (at + 1) % options.length
+              : event.key === 'ArrowUp' ? (at - 1 + options.length) % options.length
+              : event.key === 'Home' ? 0
+              : event.key === 'End' ? options.length - 1
+              : -1
+            if (next < 0) return
+            event.preventDefault()
+            setRovingIndex(next)
             options[next]?.focus()
           }}>
           {accounts.map((account, index) => <Fragment key={account.id}>
@@ -370,6 +432,8 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
             <button type="button" role="option" aria-selected={account.apiKeyEnv === activeRef}
               data-selected={account.apiKeyEnv === activeRef ? '' : undefined}
               className={css.option} disabled={switching}
+              tabIndex={index === roving ? 0 : -1}
+              onFocus={() => { setRovingIndex(index) }}
               onClick={() => { switchTo(account.apiKeyEnv) }}>
               <span className={css.optionName}>{account.name || t('accountDefault')}</span>
               {account.apiKeyEnv === activeRef ? <Tick /> : null}

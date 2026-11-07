@@ -16,7 +16,6 @@ import { createConfigForm, defaultClientSettings } from './support/client.tsx'
 import type { OpencodeGoSettings } from '../src/client/controller.ts'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createAnalyticsReport } from './support/analytics.ts'
-import { historyEn } from '../src/client/dashboard-copy.ts'
 
 describe("conversation usage", () => {
   const usageSettings = (value: OpencodeGoSettings = {}) => {
@@ -119,7 +118,7 @@ describe("conversation usage", () => {
     expect(readAnalytics).not.toHaveBeenCalled()
     await act(async () => { fireEvent.click(within(quota).getByRole('button', { name: en.sidebarAnalytics })) })
     const dialog = screen.getByRole('dialog', { name: en.analyticsTitle })
-    const account = within(dialog).getByRole<HTMLSelectElement>('combobox', { name: historyEn.account })
+    const account = within(dialog).getByRole<HTMLSelectElement>('combobox', { name: en.analyticsAccount })
     expect(account.value).toBe('ACCOUNT_A')
     expect(readAnalytics).toHaveBeenCalledExactlyOnceWith({ accountRef: 'ACCOUNT_A', range: '30d' }, expect.any(AbortSignal))
     expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_A')
@@ -595,20 +594,85 @@ describe("conversation usage", () => {
     expect(read).toHaveBeenCalledTimes(3)
   })
 
-  it('releases the busy latch when a usage read never settles and resumes timer refreshes without a fabricated failure', async () => {
-    const read = vi.fn().mockImplementation(() => new Promise<GoUsage>(() => {}))
+  it('releases the busy latch when a usage read never settles and recovers on a later timer cycle without a fabricated failure', async () => {
+    const read = vi.fn().mockImplementationOnce(() => new Promise<GoUsage>(() => {})).mockResolvedValue(updated)
     await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
     expect(read).toHaveBeenCalledTimes(1)
     expect(trigger().textContent).toBe('…')
     // Just before the sentinel, the minute timer stays latched out behind the hung read.
     await tick(29_000)
     expect(read).toHaveBeenCalledTimes(1)
-    // The ~30s sentinel frees the latch without reporting a failure, and the next
-    // minute cycle regains its turn.
-    await tick(31_000)
-    expect(read).toHaveBeenCalledTimes(2)
+    // The ~30s sentinel frees the latch. No reading ever arrived, so the pill keeps its
+    // loading glyph, marks itself stale internally and does not invent a failure; the
+    // next minute cycle can recover.
+    await tick(1_000)
+    expect(read).toHaveBeenCalledTimes(1)
     expect(trigger().textContent).toBe('…')
+    expect(trigger().hasAttribute('data-stale')).toBe(true)
     expect(screen.queryByText(en.usageUnavailable)).toBeNull()
+    await tick(30_000)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(trigger().textContent).toBe(percentageLabel(updated))
+    expect(trigger().hasAttribute('data-stale')).toBe(false)
+  })
+
+  it('keeps the last percentages and marks them stale when a refresh times out, clearing the mark on success', async () => {
+    const read = vi.fn().mockResolvedValueOnce(usage)
+      .mockImplementationOnce(() => new Promise<GoUsage>(() => {}))
+      .mockResolvedValue(updated)
+    await act(async () => { render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />) })
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(trigger().textContent).toBe(percentageLabel(usage))
+    // The minute cycle's read hangs; the 30s sentinel must flag the retained data stale
+    // instead of leaving it indistinguishable from a fresh reading.
+    await tick(60_000)
+    expect(read).toHaveBeenCalledTimes(2)
+    await tick(30_000)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(trigger().textContent).toBe(`${percentageLabel(usage)} · ${en.usageStaleShort}`)
+    expect(trigger().title).toContain(en.usageStaleShort)
+    expect(trigger().title).toContain(en.usageLastUpdated)
+    expect(trigger().title).toMatch(/\d{1,2}:\d{2}/)
+    expect(trigger().querySelector(`.${css.reading}`)?.getAttribute('data-stale')).toBe('')
+    expect(trigger().hasAttribute('data-stale')).toBe(true)
+    // A stale mark is not an error: no red failure copy and no cleared percentages.
+    expect(screen.queryByText(en.usageUnavailable)).toBeNull()
+    showDetails()
+    expect(screen.getAllByRole('progressbar')).toHaveLength(3)
+    expect(screen.getByRole('progressbar', { name: en.usage_weekly }).getAttribute('value')).toBe('10')
+    expect(screen.getByText(new RegExp(`^${en.usageLastUpdated}`))).toBeTruthy()
+    // The next minute cycle succeeds: fresh percentages replace the stale ones.
+    await tick(30_000)
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(trigger().textContent).toBe(percentageLabel(updated))
+    expect(trigger().title).toBe(percentageLabel(updated))
+    expect(trigger().hasAttribute('data-stale')).toBe(false)
+    expect(trigger().querySelector(`.${css.stale}`)).toBeNull()
+  })
+
+  it('marks the sidebar quota stale instead of unavailable when a refresh times out, then recovers', async () => {
+    const host = usageSettings({ showSidebarQuota: true })
+    const read = vi.fn().mockResolvedValueOnce(usage)
+      .mockImplementationOnce(() => new Promise<GoUsage>(() => {}))
+      .mockResolvedValue(updated)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={read} t={t} />) })
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_weekly }).getAttribute('value')).toBe('10')
+    await tick(60_000)
+    expect(read).toHaveBeenCalledTimes(2)
+    await tick(30_000)
+    expect(read).toHaveBeenCalledTimes(2)
+    // The old percentages stay, flagged stale: a timeout is not a red failure.
+    expect(within(sidebarQuota()).getByText(en.usageStaleShort)).toBeTruthy()
+    expect(within(sidebarQuota()).queryByText(en.usageUnavailable)).toBeNull()
+    expect(within(sidebarQuota()).queryByRole('status')).toBeNull()
+    expect(sidebarQuota().getAttribute('aria-label')).toContain(en.usageStaleShort)
+    expect(sidebarQuota().getAttribute('title')).toContain(en.usageLastUpdated)
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_rolling }).getAttribute('value')).toBe('0')
+    expect(within(sidebarQuota()).getByText('7%')).toBeTruthy()
+    await tick(30_000)
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(within(sidebarQuota()).queryByText(en.usageStaleShort)).toBeNull()
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_weekly }).getAttribute('value')).toBe('30')
   })
 
   it('frees the busy latch when a hung retry never settles so a later manual refresh can fire', async () => {
@@ -750,6 +814,8 @@ describe("conversation usage", () => {
     expect(selectAccount).toHaveBeenCalledWith('ACCOUNT_B')
     expect(screen.queryByRole('listbox')).toBeNull()
     expect(within(openPanel()).getAllByRole('progressbar')).toHaveLength(3)
+    // The activated option is gone; focus must land back on the trigger.
+    expect(document.activeElement).toBe(trigger())
   })
 
   it('keeps the list open with the failure notice when the host refuses the switch', async () => {
@@ -762,25 +828,87 @@ describe("conversation usage", () => {
     await act(async () => { fireEvent.click(options[1]!) })
     expect(screen.getByRole('alert').textContent).toBe(en.accountSwitchFailed)
     expect(screen.getByRole('listbox', { name: en.accountSwitchTitle })).toBeTruthy()
+    expect(document.activeElement).toBe(trigger())
   })
 
-  it('walks the account list with the arrow keys and leaves it with Escape before the panel', async () => {
+  it('walks the account list with the arrow keys, Home and End, and restores the trigger on Escape', async () => {
     const host = writableSettings()
     await act(async () => { render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)} t={t} selectAccount={vi.fn()} />) })
     showDetails()
     fireEvent.click(switchButton())
     const list = screen.getByRole('listbox', { name: en.accountSwitchTitle })
     const options = within(list).getAllByRole('option')
+    // Roving tabindex: the selected account is the list's single Tab stop.
+    expect(options[0]!.tabIndex).toBe(0)
+    expect(options[1]!.tabIndex).toBe(-1)
     options[0]!.focus()
+    expect(document.activeElement).toBe(options[0])
     fireEvent.keyDown(list, { key: 'ArrowDown' })
     expect(document.activeElement).toBe(options[1])
-    fireEvent.keyDown(list, { key: 'ArrowDown' })
+    expect(options[1]!.tabIndex).toBe(0)
+    expect(options[0]!.tabIndex).toBe(-1)
+    fireEvent.keyDown(list, { key: 'End' })
+    expect(document.activeElement).toBe(options[options.length - 1])
+    fireEvent.keyDown(list, { key: 'Home' })
     expect(document.activeElement).toBe(options[0])
+    fireEvent.keyDown(list, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(options[options.length - 1])
     fireEvent.keyDown(list, { key: 'Escape' })
-    // Escape steps back to the reading; the panel itself stays open.
+    // Escape steps back to the reading; the panel itself stays open but focus returns
+    // to the trigger instead of falling to the document body.
     expect(screen.queryByRole('listbox')).toBeNull()
     expect(openPanel()).toBeTruthy()
+    expect(document.activeElement).toBe(trigger())
     expect(within(openPanel()).getAllByRole('progressbar')).toHaveLength(3)
+  })
+
+  it('moves focus into the panel and wires the trigger to it with aria-controls', async () => {
+    const host = writableSettings()
+    await act(async () => { render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)} t={t} selectAccount={vi.fn()} />) })
+    const button = trigger()
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog')
+    const controls = button.getAttribute('aria-controls')
+    expect(controls).toBeTruthy()
+    showDetails()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    const dialog = openPanel()
+    expect(dialog.getAttribute('id')).toBe(controls)
+    expect(dialog.getAttribute('tabindex')).toBe('-1')
+    // The first action of the reading view (the account drill-down) takes focus.
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: new RegExp(en.accountSwitchAction) }))
+  })
+
+  it('returns focus to the trigger when the panel closes from Escape or an outside click', async () => {
+    const host = usageSettings({ usageDisplay: 'always' })
+    await act(async () => { render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)} t={t} />) })
+    showDetails()
+    expect(openPanel()).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(trigger())
+    showDetails()
+    expect(openPanel()).toBeTruthy()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(trigger())
+  })
+
+  it('focuses the current account when the drill-down opens and restores the trigger from its back button', async () => {
+    const host = writableSettings('ACCOUNT_B')
+    await act(async () => { render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)} t={t} selectAccount={vi.fn()} />) })
+    showDetails()
+    fireEvent.click(switchButton())
+    const options = within(openPanel()).getAllByRole('option')
+    const selected = options.find(option => option.getAttribute('aria-selected') === 'true')!
+    expect(selected.textContent).toBe('Backup')
+    expect(document.activeElement).toBe(selected)
+    expect(selected.tabIndex).toBe(0)
+    for (const option of options) if (option !== selected) expect(option.tabIndex).toBe(-1)
+    fireEvent.click(within(openPanel()).getByRole('button', { name: en.accountSwitchBack }))
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(within(openPanel()).getAllByRole('progressbar')).toHaveLength(3)
+    expect(document.activeElement).toBe(trigger())
   })
 
   it('opens the shared analytics dialog from the expanded panel', async () => {

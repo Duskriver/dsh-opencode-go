@@ -1,0 +1,58 @@
+# Changelog
+
+本文件记录 dsh-opencode-go 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+### Added
+
+- Free 通道（`dsh-opencode-free`）改为**显式 opt-in**：新增 `freeEnabled` 设置并默认关闭；未开启时不注册 Free 路由、不拉取 Free 目录、不在模型发现与设置页暴露 Free 模型，关闭开关并保存后撤回路由且允许进行中的请求完成。
+- 用量看板图表补充键盘行为：Escape 仅在存在已固定/激活日期时消费，否则保留宿主弹窗的关闭行为。
+- 发布防护：新增 `scripts/check-pack.mjs` 与 `npm run check:pack`，断言 npm tarball 包含运行期、类型、文档与第三方通知所需文件；CI 的 `core` job 增加该步骤。
+- `lib/build-info.json` 记录包版本；tarball 随包发布 `scripts/licenses/pi-1.5.0-LICENSE`，使 `THIRD_PARTY_NOTICES.md` 的引用在安装包内可解析。
+- 仓库新增 `CHANGELOG.md` 与 `SECURITY.md`；CI 新增 advisory 兼容 job，在临时 consumer 中对 DSH `0.2.2-rc.1` 的 Host 路径运行 installed-package 冒烟（允许失败）。
+- 本批新增 65 个回归测试。
+
+### Changed
+
+- 依赖：`@deepseek-ai/dsh-brand` 与 `@deepseek-ai/schemastery` 从 `dependencies` 调整为宿主提供的 `peerDependencies`（`>=0.2.1-rc.5` / `>=3.18.5 <4`），避免 profile 内重复安装；Cordis peer 范围由 `~4.0.5` 放宽为 `^4.0.5`，覆盖 DSH 0.2.2 携带的 Cordis 4.1.0。
+- Free Bun worker 改为使用显式环境 allowlist，不再继承 `process.env`：`NODE_EXTRA_CA_CERTS`、`NODE_TLS_REJECT_UNAUTHORIZED`、`NODE_OPTIONS`、`LD_PRELOAD`/`DYLD_INSERT_LIBRARIES` 与代理变量不再跨进程传递。
+- 请求生命周期：插件卸载时释放两条路由的 adapter；adapter 不再 dispose 注入的共享 `ProxyTransport`，Free worker 与 SOCKS 隧道因此有回收路径，同时不破坏 Host 拥有的传输。
+- `LlmFailure` 从实际 HTTP 响应与 `Retry-After` 回填 `status` / `providerRetryAfterMs`；实现 `imageRequestTarget`，使 token meter 按实际序列化的图片计价。
+- 官方历史 CSV 容忍空行与多余尾列；`cost_usd` 仅用于展示，`cost_micro_cents` 继续精确汇总。
+- 模型目录 discovery 拒绝重定向并脱敏失败 URL；Host 与浏览器设置表单均拒绝内嵌凭据的 `baseURL`。
+- thinking budgets 的非法值改为过滤/钳制，不再使模型解析整体失败；浏览器与 Host 共享 `MAX_THINKING_BUDGET_TOKENS`。
+- 客户端：移除未使用的 inject 服务，区分加载中与不可用，数值输入与 Host 边界一致（字段级错误、`min` / `max` / `step`），并区分 provider 切换失败与模型可见性失败。
+- Free IPC 边界：请求体在读入前按 `Content-Length`、读入后按真实字节数受 64 MiB 上限保护；worker 在 `JSON.parse` 前对 stdin 累计 256 MiB 上限做检查。
+- 发布流程：`prepack` 重新执行 `check:dist`，`prepublishOnly` 执行类型检查与 `test:ci`，避免陈旧 `lib/` 被发布；`scripts/headless-smoke.mjs` 现在要求显式传入 consumer 参数（缺省打印用法并以退出码 2 结束）。
+- 文档：`x-opencode-session` 措辞精确化为“常见可打印 ASCII 会话 ID 原样透传，仅非常规/保留前缀 ID 做 sha256 + base64url”；补充 Bun 可选依赖 postinstall 行为、发布检查说明与验证矩阵。
+
+### Fixed
+
+- 官方 CSV 遇到空行或额外尾列时会解析失败。
+- discovery 跟随重定向、错误信息携带目录 URL、`baseURL` 内嵌凭据等诊断与凭据问题。
+- 非法 thinking budget 导致模型解析失败。
+- 插件卸载后 Free Bun worker 与 SOCKS 隧道缺少释放路径。
+
+## [0.2.1] - 2026-11-06
+
+### Added
+
+- 官方 Console 每日 CSV 历史用量看板：按所选 Key 的工作区汇总，provider + model 分组，UTC 日序列补零，`cost_micro_cents` 精确汇总，并明确官方用量口径与隐私边界。
+- 侧栏月额度与账号预览：三个额度窗口常驻展示，账号徽标可循环查看只读额度并记住查看账号，不可用读数明确报错。
+- Go 与平台 Free 双路由动态模型目录：分别从各自 `/models` 发现模型与价格，保留同名模型，路由级开关与容量设置独立；内置 pi-ai 升级到 1.5.0。
+- 统一 Claude 风格的插件接口，并紧凑化模型设置布局。
+
+### Changed
+
+- 历史看板从本地统计切换为官方 Console 每日 CSV 数据源。
+- 模型与价格元数据改由各网关 `/models` 声明提供，不再依赖 models.dev 刷新。
+- Free 限流处理移入插件内部；对外错误分类保持 `FREE_QUOTA`、`FREE_RATE_LIMIT` 等稳定语义。
+- 改进 Free 传输、额度 UI 与 token 预算。
+
+### Fixed
+
+- 上下文变化后，回放用量不再沿用旧值。
+- CI 兼容 npm 10 与 Windows 权限设置。
+- POSIX 上接受 Bun 启动器路径。

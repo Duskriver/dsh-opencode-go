@@ -78,7 +78,7 @@ Enable it in **Settings → OpenCode Go → Advanced settings → Free channel**
 
 Once enabled:
 
-- **Reuses saved accounts**: Free shares the account roster, prefers usable saved keys, and follows the Automatic fallback setting.
+- **Saved-key reuse is endpoint-bound**: Free shares the account roster and follows the Automatic fallback setting, but only reuses saved keys when `freeBaseURL` is the official platform host (`opencode.ai`) or shares the Go gateway's origin (same scheme, host and port, e.g. one self-hosted reverse proxy serving both routes). Any other custom `freeBaseURL` falls back to anonymous `Bearer public` — no saved key is read or sent — and the decision is logged without credentials.
 - **Anonymous public access without a key**: with no usable key it sends `Bearer public`.
 - **Official CLI identity**: requests use the official OpenCode CLI user agent (`opencode/latest/2.2.5/cli`) instead of DSH's own attribution.
 - **Separate Bun runtime**: Free inference runs in its own HTTP worker started from the `bun@1.4.4` optional dependency. The `bun` package ships a `postinstall` that may download or unpack the platform binary; with `--ignore-scripts`, or without the optional dependency, Free can report `MISSING_BUN_RUNTIME` while Go keeps working (see the FAQ).

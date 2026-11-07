@@ -5,6 +5,34 @@ import { randomBytes } from 'node:crypto'
 
 function hostname(url: URL): string { return url.hostname.replace(/^\[|\]$/g, '') }
 
+/** Idle limit for a relayed connection: no bytes in either direction means teardown. */
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000
+
+/** Restrictions for one loopback relay instance. */
+export interface SocksTunnelOptions {
+  /**
+   * The only target host the relay may reach. Omitted keeps the unconstrained
+   * behavior used by direct tests; Free always passes the request hostname so a
+   * local process that learns the port and password cannot use it as an open
+   * proxy to arbitrary destinations.
+   */
+  allowedHost?: string
+  /** Overridable idle limit for tests; defaults to two minutes. */
+  idleTimeoutMs?: number
+}
+
+/**
+ * Canonicalize a host for comparisons: lower-case, brackets stripped and the
+ * URL parser's IPv4/IPv6 normalization applied when possible. Both sides of a
+ * comparison go through this, so differing input spellings cannot bypass the
+ * allowlist and a malformed host cannot match another host by accident.
+ */
+function normalizeHost(host: string): string {
+  const plain = host.replace(/^\[|\]$/g, '').trim().toLowerCase()
+  const candidate = plain.includes(':') ? `[${plain}]` : plain
+  try { return hostname(new URL(`http://${candidate}/`)) } catch { return plain }
+}
+
 async function read(socket: Socket, size: number): Promise<Buffer> {
   for (;;) {
     const bytes = socket.read(size) as Buffer | null
@@ -72,7 +100,11 @@ async function socksConnect(proxy: URL, target: URL, signal: AbortSignal, track:
   } catch (error) { socket.destroy(); throw error }
 }
 
-export async function openSocksTunnel(raw: string, signal: AbortSignal): Promise<{ url: string; close(): Promise<void> }> {
+export async function openSocksTunnel(
+  raw: string,
+  signal: AbortSignal,
+  options: SocksTunnelOptions = {},
+): Promise<{ url: string; close(): Promise<void> }> {
   const proxy = new URL(raw)
   const sockets = new Set<Socket>()
   const track = (socket: Socket) => {
@@ -84,11 +116,44 @@ export async function openSocksTunnel(raw: string, signal: AbortSignal): Promise
   const password = randomBytes(24).toString('hex')
   const authorization = `Basic ${Buffer.from(`free:${password}`).toString('base64')}`
   const authorized = (request: IncomingMessage) => request.headers['proxy-authorization'] === authorization
+  const allowedHost = options.allowedHost === undefined ? undefined : normalizeHost(options.allowedHost)
+  const permitted = (target: URL): boolean => allowedHost === undefined || normalizeHost(hostname(target)) === allowedHost
+  const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+  const idleTimers = new Set<ReturnType<typeof setTimeout>>()
+  /** Tear a relayed pair down after `idleTimeoutMs` without bytes in either direction. */
+  const idle = (first: Socket, second: Socket): void => {
+    if (!(idleTimeoutMs > 0)) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const clear = (): void => {
+      if (timer === undefined) return
+      clearTimeout(timer)
+      idleTimers.delete(timer)
+      timer = undefined
+    }
+    const arm = (): void => {
+      clear()
+      timer = setTimeout(() => {
+        idleTimers.delete(timer!)
+        timer = undefined
+        first.destroy()
+        second.destroy()
+      }, idleTimeoutMs)
+      timer.unref()
+      idleTimers.add(timer)
+    }
+    for (const socket of [first, second]) {
+      socket.on('data', arm)
+      socket.once('close', clear)
+    }
+    arm()
+  }
   const server = createServer(async (request, response) => {
     let agent: Agent | undefined
     try {
       const destination = new URL(request.url ?? '')
-      if (!authorized(request) || destination.protocol !== 'http:') { response.writeHead(403).end(); return }
+      if (!authorized(request) || destination.protocol !== 'http:' || !permitted(destination)) {
+        response.writeHead(403).end(); return
+      }
       const socket = await socksConnect(proxy, destination, signal, track)
       if (request.destroyed || signal.aborted) { socket.destroy(); response.destroy(); return }
       agent = new Agent({ keepAlive: false })
@@ -103,6 +168,8 @@ export async function openSocksTunnel(raw: string, signal: AbortSignal): Promise
       request.on('aborted', () => upstream.destroy())
       response.once('close', () => { upstream.destroy(); agent?.destroy() })
       request.pipe(upstream)
+      // IncomingMessage#socket is a net.Socket for HTTP server requests.
+      idle(request.socket as Socket, socket)
     } catch { agent?.destroy(); response.destroy() }
   })
   server.on('connection', socket => { track(socket) })
@@ -110,7 +177,7 @@ export async function openSocksTunnel(raw: string, signal: AbortSignal): Promise
     void (async () => {
       try {
         const destination = new URL(`https://${request.url}`)
-        if (!authorized(request)) {
+        if (!authorized(request) || !permitted(destination)) {
           client.end('HTTP/1.1 403 Forbidden\r\n\r\n'); return
         }
         const upstream = await socksConnect(proxy, destination, signal, track)
@@ -120,12 +187,16 @@ export async function openSocksTunnel(raw: string, signal: AbortSignal): Promise
         client.pipe(upstream).pipe(client)
         client.once('close', () => upstream.destroy())
         upstream.once('close', () => client.destroy())
+        // node:http types the CONNECT socket as Duplex; it is a net.Socket.
+        idle(client as Socket, upstream)
       } catch { client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n') }
     })()
   })
   let closing: Promise<void> | undefined
   const close = () => closing ??= new Promise<void>(resolve => {
     signal.removeEventListener('abort', abort)
+    for (const timer of idleTimers) clearTimeout(timer)
+    idleTimers.clear()
     for (const socket of sockets) socket.destroy()
     server.close(() => resolve())
   })

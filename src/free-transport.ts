@@ -141,7 +141,11 @@ export class FreeBunTransport {
         body = bytes.toString('base64')
       }
       signal.throwIfAborted()
-      if (proxy.startsWith('socks5:')) relay = await openSocksTunnel(proxy, signal)
+      // The relay may only reach this request's target host: a local process
+      // that learns the loopback port and password must not get an open proxy.
+      // Bun therefore cannot follow a cross-host redirect over SOCKS; the
+      // frozen target is also why redirects stay inside the request's origin.
+      if (proxy.startsWith('socks5:')) relay = await openSocksTunnel(proxy, signal, { allowedHost: url.hostname })
       signal.throwIfAborted()
       const packet: FreeHttpRequest = {
         url: request.url, method: request.method, headers: [...request.headers], body,
