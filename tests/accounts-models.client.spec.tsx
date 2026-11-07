@@ -190,7 +190,7 @@ describe("model availability and picker visibility", () => {
       expect(checked('Old')).toBe(false)
       expect(screen.queryByRole('checkbox')).toBeNull()
       // Model switches belong to the list; provider and sidebar settings have their own switches.
-      expect(within(screen.getByRole('navigation', { name: en.modelsLabel })).getAllByRole('switch')).toHaveLength(3)
+      expect(within(screen.getByRole('group', { name: en.modelsLabel })).getAllByRole('switch')).toHaveLength(3)
 
       await flip('Beta')
       expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { beta: false })
