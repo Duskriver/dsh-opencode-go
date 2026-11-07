@@ -12,7 +12,7 @@ import {
   themeStyle,
   useGoThemeTokens,
 } from '../src/client/presentation.ts'
-import { createConfigForm } from './support/client.tsx'
+import { createConfigForm, defaultClientSettings } from './support/client.tsx'
 import type { OpencodeGoSettings } from '../src/client/controller.ts'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createAnalyticsReport } from './support/analytics.ts'
@@ -21,7 +21,7 @@ import { historyEn } from '../src/client/dashboard-copy.ts'
 describe("conversation usage", () => {
   const usageSettings = (value: OpencodeGoSettings = {}) => {
     const host = createConfigForm<OpencodeGoSettings>()
-    host.publish({ status: 'ready', value })
+    host.publish({ status: 'ready', value: { ...defaultClientSettings, ...value } })
     return host
   }
 

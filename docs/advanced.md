@@ -44,11 +44,13 @@ socks5://127.0.0.1:1080
 
 ### 双路由与手动配置
 
-`dsh-opencode-go`（DSH OpenCode Go）从 `baseURL` 的 `/models` 动态发现全部聊天模型，需要至少一个可用 API Key 才激活。`dsh-opencode-free`（DSH OpenCode Free）从 `freeBaseURL` 的 `/models` 筛选已声明合法价格、且文本输入、输出、缓存及所有上下文阶梯均为零的聊天模型；缺失或非法价格不会被视为免费。插件开启即激活 Free 路由。
+`dsh-opencode-go`（DSH OpenCode Go）从 `baseURL` 的 `/models` 动态发现全部聊天模型，需要至少一个可用 API Key 才激活。`dsh-opencode-free`（DSH OpenCode Free）从 `freeBaseURL` 的 `/models` 筛选已声明合法价格、且文本输入、输出、缓存及所有上下文阶梯均为零的聊天模型；缺失或非法价格不会被视为免费。Free 是**默认关闭的显式 opt-in**：需在 **设置 → OpenCode Go → 高级设置 → 免费通道** 打开（或配置 `freeEnabled: true`）后，插件才会注册 Free 路由、拉取 Free 目录并在设置与模型发现中显示 Free 模型；默认配置下不会访问 `freeBaseURL`。关闭该开关并保存后 Free 路由立即撤回，进行中的请求允许完成；Go 通道行为不变。
 
 Free 共用账号列表，优先使用已配置的可用 Key，并遵循多账号自动切换设置；没有可用 Key 时使用 `Bearer public`。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
 
-Free 推理通过插件附带的独立 Bun 1.4.4 HTTP worker 直接发送 API 请求；不依赖本机 OpenCode。模型发现、消息和工具转换、响应解析仍由现有 Node SDK 负责，Go 沿用原传输。Free 使用实测的 `opencode/latest/2.2.5/cli` UA，保留宿主会话 ID 的原有规范化，不注入占位工具或抓包中的账号、项目和会话值。这些兼容行为不保证上游开放免费服务。
+Free 推理通过插件附带的独立 Bun 1.4.4 HTTP worker 直接发送 API 请求；不依赖本机 OpenCode。模型发现、消息和工具转换、响应解析仍由现有 Node SDK 负责，Go 沿用原传输。Free 使用实测的 `opencode/latest/2.2.5/cli` UA（即官方 OpenCode CLI 身份，而非 DSH 自身的归属 UA），保留宿主会话 ID 的原有规范化，不注入占位工具或抓包中的账号、项目和会话值。这些兼容行为不保证上游开放免费服务。
+
+> ⚠️ **风险**：Free 通道默认关闭且不是受支持的稳定能力。开启后请求会以官方 CLI 身份发往平台公共免费入口，可能违反 OpenCode / 上游服务条款，也可能触发上游风控、限流或账号限制；是否开启以及使用频度由用户自行判断并自行承担风险，不建议用于生产环境或大规模自动化调用。
 
 Free 请求自动处理限流：`FreeUsageLimitError` 返回 `FREE_QUOTA`，普通 429 返回 `FREE_RATE_LIMIT`，明确的 OpenCode 客户端限制返回 `FREE_CLIENT_RESTRICTED`，其他未明确分类的 403 返回 `FREE_ACCESS_DENIED`。Go 的错误码和账号切换保持原有规则；Free 中明确的 Go 账号额度或凭据错误仍可按既有设置切换账号，共享 Free 限制不会换号或回退到付费 Go。
 
@@ -74,6 +76,8 @@ Bun 通过 npm 可选依赖安装对应平台的二进制；禁用安装脚本�
         name: 备用账号
         apiKeyEnv: OPENCODE_GO_BACKUP_KEY
     autoSwitch: true
+    # Free 默认关闭；需要平台免费模型时显式开启（等同于 高级设置 → 免费通道）
+    freeEnabled: true
     freeBaseURL: https://opencode.ai/inference/v1
     proxyURL: http://127.0.0.1:7890
     refreshMinutes: 60
@@ -95,6 +99,7 @@ Bun 通过 npm 可选依赖安装对应平台的二进制；禁用安装脚本�
 | --- | --- |
 | `baseURL` | OpenCode Go 网关地址，默认 `https://opencode.ai/inference/go/v1`；官方网关自动按模型协议选择推理端点 |
 | `freeBaseURL` | 平台免费模型网关，默认 `https://opencode.ai/inference/v1`；高级设置可编辑并校验 URL |
+| `freeEnabled` | Free 通道显式 opt-in，默认 `false`；为 `true` 时才注册 Free 路由、拉取 Free 目录并发现 Free 模型 |
 | `usageDisplay` | 额度显示模式：`auto`、`always` 或 `off` |
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
@@ -104,6 +109,8 @@ Bun 通过 npm 可选依赖安装对应平台的二进制；禁用安装脚本�
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |
 | `requestPreparationTimeoutMs` | 目录查询及每次尝试的凭据、图片准备时限，默认 60000 毫秒 |
 | `requestTimeoutMs` | 一次发送的完整时限，包含目录查询、账号切换和流式输出，默认 1800000 毫秒；预先准备的调用从发送时计时 |
+
+未显式配置 `freeEnabled` 的旧 profile 按默认值 `false` 处理：升级后 Free 路由保持关闭，需要时在高级设置中开启；升级前已选择 `DSH OpenCode Free` 模型的旧会话，需要重新选择 Go 模型，或先开启 Free 再继续使用。
 
 默认官方网关使用 `GET https://opencode.ai/inference/go/v1/models` 读取模型列表，使用 `GET https://opencode.ai/inference/go/v1/usage` 查询额度。推理端点按模型目录声明的协议选择，与[官方文档](https://opencode.ai/v2/docs/console/go/#endpoints)一致，以下路径均以 `https://opencode.ai/inference/go` 为前缀：
 

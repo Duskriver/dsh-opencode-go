@@ -594,7 +594,8 @@ export class GoCatalogManager {
 export class GoModelsService extends TypertRemoteService {
   constructor(ctx: Context, private readonly options: {
     catalog: () => OpencodeGoCatalog
-    freeCatalog?: () => OpencodeGoCatalog
+    /** Absent while the Free channel is disabled; the directory then omits Free models. */
+    freeCatalog?: () => OpencodeGoCatalog | undefined
     onRefresh?: () => void
   }) { super(ctx, 'opencodeGoModels') }
 

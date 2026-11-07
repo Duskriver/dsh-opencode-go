@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import LlmRuntime, { LlmError, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter, OpencodeGoRequestExecutor } from '../src/adapter.ts'
 import { apply } from '../src/index.ts'
-import { context, configOf, requestOf, drain } from './support/host.ts'
+import { Config, type LiveConfig, type OpencodeGoConfig } from '../src/config.ts'
+import { parseGoModelCatalog } from '../src/contracts.ts'
+import { context, configOf, requestOf, drain, mountRemotes, invokeRemote } from './support/host.ts'
 import { mockGateway, listingBody, textEvents } from './support/gateway.ts'
 import { modelsDocument, modelEntry } from './support/data.ts'
 
@@ -15,7 +17,7 @@ describe('dual route registration', () => {
     else vi.stubEnv('OPENCODE_API_KEY', key)
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
     const ctx = context(); await ctx.plugin(LlmRuntime)
-    apply(ctx, configOf(gateway.url, { freeBaseURL: gateway.url }))
+    apply(ctx, configOf(gateway.url, { freeEnabled: true, freeBaseURL: gateway.url }))
     expect(ctx.llm.listProviders()).toEqual([{ id: 'dsh-opencode-free', name: 'DSH OpenCode Free' }])
     gateway.pushCompletions({ events: textEvents })
     expect((await drain(ctx.llm.stream(freeRequest()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
@@ -34,7 +36,7 @@ describe('dual route registration', () => {
     const go = await mockGateway({ status: 200, body: listingBody(['beam-free', 'go-only']) })
     const free = await mockGateway({ status: 200, body: modelsDocument({ 'beam-free': modelEntry(), paid: modelEntry({ cost: { text: { input: { price: 1 }, output: { price: 0 } } } }) }) })
     const ctx = context(); await ctx.plugin(LlmRuntime)
-    apply(ctx, configOf(go.url, { freeBaseURL: free.url }))
+    apply(ctx, configOf(go.url, { freeEnabled: true, freeBaseURL: free.url }))
     expect(ctx.llm.listProviders()).toEqual(expect.arrayContaining([
       { id: 'dsh-opencode-go', name: 'DSH OpenCode Go' }, { id: 'dsh-opencode-free', name: 'DSH OpenCode Free' },
     ]))
@@ -52,8 +54,66 @@ describe('dual route registration', () => {
   it('activates Go when any configured account is usable even if automatic retry is off', async () => {
     vi.stubEnv('ACCOUNT_A', undefined); vi.stubEnv('ACCOUNT_B', 'backup-key')
     const ctx = context(); await ctx.plugin(LlmRuntime)
-    apply(ctx, configOf('https://gateway.example/v1', { apiKeyEnv: 'ACCOUNT_A', accounts, autoSwitch: false }))
+    apply(ctx, configOf('https://gateway.example/v1', { freeEnabled: true, apiKeyEnv: 'ACCOUNT_A', accounts, autoSwitch: false }))
     expect(ctx.llm.listProviders().map(provider => provider.id).sort()).toEqual(['dsh-opencode-free', 'dsh-opencode-go'])
+  })
+})
+
+describe('Free channel opt-in', () => {
+  it('keeps the Free route, its models and its catalog off by default', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', undefined)
+    const go = await mockGateway({ status: 200, body: listingBody(['go-only']) })
+    const free = await mockGateway({ status: 200, body: modelsDocument({ 'beam-free': modelEntry() }) })
+    const ctx = context(); await mountRemotes(ctx); await ctx.plugin(LlmRuntime)
+    apply(ctx, configOf(go.url, { freeBaseURL: free.url }))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    // No Go key and no Free opt-in: neither route exists, so onboarding never
+    // mistakes Free for a usable provider by default.
+    expect(ctx.llm.listProviders()).toEqual([])
+    expect(free.paths).toEqual([])
+    await expect(ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-free' }))
+      .rejects.toMatchObject({ code: 'DISCOVERY_UNSUPPORTED' })
+    // The settings model directory must not carry Free models while disabled.
+    const directory = parseGoModelCatalog(await invokeRemote(ctx, { namespace: 'opencodeGoModels', method: 'read', args: {} }))
+    expect(directory.models.filter(model => model.source === 'free')).toEqual([])
+    expect(free.paths).toEqual([])
+  })
+
+  it('registers the Free route when the opt-in is enabled in configuration', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', undefined)
+    const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
+    const ctx = context(); await ctx.plugin(LlmRuntime)
+    apply(ctx, configOf('https://gateway.example/v1', { freeEnabled: true, freeBaseURL: gateway.url }))
+    await vi.waitFor(() => expect(ctx.llm.listProviders()).toEqual([{ id: 'dsh-opencode-free', name: 'DSH OpenCode Free' }]))
+    expect((await ctx.llm.listModels('dsh-opencode-free')).map(model => model.id)).toEqual(['beam-free'])
+  })
+
+  it('applies freeEnabled changes at runtime and lets a running stream finish', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', undefined)
+    const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
+    let config = configOf(gateway.url, { freeBaseURL: gateway.url, freeEnabled: false })
+    const ctx = context(); await ctx.plugin(LlmRuntime)
+    const live = Object.fromEntries(Object.keys(Config()).map(key => [key, { get: () => config[key as keyof OpencodeGoConfig] }])) as LiveConfig
+    apply(ctx, live)
+    expect(ctx.llm.listProviders()).toEqual([])
+
+    config = { ...config, freeEnabled: true }
+    ctx.emit('loader/volatile-update', [])
+    await vi.waitFor(() => expect(ctx.llm.listProviders()).toEqual([{ id: 'dsh-opencode-free', name: 'DSH OpenCode Free' }]))
+
+    gateway.pushCompletions({ events: textEvents, delayMs: 20 })
+    const streaming = drain(ctx.llm.stream(freeRequest()))
+    await vi.waitFor(() => expect(gateway.paths).toContain('/chat/completions'), { timeout: 5000 })
+
+    // Withdraw the route while the request is running: the stream keeps its
+    // captured adapter generation and is allowed to finish.
+    config = { ...config, freeEnabled: false }
+    ctx.emit('loader/volatile-update', [])
+    expect(ctx.llm.listProviders()).toEqual([])
+    expect((await streaming).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'stop' } })
+
+    await expect(ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-free' }))
+      .rejects.toMatchObject({ code: 'DISCOVERY_UNSUPPORTED' })
   })
 })
 

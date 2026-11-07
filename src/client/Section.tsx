@@ -627,7 +627,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 
 /** The tuning fields covered by the advanced parameter reset, in display order. */
 const ADVANCED_FIELDS = [
-  'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
+  'freeEnabled', 'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
   'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
@@ -1067,6 +1067,24 @@ function Loaded(props: {
                 </button>
               </div>
               <div className={css.rows}>
+                <div className={css.groupHead}>{t('groupFree')}</div>
+                <div className={css.row}>
+                  <div className={css.rowLabel}>
+                    <span className={css.rowTitle}>{t('freeEnabledLabel')}</span>
+                    <HintMark hint={t('freeEnabledHint')} />
+                  </div>
+                  <div className={css.rowControl}>
+                    <Switch
+                      checked={state.freeEnabled.text === 'true'}
+                      label={t('freeEnabledLabel')}
+                      // The Switch primitive carries no aria-describedby; title is the one channel it forwards.
+                      title={t('freeEnabledHint')}
+                      disabled={disabled || state.saving}
+                      onChange={next => { props.edit('freeEnabled', String(next)) }}
+                    />
+                  </div>
+                  <p id="opencode-go-free-enabled-hint" className={css.rowHint}>{t('freeEnabledHint')}</p>
+                </div>
                 <div className={css.groupHead}>{t('groupUsage')}</div>
                 <ValueField
                   id="opencode-go-usage-display"

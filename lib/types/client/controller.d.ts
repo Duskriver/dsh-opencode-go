@@ -5,9 +5,9 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
 import { type ModelSource, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
-export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
@@ -100,6 +100,7 @@ export interface OpencodeGoSectionState extends FormShell {
     enabled: boolean;
     usageDisplay: FieldState;
     showSidebarQuota: FieldState;
+    freeEnabled: FieldState;
     usagePillStyle: FieldState;
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;

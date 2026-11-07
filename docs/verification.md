@@ -1,8 +1,23 @@
 # Verification
 
-The recorded baseline on 2026-11-06 used macOS, Node `24.22.1`, npm `12.2.1`, development peers DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.18.5`. The installed DSH `0.2.2-rc.1` CLI was also exercised with an isolated headless profile and the rebuilt plugin. Those results precede the official-history dashboard migration and do not validate its new implementation.
+The full acceptance baseline was recorded on 2026-11-06 on macOS with Node `24.22.1` and npm `12.2.1`, against the pinned development peers DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.18.5`. A rebuilt plugin was also loaded by the installed DSH `0.2.2-rc.1` CLI in an isolated headless profile; that host-side smoke predates the official-history dashboard migration and does not verify the Web/client surface. The matrix below states the exact coverage.
 
-The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `~4.0.5`. The package retains its `.` and `./client` export contracts. The current architecture and command reference are in [development](development.md).
+The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `^4.0.5`. The Host installation supplies `@deepseek-ai/dsh-brand` (`>=0.2.1-rc.5`) and `@deepseek-ai/schemastery` (`>=3.18.5 <4`) as peer dependencies, so one copy of each is shared with the application. The package retains its `.` and `./client` export contracts. The current architecture and command reference are in [development](development.md).
+
+## Verification matrix
+
+| Surface | DSH / Cordis / Schemastery | Verification | Status |
+| --- | --- | --- | --- |
+| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:dist`, 899 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the Free opt-in change (886 tests at the original 2026-11-06 baseline) |
+| Installed desktop CLI, Host side | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | rebuilt plugin loaded in an isolated headless profile; one loopback inference completed | Partial: headless Host smoke only, recorded before the dashboard migration |
+| Web/client surface (`dsh.client`) | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | settings page, usage pill, model picker and history dashboard against a running 0.2.2 Web profile | **Not covered / pending** |
+
+The Web/client surface is the part not yet verified on 0.2.2-rc.1. The client bundle contract (`window.__ModuleLoader__.load`, the baseline module table and `dsh.client.inject`) was only compared statically with the 0.2.2-rc.1 shipped client bundles; no browser session against a 0.2.2-rc.1 Web profile has been recorded.
+
+### Pending
+
+- Advisory CI compatibility job, intentionally not enabled yet: pack this package, install it with the official `@deepseek-ai/dsh@0.2.2-rc.1` CLI into a temporary consumer, then run `node --expose-internals scripts/installed-smoke.mjs <consumer>` and `node scripts/headless-smoke.mjs <consumer>`. Keep it `continue-on-error: true` until the official CLI install path is validated; `.github/workflows/verify.yml` records the intended steps.
+- Manual Web check on a 0.2.2-rc.1 server: enable the plugin, confirm the settings section and usage pill mount, then exercise the history dashboard with a real account.
 
 ## Recorded baseline before the dashboard migration
 
@@ -10,10 +25,10 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `~4.0.5`. The pack
 | --- | --- |
 | `npm test` | 17 test files, 913 tests, zero failures or skipped tests |
 | `npm run typecheck` | Host and browser TypeScript projects pass |
-| `npm run check:dist` | All 33 shipped build artifacts match an independent rebuild |
+| `npm run check:dist` | All 31 shipped build artifacts match an independent rebuild |
 | `npm run verify` | Types, artifact comparison, full Vitest suite and installed-package smoke pass |
 
-`verify` includes `typecheck`, `test:ci` and `verify:installed`; `test:ci` includes `check:dist` and `npm test`. CI runs this same acceptance path after `npm ci --strict-peer-deps` on Linux and Windows with Node 22.19 and 24. Those CI jobs are configured; the baseline results above are from macOS.
+`verify` includes `typecheck`, `test:ci` and `verify:installed`; `test:ci` includes `check:dist` and `npm test`. CI runs this same acceptance path after `npm ci --strict-peer-deps` on Linux and Windows with Node 22.19 and 24. Those CI jobs are configured and enforce the 0.2.1-rc.5 baseline only; the baseline results above are from macOS. The 0.2.2-rc.1 matrix row is not part of CI yet.
 
 ## Official-history source check
 
@@ -36,7 +51,7 @@ The daily CSV at `https://opencode.ai/console/api/v2/usage/export?range=30d` sup
 | Credential/account/network/date cache isolation, force refresh, proxy path, cancellation, timeout and response limits | Pass: Host service and RPC tests, including independent cancellation and connection-change races |
 | Key/member-field boundary, third-party gateway rejection and explicit upstream failures | Pass: report excludes member fields and keys; explicit permission, credential, gateway and malformed-response failures |
 | Dashboard account/range/refresh, selected-account quotas and responsive light/dark UI | Pass: browser interaction tests plus real-browser 1280×1000 dark / 390×844 light checks, Chinese and English |
-| `npm test` | Pass: 17 files, 886 tests; zero failures or skipped tests |
+| `npm test` | Pass: 17 files, 899 tests; zero failures or skipped tests |
 | `npm run typecheck` / `npm run compile` | Pass: Host and browser types and distribution build |
 | `npm run check:dist` | Pass: all 31 shipped artifacts match an independent rebuild |
 | `npm run verify` | Pass: types, build comparison, all tests and installed-package smoke |

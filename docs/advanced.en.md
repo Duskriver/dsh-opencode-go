@@ -44,9 +44,11 @@ HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported. 
 
 ### Dual routes and manual configuration
 
-`dsh-opencode-go` (DSH OpenCode Go) discovers all chat models from `baseURL/models` and activates when at least one usable API key is configured. `dsh-opencode-free` (DSH OpenCode Free) discovers only chat models with a valid declared tariff whose text input, output, cache and every context tier are all zero, from `freeBaseURL/models`. Missing or invalid prices never qualify as free. Free activates whenever the plugin is enabled.
+`dsh-opencode-go` (DSH OpenCode Go) discovers all chat models from `baseURL/models` and activates when at least one usable API key is configured. `dsh-opencode-free` (DSH OpenCode Free) discovers only chat models with a valid declared tariff whose text input, output, cache and every context tier are all zero, from `freeBaseURL/models`. Missing or invalid prices never qualify as free. The Free route is an **explicit opt-in and off by default**: only after `freeEnabled` is enabled in **Settings → OpenCode Go → Advanced settings → Free channel** (or `freeEnabled: true` in the profile patch) does the plugin register the route, fetch the Free catalog and advertise Free models. The default configuration never contacts `freeBaseURL`. Turning the switch off withdraws the route on the next settings update; requests already streaming are allowed to finish. Go behavior is unchanged.
 
 Free shares the account roster, prefers usable saved keys and follows automatic account retry settings. Without a usable key it sends `Bearer public`. Both routes preserve original model IDs, including overlapping names. Settings provides separate model tabs; Go keeps existing ID keys, while Free uses `dsh-opencode-free/<model ID>` in visibility and capacity settings.
+
+> ⚠️ **Risk**: the Free channel is off by default and is not a supported stable capability. Once enabled it sends requests to the platform's public Free entry point while identifying as the official CLI, which may violate OpenCode/upstream terms of service and may trigger upstream risk controls, rate limits or account restrictions. Whether and how often to use it is your own decision and risk; it is not recommended for production or large-scale automation.
 
 Free inference sends direct API requests through the bundled standalone Bun 1.4.4 HTTP worker, with no local OpenCode dependency. The existing Node SDK still handles discovery, message/tool conversion and response parsing; Go retains its transport. Free uses the observed `opencode/latest/2.2.5/cli` user agent and the existing host-session normalization, without placeholder tools or captured account/project/session values. Compatibility does not guarantee upstream free access.
 
@@ -74,6 +76,9 @@ The following patch configures shared accounts and per-model settings:
         name: Backup
         apiKeyEnv: OPENCODE_GO_BACKUP_KEY
     autoSwitch: true
+    # Free is off by default; opt in to the platform's free models
+    # (same as Settings → Advanced settings → Free channel).
+    freeEnabled: true
     freeBaseURL: https://opencode.ai/inference/v1
     proxyURL: http://127.0.0.1:7890
     refreshMinutes: 60
@@ -95,6 +100,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | --- | --- |
 | `baseURL` | OpenCode Go gateway address; defaults to `https://opencode.ai/inference/go/v1`, with official inference endpoints selected by model protocol |
 | `freeBaseURL` | Platform free gateway, default `https://opencode.ai/inference/v1`; editable with URL validation in advanced settings |
+| `freeEnabled` | Explicit opt-in for the Free route, default `false`; only when `true` does the plugin register the Free route, fetch its catalog and discover Free models |
 | `usageDisplay` | Usage display mode: `auto`, `always`, or `off` |
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
@@ -104,6 +110,8 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |
 | `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
 | `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
+
+Profiles that never set `freeEnabled` keep the default `false`: after upgrading, the Free route stays off until it is enabled in advanced settings. Sessions that selected a `DSH OpenCode Free` model before the upgrade need to select a Go model or enable Free first.
 
 The default official gateway lists models at `GET https://opencode.ai/inference/go/v1/models` and reads usage at `GET https://opencode.ai/inference/go/v1/usage`. Inference follows each model's declared protocol and the [official endpoint documentation](https://opencode.ai/v2/docs/console/go/#endpoints). The following paths share the prefix `https://opencode.ai/inference/go`:
 

@@ -11,6 +11,45 @@ export const OPENCODE_FREE_USER_AGENT = 'opencode/latest/2.2.5/cli'
 const MAX_METADATA_BYTES = 64 * 1024
 const MAX_PACKET_BYTES = 256 * 1024 * 1024
 
+/** Variables the standalone Bun worker may need to start and locate its own resources. */
+const POSIX_WORKER_ENVIRONMENT = ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ'] as const
+/** Windows additionally needs its system directories and shell metadata to start. */
+const WINDOWS_WORKER_ENVIRONMENT = ['SystemRoot', 'WINDIR', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'COMSPEC', 'PATHEXT'] as const
+
+/**
+ * Build the standalone worker's environment from an explicit allowlist. Bun is a
+ * third-party native runtime, so Host credentials, proxy settings and TLS or
+ * dynamic-linker overrides must not cross the process boundary even though the
+ * worker only speaks HTTP: only variables Bun needs to start and resolve its
+ * resources are forwarded. Windows matches names case-insensitively and keeps
+ * the original spelling it finds; everything unlisted is omitted.
+ * @param environment - source environment, normally `process.env`.
+ * @param platform - target platform deciding the Windows extras.
+ * @returns the minimal environment for the Bun child.
+ */
+export function freeWorkerEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const names: readonly string[] = platform === 'win32'
+    ? [...POSIX_WORKER_ENVIRONMENT, ...WINDOWS_WORKER_ENVIRONMENT] : POSIX_WORKER_ENVIRONMENT
+  const result: NodeJS.ProcessEnv = {}
+  if (platform !== 'win32') {
+    for (const name of names) {
+      const value = environment[name]
+      if (value !== undefined) result[name] = value
+    }
+    return result
+  }
+  const keys = Object.keys(environment)
+  for (const name of names) {
+    const match = keys.find(key => key === name) ?? keys.find(key => key.toUpperCase() === name.toUpperCase())
+    const value = match === undefined ? undefined : environment[match]
+    if (match !== undefined && value !== undefined) result[match] = value
+  }
+  return result
+}
+
 export class FreeBunTransport {
   private readonly shutdown = new AbortController()
   private readonly workers = new Set<Promise<void>>()
@@ -85,10 +124,7 @@ export class FreeBunTransport {
       }
       const serialized = JSON.stringify(packet)
       if (Buffer.byteLength(serialized) > MAX_PACKET_BYTES) throw new RangeError('Free HTTP request exceeds the 256 MiB IPC limit')
-      const env = { ...process.env }
-      // Match Node's explicit proxy setting rather than silently inheriting a
-      // different proxy from Bun's HTTP_PROXY/ALL_PROXY support.
-      for (const name of ['BUN_BE_BUN', 'NODE_OPTIONS', 'BUN_OPTIONS', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']) delete env[name]
+      const env = freeWorkerEnvironment()
       const child = spawn(executable, ['--no-env-file', worker], {
         env, cwd: dirname(worker), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
       })

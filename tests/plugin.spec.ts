@@ -91,7 +91,7 @@ describe("route lifecycle", () => {
         expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id])
         expect(updated).not.toHaveBeenCalled()
         metadata.resolve(Response.json(modelsDocument({ [id]: modelEntry(), 'new-model': modelEntry() })))
-        await expect.poll(() => updated.mock.calls.length).toBe(2)
+        await expect.poll(() => updated.mock.calls.length).toBe(1)
         expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual([id, 'new-model'])
       } finally {
         metadata.resolve(Response.json(modelsDocument()))
@@ -366,7 +366,7 @@ describe("route lifecycle", () => {
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       const ctx = new Context()
       await ctx.plugin(LlmRuntime)
-      apply(ctx, configOf(gateway.url))
+      apply(ctx, configOf(gateway.url, { freeEnabled: true }))
 
       // No key anywhere: the route stays dormant so first-run onboarding never
       // mistakes it for a usable provider, and no request reaches the gateway.
@@ -702,7 +702,7 @@ describe('profile forms and live configuration', () => {
     await expect.poll(() => ctx.llm.listProviders()).toEqual([])
     expect(entry.fiber).toBe(fiber)
     await ctx.settings.update('opencode-go', { enabled: true, modelVisibility: { 'deepseek-v4.1-flash': false } })
-    await expect.poll(() => ctx.llm.listProviders()).toHaveLength(2)
+    await expect.poll(() => ctx.llm.listProviders()).toHaveLength(1)
     expect(await ctx.llm.listModels('dsh-opencode-go')).toEqual([])
     await ctx.settings.update('opencode-go', { modelVisibility: {}, modelLimits: { 'deepseek-v4.1-flash': { contextWindow: 123456, maxTokens: 2048 } } })
     const resolved = await ctx.llm.resolveModelInfo('dsh-opencode-go', 'deepseek-v4.1-flash')
@@ -776,7 +776,8 @@ describe('profile forms and live configuration', () => {
     for (const version of ['0.2.1-rc.4', '0.2.0', '0.1.6']) expect(satisfies(version, pkg.engines.dsh, { includePrerelease: true })).toBe(false)
     for (const version of ['0.2.1-rc.5', '0.2.1', '0.3.0']) expect(satisfies(version, pkg.engines.dsh, { includePrerelease: true })).toBe(true)
     expect(satisfies('4.0.5', pkg.peerDependencies['@deepseek-ai/cordis'])).toBe(true)
-    expect(satisfies('4.1.0', pkg.peerDependencies['@deepseek-ai/cordis'])).toBe(false)
+    expect(satisfies('4.1.0', pkg.peerDependencies['@deepseek-ai/cordis'])).toBe(true)
+    expect(satisfies('4.0.4', pkg.peerDependencies['@deepseek-ai/cordis'])).toBe(false)
     for (const entry of ['.', './client']) {
       expect(pkg.exports[entry]).toMatchObject({ types: expect.stringMatching(/\.d\.ts$/), default: expect.stringMatching(/\.js$/) })
       expect((await readFile(new URL('../' + pkg.exports[entry].default, import.meta.url))).byteLength).toBeGreaterThan(0)

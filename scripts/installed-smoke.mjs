@@ -58,7 +58,7 @@ try {
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const adapterId = await ctx.loader.create({
     name: 'dsh-opencode-go',
-    config: { apiKeyEnv: 'OPENCODE_GO_INSTALL_TEST_KEY', baseURL: `http://127.0.0.1:${server.address().port}`, freeBaseURL: `http://127.0.0.1:${server.address().port}/free`, streamIdleTimeoutMs: 5000 },
+    config: { apiKeyEnv: 'OPENCODE_GO_INSTALL_TEST_KEY', baseURL: `http://127.0.0.1:${server.address().port}`, freeBaseURL: `http://127.0.0.1:${server.address().port}/free`, freeEnabled: true, streamIdleTimeoutMs: 5000 },
   })
   await ctx.loader.await()
   const adapterEntry = ctx.loader.resolve(adapterId)

@@ -145,7 +145,9 @@ function Trend({ days, copy, locale }: { days: AnalyticsDayRow[]; copy: HistoryC
   const keyboard = (event: KeyboardEvent, index: number): void => {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); focusDay(index + (event.key === 'ArrowLeft' ? -1 : 1)) }
     if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); focusDay(event.key === 'Home' ? 0 : days.length - 1) }
-    if (event.key === 'Escape') { event.stopPropagation(); setPinned(null); setActive(null) }
+    // Escape first dismisses the chart's own selection; with nothing selected it
+    // stays unhandled so the Host's Modal still owns closing the dialog.
+    if (event.key === 'Escape' && (pinned !== null || active !== null)) { event.stopPropagation(); setPinned(null); setActive(null) }
   }
   return <section className={css.trend}><div className={css.sectionHead}><div><h2>{copy.trend}</h2><p>{copy.trendHint}</p></div><div className={css.segmented} role="group" aria-label={copy.trend}><button type="button" aria-pressed={mode === 'tokens'} onClick={() => { setMode('tokens') }}>{copy.tokensMode}</button><button type="button" aria-pressed={mode === 'requests'} onClick={() => { setMode('requests') }}>{copy.requestsMode}</button></div></div>
     <div className={css.legend}>{mode === 'tokens' ? PARTS.map(part => <span key={part}><i data-part={part} />{copy[LABELS[part]]}</span>) : <span><i data-part="requests" />{copy.requests}</span>}</div>

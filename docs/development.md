@@ -1,6 +1,6 @@
 # Development
 
-The development baseline is DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.18.5`. Runtime DSH peers require `>=0.2.1-rc.5`; Cordis requires `~4.0.5`. Install the locked dependencies with `npm ci`.
+The development and full-acceptance baseline is DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.18.5`. The published package requires DSH `>=0.2.1-rc.5`, Cordis `^4.0.5`, `@deepseek-ai/dsh-brand >=0.2.1-rc.5` and `@deepseek-ai/schemastery >=3.18.5 <4` as Host-provided peer dependencies. The installed DSH `0.2.2-rc.1` runtime (Cordis `4.1.0`, Schemastery `3.19.0`) has only been smoke-tested through the headless CLI; its Web/client surface is unverified, as the [verification matrix](verification.md#verification-matrix) records. Install the locked dependencies with `npm ci`.
 
 ## Commands
 
@@ -15,7 +15,7 @@ The development baseline is DSH `0.2.1-rc.5`, Cordis `4.0.5` and Schemastery `3.
 | `npm run verify:headless -- /path/to/consumer` | Exercise a consumer containing the official DSH CLI and the installed plugin, with an isolated profile and loopback gateway |
 | `npm run verify` | Run type checks, artifact comparison, the complete Vitest suite and installed-package smoke |
 
-`test:ci` runs `check:dist` followed by `npm test`. `verify` runs `typecheck`, `test:ci` and `verify:installed`. CI uses `npm ci --strict-peer-deps` and `npm run verify` on Linux and Windows with Node 22.19 and 24. Inference smoke checks use synthetic credentials and a loopback gateway. `verify:headless` additionally requires the official DSH CLI in the supplied consumer; it creates an isolated home and profile.
+`test:ci` runs `check:dist` followed by `npm test`. `verify` runs `typecheck`, `test:ci` and `verify:installed`. CI uses `npm ci --strict-peer-deps` and `npm run verify` on Linux and Windows with Node 22.19 and 24. Inference smoke checks use synthetic credentials and a loopback gateway. `verify:headless` additionally requires the official DSH CLI in the supplied consumer; it creates an isolated home and profile. CI enforces the 0.2.1-rc.5 baseline only; an advisory 0.2.2-rc.1 compatibility job is still pending (see the verification matrix).
 
 ## Test suite
 
@@ -75,7 +75,7 @@ Image count limits are checked before reads. Each request prepares up to four im
 
 ## Distribution
 
-The `.` and `./client` exports continue to point to the built host entry and browser factory. Rebuild `lib/` with source changes, then run `npm run check:dist`. Builds do not execute during dependency installation. The private `opencode-go-pi-ai` alias uses `@earendil-works/pi-ai@1.5.0`, which pins `@earendil-works/pi-telemetry@1.5.0` and `@earendil-works/pi-schema@1.5.0` exactly; `package.json` no longer needs `overrides`.
+The `.` and `./client` exports continue to point to the built host entry and browser factory. Rebuild `lib/` with source changes, then run `npm run check:dist`. Builds do not execute during dependency installation. The Host supplies `@deepseek-ai/dsh-brand` and `@deepseek-ai/schemastery` as peers so the installation keeps one copy of each; the lockfile still records both because the pinned DSH development packages depend on them transitively. The private `opencode-go-pi-ai` alias uses `@earendil-works/pi-ai@1.5.0`, which pins `@earendil-works/pi-telemetry@1.5.0` and `@earendil-works/pi-schema@1.5.0` exactly; `package.json` no longer needs `overrides`.
 
 The Google transport bridge is version-guarded for pi-ai 1.5.0 and `@google/genai@2.21.0`. `src/google.ts` delegates simple streaming to the upstream adapter through the request-scoped fetch binding; pi-ai now selects discrete thinking levels for Gemini 4 natively.
 

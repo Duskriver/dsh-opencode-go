@@ -9,6 +9,20 @@ on:
 permissions:
   contents: read
 
+# Compatibility coverage (deliberate scope):
+# - `core` is the full acceptance path (typecheck, check:dist, 886 Vitest tests,
+#   installed-package smoke) against the pinned development baseline
+#   DSH 0.2.1-rc.5 / Cordis 4.0.5 / Schemastery 3.18.5.
+# - The installed DSH 0.2.2-rc.1 runtime (Cordis 4.1.0, Schemastery 3.19.0) has
+#   only been exercised manually through the headless CLI; its Web/client
+#   surface is not covered by CI yet. See docs/verification.md.
+# - TODO(compat): add an advisory `compat` job (`continue-on-error: true`) once
+#   the official CLI install path is validated: pack this package, install it
+#   with @deepseek-ai/dsh@0.2.2-rc.1 into a temporary consumer, then run
+#   `node --expose-internals scripts/installed-smoke.mjs <consumer>` and
+#   `node scripts/headless-smoke.mjs <consumer>`. Keeping the job advisory
+#   preserves a green default run; docs/verification.md tracks the pending work.
+
 jobs:
   core:
     strategy:

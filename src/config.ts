@@ -41,6 +41,9 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * 60_000
 /** Runtime schema for {@link OpencodeGoConfig}. */
 const fields = {
   enabled: z.boolean().default(true),
+  // Free access is deliberately off unless the user opts in: requests are sent
+  // as the official OpenCode CLI user agent and may violate upstream terms.
+  freeEnabled: z.boolean().default(false),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   showSidebarQuota: z.boolean().default(false),
   usagePillStyle: z.union(USAGE_PILL_STYLES.map(style => z.const(style))).default(DEFAULT_USAGE_PILL_STYLE),

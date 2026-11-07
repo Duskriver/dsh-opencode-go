@@ -78,11 +78,19 @@ export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
     /**
-     * Whether this plugin serves Go and Free. False withdraws both routes and
-     * their models without unloading the settings page. Go additionally requires
-     * a usable configured key; Free supports public access.
+     * Master switch for both routes. False withdraws Go and Free and their models
+     * without unloading the settings page. Go additionally requires a usable
+     * configured key; Free additionally requires {@link freeEnabled}.
      */
     enabled: boolean;
+    /**
+     * Serve the Free provider, its models and its public access. Off by default:
+     * enabling it sends requests as the official OpenCode CLI user agent and may
+     * violate upstream terms or trigger rate limiting, so it is an explicit
+     * opt-in independent of {@link enabled}. While off, the Free route is not
+     * registered, its catalog is not fetched and its models are not discovered.
+     */
+    freeEnabled: boolean;
     /** Usage pill visibility; auto follows only the selected Go route. */
     usageDisplay: UsageDisplayMode;
     /** Show quota in the sidebar independently of the selected conversation model. */

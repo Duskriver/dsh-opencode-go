@@ -129,7 +129,8 @@ export declare class GoModelsService extends TypertRemoteService {
     private readonly options;
     constructor(ctx: Context, options: {
         catalog: () => OpencodeGoCatalog;
-        freeCatalog?: () => OpencodeGoCatalog;
+        /** Absent while the Free channel is disabled; the directory then omits Free models. */
+        freeCatalog?: () => OpencodeGoCatalog | undefined;
         onRefresh?: () => void;
     });
     read(): Promise<GoModelCatalog>;

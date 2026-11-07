@@ -5,7 +5,7 @@ import type { GoModel, GoModelCatalog, GoUsage } from '../src/contracts.ts'
 import { OpencodeGoSection, AccountsCard } from '../src/client/Section.tsx'
 import { en } from '../src/client/presentation.ts'
 import { OpencodeGoSectionController, type OpencodeGoSettings } from '../src/client/controller.ts'
-import { bindSnapshotSelector, createConfigForm, translator } from './support/client.tsx'
+import { bindSnapshotSelector, createConfigForm, defaultClientSettings, translator } from './support/client.tsx'
 import { accountHarness } from './support/host.ts'
 
 describe("model availability and picker visibility", () => {
@@ -28,7 +28,7 @@ describe("model availability and picker visibility", () => {
 
   async function mount(options: { value?: OpencodeGoSettings; writable?: boolean; catalog?: GoModelCatalog } = {}) {
     const host = createConfigForm<OpencodeGoSettings>()
-    host.publish({ status: 'ready', writable: options.writable ?? true, value: options.value ?? {}, base: {}, user: {} })
+    host.publish({ status: 'ready', writable: options.writable ?? true, value: { ...defaultClientSettings, ...(options.value ?? {}) }, base: {}, user: {} })
 
     const read = vi.fn(async () => ({ ok: true as const, value: options.catalog ?? { models, stale: false } }))
     const controller = new OpencodeGoSectionController(host.form, { remote: {

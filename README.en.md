@@ -15,8 +15,8 @@
 
 DSH already supports OpenCode Go natively. This plugin focuses on usage inside conversations, managing multiple accounts, and dedicated model and settings controls.
 
-- **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. Free shares saved keys and uses public access when none is usable.
-- **Free rate-limit protection**: honors upstream `Retry-After` and pauses new requests during cooldown. Shared Free quota/IP limits do not rotate Go accounts.
+- **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. The Free route is an explicit opt-in and is **off by default**; enable it in **Settings → OpenCode Go → Advanced settings → Free channel** before it registers, fetches its catalog, or appears in model pickers.
+- **Free rate-limit protection**: once enabled, honors upstream `Retry-After` and pauses new requests during cooldown. Shared Free quota/IP limits do not rotate Go accounts.
 - **Usage at a glance**: see usage beside the conversation input, then open the panel for five-hour, weekly, and monthly percentages and reset times.
 - **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
 - **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
@@ -69,6 +69,21 @@ With **Automatic fallback** enabled, HTTP 401/403/429 or exhausted quota causes 
 Gateway-rejected keys cool down in memory for five minutes. Account commands write credentials and settings through one serial host queue.
 
 Keys are saved through DSH's credential service. Settings never displays an already saved key.
+
+## Free channel (opt-in, off by default)
+
+`DSH OpenCode Free` is not enabled by default. It is an explicit opt-in because it uses the upstream public Free entry point and sends requests as the official OpenCode CLI, which may violate upstream terms or trigger abuse controls.
+
+Enable it in **Settings → OpenCode Go → Advanced settings → Free channel** and save (or set `freeEnabled: true` in the profile patch). While it is off, the plugin does not register the `dsh-opencode-free` route, does not fetch `freeBaseURL`'s model catalog, and does not advertise Free models through discovery or the Settings model list. Turning the switch off later withdraws the route on the next settings update; requests already streaming are allowed to finish. Go behavior and account handling are unchanged.
+
+Once enabled:
+
+- **Reuses saved accounts**: Free shares the account roster, prefers usable saved keys, and follows the Automatic fallback setting.
+- **Anonymous public access without a key**: with no usable key it sends `Bearer public`.
+- **Official CLI identity**: requests use the official OpenCode CLI user agent (`opencode/latest/2.2.5/cli`) instead of DSH's own attribution.
+- **Rate-limit protection**: honors upstream `Retry-After`; new calls during cooldown fail fast with `FREE_COOLDOWN`, and shared Free quota/IP limits never rotate Go accounts.
+
+> ⚠️ **Risk**: the Free channel relies on the upstream public Free access point and an impersonated client user agent. It may violate OpenCode/upstream terms of service and may trigger rate limiting, risk controls, or account restrictions. Use it only if you understand and accept that risk; it is not intended for production or large-scale automation.
 
 ## Install and get started
 
@@ -128,7 +143,7 @@ Advanced settings are grouped into **Usage settings**, **Connection**, **Cache a
 
 HTTP, HTTPS, and SOCKS5 proxies are supported. After saving, subsequent conversations, catalog updates, and usage queries use the proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
 
-Set `baseURL` and `freeBaseURL` independently under Connection. Protocol selection follows the gateway model declaration. See the [advanced guide](docs/advanced.en.md) for account, model-key and disk-cache details.
+Set `baseURL` and `freeBaseURL` independently under Connection. Protocol selection follows the gateway model declaration. The **Free channel** switch is the explicit opt-in for the Free route (off by default); see [Free channel](#free-channel-opt-in-off-by-default) for behavior and risks. See the [advanced guide](docs/advanced.en.md) for account, model-key and disk-cache details.
 
 Screenshots illustrate the interface. Actual models, quotas, and timestamps depend on your account and the current online catalog.
 
@@ -143,6 +158,8 @@ dsh plugin --profile web update dsh-opencode-go --latest
 Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reopen the application. Headless users should replace `web` with `headless`. The repository's default branch may contain changes not yet released to npm.
 
 **Why is usage hidden?** Auto mode shows it only for **DSH OpenCode Go** models. Check that the plugin is enabled, a key is configured, and the display mode is appropriate. Choose Always to show usage with other providers.
+
+**Where is DSH OpenCode Free?** The Free route is an explicit opt-in and is off by default. Enable it in **Settings → OpenCode Go → Advanced settings → Free channel** and save; only then does the plugin register the route, fetch its catalog, and show Free models. See [Free channel](#free-channel-opt-in-off-by-default) for behavior and risks.
 
 **What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. Account actions run in a serial host queue; unsuccessful operations can be retried. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving).
 

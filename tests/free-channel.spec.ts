@@ -100,7 +100,7 @@ describe('Free backoff through normal Host requests', () => {
     vi.stubEnv('OPENCODE_API_KEY', 'saved-go-key')
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
     const ctx = context(); await mountRemotes(ctx); await ctx.plugin(LlmRuntime)
-    apply(ctx, configOf(gateway.url, { freeBaseURL: gateway.url }))
+    apply(ctx, configOf(gateway.url, { freeEnabled: true, freeBaseURL: gateway.url }))
     await vi.waitFor(() => expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('dsh-opencode-free'))
     expect(goRemote.descriptors.some(descriptor => descriptor.namespace === 'opencodeGoFree')).toBe(false)
     expect(gateway.paths).toHaveLength(0)

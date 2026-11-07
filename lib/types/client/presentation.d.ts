@@ -182,6 +182,9 @@ export declare const en: {
     advancedResetAll: string;
     advancedLabel: string;
     groupUsage: string;
+    groupFree: string;
+    freeEnabledLabel: string;
+    freeEnabledHint: string;
     usageAppearanceLabel: string;
     usageAppearanceReset: string;
     showSidebarQuotaLabel: string;

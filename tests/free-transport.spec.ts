@@ -6,15 +6,46 @@ import { execFileSync } from 'node:child_process'
 import { connect, type Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { FreeBunTransport } from '../src/free-transport.ts'
+import { FreeBunTransport, freeWorkerEnvironment } from '../src/free-transport.ts'
 import { resolveFreeRuntime } from '../src/free-runtime.ts'
 import { mockProxy } from './support/proxy.ts'
+
+/**
+ * Capture worker spawns so a test can assert the child environment, and inject
+ * fixture-local environment only into the worker (the Bun TLS certificate for
+ * the loopback fixtures). Production code never sees `workerEnvironment`: it
+ * builds the child environment from the allowlist in src/free-transport.ts and
+ * the positive test compares the captured environment with that same allowlist.
+ */
+const spawnProbe = vi.hoisted(() => ({
+  calls: [] as { command: string; args: readonly string[]; env: NodeJS.ProcessEnv | undefined }[],
+  workerEnvironment: {} as NodeJS.ProcessEnv,
+}))
+
+vi.mock('node:child_process', async importOriginal => {
+  const original = await importOriginal<typeof import('node:child_process')>()
+  const { resolve } = await import('node:path')
+  const guard = resolve('tests/support/bun-network-guard.mjs')
+  return {
+    ...original,
+    spawn(command: string, args: readonly string[], options?: import('node:child_process').SpawnOptions) {
+      if (!args?.some(arg => /free-http-worker\.(?:js|ts)$/.test(arg))) return original.spawn(command, args, options)
+      const env = { ...options?.env, ...spawnProbe.workerEnvironment }
+      spawnProbe.calls.push({ command, args: [...args], env })
+      return original.spawn(command, ['--preload', guard, ...args], { ...options, env })
+    },
+  }
+})
 
 // Test-only localhost certificate; never used by production transports.
 const certPath = new URL('./fixtures/localhost-cert.pem', import.meta.url)
 const tls = { cert: readFileSync(certPath), key: readFileSync(new URL('./fixtures/localhost-key.pem', import.meta.url)) }
 const cleanups: (() => Promise<unknown>)[] = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close()
+  spawnProbe.calls.length = 0
+  spawnProbe.workerEnvironment = {}
+})
 
 async function server(listener: RequestListener, secure = false) {
   const value = secure ? httpsServer(tls, listener) : createServer(listener)
@@ -35,6 +66,32 @@ describe('standalone Bun Free transport', () => {
   it('resolves the pinned official binary without an install script or OpenCode', () => {
     expect(resolveFreeRuntime()).toMatch(/[\\/]node_modules[\\/](?:@oven[\\/]bun-|bun[\\/])/)
     expect(execFileSync(resolveFreeRuntime(), ['--version'], { encoding: 'utf8' }).trim()).toBe('1.4.4')
+  })
+
+  it('spawns the worker with only the environment allowlist', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'fixture-env-secret')
+    vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '0')
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', fileURLToPath(certPath))
+    vi.stubEnv('NODE_OPTIONS', '--require /fixture/hook.js')
+    vi.stubEnv('HTTPS_PROXY', 'http://fixture-proxy.invalid')
+    vi.stubEnv('http_proxy', 'http://fixture-proxy.invalid')
+    vi.stubEnv('LD_PRELOAD', '/fixture/preload.so')
+    vi.stubEnv('DYLD_INSERT_LIBRARIES', '/fixture/insert.dylib')
+    vi.stubEnv('BUN_BE_BUN', '1')
+    const gateway = await server((_request, response) => response.end('allowed'))
+    expect(await (await transport().forProxy()(gateway.url)).text()).toBe('allowed')
+    expect(spawnProbe.calls).toHaveLength(1)
+    const call = spawnProbe.calls[0]!
+    expect(call.command).toBe(resolveFreeRuntime())
+    expect(call.args).toEqual(['--no-env-file', expect.stringMatching(/free-http-worker\.(?:js|ts)$/)])
+    // The real child environment is exactly the production allowlist result.
+    expect(call.env).toEqual(freeWorkerEnvironment())
+    for (const name of ['OPENCODE_API_KEY', 'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS',
+      'NODE_OPTIONS', 'HTTPS_PROXY', 'http_proxy', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'BUN_BE_BUN']) {
+      expect(call.env).not.toHaveProperty(name)
+    }
+    if (process.platform === 'win32') expect(call.env).toHaveProperty('SystemRoot')
+    else expect(call.env).not.toHaveProperty('SystemRoot')
   })
 
   it('streams before upstream EOF and preserves binary bytes with backpressure', async () => {
@@ -138,7 +195,9 @@ describe('standalone Bun Free transport', () => {
   })
 
   it('uses an HTTPS proxy with authenticated CONNECT and target TLS', async () => {
-    vi.stubEnv('NODE_EXTRA_CA_CERTS', fileURLToPath(certPath))
+    // Test-only injection: the production allowlist never forwards TLS overrides
+    // to the third-party runtime, so trust this fixture certificate here instead.
+    spawnProbe.workerEnvironment = { NODE_EXTRA_CA_CERTS: fileURLToPath(certPath) }
     const gateway = await server((_request, response) => response.end('https-proxy-target'), true)
     const proxy = await server((_request, response) => response.writeHead(500).end(), true)
     const sockets = new Set<Socket>()
@@ -159,7 +218,8 @@ describe('standalone Bun Free transport', () => {
   })
 
   it.each(['http', 'socks5'] as const)('uses authenticated %s proxy tunnels and validates target TLS', async protocol => {
-    vi.stubEnv('NODE_EXTRA_CA_CERTS', fileURLToPath(certPath))
+    // Test-only injection; see the HTTPS-proxy case above.
+    spawnProbe.workerEnvironment = { NODE_EXTRA_CA_CERTS: fileURLToPath(certPath) }
     const gateway = await server((request, response) => {
       expect(request.headers['proxy-authorization']).toBeUndefined()
       response.end('secure-proxied')
@@ -172,9 +232,11 @@ describe('standalone Bun Free transport', () => {
     expect(proxy.authorizations).toContain(protocol === 'http' ? `Basic ${Buffer.from('user:p@ss').toString('base64')}` : 'user:p@ss')
   })
 
-  it('rejects an untrusted TLS certificate', async () => {
-    vi.stubEnv('NODE_EXTRA_CA_CERTS', undefined)
-    vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', undefined)
+  it('rejects an untrusted TLS certificate despite host environment overrides', async () => {
+    // Ambient env must not weaken the worker: the allowlist drops both names, so
+    // Bun keeps verifying the fixture's self-signed certificate and rejects it.
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', fileURLToPath(certPath))
+    vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '0')
     const gateway = await server((_request, response) => response.end('untrusted'), true)
     await expect(transport().forProxy()(gateway.url)).rejects.toBeInstanceOf(TypeError)
   })
@@ -218,5 +280,39 @@ describe('standalone Bun Free transport', () => {
     const proxy = await mockProxy('socks5')
     await proxy.close()
     await expect(transport().forProxy(proxy.url)(gateway.url)).rejects.toThrow()
+  })
+})
+
+describe('free worker environment allowlist', () => {
+  it('forwards only POSIX startup variables and drops secrets, proxies and overrides', () => {
+    const env = freeWorkerEnvironment({
+      PATH: '/bin', HOME: '/home/fixture', TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp',
+      LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', LC_CTYPE: 'C.UTF-8', TZ: 'UTC',
+      OPENCODE_API_KEY: 'secret', GITHUB_TOKEN: 'secret', AWS_SECRET_ACCESS_KEY: 'secret',
+      NODE_OPTIONS: '--require hook', NODE_EXTRA_CA_CERTS: '/ca.pem', NODE_TLS_REJECT_UNAUTHORIZED: '0',
+      HTTP_PROXY: 'http://proxy', HTTPS_PROXY: 'http://proxy', ALL_PROXY: 'socks5://proxy', NO_PROXY: '*',
+      http_proxy: 'http://proxy', LD_PRELOAD: '/preload.so', DYLD_INSERT_LIBRARIES: '/insert.dylib',
+      BUN_OPTIONS: '--smol', SystemRoot: 'C:/Windows',
+    }, 'linux')
+    expect(env).toEqual({ PATH: '/bin', HOME: '/home/fixture', TMPDIR: '/tmp', TMP: '/tmp', TEMP: '/tmp',
+      LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', LC_CTYPE: 'C.UTF-8', TZ: 'UTC' })
+  })
+
+  it('matches Windows names case-insensitively and preserves the original spelling', () => {
+    const env = freeWorkerEnvironment({
+      Path: 'C:/bin', HOME: 'C:/Users/fixture', systemroot: 'C:/Windows', WINDIR: 'C:/Windows',
+      UserProfile: 'C:/Users/fixture', APPDATA: 'C:/AppData', localappdata: 'C:/Local',
+      ComSpec: 'C:/cmd.exe', PATHEXT: '.EXE;.CMD',
+      OPENCODE_API_KEY: 'secret', NODE_TLS_REJECT_UNAUTHORIZED: '0', HTTPS_PROXY: 'http://proxy',
+    }, 'win32')
+    expect(env).toEqual({ Path: 'C:/bin', HOME: 'C:/Users/fixture', systemroot: 'C:/Windows', WINDIR: 'C:/Windows',
+      UserProfile: 'C:/Users/fixture', APPDATA: 'C:/AppData', localappdata: 'C:/Local',
+      ComSpec: 'C:/cmd.exe', PATHEXT: '.EXE;.CMD' })
+  })
+
+  it('omits allowlisted variables that are unset', () => {
+    expect(freeWorkerEnvironment({}, 'linux')).toEqual({})
+    expect(freeWorkerEnvironment({ PATH: undefined }, 'linux')).toEqual({})
+    expect(freeWorkerEnvironment({}, 'win32')).toEqual({})
   })
 })

@@ -120,6 +120,40 @@ describe('official history dashboard', () => {
     expect(document.querySelector(`.${css.dayDetail}`)?.textContent).toContain('$1.23')
   })
 
+  it('leaves Escape unhandled when the chart has no selection so the Host dialog can close', async () => {
+    const onClose = vi.fn()
+    render(<AnalyticsDialog {...props({ onClose })} />)
+    await screen.findAllByText('deepseek-v4.1-flash')
+    const days = Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-day]'))
+    const atDocument = vi.fn()
+    document.addEventListener('keydown', atDocument)
+    try {
+      fireEvent.keyDown(days[0], { key: 'Escape' })
+      expect(atDocument).toHaveBeenCalledTimes(1)
+      expect(onClose).toHaveBeenCalledTimes(1)
+    } finally { document.removeEventListener('keydown', atDocument) }
+  })
+
+  it('consumes Escape to clear a pinned day, then lets the next Escape close the Host dialog', async () => {
+    const onClose = vi.fn()
+    render(<AnalyticsDialog {...props({ onClose })} />)
+    await screen.findAllByText('deepseek-v4.1-flash')
+    const days = Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-day]'))
+    fireEvent.click(days[1])
+    expect(days[1].getAttribute('aria-pressed')).toBe('true')
+    const atDocument = vi.fn()
+    document.addEventListener('keydown', atDocument)
+    try {
+      fireEvent.keyDown(days[1], { key: 'Escape' })
+      expect(atDocument).not.toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByText(copy.selectDay)).toBeTruthy()
+      fireEvent.keyDown(days[1], { key: 'Escape' })
+      expect(atDocument).toHaveBeenCalledTimes(1)
+      expect(onClose).toHaveBeenCalledTimes(1)
+    } finally { document.removeEventListener('keydown', atDocument) }
+  })
+
   it('switches trend metrics and ranks distinct providers without conflating the same model', async () => {
     const read = vi.fn(async query => createAnalyticsReport(query, { byModel: [
       { ...analyticsCounts, model: 'shared-model', provider: 'opencode-go' },

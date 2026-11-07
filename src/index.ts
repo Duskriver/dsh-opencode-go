@@ -161,7 +161,12 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const freeAdapter = new OpencodeGoAdapter({ ...adapterOptions, source: 'free', catalog: config => catalogs.forConfig(config, 'free') })
   ctx.plugin(GoModelsService, {
     catalog: () => catalogs.forConfig(current()),
-    freeCatalog: () => catalogs.forConfig(current(), 'free'),
+    // Free is an explicit opt-in: while it is off, its catalog is neither
+    // fetched nor included in the settings model directory.
+    freeCatalog: () => {
+      const config = current()
+      return config.freeEnabled ? catalogs.forConfig(config, 'free') : undefined
+    },
     onRefresh: refreshPickers,
   })
   ctx.plugin(GoAnalyticsService, {
@@ -174,12 +179,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().modelLimits ?? {},
     current().baseURL, current().freeBaseURL, current().proxyURL])
   let pickerVisibility = pickerVisibilityOf()
-  /** Free follows enabled immediately; Go additionally requires a usable saved key. */
+  /**
+   * Serve the Go route only when a usable key exists; serve Free only when the
+   * user opted in with {@link OpencodeGoConfig.freeEnabled}. `enabled` remains
+   * the master switch for both.
+   */
   const applyRoute = (configured: boolean): void => {
     for (const source of ['go', 'free'] as const) {
       const id = source === 'go' ? PROVIDER_ID : FREE_PROVIDER_ID
       const handle = source === 'go' ? registration : freeRegistration
-      const active = current().enabled && (source === 'free' || configured)
+      const active = current().enabled && (source === 'free' ? current().freeEnabled : configured)
       if (active && !handle) {
         try {
           const next = ctx.llm.registerAdapter([id], source === 'go' ? adapter : freeAdapter)
@@ -192,6 +201,26 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
         if (source === 'go') registration = undefined
         else freeRegistration = undefined
       }
+    }
+  }
+  /**
+   * Register or withdraw only the Free route. It must not touch the Go route:
+   * Go's presence waits for asynchronous credential checks and re-running the
+   * whole route decision here would make pickers flap on every sync.
+   */
+  const syncFreeRoute = (): void => {
+    const active = current().enabled && current().freeEnabled
+    if (active && !freeRegistration) {
+      try {
+        freeRegistration = ctx.llm.registerAdapter([FREE_PROVIDER_ID], freeAdapter)
+        ctx.logger.info(`llm-opencode-go: route "${FREE_PROVIDER_ID}" registered as ${FREE_DISPLAY_NAME}`)
+      } catch (error) { ctx.logger.error(`llm-opencode-go: not registering the "${FREE_PROVIDER_ID}" route (${String(error)})`) }
+    } else if (!active && freeRegistration) {
+      // Withdrawing the route only removes the provider; a request already
+      // streaming through it keeps its iterator and is allowed to finish.
+      freeRegistration()
+      freeRegistration = undefined
+      ctx.logger.info(`llm-opencode-go: route "${FREE_PROVIDER_ID}" withdrawn (Free channel disabled)`)
     }
   }
   let routeCheck = 0
@@ -216,12 +245,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       freeAdapter.forgetRejectedKey(selected)
     }
     const refs = accountsOf(config).map(account => account.apiKeyEnv)
-    // Free is available immediately, including while credential storage is resolving.
     if (!config.enabled) { applyRoute(false); return }
-    if (!freeRegistration) {
-      try { freeRegistration = ctx.llm.registerAdapter([FREE_PROVIDER_ID], freeAdapter) }
-      catch (error) { ctx.logger.error(`llm-opencode-go: not registering the "${FREE_PROVIDER_ID}" route (${String(error)})`) }
-    }
+    // Free is an explicit opt-in and needs no credential check, so register or
+    // withdraw it immediately: a settings toggle takes effect on the next sync
+    // (loader/volatile-update) without waiting for account resolution.
+    syncFreeRoute()
     if (credentials === undefined) {
       applyRoute(refs.some(ref => {
         const value = launchEnvironmentOf(ctx).get(ref)?.value
@@ -269,7 +297,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       }
       const source = request.provider === FREE_PROVIDER_ID || request.provider !== PROVIDER_ID
         && request.baseURL !== undefined && !new URL(request.baseURL).pathname.includes('/go/') ? 'free' : 'go'
-      return discoverCatalogModels(catalogs.forConfig(current(), source))
+      const config = current()
+      if (source === 'free' && !config.freeEnabled) {
+        // Free is an explicit opt-in: refuse its discovery instead of fetching
+        // (or advertising) a catalog for a channel the user has not enabled.
+        throw new LlmError(
+          'llm-opencode-go: the Free channel is disabled; enable it in Settings → Advanced settings',
+          'DISCOVERY_UNSUPPORTED',
+        )
+      }
+      return discoverCatalogModels(catalogs.forConfig(config, source))
     })
   } catch (error: unknown) {
     // A duplicate mount may already own our discovery registration — the same

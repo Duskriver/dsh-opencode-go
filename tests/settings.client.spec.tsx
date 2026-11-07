@@ -2,7 +2,7 @@
 import { apply, accountCommands } from '../src/client/index.ts'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
-import { bindSnapshotSelector, createConfigForm, acceptFormWrites, translator } from './support/client.tsx'
+import { bindSnapshotSelector, createConfigForm, acceptFormWrites, defaultClientSettings, translator } from './support/client.tsx'
 import * as store from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { OpencodeGoSection, type OpencodeGoSectionProps, type OpencodeGoSectionState } from '../src/client/Section.tsx'
@@ -38,7 +38,7 @@ describe("settings page and typed capacity editing", () => {
   }
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
-    | 'usageDisplay' | 'usagePillStyle' | 'showSidebarQuota'
+    | 'usageDisplay' | 'usagePillStyle' | 'showSidebarQuota' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -74,6 +74,7 @@ describe("settings page and typed capacity editing", () => {
       usageDisplay: field('auto'),
       usagePillStyle: field('badge'),
       showSidebarQuota: field('false'),
+      freeEnabled: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
       baseURL: field('https://opencode.ai/zen/go/v1'),
       proxyURL: field(''),
@@ -247,6 +248,30 @@ describe("settings page and typed capacity editing", () => {
       openAdvanced()
       const choices = within(screen.getByRole('radiogroup', { name: en.usageDisplayLabel })).getAllByRole('radio')
       expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
+    })
+
+    it('stages the Free channel opt-in from advanced settings and offers reset', () => {
+      const reading = actions()
+      renderSection(stateOf({ freeEnabled: field('true', { overridden: true }) }), reading)
+      // Off by default and folded away until a reader opens the advanced card.
+      expect(screen.queryByRole('switch', { name: en.freeEnabledLabel })).toBeNull()
+      openAdvanced()
+      expect(screen.getByText(en.groupFree)).toBeTruthy()
+      expect(screen.getByText(en.freeEnabledHint)).toBeTruthy()
+      const free = screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel })
+      expect(free.getAttribute('aria-checked')).toBe('true')
+      expect(free.title).toBe(en.freeEnabledHint)
+      fireEvent.click(free)
+      expect(reading.edit).toHaveBeenCalledExactlyOnceWith('freeEnabled', 'false')
+      expect(reading.save).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      expect(reading.resetField).toHaveBeenCalledWith('freeEnabled')
+    })
+
+    it('disables the Free channel switch in a read-only deployment', () => {
+      renderSection(stateOf({ writable: false }))
+      openAdvanced()
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel }).disabled).toBe(true)
     })
 
     it('moves the segmented selection with the arrow keys', () => {
@@ -1179,7 +1204,7 @@ describe("installed Host localization", () => {
 
   async function mountSurfaces(locale: HostLocaleRuntime) {
     const settings = createConfigForm<OpencodeGoSettings>()
-    settings.publish({ status: 'ready', writable: true, value: {}, base: {}, user: {} })
+    settings.publish({ status: 'ready', writable: true, value: defaultClientSettings, base: {}, user: {} })
     const readModels = vi.fn(async () => ({ ok: true as const, value: { stale: false, models: [
       { id: 'alpha', name: 'Alpha', releaseDate: '2026-09-23', contextWindow: 123456, maxTokens: 8192 },
       { id: 'missing', name: 'missing', configurationMissing: true },
@@ -1285,7 +1310,7 @@ describe("installed Host localization", () => {
 describe('typed ConfigForm drafts and writes', () => {
   const controllers: OpencodeGoSectionController[] = []
   afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose() })
-  function setup(value: OpencodeGoSettings = {}) {
+  function setup(value: OpencodeGoSettings = defaultClientSettings) {
     const host = createConfigForm(value)
     const controller = new OpencodeGoSectionController(host.form, {} as never)
     controllers.push(controller)
@@ -1311,6 +1336,39 @@ describe('typed ConfigForm drafts and writes', () => {
     expect(snapshot()).toMatchObject({ invalid: true, showSidebarQuota: { invalid: true }, usagePillStyle: { invalid: true } })
     await controller.save()
     expect(host.mutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('defaults, persists and resets the Free channel opt-in as an independent typed value', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    expect(editableKeys).toEqual(expect.arrayContaining(['freeEnabled']))
+    expect(snapshot()).toMatchObject({ freeEnabled: { text: 'false', overridden: false, invalid: false } })
+    actions.edit('freeEnabled', 'true')
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'set', path: ['freeEnabled'], value: true }], 0)
+    expect(host.form.getSnapshot().user).toMatchObject({ freeEnabled: true })
+    expect(snapshot()).toMatchObject({ freeEnabled: { text: 'true' }, dirty: false, usageDisplay: { text: 'auto' } })
+    actions.edit('freeEnabled', 'false')
+    await controller.save()
+    expect(host.form.getSnapshot().user).toMatchObject({ freeEnabled: false })
+    actions.resetField('freeEnabled')
+    expect(snapshot().freeEnabled).toMatchObject({ text: 'false', overridden: false })
+  })
+
+  it('keeps the Free channel draft and reports a refused opt-in without touching other fields', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    host.mutate.mockResolvedValueOnce(false)
+    actions.edit('refreshMinutes', '30')
+    actions.edit('freeEnabled', 'true')
+    await controller.save()
+    expect(snapshot()).toMatchObject({ failed: true, dirty: true, saving: false,
+      freeEnabled: { text: 'true' }, refreshMinutes: { text: '30' } })
+    expect(host.form.getSnapshot().user).toEqual({})
+    await controller.save()
+    expect(host.mutate).toHaveBeenLastCalledWith([
+      { op: 'set', path: ['refreshMinutes'], value: 30 },
+      { op: 'set', path: ['freeEnabled'], value: true },
+    ], 0)
+    expect(snapshot()).toMatchObject({ failed: false, dirty: false })
   })
 
   it('resets appearance to inherited values without changing the selected account', async () => {

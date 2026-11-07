@@ -29,6 +29,9 @@ export function bindSnapshotSelector<T>(source: HostObservable<T>): SnapshotSele
   }
 }
 
+/** Client fixture baseline: Free access is opt-in, so fixtures start with it disabled. */
+export const defaultClientSettings: OpencodeGoSettings = { freeEnabled: false }
+
 /** The current ConfigForm contract: writes acknowledge acceptance with a boolean. */
 class TestForm<T> implements ConfigForm<T> {
   private snapshot: ConfigFormSnapshot<T> = {
