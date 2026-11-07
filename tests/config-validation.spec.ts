@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { readFile } from 'node:fs/promises'
 import { DEFAULT_CONFIG, PlainConfig, assertBaseURL, validateGoConfig } from '../src/config.ts'
 import {
   MAX_THINKING_BUDGET_TOKENS,
+  PROFILE_ENTRY_ID,
+  SETTINGS_NAMESPACE,
   assertProxyURL,
   type OpencodeGoConfig,
 } from '../src/contracts.ts'
@@ -78,5 +81,18 @@ describe('thinking budget bounds', () => {
     for (const tokens of [0, -1, 1.5, NaN]) {
       expect(() => PlainConfig({ modelLimits: { model: { thinkingBudgets: [tokens] } } })).toThrow()
     }
+  })
+})
+
+describe('profile entry identity', () => {
+  it('keeps the settings row id in sync with the shipped profile patch entry', async () => {
+    const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+    const ids = [...patch.matchAll(/^\s*-\s*id:\s*(\S+)\s*$/gm)].map(match => match[1])
+    // DSH settings addresses rows by Loader profile entry id (entry.options.id),
+    // so the constant must track the shipped patch entry, not the service name.
+    expect(ids).toContain(PROFILE_ENTRY_ID)
+    expect(PROFILE_ENTRY_ID).toBe('opencode-go')
+    expect(PROFILE_ENTRY_ID).not.toBe(SETTINGS_NAMESPACE)
+    expect(SETTINGS_NAMESPACE).toBe('llm-opencode-go')
   })
 })

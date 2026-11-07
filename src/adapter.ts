@@ -52,6 +52,27 @@ import { FreeChannelState } from './free-channel.ts'
 
 const DEFAULT_MAX_TOKENS = 65_536
 
+/**
+ * Bound for the per-reference rejection map. Only account references are ever
+ * attempted (the roster is capped at MAX_ACCOUNTS), so this cap is defensive:
+ * expired entries are pruned first, and the cap only evicts under artificial
+ * reference churn.
+ */
+const MAX_REJECTED_KEY_REFS = 64
+
+/**
+ * Bound for {@link OpencodeGoAdapter.credentialVersions}. Account rosters are
+ * capped at MAX_ACCOUNTS, so the map only exceeds this under credential events
+ * for references that are not current accounts.
+ */
+const MAX_CREDENTIAL_VERSIONS = 64
+
+/** Diagnostics observers must never turn a working request into a failure. */
+function observe(observer: (() => void) | undefined): void {
+  if (observer === undefined) return
+  try { observer() } catch { /* Diagnostics cannot fail a request. */ }
+}
+
 /** Origin of a configured endpoint for diagnostics; never includes credentials. */
 function endpointOrigin(raw: string): string {
   try { return new URL(raw).origin } catch { return '[invalid URL]' }
@@ -113,6 +134,12 @@ export interface OpencodeGoRequestExecutorOptions {
   imageAccess?: OpencodeGoImageAccess
   /** Observe assistant history degrading to provider-neutral conversion. */
   onReplayDegrade?: (reason: string) => void
+  /**
+   * Observe a configured thinking budget that was ignored or clamped for one
+   * model. Configured budgets never fail resolution; this is the only visible
+   * signal that a stale setting was dropped.
+   */
+  onModelWarning?: (detail: { model: string; reason: string }) => void
 }
 
 /** Inputs already resolved by the adapter, including one account and the wire session ID. */
@@ -128,9 +155,10 @@ export interface OpencodeGoRequestSnapshot {
 function resolveReasoningLevel(
   model: Model<Api>,
   effort: GenerateOptions['reasoningEffort'],
+  onWarning?: (reason: string) => void,
 ): string | undefined {
   if (effort === undefined) return undefined
-  const supported = reasoningChoices(model).map(choice => choice.id)
+  const supported = reasoningChoices(model, onWarning).map(choice => choice.id)
   if (supported.some(level => level === effort)) return effort
   throw new LlmError(
     `opencode-go model "${model.id}" does not support reasoning effort "${effort}"`,
@@ -206,7 +234,7 @@ export class OpencodeGoRequestExecutor {
     }
     const { config, provider, model, sessionId } = snapshot
     const maxTokens = requestMaxTokens(model, config.modelLimits, options.maxTokens)
-    const reasoning = resolveReasoningLevel(model, options.reasoningEffort)
+    const reasoning = resolveReasoningLevel(model, options.reasoningEffort, reason => observe(() => this.options.onModelWarning?.({ model: model.id, reason })))
 
     const consumer = new AbortController()
     const upstream = options.signal === undefined
@@ -249,10 +277,13 @@ export class OpencodeGoRequestExecutor {
       }
       // The sync overload converts every message from the session log; the
       // images overload additionally converts attachment references through
-      // the mounted attachment service.
+      // the mounted attachment service. The degrade observer is isolated: a
+      // throwing diagnostic callback must not fail the conversion.
+      const onReplayDegrade = this.options.onReplayDegrade === undefined ? undefined
+        : (reason: string): void => { observe(() => this.options.onReplayDegrade?.(reason)) }
       const context = await waitWithSignal(() => imageRequest === undefined
-        ? Promise.resolve(toPiContext(options, undefined, this.options.onReplayDegrade))
-        : toPiContext({ ...options, signal: preparation.signal }, imageRequest, this.options.onReplayDegrade), preparation.signal)
+        ? Promise.resolve(toPiContext(options, undefined, onReplayDegrade))
+        : toPiContext({ ...options, signal: preparation.signal }, imageRequest, onReplayDegrade), preparation.signal)
       preparation[Symbol.dispose]()
       watchdog.signal.throwIfAborted()
       // Direct providers accept a transcript, unlike Models which normalizes
@@ -286,7 +317,7 @@ export class OpencodeGoRequestExecutor {
             ? {} : { providerRetryAfterMs: retryAfterMs },
         }
       }
-      const reasoningOptions = reasoningRequest(reasoningIntent(model, reasoning))
+      const reasoningOptions = reasoningRequest(reasoningIntent(model, reasoning, reason => observe(() => this.options.onModelWarning?.({ model: model.id, reason }))))
       const events = provider.streamSimple(model, transcript, {
         apiKey,
         fetch: observedFetch,
@@ -482,8 +513,12 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
   private readonly rejectedKeys = new Map<string, Map<string, number>>()
-  /** Reference updates invalidate rejections from attempts using an older key. */
+  /**
+   * Reference updates invalidate rejections from attempts using an older key.
+   * Values are globally monotonic epochs, so pruning never reuses a version.
+   */
   private readonly credentialVersions = new Map<string, number>()
+  private credentialEpoch = 0
 
   /** Monotonic sequence of the latest request this adapter started. */
   private callSeq = 0
@@ -610,7 +645,7 @@ export class OpencodeGoAdapter extends LlmAdapter {
   private modelInfo(model: Model<Api>, limits: OpencodeGoModelLimits): LlmResolvedModelInfo {
     const defaultMaxTokens = requestMaxTokens(model, limits)
     const reasoning: Pick<LlmResolvedModelInfo, 'reasoning'> = {}
-    const choices = reasoningChoices(model)
+    const choices = reasoningChoices(model, reason => observe(() => this.options.onModelWarning?.({ model: model.id, reason })))
     if (choices.length > 0) {
       reasoning.reasoning = {
         efforts: choices.map(choice => ({ ...choice, id: ReasoningEffortId(choice.id) })),
@@ -673,12 +708,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
       // A Free endpoint that is neither official nor the Go gateway's own origin
       // must never receive saved account credentials: send public access only,
       // and report why without reading or echoing any key.
-      try {
-        this.options.onFreeCredentialWithheld?.({
-          reason: 'unbound-free-endpoint',
-          freeBaseURL: endpointOrigin(snapshot.config.freeBaseURL),
-        })
-      } catch { /* Diagnostics must not fail the request. */ }
+      observe(() => this.options.onFreeCredentialWithheld?.({
+        reason: 'unbound-free-endpoint',
+        freeBaseURL: endpointOrigin(snapshot.config.freeBaseURL),
+      }))
       yield* streamPublic()
       return
     }
@@ -696,16 +729,12 @@ export class OpencodeGoAdapter extends LlmAdapter {
     const now = Date.now()
     const gateway = assertBaseURL(this.source === 'go' ? snapshot.config.baseURL : snapshot.config.freeBaseURL,
       this.source === 'go' ? 'baseURL' : 'freeBaseURL')
+    // Expired rejections are pruned before every attempt, so the map stays
+    // bounded by recently rejected references instead of growing with history.
+    this.pruneRejectedKeys(now)
     const usable = ordered.filter(ref => {
-      const rejected = this.rejectedKeys.get(ref)
-      const until = rejected?.get(gateway)
-      if (until === undefined) return true
-      if (now >= until) {
-        rejected!.delete(gateway)
-        if (rejected!.size === 0) this.rejectedKeys.delete(ref)
-        return true
-      }
-      return false
+      const until = this.rejectedKeys.get(ref)?.get(gateway)
+      return until === undefined || now >= until
     })
     const candidates = this.accountCandidates(snapshot.config, ordered, usable, options.signal)
     let candidate = await candidates.next()
@@ -754,8 +783,10 @@ export class OpencodeGoAdapter extends LlmAdapter {
           reason: switchReason ?? 'credential',
           at: Date.now(),
         }
-        this.options.onAccountSettled?.({ seq, generation: snapshot.generation, config: snapshot.config, ref: serving, notice })
-        this.options.onAccountSwitch?.(notice, snapshot.config, seq)
+        // Account observers persist selection and drive UI notices; a throwing
+        // observer must not turn an already-successful stream into a failure.
+        observe(() => this.options.onAccountSettled?.({ seq, generation: snapshot.generation, config: snapshot.config, ref: serving, notice }))
+        observe(() => this.options.onAccountSwitch?.(notice, snapshot.config, seq))
       }
       try {
         for await (const chunk of this.requestExecutor.stream(options, {
@@ -819,15 +850,59 @@ export class OpencodeGoAdapter extends LlmAdapter {
     }
   }
 
+  /** Drop expired rejections so the maps stay bounded by the recent window. */
+  private pruneRejectedKeys(now: number): void {
+    for (const [ref, gateways] of this.rejectedKeys) {
+      for (const [gateway, until] of gateways) if (now >= until) gateways.delete(gateway)
+      if (gateways.size === 0) this.rejectedKeys.delete(ref)
+    }
+  }
+
   private rememberRejectedKey(ref: string, gateway: string): void {
+    const now = Date.now()
+    this.pruneRejectedKeys(now)
     const rejected = this.rejectedKeys.get(ref) ?? new Map<string, number>()
-    rejected.set(gateway, Date.now() + REJECTED_KEY_TTL_MS)
+    rejected.set(gateway, now + REJECTED_KEY_TTL_MS)
     this.rejectedKeys.set(ref, rejected)
+    // Defensive cap: only account references are attempted, so this can only
+    // evict under artificial reference churn. Expired entries were pruned first,
+    // which keeps the normal working set at the live roster size.
+    while (this.rejectedKeys.size > MAX_REJECTED_KEY_REFS) {
+      const oldest = this.rejectedKeys.keys().next().value
+      if (oldest === undefined || oldest === ref) break
+      this.rejectedKeys.delete(oldest)
+    }
   }
 
   /** A stored change to a reference outranks the gateway's last rejection of it. */
   forgetRejectedKey(ref: string): void {
-    this.credentialVersions.set(ref, (this.credentialVersions.get(ref) ?? 0) + 1)
+    // Globally monotonic epochs: pruning the map can never reuse a version, so
+    // a request that captured a stale version still fails the guard.
+    this.credentialEpoch += 1
+    this.credentialVersions.set(ref, this.credentialEpoch)
     this.rejectedKeys.delete(ref)
+    this.pruneCredentialVersions()
+  }
+
+  /**
+   * Keep the version map bounded: account rosters are at most MAX_ACCOUNTS, so
+   * only references that are not current accounts can push it over the cap.
+   * Those are evicted first; the roster entries are kept. A pruned entry reads
+   * as version 0 (unchanged), which cannot falsely match an attempt that saw a
+   * real epoch (>= 1); requests started before a reference's first change keep
+   * their 0 and are only reachable in the artificial overflow/rename window.
+   */
+  private pruneCredentialVersions(): void {
+    if (this.credentialVersions.size <= MAX_CREDENTIAL_VERSIONS) return
+    const roster = new Set(accountsOf(this.options.config()).map(account => account.apiKeyEnv))
+    for (const ref of this.credentialVersions.keys()) {
+      if (this.credentialVersions.size <= MAX_CREDENTIAL_VERSIONS) return
+      if (!roster.has(ref)) this.credentialVersions.delete(ref)
+    }
+    while (this.credentialVersions.size > MAX_CREDENTIAL_VERSIONS) {
+      const oldest = this.credentialVersions.keys().next().value
+      if (oldest === undefined) return
+      this.credentialVersions.delete(oldest)
+    }
   }
 }

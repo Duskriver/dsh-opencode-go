@@ -65,6 +65,21 @@ export interface GoAccountSwitch {
     at: number;
 }
 export declare const SETTINGS_NAMESPACE = "llm-opencode-go";
+/**
+ * Loader profile entry id this plugin ships in `cordis.patch.yml`.
+ *
+ * DSH settings addresses rows by Loader profile entry id: `SettingsDescriptor.ns`
+ * is `entry.options.id` in `@deepseek-ai/dsh-settings`, so this is NOT an
+ * intrinsic plugin namespace — it must match the `insert[].id` of the shipped
+ * profile patch. Renaming that patch id requires renaming this constant.
+ *
+ * A runtime fallback discovery is intentionally not attempted:
+ * `settings.describe()` exposes no plugin identity (`ns` is the entry id and
+ * `schema` is a per-mount uid/ref graph), so a heuristic match could bind
+ * account metadata to another plugin's row. The shipped patch id is the
+ * invariant; a renamed entry id is unsupported and fails loudly through the
+ * account manager ("Account settings are unavailable") instead of guessing.
+ */
 export declare const PROFILE_ENTRY_ID = "opencode-go";
 /**
  * One model's configured capacities. Every field is optional so a deployment

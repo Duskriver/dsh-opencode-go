@@ -15,9 +15,13 @@ export declare function unsupportedThinkingLevels(): ThinkingLevelMap;
  * Selectable reasoning choices, configured budgets included. Configured budgets
  * are user data: unusable entries (outside the model's range, non-integers or
  * above {@link MAX_THINKING_BUDGET_TOKENS}) are dropped rather than throwing,
- * so a stale setting can never make its model unresolvable.
+ * so a stale setting can never make its model unresolvable. `onWarning`
+ * receives one explanation per dropped entry so the Host can surface it.
+ * @param model - model whose selectable reasoning controls are resolved.
+ * @param onWarning - optional observer for each ignored configured budget.
+ * @returns the selectable thinking choices in display order.
  */
-export declare function reasoningChoices(model: Model<Api>): readonly {
+export declare function reasoningChoices(model: Model<Api>, onWarning?: (reason: string) => void): readonly {
     id: string;
     name: string;
 }[];
@@ -35,8 +39,14 @@ export type ReasoningIntent = {
     tokens: number;
     min: number;
 };
-/** Called after validation against the model's choices. */
-export declare function reasoningIntent(model: Model<Api>, level: string | undefined): ReasoningIntent;
+/**
+ * Called after validation against the model's choices.
+ * @param model - model that owns the selection.
+ * @param level - selected effort id (effort, toggle, off or `budget:N`).
+ * @param onWarning - optional observer for one clamped stale budget selection.
+ * @returns the serialization intent for the selection.
+ */
+export declare function reasoningIntent(model: Model<Api>, level: string | undefined, onWarning?: (reason: string) => void): ReasoningIntent;
 /**
  * The SDK serializes explicit choices. Default must leave all thinking controls
  * to the service; a switch's On must not acquire an invented effort spelling.
@@ -113,7 +123,14 @@ export declare class OpencodeGoCatalog {
     private refresh;
     forModel(id: string, signal?: AbortSignal): Promise<CatalogSnapshot>;
 }
-export declare function discoverCatalogModels(catalog: OpencodeGoCatalog): Promise<readonly LlmDiscoveredModel[]>;
+/**
+ * Discover one catalog source's models, forced through the shared refresh.
+ * @param catalog - source catalog to interrogate.
+ * @param signal - optional caller cancellation. Only this waiter is cancelled;
+ *   the shared refresh keeps running for other readers and the next discovery.
+ * @returns the discovered models for the source.
+ */
+export declare function discoverCatalogModels(catalog: OpencodeGoCatalog, signal?: AbortSignal): Promise<readonly LlmDiscoveredModel[]>;
 export declare function discoverSettingsModels(catalog: OpencodeGoCatalog, freeCatalog?: OpencodeGoCatalog): Promise<GoModelCatalog>;
 export declare class GoCatalogManager {
     private readonly options;

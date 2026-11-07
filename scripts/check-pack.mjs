@@ -12,6 +12,8 @@ const REQUIRED_FILES = [
   'LICENSE',
   'README.md',
   'README.en.md',
+  'CHANGELOG.md',
+  'SECURITY.md',
   'THIRD_PARTY_NOTICES.md',
   'cordis.patch.yml',
   'assets/icon.png',

@@ -71,18 +71,46 @@ export function unsupportedThinkingLevels(): ThinkingLevelMap {
   return Object.fromEntries(THINKING_LEVELS.map(level => [level, null]))
 }
 
+/** Explain one configured thinking budget that was dropped instead of applied. */
+function ignoredBudgetReason(model: Model<Api>, tokens: number, range: ThinkingBudgetRange | undefined): string {
+  const value = Number.isFinite(tokens) ? String(tokens) : 'non-numeric'
+  if (tokens > MAX_THINKING_BUDGET_TOKENS) {
+    return `configured thinking budget ${value} is ignored: it exceeds the ${MAX_THINKING_BUDGET_TOKENS}-token cap`
+  }
+  if (range === undefined) {
+    return `configured thinking budget ${value} is ignored: model "${model.id}" exposes no usable numeric thinking budget`
+  }
+  return `configured thinking budget ${value} is ignored: model "${model.id}" accepts ${range.min}-${range.max} tokens`
+}
+
 /**
  * Selectable reasoning choices, configured budgets included. Configured budgets
  * are user data: unusable entries (outside the model's range, non-integers or
  * above {@link MAX_THINKING_BUDGET_TOKENS}) are dropped rather than throwing,
- * so a stale setting can never make its model unresolvable.
+ * so a stale setting can never make its model unresolvable. `onWarning`
+ * receives one explanation per dropped entry so the Host can surface it.
+ * @param model - model whose selectable reasoning controls are resolved.
+ * @param onWarning - optional observer for each ignored configured budget.
+ * @returns the selectable thinking choices in display order.
  */
-export function reasoningChoices(model: Model<Api>): readonly { id: string; name: string }[] {
-  if (!model.reasoning) return []
+export function reasoningChoices(model: Model<Api>, onWarning?: (reason: string) => void): readonly { id: string; name: string }[] {
+  if (!model.reasoning) {
+    // A configured budget on a model without reasoning controls cannot apply;
+    // report it once so a stale profile is visible instead of silently inert.
+    for (const tokens of new Set(model.reasoningBudgetPresets ?? [])) {
+      onWarning?.(`configured thinking budget ${Number.isFinite(tokens) ? String(tokens) : 'non-numeric'} is ignored: model "${model.id}" exposes no reasoning controls`)
+    }
+    return []
+  }
   const range = reasoningBudgetRange(model)
   const valid = (tokens: number): boolean => range !== undefined && Number.isSafeInteger(tokens)
     && tokens >= range.min && tokens <= range.max && tokens <= MAX_THINKING_BUDGET_TOKENS
-  const presets = [...new Set(model.reasoningBudgetPresets ?? [])].filter(valid).sort((a, b) => a - b)
+  const presets: number[] = []
+  for (const tokens of new Set(model.reasoningBudgetPresets ?? [])) {
+    if (valid(tokens)) presets.push(tokens)
+    else onWarning?.(ignoredBudgetReason(model, tokens, range))
+  }
+  presets.sort((a, b) => a - b)
   if (range && model.reasoningControl === 'budget') {
     const choices: { id: string; tokens: number }[] = Object.entries(BUDGET_PRESETS).filter(([, tokens]) => valid(tokens))
       .map(([id, tokens]) => ({ id, tokens }))
@@ -116,8 +144,14 @@ function clampThinkingBudget(range: ThinkingBudgetRange, requested: number | und
   return Math.min(Math.max(Math.round(requested), range.min), range.max)
 }
 
-/** Called after validation against the model's choices. */
-export function reasoningIntent(model: Model<Api>, level: string | undefined): ReasoningIntent {
+/**
+ * Called after validation against the model's choices.
+ * @param model - model that owns the selection.
+ * @param level - selected effort id (effort, toggle, off or `budget:N`).
+ * @param onWarning - optional observer for one clamped stale budget selection.
+ * @returns the serialization intent for the selection.
+ */
+export function reasoningIntent(model: Model<Api>, level: string | undefined, onWarning?: (reason: string) => void): ReasoningIntent {
   if (level === undefined) return { kind: 'default' }
   if (level === 'off') return { kind: 'off' }
   const range = reasoningBudgetRange(model)
@@ -125,9 +159,14 @@ export function reasoningIntent(model: Model<Api>, level: string | undefined): R
     const requested = level.startsWith('budget:') ? Number(level.slice(7))
       : BUDGET_PRESETS[level as keyof typeof BUDGET_PRESETS] as number | undefined
     // A persisted selection can outlive the catalog or its configured presets;
-    // degrade to the nearest usable budget instead of failing the request.
-    const tokens = requested !== undefined && Number.isSafeInteger(requested) && requested >= range.min && requested <= range.max
-      ? requested : clampThinkingBudget(range, requested)
+    // degrade to the nearest usable budget instead of failing the request, and
+    // report the clamp so a stale setting is visible instead of silent.
+    const usable = requested !== undefined && Number.isSafeInteger(requested)
+      && requested >= range.min && requested <= range.max
+    const tokens = usable ? requested : clampThinkingBudget(range, requested)
+    if (!usable) {
+      onWarning?.(`selected thinking budget ${requested === undefined ? 'unavailable' : String(requested)} was clamped to ${tokens} tokens for model "${model.id}"`)
+    }
     return { kind: 'budget', min: range.min, tokens }
   }
   return model.reasoningControl === 'toggle' ? { kind: 'on' }
@@ -572,8 +611,15 @@ function describeCatalog(snapshot: CatalogSnapshot): GoModel[] {
   ].map(model => ({ ...model, source: snapshot.source, ...snapshot.details.get(model.id) })))
 }
 
-export async function discoverCatalogModels(catalog: OpencodeGoCatalog): Promise<readonly LlmDiscoveredModel[]> {
-  const snapshot = await catalog.snapshot(true)
+/**
+ * Discover one catalog source's models, forced through the shared refresh.
+ * @param catalog - source catalog to interrogate.
+ * @param signal - optional caller cancellation. Only this waiter is cancelled;
+ *   the shared refresh keeps running for other readers and the next discovery.
+ * @returns the discovered models for the source.
+ */
+export async function discoverCatalogModels(catalog: OpencodeGoCatalog, signal?: AbortSignal): Promise<readonly LlmDiscoveredModel[]> {
+  const snapshot = await catalog.snapshot(true, signal)
   if (!snapshot.live) throw listingError(snapshot)
   return describeCatalog(snapshot).map(({ id, name, contextWindow, maxTokens }) => ({ id,
     name: snapshot.unavailable.has(id) ? `${id} (configuration unavailable: ${snapshot.unavailable.get(id)})` : name,

@@ -35,7 +35,7 @@ import { Config, DEFAULT_CONFIG, normalizeConfig, type LiveConfig } from '../src
 import { OpencodeGoCatalog } from '../src/catalog.ts'
 import { FreeBunTransport } from '../src/free-transport.ts'
 import { ProxyTransport } from '../src/transport.ts'
-import { modelsDocument, modelEntry } from './support/data.ts'
+import { modelsDocument, modelEntry, protocolEntry } from './support/data.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -405,19 +405,23 @@ describe("route lifecycle", () => {
       apply(ctx, configOf(gateway.url))
       try {
         const controller = new AbortController()
+        const reason = new Error('caller cancelled discovery')
         const discovery = ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' }, controller.signal)
         await vi.waitFor(() => expect(modelsRequests).toBe(1))
-        controller.abort(new Error('caller cancelled discovery'))
-        // The registration callback's signal settles the RPC promptly instead of
-        // waiting for the shared catalog refresh.
-        await expect(discovery).rejects.toThrow('caller cancelled discovery')
+        controller.abort(reason)
+        // The callback forwards the signal into the shared snapshot waiter, so
+        // this caller settles with the catalog abort error instead of waiting
+        // for the shared catalog refresh.
+        const cancelled = await discovery.catch(error => error)
+        expect(cancelled).toMatchObject({ code: 'ABORTED', message: expect.stringContaining('aborted by caller') })
+        expect(cancelled.cause).toBe(reason)
         expect(modelsRequests).toBe(1)
 
         // An already-aborted caller never starts a catalog request at all.
         const preAborted = new AbortController()
         preAborted.abort(new Error('already cancelled discovery'))
         await expect(ctx.llm.discoverModels('llm-opencode-go', { provider: 'dsh-opencode-go' }, preAborted.signal))
-          .rejects.toThrow('already cancelled discovery')
+          .rejects.toMatchObject({ code: 'ABORTED', message: expect.stringContaining('aborted by caller') })
         expect(modelsRequests).toBe(1)
 
         // The shared refresh itself was not aborted: a later discovery answers.
@@ -438,7 +442,7 @@ describe("route lifecycle", () => {
 
       // No key anywhere: the route stays dormant so first-run onboarding never
       // mistakes it for a usable provider, and no request reaches the gateway.
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise(resolve => setTimeout(resolve, 200))
       expect(ctx.llm.listProviders()).toEqual([{ id: 'dsh-opencode-free', name: 'DSH OpenCode Free' }])
       expect(gateway.paths).toEqual([])
     })
@@ -781,6 +785,32 @@ describe('profile forms and live configuration', () => {
     expect(view().value).toMatchObject({ enabled: true, proxyURL: '' })
     expect(entry.fiber).toBe(fiber)
     expect(gateway.modelListings).toBe(1)
+  })
+
+  it('warns once about an ignored configured thinking budget and keeps the model usable', async () => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({
+      budgeted: modelEntry({ api: protocolEntry('messages'), limit: { context: 10_000, output: 5_000 },
+        capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1024, max: 4096 } } } }),
+    }) })
+    const { ctx } = await profile(gateway.url)
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: string) => { warnings.push(message) }) as typeof ctx.logger.warn
+    const budgetWarnings = () => warnings.filter(message => message.includes('thinking budget'))
+
+    await ctx.settings.update('opencode-go', { modelLimits: { budgeted: { thinkingBudgets: [60_000, 3000] } } })
+    const resolved = await ctx.llm.resolveModelInfo('dsh-opencode-go', 'budgeted')
+    expect(String(resolved.reasoning?.efforts.map(effort => effort.id))).not.toContain('budget:60000')
+    await ctx.llm.resolveModelInfo('dsh-opencode-go', 'budgeted')
+
+    // De-duplicated per (model, reason): one warning for the stale setting.
+    expect(budgetWarnings()).toHaveLength(1)
+    expect(budgetWarnings()[0]).toContain('budgeted')
+    expect(budgetWarnings()[0]).toContain('60000')
+
+    // A usable configuration is silent.
+    await ctx.settings.update('opencode-go', { modelLimits: { budgeted: { thinkingBudgets: [3000] } } })
+    await ctx.llm.resolveModelInfo('dsh-opencode-go', 'budgeted')
+    expect(budgetWarnings()).toHaveLength(1)
   })
 
   it('persists quota placement and appearance through the live profile without remounting the provider', async () => {

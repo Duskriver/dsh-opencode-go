@@ -33,7 +33,7 @@ import {
 import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
 import { GoAnalyticsService } from './analytics.ts'
 import { accountsOf, accountRefOf, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
-import { ProxyTransport, waitWithSignal } from './transport.ts'
+import { ProxyTransport } from './transport.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -128,6 +128,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   }
   let registration: AdapterRegistrationHandle | undefined
   let freeRegistration: AdapterRegistrationHandle | undefined
+  /** Bounded, per-(model, reason) de-duplication for dropped-setting warnings. */
+  const warnedModelSettings = new Set<string>()
   const refreshPickers = (): void => {
     registration?.replace([PROVIDER_ID])
     freeRegistration?.replace([FREE_PROVIDER_ID])
@@ -167,6 +169,16 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     },
     onReplayDegrade: (reason: string) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
+    },
+    // Configured thinking budgets are filtered/clamped instead of failing the
+    // model; surface each distinct dropped setting once so a stale profile can
+    // be fixed without per-request log spam.
+    onModelWarning: (detail: { model: string; reason: string }) => {
+      const key = detail.model + '\u0000' + detail.reason
+      if (warnedModelSettings.has(key)) return
+      if (warnedModelSettings.size >= 64) warnedModelSettings.clear()
+      warnedModelSettings.add(key)
+      ctx.logger.warn(`llm-opencode-go: model "${detail.model}": ${detail.reason}`)
     },
   }
   const adapter = new OpencodeGoAdapter({ ...adapterOptions, catalog: config => catalogs.forConfig(config) })
@@ -318,16 +330,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
           'DISCOVERY_UNSUPPORTED',
         )
       }
-      signal?.throwIfAborted()
-      const discovery = discoverCatalogModels(catalogs.forConfig(config, source))
-      if (signal === undefined) return discovery
       // `LlmModelDiscoveryRequest` carries no signal; the registration callback's
-      // second argument is the caller's cancellation and must be honored. The
-      // shared catalog helper has no cancellation parameter (its forced refresh
-      // is shared with other readers), so settle this call promptly instead of
-      // waiting for that one refresh; the shared refresh keeps running for the
-      // next reader, which can then answer from the same snapshot.
-      return await waitWithSignal(() => discovery, signal)
+      // second argument is the caller's cancellation and is forwarded into the
+      // shared snapshot waiter. Aborting cancels only this discovery caller —
+      // the refresh itself continues for other readers and the next discovery.
+      return discoverCatalogModels(catalogs.forConfig(config, source), signal)
     })
   } catch (error: unknown) {
     // A duplicate mount may already own our discovery registration — the same

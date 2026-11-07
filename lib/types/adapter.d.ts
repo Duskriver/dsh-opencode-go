@@ -52,6 +52,15 @@ export interface OpencodeGoRequestExecutorOptions {
     imageAccess?: OpencodeGoImageAccess;
     /** Observe assistant history degrading to provider-neutral conversion. */
     onReplayDegrade?: (reason: string) => void;
+    /**
+     * Observe a configured thinking budget that was ignored or clamped for one
+     * model. Configured budgets never fail resolution; this is the only visible
+     * signal that a stale setting was dropped.
+     */
+    onModelWarning?: (detail: {
+        model: string;
+        reason: string;
+    }) => void;
 }
 /** Inputs already resolved by the adapter, including one account and the wire session ID. */
 export interface OpencodeGoRequestSnapshot {
@@ -149,8 +158,12 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly freeChannel;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
-    /** Reference updates invalidate rejections from attempts using an older key. */
+    /**
+     * Reference updates invalidate rejections from attempts using an older key.
+     * Values are globally monotonic epochs, so pruning never reuses a version.
+     */
     private readonly credentialVersions;
+    private credentialEpoch;
     /** Monotonic sequence of the latest request this adapter started. */
     private callSeq;
     private nextCallSequence;
@@ -199,7 +212,18 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private streamAccounts;
     /** Resolve Free keys only when selecting an account or retrying a failed attempt. */
     private accountCandidates;
+    /** Drop expired rejections so the maps stay bounded by the recent window. */
+    private pruneRejectedKeys;
     private rememberRejectedKey;
     /** A stored change to a reference outranks the gateway's last rejection of it. */
     forgetRejectedKey(ref: string): void;
+    /**
+     * Keep the version map bounded: account rosters are at most MAX_ACCOUNTS, so
+     * only references that are not current accounts can push it over the cap.
+     * Those are evicted first; the roster entries are kept. A pruned entry reads
+     * as version 0 (unchanged), which cannot falsely match an attempt that saw a
+     * real epoch (>= 1); requests started before a reference's first change keep
+     * their 0 and are only reachable in the artificial overflow/rename window.
+     */
+    private pruneCredentialVersions;
 }

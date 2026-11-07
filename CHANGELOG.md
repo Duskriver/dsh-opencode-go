@@ -3,7 +3,7 @@
 本文件记录 dsh-opencode-go 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.3.0] - 2026-11-07
 
 ### Added
 
@@ -13,9 +13,13 @@
 - `lib/build-info.json` 记录包版本；tarball 随包发布 `scripts/licenses/pi-1.5.0-LICENSE`，使 `THIRD_PARTY_NOTICES.md` 的引用在安装包内可解析。
 - 仓库新增 `CHANGELOG.md` 与 `SECURITY.md`；CI 新增 advisory 兼容 job，在临时 consumer 中对 DSH `0.2.2-rc.1` 的 Host 路径运行 installed-package 冒烟（允许失败）。
 - 本批新增 65 个回归测试。
+- 发布内容：`CHANGELOG.md` 与 `SECURITY.md` 纳入 npm tarball，`check:pack` 同步断言。
+- 仓库卫生：删除未被引用的跟踪资产（根目录 `image.png`、`.github/assets/*.png`）；新增 `npm run check:hygiene`（`scripts/check-source.mjs`），检查跟踪源文件的 BOM/LF/行尾空白/文件末尾单换行，并要求 `src`/`scripts` 无 tab，已接入 `verify` 链。
 
 ### Changed
 
+- 版本号提升到 `0.3.0`：本次包含破坏性行为变化（Free 默认关闭、peer 依赖调整、Free worker 环境 allowlist）。
+- devDependencies 评估后**不裁剪**：DSH 客户端包（如 `@deepseek-ai/dsh-client-ui-primitives`、`@deepseek-ai/dsh-client-store`）在运行期直接 import 了一部分未写进其自身清单的依赖（`clsx`、`shiki`/`@shikijs/langs`、`katex`、markdown/micromark 链、`zustand`/`immer`、`simple-icons`、`@deepseek-ai/dsh-util-workspace-path` 等），根 `devDependencies` 是这些隐式运行期与类型依赖的唯一供给，因此保留原有 devDependencies 不变；CI 的干净 `npm ci` 是唯一可靠验证。
 - 依赖：`@deepseek-ai/dsh-brand` 与 `@deepseek-ai/schemastery` 从 `dependencies` 调整为宿主提供的 `peerDependencies`（`>=0.2.1-rc.5` / `>=3.18.5 <4`），避免 profile 内重复安装；Cordis peer 范围由 `~4.0.5` 放宽为 `^4.0.5`，覆盖 DSH 0.2.2 携带的 Cordis 4.1.0。
 - Free Bun worker 改为使用显式环境 allowlist，不再继承 `process.env`：`NODE_EXTRA_CA_CERTS`、`NODE_TLS_REJECT_UNAUTHORIZED`、`NODE_OPTIONS`、`LD_PRELOAD`/`DYLD_INSERT_LIBRARIES` 与代理变量不再跨进程传递。
 - 请求生命周期：插件卸载时释放两条路由的 adapter；adapter 不再 dispose 注入的共享 `ProxyTransport`，Free worker 与 SOCKS 隧道因此有回收路径，同时不破坏 Host 拥有的传输。

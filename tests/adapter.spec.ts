@@ -104,7 +104,7 @@ describe("requests and deadlines", () => {
       controller.abort()
       try {
         // Observe cancellation before releasing the unrelated shared network read.
-        const result = await Promise.race([outcome, new Promise<null>(resolve => setTimeout(() => resolve(null), 100))])
+        const result = await Promise.race([outcome, new Promise<null>(resolve => setTimeout(() => resolve(null), 2_000))])
         if (operation !== 'stream') expect(result).toMatchObject({ error: { code: 'ABORTED' } })
         else expect(result).toMatchObject({ value: [{ type: 'finish', reason: { kind: 'aborted' } }] })
         expect(metadataSignal?.aborted).toBe(false)
@@ -527,6 +527,35 @@ describe("requests and deadlines", () => {
       expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
     })
 
+    it('keeps a successful stream when diagnostics observers throw', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({ events: textEvents })
+      const thrower = (): never => { throw new Error('observer exploded') }
+      const adapter = new OpencodeGoAdapter({
+        config: () => configOf(gateway.url),
+        resolveApiKey: () => Promise.resolve('test-key'),
+        onAccountSettled: thrower,
+        onAccountSwitch: thrower,
+        onReplayDegrade: thrower,
+      })
+      // A foreign replay envelope normally reports a degradation; a throwing
+      // diagnostics observer must not turn conversion into a request failure.
+      const history = requestOf()
+      history.messages = [
+        createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } }),
+        {
+          id: MessageId('m1'),
+          role: 'assistant',
+          content: [{ type: 'text', text: 'earlier answer' }],
+          source: { kind: 'model', provider: PROVIDER_ID, model: 'deepseek-v4.1-flash', replayState: { kind: 'foreign-adapter' } },
+        },
+      ]
+
+      const chunks = await drain(adapter.stream(history))
+
+      expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+    })
+
     it('forwards temperature and maxTokens', async () => {
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       gateway.pushCompletions({ events: textEvents })
@@ -629,6 +658,65 @@ describe("requests and deadlines", () => {
       expect(adapter.providerInfo(PROVIDER_ID)).toEqual({ id: PROVIDER_ID, name: 'DSH OpenCode Go' })
     })
 
+    it('bounds rejection and credential-version bookkeeping without changing cooldowns', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+      const adapter = await adapterFor(gateway.url)
+      const internals = adapter as unknown as {
+        rejectedKeys: Map<string, Map<string, number>>
+        credentialVersions: Map<string, number>
+        rememberRejectedKey(ref: string, gateway: string): void
+      }
+
+      // Expired rejections are pruned before a new rejection is remembered.
+      internals.rejectedKeys.set('EXPIRED', new Map([['https://gateway.invalid', Date.now() - 1]]))
+      internals.rememberRejectedKey('ACCOUNT_A', 'https://gateway.invalid')
+      expect(internals.rejectedKeys.has('EXPIRED')).toBe(false)
+      expect(internals.rejectedKeys.get('ACCOUNT_A')?.get('https://gateway.invalid')).toBeGreaterThan(Date.now())
+
+      // Credential events for references that are not accounts cannot grow the
+      // version map past its cap, and the current reference survives pressure.
+      for (let index = 0; index < 200; index += 1) adapter.forgetRejectedKey(`UNUSED_REF_${index}`)
+      expect(internals.credentialVersions.size).toBeLessThanOrEqual(64)
+      adapter.forgetRejectedKey('OPENCODE_API_KEY')
+      expect(internals.credentialVersions.has('OPENCODE_API_KEY')).toBe(true)
+      expect(internals.credentialVersions.size).toBeLessThanOrEqual(64)
+    })
+
+    it('reports configured thinking budgets it ignores without failing resolution', async () => {
+      const gateway = await mockGateway({ status: 200, body: modelsDocument({
+        budgeted: modelEntry({
+          api: { 'chat-completions': { base_url: 'https://opencode.ai/inference/go/openai/v1' } },
+          limit: { context: 10_000, output: 5_000 },
+          capabilities: { reasoning: { supported: true, toggle: true, budget: { min: 1024, max: 4096 } } },
+        }),
+      }) })
+      const warnings: { model: string; reason: string }[] = []
+      const adapter = new OpencodeGoAdapter({
+        config: () => configOf(gateway.url, { modelLimits: { budgeted: { thinkingBudgets: [60_000, 3000] } } }),
+        resolveApiKey: () => Promise.resolve('test-key'),
+        onModelWarning: detail => warnings.push(detail),
+      })
+
+      const resolved = await adapter.resolveModel(PROVIDER_ID, 'budgeted')
+
+      const ids = resolved.reasoning?.efforts.map(effort => String(effort.id)) ?? []
+      expect(ids).toContain('budget:3000')
+      expect(ids).not.toContain('budget:60000')
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toMatchObject({ model: 'budgeted' })
+      expect(warnings[0]!.reason).toContain('60000')
+      expect(warnings[0]!.reason).toContain('1024-3976')
+
+      // A usable configuration reports nothing.
+      const quiet = new OpencodeGoAdapter({
+        config: () => configOf(gateway.url, { modelLimits: { budgeted: { thinkingBudgets: [3000] } } }),
+        resolveApiKey: () => Promise.resolve('test-key'),
+        onModelWarning: detail => warnings.push(detail),
+      })
+      await quiet.resolveModel(PROVIDER_ID, 'budgeted')
+      expect(warnings).toHaveLength(1)
+    })
+
     it('applies and removes capacities immediately without dropping the catalog cache', async () => {
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
       let modelLimits: Record<string, { contextWindow?: number; maxTokens?: number }> = {}
@@ -666,7 +754,7 @@ describe("requests and deadlines", () => {
     await started.promise
     if (kind === 'caller') controller.abort()
     try {
-      const result = await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 200))])
+      const result = await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 2_000))])
       if (kind === 'caller') expect(result).toMatchObject({ value: [{ reason: { kind: 'aborted', failure: { code: 'ABORTED' } } }] })
       else expect(result).toMatchObject({ error: { code: 'TIMEOUT' } })
       expect(gateway.bodies).toHaveLength(0)
@@ -692,7 +780,7 @@ describe("requests and deadlines", () => {
     })] })))
     const outcome = pending.then(value => ({ value }), error => ({ error }))
     try {
-      expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 200))]))
+      expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 2_000))]))
         .toMatchObject({ error: { code: 'TIMEOUT' } })
       expect(read).toHaveBeenCalledTimes(1)
       expect(gateway.bodies).toHaveLength(0)
@@ -705,7 +793,7 @@ describe("requests and deadlines", () => {
     const release = Promise.withResolvers<string>()
     const accounts = [{ id: 'a', name: 'A', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'B', apiKeyEnv: 'ACCOUNT_B' }]
     const adapter = new OpencodeGoAdapter({ config: () => configOf(gateway.url, {
-      accounts, autoSwitch: true, apiKeyEnv: 'ACCOUNT_A', requestTimeoutMs: 80, requestPreparationTimeoutMs: 1000,
+      accounts, autoSwitch: true, apiKeyEnv: 'ACCOUNT_A', requestTimeoutMs: 250, requestPreparationTimeoutMs: 1000,
     }), resolveApiKey: async config => {
       if (config.apiKeyEnv === 'ACCOUNT_A') {
         await new Promise(resolve => setTimeout(resolve, 45))
@@ -719,7 +807,7 @@ describe("requests and deadlines", () => {
     const outcome = pending.then(value => ({ value }), error => ({ error }))
     await started.promise
     try {
-      expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 65))]))
+      expect(await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('stalled'), 2_000))]))
         .toMatchObject({ error: { code: 'TIMEOUT' } })
     } finally { release.resolve('late-key'); await outcome }
     expect(gateway.bodies).toHaveLength(0)

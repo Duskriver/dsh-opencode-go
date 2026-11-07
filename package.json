@@ -1,6 +1,6 @@
 {
   "name": "dsh-opencode-go",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "OpenCode Go model provider and settings UI for DeepSeek Harness",
   "icon": "assets/icon.png",
   "type": "module",
@@ -37,7 +37,9 @@
     "THIRD_PARTY_NOTICES.md",
     "docs",
     "examples",
-    "scripts/licenses"
+    "scripts/licenses",
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "dsh": {
     "bundle": {
@@ -58,13 +60,14 @@
     "check:dist": "node scripts/build.mjs --check",
     "check:pack": "node scripts/check-pack.mjs",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "check:hygiene": "node scripts/check-source.mjs",
     "test": "vitest run",
     "test:ci": "npm run check:dist && npm test",
     "prepack": "npm run check:dist",
     "prepublishOnly": "npm run typecheck && npm run test:ci",
     "verify:installed": "node --expose-internals scripts/installed-smoke.mjs",
     "verify:headless": "node scripts/headless-smoke.mjs",
-    "verify": "npm run typecheck && npm run test:ci && npm run verify:installed"
+    "verify": "npm run typecheck && npm run check:hygiene && npm run test:ci && npm run verify:installed"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
