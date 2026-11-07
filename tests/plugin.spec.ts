@@ -31,7 +31,7 @@ import {
   type SaveImageAttachment,
   type StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import { Config, type LiveConfig } from '../src/config.ts'
+import { Config, DEFAULT_CONFIG, normalizeConfig, type LiveConfig } from '../src/config.ts'
 import { OpencodeGoCatalog } from '../src/catalog.ts'
 import { modelsDocument, modelEntry } from './support/data.ts'
 import { tmpdir } from 'node:os'
@@ -644,6 +644,15 @@ describe("Loader composition", () => {
 })
 
 describe('profile forms and live configuration', () => {
+  it('normalizes old profiles to badge appearance with sidebar quota disabled and validates saved choices', () => {
+    expect(DEFAULT_CONFIG).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(normalizeConfig()).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(normalizeConfig({ showSidebarQuota: true, usagePillStyle: 'plain' })).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    expect(DEFAULT_CONFIG).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(() => normalizeConfig({ usagePillStyle: 'neon' as never })).toThrow()
+    expect(() => normalizeConfig({ showSidebarQuota: 'true' as never })).toThrow()
+  })
+
   async function profile(baseURL: string) {
     const ctx = context()
     const secrets = new Map([['OPENCODE_API_KEY', 'profile-key']])
@@ -704,6 +713,22 @@ describe('profile forms and live configuration', () => {
     expect(view().value).toMatchObject({ enabled: true, proxyURL: '' })
     expect(entry.fiber).toBe(fiber)
     expect(gateway.modelListings).toBe(1)
+  })
+
+  it('persists quota placement and appearance through the live profile without remounting the provider', async () => {
+    const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
+    const { ctx, entry, fiber, view } = await profile(gateway.url)
+    expect(view().value).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    await ctx.settings.update('opencode-go', { showSidebarQuota: true, usagePillStyle: 'plain' }, view().revision)
+    expect(view().value).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    expect(entry.options.config).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    expect(entry.fiber).toBe(fiber)
+    await expect(ctx.settings.update('opencode-go', { usagePillStyle: 'neon' })).rejects.toThrow()
+    await expect(ctx.settings.update('opencode-go', { showSidebarQuota: 'true' })).rejects.toThrow()
+    expect(view().value).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    await ctx.settings.update('opencode-go', { showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(view().value).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(entry.fiber).toBe(fiber)
   })
 
   it('runs account commands through current RPC and forms, keeping secrets outside the configuration document', async () => {

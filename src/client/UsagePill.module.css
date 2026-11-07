@@ -1,96 +1,124 @@
-/* The pill and its popover share the selected theme's tokens (--go-*), with
-   the Host's alias variables as fallbacks for a surface mounted without them. */
-.root { position: relative; display: inline-flex; min-width: 0; color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); }
-.trigger { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 16%, transparent));
-  background: color-mix(in srgb, var(--go-surface, Canvas) 72%, transparent); color: inherit; font: inherit; font-size: 12.5px; line-height: 1.6;
-  padding: 4px 9px; border-radius: 12px; cursor: pointer; white-space: nowrap; }
-.trigger:hover, .trigger:focus-visible { background: var(--go-surface-2, color-mix(in srgb, currentColor 8%, transparent)); border-color: color-mix(in srgb, var(--go-accent, currentColor) 42%, var(--go-border, transparent)); }
-.reading { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.stale { color: var(--go-warning, currentColor); }
-.fallback { color: var(--go-warning, currentColor); }
-/* The active account's full name yields to the readings first: it shrinks three
-   times as fast and ends in an ellipsis, while the button's title keeps the
-   complete label for hover and the screen reader. */
-.account { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Warm quota surfaces, with the same local typography and palette as settings. */
+.root { position: relative; display: inline-flex; min-width: 0; font-family: var(--go-font); color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); }
+.trigger { box-sizing: border-box; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%;
+  padding: 6px 10px; border: 1px solid var(--go-border); border-radius: 99px; background: var(--go-surface);
+  color: var(--go-text); font: inherit; font-size: 11.5px; line-height: 1.5; white-space: nowrap; cursor: pointer; }
+.trigger:hover, .trigger:focus-visible { border-color: color-mix(in srgb, var(--go-accent) 65%, var(--go-border)); background: var(--go-surface-2); }
+.trigger.plain { padding: 4px 6px; border-color: transparent; background: transparent; color: inherit; }
+.trigger.plain:hover, .trigger.plain:focus-visible { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
+.trigger:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+.pillStatus { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
+.pillStatus[data-warning] { background: var(--go-warning); }
+.reading { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+.unit { color: var(--go-muted); }
+.stale, .fallback { color: var(--go-warning); font-size: 11px; }
+.account { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--go-muted); }
 
-/* Narrow composer, tier 1: drop the stale/fallback wording. The account name keeps
-   its place but truncates, so a multi-account setup stays identifiable. */
+/* Preserve the readings and account identity as the composer narrows. */
 @container (max-width: 460px) {
   .stale, .fallback { display: none; }
   .reading[data-stale]::after { content: '*'; }
-  .trigger[data-fallback]::after { content: ' ↳'; }
+  .trigger[data-fallback]::after { content: ' ↳'; color: var(--go-warning); }
 }
-@container (max-width: 360px) {
-  .unit { display: none; }
-}
+@container (max-width: 360px) { .unit { display: none; } }
 
-.panel { position: absolute; bottom: calc(100% + 10px); right: 0; z-index: 100; width: 340px; max-width: calc(100vw - 24px); max-height: 72vh;
-  box-sizing: border-box; border: 1px solid var(--go-border, color-mix(in srgb, currentColor 12%, transparent)); border-radius: 16px;
-  color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); font-size: 12px; isolation: isolate; display: flex; flex-direction: column;
-  box-shadow: 0 20px 60px #0005; }
-.material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
-  background: color-mix(in srgb, var(--go-surface, var(--dsw-specific-menu, #2a2a2c)) 88%, transparent);
-  backdrop-filter: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); }
-@supports not (backdrop-filter: blur(1px)) {
-  .material { background: var(--go-surface, var(--dsw-alias-bg-layer-2, Canvas)); }
-}
-.body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 7px; }
-
-.panelTitle, .panelHead { flex: none; padding: 2px 6px 0; font-size: 11.5px; line-height: 1.6; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
-.panelHead { display: flex; align-items: center; gap: 6px; }
-.panelHead strong { font-size: 12px; font-weight: 600; color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); }
-.back { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: none; color: inherit; cursor: pointer; }
-.back:hover { background: color-mix(in srgb, var(--go-text, currentColor) 8%, transparent); }
+.panel { position: absolute; bottom: calc(100% + 9px); right: 0; z-index: 100; box-sizing: border-box;
+  display: flex; flex-direction: column; width: 352px; max-width: calc(100vw - 48px); max-height: 72vh;
+  border: 1px solid var(--go-border); border-radius: 12px; color: var(--go-text); font-size: 12px;
+  box-shadow: 0 18px 48px var(--go-shadow); isolation: isolate; }
+.material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--go-surface); pointer-events: none; }
+.body { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; box-sizing: border-box;
+  overflow-y: auto; overscroll-behavior: contain; padding: 7px 16px 12px; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+.panelTitle, .panelHead { flex: none; display: flex; align-items: center; min-height: 46px; padding: 0; border-bottom: 1px solid var(--go-border);
+  color: var(--go-text); font-family: var(--go-display-font); font-size: 17px; font-weight: 400; letter-spacing: -.025em; }
+.panelHead { gap: 8px; }
+.panelHead strong { font-size: 17px; font-weight: 400; letter-spacing: 0; color: var(--go-text); }
+.back { display: grid; place-items: center; width: 24px; height: 26px; margin-left: -5px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--go-muted); cursor: pointer; }
+.back:hover { color: var(--go-text); background: var(--go-surface-2); }
 .icon { flex: none; width: 14px; height: 14px; }
-.tick { flex: none; width: 14px; height: 14px; color: var(--go-success, #39a878); }
-.tile { flex: none; border-radius: 10px; background: var(--go-surface-2, color-mix(in srgb, currentColor 6%, transparent)); overflow: hidden; }
-.divider { height: .5px; margin: 0 12px; background: var(--go-border, color-mix(in srgb, currentColor 10%, transparent)); }
-.accHead { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; }
-.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--go-success, #39a878); }
-.accName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; }
-.tag { flex: none; padding: 0 7px; border-radius: 999px; border: .5px solid color-mix(in srgb, var(--go-success, #39a878) 45%, transparent);
-  background: color-mix(in srgb, var(--go-success, #39a878) 12%, transparent); color: var(--go-success, #39a878); font-size: 10.5px; line-height: 1.7; }
-.switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; border: 0; border-radius: 6px; background: none;
-  font: inherit; font-size: 11.5px; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); cursor: pointer; }
-.switch:hover:not(:disabled) { background: color-mix(in srgb, var(--go-text, currentColor) 8%, transparent); }
-.switch:disabled { opacity: .55; cursor: default; }
-.switch svg { display: block; transform: translateY(.5px); }
-.option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 0 12px; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
-.option:hover:not(:disabled) { background: color-mix(in srgb, var(--go-text, currentColor) 6%, transparent); }
-.option:disabled { opacity: .6; cursor: default; }
-.optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--go-text, var(--dsw-alias-label-secondary, currentColor)); }
-.option[data-selected] .optionName { font-weight: 600; color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); }
-.hint { opacity: .65; font-size: 11px; line-height: 1.6; }
-.warning { margin: 10px 0; padding: 10px; border-radius: 6px; background: color-mix(in srgb, var(--go-warning, currentColor) 8%, transparent); line-height: 1.5; overflow-wrap: anywhere; }
-.warning p { margin: 5px 0 0; }
-.retry { border: 1px solid color-mix(in srgb, var(--go-text, currentColor) 25%, transparent); border-radius: 6px; padding: 5px 9px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.retry:disabled { opacity: .6; cursor: default; }
-.back:focus-visible, .switch:focus-visible, .option:focus-visible, .retry:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 2px; }
+.tick { flex: none; width: 15px; height: 15px; color: var(--go-accent); }
+.tile { flex: none; overflow: hidden; }
+.divider { height: 1px; background: var(--go-border); }
+.accHead { display: flex; align-items: center; gap: 7px; min-height: 48px; }
+.dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
+.accName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.tag { flex: none; padding: 1px 6px; border-radius: 4px; background: var(--go-accent-soft); color: var(--go-accent); font-size: 11px; line-height: 1.6; }
+.switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 4px 5px; border: 0; border-radius: 4px;
+  background: none; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
+.switch:hover:not(:disabled) { background: var(--go-surface-2); }
+.switch:disabled { opacity: .5; cursor: default; }
+.option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 9px;
+  border: 0; background: none; color: var(--go-text); font: inherit; text-align: left; cursor: pointer; }
+.option:hover:not(:disabled), .option[data-selected] { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
+.option:disabled { opacity: .5; cursor: default; }
+.optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.option[data-selected] .optionName { font-weight: 500; }
+.hint { margin: 10px 0 2px; color: var(--go-muted); font-size: 11.5px; line-height: 1.7; }
+.warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--go-warning) 7%, transparent); color: var(--go-text); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.warning p { margin: 4px 0 0; }
+.retry { align-self: flex-start; padding: 4px 8px; margin-bottom: 8px; border: 1px solid var(--go-border); border-radius: 4px;
+  background: transparent; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
+.retry:disabled { opacity: .5; cursor: default; }
+.back:focus-visible, .switch:focus-visible, .option:focus-visible, .retry:focus-visible { outline: 2px solid var(--go-accent); outline-offset: -2px; }
 
-.window { padding: 10px 12px; }
-.windowRow { display: flex; align-items: center; gap: 10px; }
-.windowLabel { flex: none; width: 48px; font-size: 12.5px; color: var(--go-muted, var(--dsw-alias-label-secondary, currentColor)); }
-.windowPercent { flex: none; width: 38px; text-align: right; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.window progress { flex: 1; min-width: 60px; height: 8px; display: block; appearance: none; border: 0; border-radius: 99px;
-  background: color-mix(in srgb, var(--go-text, currentColor) 12%, transparent); }
-.window progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
-.window progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent, #39a878)); border-radius: 99px; }
-.window progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent, #39a878)); border-radius: 99px; }
-.windowReset { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
-.progressRolling { --go-progress: var(--go-accent); }
-.progressWeekly { --go-progress: var(--go-success); }
-.progressMonthly { --go-progress: var(--go-warning); }
-.window progress.high { --go-progress: var(--go-warning); }
-.window progress.limited { --go-progress: var(--go-danger); }
-.limitedText { margin-top: 2px; color: var(--go-danger, #e5484d); font-weight: 600; }
-
-.foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 6px 1px; font-size: 10.5px; color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
-/* The dashboard entry is the same quiet row as the account tile above it: a
-   surface, not an accent-colored control. */
-.analyticsEntry { flex: none; display: flex; align-items: center; gap: 7px; width: 100%; min-height: 42px; padding: 0 12px;
-  border: 0; border-radius: 10px; background: var(--go-surface-2, color-mix(in srgb, currentColor 6%, transparent));
-  color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); font: inherit; font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer; }
+.window { padding: 15px 0; }
+.windowRow { display: flex; align-items: center; gap: 12px; }
+.windowLabel { flex: none; width: 48px; color: var(--go-muted); font-size: 12px; }
+.windowPercent { flex: none; width: 43px; text-align: right; font-family: var(--go-number-font); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.window progress, .sidebarWindow progress { display: block; flex: 1; min-width: 0; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px;
+  background: var(--go-surface-2); }
+.window progress::-webkit-progress-bar, .sidebarWindow progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
+.window progress::-webkit-progress-value, .sidebarWindow progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.window progress::-moz-progress-bar, .sidebarWindow progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.window progress { min-width: 50px; }
+.windowReset { margin-top: 7px; padding-left: 60px; color: var(--go-muted); font-size: 11px; line-height: 1.6; }
+.progressRolling, .progressWeekly, .progressMonthly { --go-progress: var(--go-accent); }
+.window progress.high, .sidebarWindow progress.high { --go-progress: var(--go-warning); }
+.window progress.limited, .sidebarWindow progress.limited { --go-progress: var(--go-danger); }
+.limitedText { margin-top: 5px; color: var(--go-danger); font-size: 11px; }
+.foot { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding-top: 10px; color: var(--go-muted); font-size: 11px; line-height: 1.6; }
+.foot > span { min-width: 0; }
+.analyticsEntry { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; margin-top: 3px; padding: 0;
+  border: 0; border-top: 1px solid var(--go-border); background: transparent; color: var(--go-text); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
 .analyticsEntry span { flex: 1; min-width: 0; }
-.analyticsEntry .icon { color: var(--go-muted, var(--dsw-alias-label-tertiary, currentColor)); }
-.analyticsEntry:hover { background: color-mix(in srgb, var(--go-text, currentColor) 8%, var(--go-surface-2, transparent)); }
-.analyticsEntry:focus-visible { outline: 2px solid var(--go-accent, currentColor); outline-offset: 1px; }
+.analyticsEntry > .icon:first-child { color: var(--go-accent); }
+.analyticsEntry > .icon:last-child { color: var(--go-muted); }
+.analyticsEntry:hover { color: var(--go-accent); }
+.analyticsEntry:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; border-radius: 2px; }
+
+/* The account badge cycles the viewed quota only. History has its own action. */
+.sidebarRoot { display: flex; width: 100%; min-width: 0; }
+.sidebarRoot[data-wide='false'] { width: 36px; min-width: 36px; flex: none; }
+.sidebarCard, .sidebarIcon { box-sizing: border-box; border: 1px solid var(--go-border); background: var(--go-surface); color: var(--go-text); font: inherit; }
+.sidebarCard { display: flex; flex-direction: column; align-items: stretch; gap: 11px; width: 100%; min-width: 0; padding: 14px 12px 6px; border-radius: 10px; text-align: left; }
+.sidebarHead { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 1px; }
+.sidebarHead > strong { flex: none; font-family: var(--go-display-font); font-size: 15px; font-weight: 400; white-space: nowrap; letter-spacing: -.03em; }
+.sidebarBadge { min-width: 0; margin-left: auto; padding: 1px 5px; border: 1px solid var(--go-border); border-radius: 3px;
+  background: transparent; color: var(--go-muted); font-size: 11px; line-height: 1.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebarAccountButton { font-family: inherit; cursor: pointer; }
+.sidebarAccountButton:hover { color: var(--go-accent); border-color: var(--go-accent); }
+.sidebarAccountButton:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+.sidebarWindow { display: grid; grid-template-columns: 44px minmax(0, 1fr) 36px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
+.sidebarWindow > span { color: var(--go-muted); white-space: nowrap; }
+.sidebarWindow > strong { text-align: right; font-family: var(--go-number-font); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.sidebarStatus { color: var(--go-warning); font-size: 11px; }
+.sidebarHistory { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 33px; margin-top: 2px; padding: 0;
+  border: 0; border-top: 1px solid var(--go-border); background: transparent; color: var(--go-muted); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+.sidebarHistory span { flex: 1; }
+.sidebarHistory > .icon:first-child { color: var(--go-accent); }
+.sidebarHistory:hover { color: var(--go-text); }
+.sidebarHistory:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 1px; border-radius: 2px; }
+.sidebarIcon { display: grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: 7px; color: var(--go-accent); }
+button.sidebarIcon { cursor: pointer; }
+button.sidebarIcon:hover { background: var(--go-surface-2); border-color: var(--go-accent); }
+button.sidebarIcon:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+.sidebarIcon .icon { width: 17px; height: 17px; }
+/* Stack the quota card with the Host footer's other plugin entries. */
+:global([class*="_footArea"] [class*="_footerActions"]):has(.sidebarRoot) { flex-direction: column; }
+
+@media (max-width: 360px) {
+  .windowRow { gap: 8px; }
+  .windowReset { padding-left: 56px; }
+  .foot { align-items: flex-start; }
+}

@@ -5,6 +5,19 @@ import { join } from 'node:path'
 import { closeMockGateways } from './support/gateway.ts'
 import { DEFAULT_FREE_BASE_URL } from '../src/contracts.ts'
 
+vi.mock('node:child_process', async importOriginal => {
+  const original = await importOriginal<typeof import('node:child_process')>()
+  const { resolve } = await import('node:path')
+  const guard = resolve('tests/support/bun-network-guard.mjs')
+  return {
+    ...original,
+    spawn(command: string, args: string[], options: object) {
+      const worker = args?.some(arg => /free-http-worker\.(?:js|ts)$/.test(arg))
+      return original.spawn(command, worker ? ['--preload', guard, ...args] : args, options)
+    },
+  }
+})
+
 const networkFetch = globalThis.fetch
 let testHome: string
 

@@ -19,11 +19,13 @@ import {
   toPiContext,
   toPiAssistant,
   toPiReplayState,
+  piContextUsageKey,
   type PiImageRequestContext,
   toStreamChunks,
 } from '../src/conversion.ts'
 import { requestOf } from './support/host.ts'
 import type { AssistantMessage, AssistantMessageEvent } from '../src/sdk-types.ts'
+import { estimateContextTokens } from 'opencode-go-pi-ai/utils/estimate'
 
 describe("stream outcomes", () => {
   function message(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
@@ -185,9 +187,76 @@ describe('current history roles and durable replay', () => {
     const replay = toPiReplayState(piMessage(), 'requested-model', 'dsh-opencode-go')
     const stored = JSON.parse(JSON.stringify(durable(replay)))
     const converted = toPiAssistant(stored)
-    expect(converted).toMatchObject({ api: 'google-generative-ai', provider: 'opencode-go', model: 'requested-model', responseId: 'response-1', providerThinkingLevel: 'low', stopReason: 'toolUse', content: piMessage().content })
+    expect(converted).toMatchObject({ api: 'google-generative-ai', provider: 'opencode-go', model: 'requested-model', responseId: 'response-1', providerThinkingLevel: 'low', stopReason: 'toolUse', content: piMessage().content, usage: piMessage().usage })
     const context = toPiContext(requestOf({ messages: [stored, createToolResultMessage({ callId, content: [{ type: 'text', text: 'file contents' }], isError: false })] }))
     expect(context.messages[1]).toMatchObject({ role: 'toolResult', toolName: 'lookup', toolCallId: callId })
+  })
+
+  it.each(['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const)('preserves nonzero %s through durable replay without persisting cost', field => {
+    const message = piMessage()
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, [field]: 17 }
+    message.usage = { ...tokens, cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 } }
+    const replay = toPiReplayState(message, 'requested-model', 'dsh-opencode-go')
+    expect(replay.response).toHaveProperty('usage', tokens)
+    expect((replay.response as { usage: unknown }).usage).not.toHaveProperty('cost')
+    const restored = toPiAssistant(JSON.parse(JSON.stringify(durable(replay))))
+    expect(restored.usage).toEqual({ ...tokens, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } })
+    expect(estimateContextTokens([restored])).toMatchObject({ tokens: 17, usageTokens: 17, lastUsageIndex: 0 })
+  })
+
+  it.each(['text', 'images'] as const)('validates measured usage against the full prefix without losing signed replay on the %s path', async mode => {
+    const degraded = vi.fn()
+    const first = requestOf({ model: 'requested-model', system: 'System instructions',
+      messages: [user([{ type: 'text', text: 'hello' }])],
+      tools: [{ name: 'lookup', description: 'Read a path', parameters: {
+        type: 'object', properties: { path: { type: 'string' } }, required: ['path'],
+      } }],
+    })
+    const convert = (options: typeof first) => mode === 'text'
+      ? Promise.resolve(toPiContext(options, undefined, degraded)) : toPiContext(options, images(), degraded)
+    const context = await convert(first)
+    const replay = toPiReplayState(piMessage(), first.model, first.provider, piContextUsageKey(context, first.provider, first.model))
+    const stored = JSON.parse(JSON.stringify(durable(replay)))
+    const next = user([{ type: 'text', text: 'continue' }])
+    const continued = { ...first, messages: [...first.messages, stored, next],
+      tools: [{ ...first.tools![0], parameters: { required: ['path'], properties: { path: { type: 'string' } }, type: 'object' } }],
+    }
+    expect(estimateContextTokens(await convert(continued))).toMatchObject({ usageTokens: 6, lastUsageIndex: 1 })
+
+    const compacted = { ...continued, messages: [user([{ type: 'text', text: 'Compacted summary' }]), stored, next] }
+    const compactedContext = await convert(compacted)
+    expect(estimateContextTokens(compactedContext).lastUsageIndex).toBeNull()
+    expect(compactedContext.messages[1]).toMatchObject({
+      api: 'google-generative-ai', provider: 'opencode-go', model: 'requested-model',
+      content: toPiAssistant(stored).content, usage: { totalTokens: 0 },
+    })
+    expect(stored.source.replayState.response.usage.totalTokens).toBe(6)
+
+    // A fresh response after compaction supplies a valid measurement again.
+    const fresh = durable(toPiReplayState(piMessage(), first.model, first.provider,
+      piContextUsageKey(compactedContext, first.provider, first.model)))
+    const resumed = await convert({ ...compacted, messages: [...compacted.messages, fresh, next] })
+    expect(estimateContextTokens(resumed)).toMatchObject({ usageTokens: 6, lastUsageIndex: 3 })
+
+    const legacy = structuredClone(stored)
+    delete legacy.source.replayState.response.usageContext
+    const legacyContext = await convert({ ...continued, messages: [...first.messages, legacy, next] })
+    expect(estimateContextTokens(legacyContext).lastUsageIndex).toBeNull()
+    expect(legacyContext.messages[1]).toMatchObject({ api: 'google-generative-ai', content: toPiAssistant(stored).content })
+    expect(degraded).not.toHaveBeenCalled()
+  })
+
+  it('omits unmeasured usage and reads older replay envelopes without usage', () => {
+    const message = piMessage()
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+    message.usage = usage
+    expect(toPiReplayState(message).response).not.toHaveProperty('usage')
+    const replay = toPiReplayState(piMessage(), 'requested-model', 'dsh-opencode-go')
+    delete (replay.response as { usage?: unknown }).usage
+    const degraded = vi.fn()
+    expect(toPiAssistant(durable(replay), degraded)).toMatchObject({ api: 'google-generative-ai', usage })
+    expect(degraded).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -198,6 +267,15 @@ describe('current history roles and durable replay', () => {
     (state: any) => { state.blocks.pop() },
     (state: any) => { state.blocks[0].type = 'text' },
     (state: any) => { state.blocks[0].thinkingSignature = false },
+    (state: any) => { state.response.usageContext = null },
+    (state: any) => { state.response.usageContext = 'invalid' },
+    (state: any) => { state.response.usage = null },
+    (state: any) => { state.response.usage = [] },
+    (state: any) => { state.response.usage.input = -1 },
+    (state: any) => { state.response.usage.output = '1' },
+    (state: any) => { state.response.usage.cacheRead = Infinity },
+    (state: any) => { state.response.usage.cacheWrite = NaN },
+    (state: any) => { delete state.response.usage.totalTokens },
   ])('degrades malformed replay to neutral content while reporting its reason', mutate => {
     const replay = structuredClone(toPiReplayState(piMessage(), 'requested-model', 'dsh-opencode-go'))
     mutate(replay)
@@ -233,6 +311,30 @@ describe('request-local image budgets and durable offloading', () => {
     }))
     return { read, access: { attachments: { readImageRequest: read } as unknown as AttachmentStore, resolveImageAccess: () => undefined } satisfies PiImageRequestContext }
   }
+
+  it('invalidates measured usage when a retained prefix image is offloaded', async () => {
+    const { read, access } = fixture(), image = ref()
+    const first = requestOf({ messages: [user([{ type: 'image', attachment: image }])] })
+    const context = await toPiContext(first, access)
+    const reply: AssistantMessage = {
+      role: 'assistant', api: 'openai-completions', provider: 'opencode-go', model: first.model,
+      content: [{ type: 'text', text: 'Image answer' }], stopReason: 'stop', timestamp: 0,
+      usage: { input: 50_000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 50_001,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    }
+    const previous = createAssistantMessage({ content: [{ type: 'text', text: 'Image answer' }],
+      source: { provider: first.provider, model: first.model,
+        replayState: toPiReplayState(reply, first.model, first.provider, piContextUsageKey(context, first.provider, first.model)) },
+    })
+    const continued = await toPiContext({ ...first, messages: [...first.messages, previous] }, access)
+    expect(estimateContextTokens(continued).usageTokens).toBe(50_001)
+    const offloaded = await toPiContext({ ...first,
+      messages: [user([{ type: 'image', attachment: image, offloaded: true }]), previous],
+    }, access)
+    expect(estimateContextTokens(offloaded).lastUsageIndex).toBeNull()
+    expect(offloaded.messages[1]).toMatchObject({ api: reply.api, content: reply.content })
+    expect(read).toHaveBeenCalledTimes(2)
+  })
 
   it('prepares a repeated attachment once, preserving every occurrence and the configured normalization target', async () => {
     const { read, access } = fixture(), image = ref()

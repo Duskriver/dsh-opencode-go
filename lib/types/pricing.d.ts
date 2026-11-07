@@ -1,4 +1,4 @@
-/** Gateway text tariffs and UTC multiplier conditions, shared with analytics. */
+/** Strict gateway tariff validation for model discovery and Free eligibility. */
 import type { ModelCost } from './sdk-types.ts';
 type Comparison<T> = {
     in?: T[];
@@ -19,8 +19,6 @@ export interface PriceMultiplier {
     when: PricingCondition;
     factor: number;
 }
-export declare function matchesPricingCondition(rule: PricingCondition, at: number): boolean;
-export declare function priceMultiplierAt(multipliers: readonly PriceMultiplier[] | undefined, at: number): number;
 export interface ParsedCost {
     cost: ModelCost;
     multipliers?: PriceMultiplier[];

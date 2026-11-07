@@ -18,9 +18,10 @@ const { default: Loader } = await import(pathToFileURL(require.resolve('@deepsee
 const { createUserMessage } = await load('@deepseek-ai/dsh-llm')
 const requests = []
 const server = createServer((request, response) => {
-  request.resume()
+  let body = ''
+  request.on('data', chunk => { body += chunk })
   request.on('end', () => {
-    requests.push({ path: request.url, headers: request.headers })
+    requests.push({ path: request.url, headers: request.headers, body: body ? JSON.parse(body) : undefined })
     if (request.url.endsWith('/models')) {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ data: [{ id: 'deepseek-v4.1-flash', type: 'chat', name: 'Fixture chat',
@@ -75,6 +76,10 @@ try {
   for await (const chunk of ctx.llm.stream({ provider: 'dsh-opencode-free', model: 'deepseek-v4.1-flash', messages: [], sessionId: 'free-session' })) freeChunks.push(chunk)
   assert.ok(freeChunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'standalone-ok'))
   assert.ok(requests.some(request => request.path === '/free/chat/completions' && request.headers.authorization === 'Bearer fixture-key'))
+  const freeRequest = requests.find(request => request.path === '/free/chat/completions')
+  assert.equal(freeRequest.headers['user-agent'], 'opencode/latest/2.2.5/cli')
+  assert.equal(freeRequest.headers['x-opencode-session'], 'free-session')
+  assert.equal(freeRequest.body.tools, undefined)
   const completions = requests.filter(request => request.path === '/chat/completions')
   assert.deepEqual(completions.map(request => request.headers['x-opencode-session']), ['standalone-session-a', 'standalone-session-a', 'standalone-session-b'])
   assert.ok(completions.every(request => request.headers['user-agent'].startsWith('deepseek-harness/')))

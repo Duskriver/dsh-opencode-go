@@ -85,6 +85,11 @@ async function compile(output) {
     code = code.slice(0, start) + code.slice(start, end).replace(/[ \t]+$/gm, '') + code.slice(end)
   }
   await writeFile(hostPath, code)
+  // Standalone Bun executes only this HTTP worker, never the host/agent bundle.
+  await build({
+    entryPoints: ['src/free-http-worker.ts'], outfile: join(output, 'free-http-worker.js'),
+    bundle: true, format: 'esm', platform: 'node', target: 'es2022',
+  })
   // Consumers must also resolve exported types without installing pi-ai.
   const bundledTypes = ['opencode-go-pi-ai', '@earendil-works/pi-telemetry', '@earendil-works/pi-schema']
   const sdkDirectory = resolve('node_modules/opencode-go-pi-ai')

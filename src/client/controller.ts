@@ -10,6 +10,8 @@ import {
   type ModelSource,
   DEFAULT_USAGE_DISPLAY,
   USAGE_DISPLAY_MODES,
+  DEFAULT_USAGE_PILL_STYLE,
+  USAGE_PILL_STYLES,
   SETTINGS_NAMESPACE,
   type OpencodeGoConfig,
   type OpencodeGoSettings,
@@ -22,8 +24,6 @@ import {
   type GoModel,
   type GoModelCatalog,
   type GoUsage,
-  type AnalyticsQuery,
-  type AnalyticsReport,
   type AccountCommand,
   type SettingsWriteResult,
 } from '../contracts.ts'
@@ -32,12 +32,14 @@ export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } 
 
 export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
-export const TEXT_FIELDS = ['usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
+export const TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'showSidebarQuota', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
   'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes'] as const
 
 export type TextField = typeof TEXT_FIELDS[number]
 
-export type EditableField = TextField | 'modelLimits'
+export const editableKeys = [...TEXT_FIELDS, 'modelLimits'] as const
+
+export type EditableField = typeof editableKeys[number]
 
 export interface FieldState { text: string; overridden: boolean; invalid: boolean }
 
@@ -59,11 +61,15 @@ type FieldWrite = { kind: 'set'; value: OpencodeGoConfig[EditableField] } | { ki
 
 function formatField(field: TextField, value: unknown): string {
   if (field === 'usageDisplay') return typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY
+  if (field === 'usagePillStyle') return typeof value === 'string' ? value : DEFAULT_USAGE_PILL_STYLE
+  if (field === 'showSidebarQuota') return String(value === true)
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 }
 
 function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'usageDisplay') return USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as OpencodeGoConfig['usageDisplay'] } : undefined
+  if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as OpencodeGoConfig['usagePillStyle'] } : undefined
+  if (field === 'showSidebarQuota') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
     try { assertProxyURL(trimmed); return { kind: 'set', value: trimmed } }
@@ -168,6 +174,8 @@ export interface OpencodeGoSectionState extends FormShell {
   accounts: GoAccountsState
   enabled: boolean
   usageDisplay: FieldState
+  showSidebarQuota: FieldState
+  usagePillStyle: FieldState
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
@@ -188,8 +196,6 @@ export interface OpencodeGoSectionState extends FormShell {
 export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   hooks: { opencodeGo: SnapshotStore<OpencodeGoSectionState> }
   loadModels(): void
-  readAnalytics(query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport>
-  readQuota(ref: string): Promise<GoUsage>
   setEnabled(next: boolean): void
   setModelEnabled(id: string, next: boolean): void
 }
@@ -230,11 +236,6 @@ export class OpencodeGoSectionController {
     private readonly executeAccountCommand: ExecuteAccountCommand = async command => {
       const result = await ctx.remote.opencodeGoAccounts.execute(command)
       return result.ok ? result.value : 'unknown'
-    },
-    private readonly readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport> = async () => {
-      throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
-        code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
-      })
     },
   ) {
     this.syncAccounts()
@@ -351,7 +352,7 @@ export class OpencodeGoSectionController {
   inject(): OpencodeGoSectionFace {
     this.face ??= {
       hooks: { opencodeGo: this.store },
-      loadModels: () => this.loadModels(), readAnalytics: (query, signal) => this.readAnalytics(query, signal), readQuota: ref => this.readUsage(ref),
+      loadModels: () => this.loadModels(),
       setEnabled: next => { void this.setEnabled(next) }, setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
       edit: (field, text) => this.edit(field, { kind: 'text', text }),
       editModelLimits: value => this.edit('modelLimits', { kind: 'limits', value: structuredClone(value) }),
@@ -433,6 +434,7 @@ export class OpencodeGoSectionController {
     if (!accountsOf(this.scope.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) return
     this.accountEpoch++
     this.accountRows.delete(ref)
+    this.publish()
     if (this.accountsLoaded) void this.refreshAccounts()
   }
 

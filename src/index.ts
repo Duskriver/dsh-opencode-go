@@ -31,7 +31,7 @@ import {
   validateGoConfig,
 } from './config.ts'
 import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
-import { GoAnalyticsService, analyticsPriceBook, type AnalyticsSessionQuery } from './analytics.ts'
+import { GoAnalyticsService } from './analytics.ts'
 import { accountsOf, accountRefOf, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
 import { ProxyTransport } from './transport.ts'
 
@@ -164,13 +164,12 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     freeCatalog: () => catalogs.forConfig(current(), 'free'),
     onRefresh: refreshPickers,
   })
-  const sessionQueryOf = (): AnalyticsSessionQuery | undefined =>
-    (ctx as unknown as { get(name: string): unknown }).get('sessionQuery') as AnalyticsSessionQuery | undefined
   ctx.plugin(GoAnalyticsService, {
-    query: sessionQueryOf,
-    pricing: async () => analyticsPriceBook(...await Promise.all([
-      catalogs.forConfig(current()).snapshot(), catalogs.forConfig(current(), 'free').snapshot(),
-    ])),
+    baseURL: () => current().baseURL,
+    proxyURL: () => current().proxyURL,
+    transport,
+    resolveApiKey: (ref: string) => resolveApiKey({ ...current(), apiKeyEnv: ref }),
+    accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
   })
   const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().modelLimits ?? {},
     current().baseURL, current().freeBaseURL, current().proxyURL])

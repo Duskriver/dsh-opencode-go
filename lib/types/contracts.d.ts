@@ -1,6 +1,5 @@
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol';
-import type { AnalyticsFailureReason, AnalyticsQuery, AnalyticsReport } from './analytics.ts';
 /** Public DSH route and the private SDK transport have separate identities. */
 export declare const PROVIDER_ID = "dsh-opencode-go";
 export declare const DISPLAY_NAME = "DSH OpenCode Go";
@@ -26,6 +25,9 @@ export declare function assertProxyURL(raw: string | undefined): string;
 export declare const USAGE_DISPLAY_MODES: readonly ["auto", "always", "off"];
 export type UsageDisplayMode = typeof USAGE_DISPLAY_MODES[number];
 export declare const DEFAULT_USAGE_DISPLAY: UsageDisplayMode;
+export declare const USAGE_PILL_STYLES: readonly ["badge", "plain"];
+export type UsagePillStyle = typeof USAGE_PILL_STYLES[number];
+export declare const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle;
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
     id: string;
@@ -83,6 +85,10 @@ export interface OpencodeGoConfig {
     enabled: boolean;
     /** Usage pill visibility; auto follows only the selected Go route. */
     usageDisplay: UsageDisplayMode;
+    /** Show quota in the sidebar independently of the selected conversation model. */
+    showSidebarQuota: boolean;
+    /** Appearance of the conversation input's quota trigger. */
+    usagePillStyle: UsagePillStyle;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
     /** Legacy credential reference, kept in sync with the first/current account. */
@@ -252,26 +258,73 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 }
 export declare const accountsRemote: TypertRemoteContribution;
 export type SettingsWriteResult = 'applied' | 'rejected' | 'unknown';
-export type { AnalyticsFailureReason, AnalyticsQuery, AnalyticsTotals, AnalyticsModelRow, AnalyticsDayRow, AnalyticsCoverage, AnalyticsPricing, AnalyticsReport } from './analytics.ts';
+export type AnalyticsRange = 'today' | '7d' | '30d' | '90d';
+export interface AnalyticsQuery {
+    accountRef: string;
+    range: AnalyticsRange;
+    refresh?: boolean;
+}
+/** Exact nonnegative integers on the wire; one USD is 100,000,000 micro cents. */
+export interface AnalyticsTotals {
+    requests: string;
+    inputTokens: string;
+    outputTokens: string;
+    cacheReadTokens: string;
+    cacheWrite5mTokens: string;
+    cacheWrite1hTokens: string;
+    cacheWriteTokens: string;
+    tokens: string;
+    costMicroCents: string;
+}
+export interface AnalyticsModelRow extends AnalyticsTotals {
+    provider: string;
+    model: string;
+}
+export interface AnalyticsDayRow extends AnalyticsTotals {
+    day: string;
+}
+export interface AnalyticsReport {
+    accountRef: string;
+    /** Opaque account, credential and network identity; contains no credential material. */
+    source: string;
+    generatedAt: number;
+    period: AnalyticsRange;
+    range: {
+        from: number;
+        to: number;
+    };
+    timeZone: 'UTC';
+    totals: AnalyticsTotals;
+    byModel: AnalyticsModelRow[];
+    byDay: AnalyticsDayRow[];
+}
+export interface AnalyticsExport {
+    filename: string;
+    csv: string;
+}
+export type AnalyticsFailureReason = 'invalid-query' | 'unknown-account' | 'missing-credential' | 'credential-unavailable' | 'unsupported-gateway' | 'invalid-proxy' | 'permission-denied' | 'upstream' | 'network' | 'timeout' | 'invalid-response';
 /**
- * Validate one query. Unknown fields are ignored so a newer client can add
- * optional knobs without breaking an older Host.
+ * Validate one account-scoped official history query.
  * @param value - raw RPC argument.
  * @returns the validated query.
  */
 export declare function parseAnalyticsQuery(value: unknown): AnalyticsQuery;
-/** Check the response envelope; the host constructs typed aggregate rows. */
+/** Keep the browser wire response limited to validated aggregate fields. */
 export declare function parseAnalyticsReport(value: unknown): AnalyticsReport;
+export declare function parseAnalyticsExport(value: unknown): AnalyticsExport;
 declare module '@deepseek-ai/dsh-typert-protocol' {
     interface RemoteErrorDetailsMap {
         'opencode-go/analytics-unavailable': {
             readonly reason: AnalyticsFailureReason;
             readonly retryable: boolean;
+            readonly retainPrevious?: boolean;
+            readonly source?: string;
         };
     }
     interface TypertRemoteNamespaceMap {
         opencodeGoAnalytics: {
             read(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsReport>>;
+            exportCsv(query: AnalyticsQuery, signal?: AbortSignal): Promise<RemoteResult<AnalyticsExport>>;
         };
     }
 }

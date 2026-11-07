@@ -86,7 +86,7 @@ describe("model availability and picker visibility", () => {
       const pending = Promise.withResolvers<{ ok: true; value: GoModelCatalog }>()
       read.mockImplementationOnce(() => pending.promise)
       await refresh()
-      expect(screen.getByText(en.modelsRefreshing)).toBeTruthy()
+      expect(screen.getByRole('status', { name: en.modelsRefreshing })).toBeTruthy()
       expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
       expect(screen.getByText('Go answered HTTP 503')).toBeTruthy()
       await act(async () => { pending.resolve({ ok: true, value: {
@@ -127,16 +127,19 @@ describe("model availability and picker visibility", () => {
         models, stale: true, error: 'Free answered HTTP 503',
         sources: { go: { updatedAt: goTime }, free: { updatedAt: freeTime, error: 'HTTP 503' } },
       } })
-      expect(screen.getByText(/Go model source: Up to date/).textContent).toContain(new Date(goTime).toLocaleString())
-      expect(screen.getByText(/Free model source: Refresh failed/).textContent).toContain(new Date(freeTime).toLocaleString())
+      expect(screen.getByRole('status', { name: /Go model source: Up to date/ }).title).toContain(new Date(goTime).toLocaleString())
+      expect(screen.queryByRole('status', { name: /Free model source:/ })).toBeNull()
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
+      expect(screen.getByRole('status', { name: /Free model source: Refresh failed/ }).title).toContain(new Date(freeTime).toLocaleString())
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsGoTab }))
       read.mockRejectedValueOnce(new Error('Host unreachable'))
       await refresh()
       expect(screen.getByText('Host unreachable')).toBeTruthy()
-      expect(screen.queryByText(/Go model source: Up to date/)).toBeNull()
+      expect(screen.queryByRole('status', { name: /Go model source: Up to date/ })).toBeNull()
       read.mockResolvedValueOnce({ ok: true, value: { models, stale: false } })
       await refresh()
       expect(screen.queryByRole('alert')).toBeNull()
-      expect(screen.queryByText(/Free model source: Refresh failed/)).toBeNull()
+      expect(screen.queryByRole('status', { name: /Free model source: Refresh failed/ })).toBeNull()
       expect(toggle('Alpha').disabled).toBe(false)
     })
 
@@ -186,8 +189,8 @@ describe("model availability and picker visibility", () => {
       expect(checked('Beta')).toBe(true)
       expect(checked('Old')).toBe(false)
       expect(screen.queryByRole('checkbox')).toBeNull()
-      // The accounts card ships folded, so its fallback switch is not on the page yet.
-      expect(screen.getAllByRole('switch')).toHaveLength(4) // provider and one per model
+      // Model switches belong to the list; provider and sidebar settings have their own switches.
+      expect(within(screen.getByRole('group', { name: en.modelsLabel })).getAllByRole('switch')).toHaveLength(3)
 
       await flip('Beta')
       expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { beta: false })
@@ -251,7 +254,7 @@ describe("model availability and picker visibility", () => {
       read.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
       fireEvent.click(screen.getByRole('button', { name: en.modelsRefresh }))
       expect(snapshot().models).toMatchObject({ status: 'ready', refreshing: true })
-      expect(screen.getByText(en.modelsRefreshing)).toBeTruthy()
+      expect(screen.getByRole('status', { name: en.modelsRefreshing })).toBeTruthy()
       expect(toggle('Beta').disabled).toBe(false)
       await act(async () => { reject(new Error('request timed out')) })
       expect(snapshot().models).toMatchObject({ status: 'ready', stale: true, count: 3, message: 'request timed out' })

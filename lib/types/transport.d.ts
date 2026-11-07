@@ -25,25 +25,33 @@ export declare function readJsonResponse(response: Response, maxBytes: number, o
     gzip?: boolean;
     signal?: AbortSignal | null;
 }): Promise<unknown>;
-/** Gateway status codes cover several domains; a 401 alone cannot reject a key. */
-export declare function classifyGatewayError(status: number, body: string, fallback: string): string;
+interface GatewayContextBudget {
+    contextWindow?: number;
+    maxTokens?: number;
+    estimatedContextTokens?: number;
+}
+/** Gateway status codes cover several domains; model permissions do not reject a key. */
+export declare function classifyGatewayError(status: number, body: string, fallback: string, budget?: GatewayContextBudget): string;
 export declare class GatewayDiagnostics {
     private readonly options;
+    private retryAt;
+    private transportFailed;
     private evidence;
     private code;
     private readonly secrets;
-    constructor(options: {
+    constructor(options: GatewayContextBudget & {
         provider: string;
         model: string;
         apiKey: string;
         proxyURL?: string;
         fetch?: typeof globalThis.fetch;
-        contextWindow?: number;
-        maxTokens?: number;
+        free?: boolean;
     });
     private redact;
     readonly fetch: typeof globalThis.fetch;
     failureCode(fallback: string): Promise<string>;
+    /** Upstream deadline consumed by passive Free backoff. */
+    retryDeadline(): number | undefined;
     failureMessage(original: string): Promise<string>;
 }
 interface UsageErrorOptions {

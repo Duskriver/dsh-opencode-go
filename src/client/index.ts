@@ -1,4 +1,4 @@
-/** Browser registration for the settings page and conversation usage pill. */
+/** Browser registration for settings, conversation usage and sidebar quota. */
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
@@ -10,6 +10,7 @@ import {
   type GoUsage,
   type AnalyticsQuery,
   type AnalyticsReport,
+  type AnalyticsExport,
   goRemote,
   accountsOf,
 } from '../contracts.ts'
@@ -21,10 +22,14 @@ import {
   type ExecuteAccountCommand,
 } from './controller.ts'
 import { en, zh, type OpencodeGoKey } from './presentation.ts'
-import { UsagePill } from './UsagePill.tsx'
+import { UsagePill, SidebarQuota, type UsagePillProps } from './UsagePill.tsx'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: { wide: boolean } }
+  }
+
   interface LocaleNamespaceMap {
     /** The OpenCode Go settings page copy. */
     'settings.opencode-go': keyof typeof en
@@ -77,15 +82,6 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
       return result.value
     }
   })
-  // Read the cancellable Host analytics endpoint.
-  let readAnalytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
-  ctx.inject(['remote.opencodeGoAnalytics'], ready => {
-    readAnalytics = async (query, signal) => {
-      const result = await (ready as ClientContext).remote.opencodeGoAnalytics.read(query, signal)
-      if (!result.ok) throw result.error
-      return result.value
-    }
-  })
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
     return ctx.remote.opencodeGoModels.read()
@@ -95,12 +91,7 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     // of reaching for a context that never injected it.
     if (readAccount === undefined) throw new Error('OpenCode Go account usage is unavailable in this session')
     return readAccount(ref)
-  }, executeAccountCommand, async (query, signal) => {
-    if (readAnalytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
-      code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
-    })
-    return readAnalytics(query, signal)
-  })
+  }, executeAccountCommand)
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
   const injected = (): OpencodeGoSectionInjected => ({ ...controller.inject(), t, getLocale: () => ctx.locale.getLocale().active })
@@ -138,52 +129,73 @@ export function accountCommands(ctx: Context): ExecuteAccountCommand {
 }
 
 export function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>): void {
-  ctx.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
-    scope.inject(['remote.opencodeGoUsage'], ready => {
-      const credentialChanges = createSnapshotStore(0)
-      ready.effect(() => ready.remote.$on('credentials/reference-updated', ref => {
-        if (accountsOf(settings.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) {
-          credentialChanges.set(credentialChanges.getSnapshot() + 1)
-        }
-      }))
-      const readUsage = async () => {
-        const result = await ready.remote.opencodeGoUsage.read()
+  ctx.inject(['remote.opencodeGoUsage'], ready => {
+    const credentialChanges = createSnapshotStore(0)
+    ready.effect(() => ready.remote.$on('credentials/reference-updated', ref => {
+      if (accountsOf(settings.getSnapshot().value ?? {}).some(account => account.apiKeyEnv === ref)) {
+        credentialChanges.set(credentialChanges.getSnapshot() + 1)
+      }
+    }))
+    const readUsage = async () => {
+      const result = await ready.remote.opencodeGoUsage.read()
+      if (!result.ok) throw result.error
+      return result.value
+    }
+    const readAccountUsage = async (ref: string) => {
+      const result = await ready.remote.opencodeGoUsage.readAccount(ref)
+      if (!result.ok) throw result.error
+      return result.value
+    }
+    // Keep both quota placements available while analytics activates.
+    // Cancellation is injected by the descriptor, outside the wire arguments.
+    let analytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
+    let exportCsv: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>) | undefined
+    ready.inject(['remote.opencodeGoAnalytics'], withAnalytics => {
+      analytics = async (query, signal) => {
+        const result = await withAnalytics.remote.opencodeGoAnalytics.read(query, signal)
         if (!result.ok) throw result.error
         return result.value
       }
-      // Keep the quota pill available while the analytics namespace activates.
-      // Cancellation is injected by the descriptor, outside the wire arguments.
-      let analytics: ((query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>) | undefined
-      scope.inject(['remote.opencodeGoAnalytics'], withAnalytics => {
-        analytics = async (query, signal) => {
-          const result = await withAnalytics.remote.opencodeGoAnalytics.read(query, signal)
-          if (!result.ok) throw result.error
-          return result.value
-        }
-      })
-      const readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> => {
-        if (analytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
-          code: 'opencode-go/analytics-unavailable', details: { reason: 'no-session-query', retryable: false },
-        })
-        return analytics(query, signal)
+      exportCsv = async (query, signal) => {
+        const result = await withAnalytics.remote.opencodeGoAnalytics.exportCsv(query, signal)
+        if (!result.ok) throw result.error
+        return result.value
       }
-      const translate = ready.locale.bind('settings.opencode-go')
-      ready.slots.inject('conversation.input.right', () => ready.slots.register({
+    })
+    const readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport> => {
+      if (analytics === undefined) throw Object.assign(new Error('OpenCode Go analytics is unavailable in this session'), {
+        code: 'opencode-go/analytics-unavailable', details: { reason: 'unavailable', retryable: false },
+      })
+      return analytics(query, signal)
+    }
+    const exportAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsExport> => {
+      if (exportCsv === undefined) throw new Error('OpenCode Console export is unavailable in this session')
+      return exportCsv(query, signal)
+    }
+    const translate = ready.locale.bind('settings.opencode-go')
+    const usageProps = (): Omit<UsagePillProps, 'directory'> => ({
+      settings,
+      credentialChanges,
+      selectAccount: async ref => {
+        const snapshot = settings.getSnapshot()
+        if (!snapshot.writable || !accountsOf(snapshot.value ?? {}).some(account => account.apiKeyEnv === ref)) return false
+        return selectAccount ? selectAccount(ref).catch(() => false) : false
+      },
+      readUsage,
+      readAccountUsage,
+      readAnalytics,
+      exportAnalytics,
+      getLocale: () => ready.locale.getLocale().active,
+      t: (key: string) => translate(key as OpencodeGoKey),
+    })
+    ready.slots.inject('sidebar.footer.action', () => ready.slots.register({
+      name: 'sidebar.footer.action', id: 'opencode-go-sidebar-quota', order: 1000,
+      inject: () => ({ ...usageProps(), readAccountUsage }),
+    }, SidebarQuota))
+    ready.inject(['modelDirectories', 'sessions', 'remote.session'], scope => {
+      scope.slots.inject('conversation.input.right', () => scope.slots.register({
         name: 'conversation.input.right', id: 'opencode-go-usage', order: 1000,
-        inject: sessionId => ({
-          directory: ready.modelDirectories.directoryFor(sessionId as SessionId).store,
-          settings,
-          credentialChanges,
-          selectAccount: async ref => {
-            const snapshot = settings.getSnapshot()
-            if (!snapshot.writable || !accountsOf(snapshot.value ?? {}).some(account => account.apiKeyEnv === ref)) return false
-            return selectAccount ? selectAccount(ref).catch(() => false) : false
-          },
-          readUsage,
-          readAnalytics,
-          getLocale: () => ready.locale.getLocale().active,
-          t: (key: string) => translate(key as OpencodeGoKey),
-        }),
+        inject: sessionId => ({ ...usageProps(), directory: scope.modelDirectories.directoryFor(sessionId as SessionId).store }),
       }, UsagePill))
     })
   })

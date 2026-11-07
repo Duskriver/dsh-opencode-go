@@ -1,6 +1,6 @@
 /** Settings cards, account editors, model capacities and accessible field help. */
 import css from './Section.module.css'
-import themeCss from './ThemePicker.module.css'
+import usageCss from './UsagePill.module.css'
 import {
   Tooltip,
   IconQuestionOutlineRegular,
@@ -11,12 +11,8 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   type en,
-  GO_THEMES,
-  GO_THEME_LABELS,
-  GO_THEME_TOKENS,
-  setGoTheme,
-  useGoTheme,
-  useHostScheme,
+  useGoThemeTokens,
+  themeStyle,
 } from './presentation.ts'
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type {
@@ -44,12 +40,9 @@ import {
   type GoModel,
   type InputModality,
   USAGE_DISPLAY_MODES,
-  type AnalyticsQuery,
-  type AnalyticsReport,
-  type GoUsage,
+  USAGE_PILL_STYLES,
 } from '../contracts.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { AnalyticsDialog } from './AnalyticsDialog.tsx'
 
 export function HintMark(props: { hint: string }) {
   return <Tooltip label={props.hint} side="bottom" maxWidth={280}>
@@ -61,48 +54,6 @@ export function HintMark(props: { hint: string }) {
 
 export function HintText(props: { id: string; hint: string }) {
   return <p id={props.id} className={css.visuallyHidden}>{props.hint}</p>
-}
-
-/**
- * The one place a style is chosen: four previews, each a miniature of the
- * surface it selects, on the Settings page. The picker lives here rather than in
- * the pill or the dashboard so a working session never changes its own look.
- * @param props.t - copy lookup.
- */
-export function ThemePicker({ t }: { t: (key: keyof typeof en) => string }) {
-  const active = useGoTheme()
-  const scheme = useHostScheme()
-  return <div className={themeCss.group} role="group" aria-label={t('themeLabel')}>
-    {GO_THEMES.map(id => {
-      const tokens = GO_THEME_TOKENS[id][scheme]
-      const name = t(GO_THEME_LABELS[id])
-      return <button
-        key={id}
-        type="button"
-        className={themeCss.option}
-        aria-pressed={active === id}
-        data-theme={id}
-        title={name}
-        onClick={() => { setGoTheme(id) }}
-      >
-        {/* A four-line sketch of one panel: its surface, its accent and two text
-            tones. Inline because each tile paints a different palette. */}
-        <span
-          className={themeCss.swatch}
-          aria-hidden="true"
-          style={{ background: tokens.surface, borderColor: tokens.border }}
-        >
-          <span className={themeCss.swatchRow}>
-            <span className={themeCss.swatchDot} style={{ background: tokens.accent }} />
-            <span className={themeCss.swatchBar} style={{ background: tokens.accent, opacity: .5, width: '18px' }} />
-          </span>
-          <span className={themeCss.swatchBar} style={{ background: tokens.muted, opacity: .5 }} />
-          <span className={themeCss.swatchBar} style={{ background: tokens.muted, opacity: .28, width: '62%' }} />
-        </span>
-        <span className={themeCss.name}>{name}</span>
-      </button>
-    })}
-  </div>
 }
 
 type AccountTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string
@@ -434,7 +385,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         })}
       </div>
       {editor ? (editor.kind === 'add' ? editorForm() : null)
-        : <Button variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
+        : <Button className={css.addAccount} variant="primary" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
           onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
       <div className={css.field}>
         <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}<HintMark hint={t('accountAutoSwitchHint')} /></span>
@@ -461,7 +412,7 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
 }
 
 /** Per-model switches apply immediately; capacity edits stay in the staged form. */
-export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, filterAction, onEdit, onModelEnabled }: {
+export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
   source?: ModelSource
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
@@ -470,8 +421,6 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   locale?: string
   disabled: boolean
   visibilitySaving: boolean
-  /** Optional control pinned to the right of the filter row, such as a refresh. */
-  filterAction?: ReactNode
   onEdit: (next: OpencodeGoModelLimits) => void
   onModelEnabled: (id: string, enabled: boolean) => void
 }) {
@@ -510,15 +459,16 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   </>
   return (
     <div className={css.limitsEditor}>
-      <p className={css.hint}>{t('visibilityHint')}</p>
-      <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
-      <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
-        placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
-      <div className={css.filters} role="group" aria-label={t('filterLabel')}>
-        {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
-          aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
-        {filterAction ? <span className={css.filterAction}>{filterAction}</span> : null}
+      <div className={css.modelSearchRow}>
+        <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
+        <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
+          placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
+        <div className={css.filters} role="group" aria-label={t('filterLabel')}>
+          {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
+            aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
+        </div>
       </div>
+      <p className={css.modelHelp}>{t('visibilityHint')}</p>
       {model ? (
         <div className={css.modelLayout}>
           {/* A group, not a <nav>: the model picker is not navigation, and any
@@ -531,11 +481,12 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                 aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
                 {/* The row carries the name and its badges only; the model id and
                     the release date belong to the parameter card. */}
-                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}</span>
+                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}
+                  {hasCapacityOverride(draft[modelSettingsKey(entry)])
+                    ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
+                    : null}
+                </span>
               </button>
-              {hasCapacityOverride(draft[modelSettingsKey(entry)])
-                ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
-                : null}
               <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
                 onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
@@ -614,10 +565,12 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   onChange: (id: string, field: 'contextWindow' | 'maxTokens', value: number | undefined) => void
 }) {
   const id = `opencode-go-${field}-${encodeURIComponent(model.id)}`
-  const defaultValue = model[field]
+  const catalogValue = model[field]
+  const defaultValue = field === 'maxTokens' && catalogValue !== undefined ? Math.min(catalogValue, 65_536) : catalogValue
+  const cappedOutput = field === 'maxTokens' && catalogValue !== undefined && catalogValue > 65_536
   return <div className={css.stat}>
     <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
-    <input id={id} className={css.input} type="number" min={1} step={1} inputMode="numeric"
+    <input id={id} className={css.input} type="number" min={1} max={field === 'maxTokens' ? model.maxTokens : undefined} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
       aria-describedby={`${id}-default`} value={limit?.[field] ?? ''}
       placeholder={defaultValue === undefined ? t('capacityMissing') : String(defaultValue)} disabled={disabled}
@@ -628,7 +581,9 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
         else if (Number.isSafeInteger(value) && value > 0) onChange(modelSettingsKey(model), field, value)
       }} />
     <span id={`${id}-default`} className={css.hint}>
-      {t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString(locale) })}
+      {cappedOutput
+        ? t('capacityDefaultCapped', { value: defaultValue!.toLocaleString(locale), max: catalogValue.toLocaleString(locale) })
+        : t('capacityDefault', { value: defaultValue === undefined ? t('capacityMissing') : defaultValue.toLocaleString(locale) })}
       {limit?.[field] != null ? ` · ${t('overridden')}` : ''}
     </span>
   </div>
@@ -670,12 +625,14 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
   </details>
 }
 
-/** The tuning fields the advanced card owns, in the order it renders them. */
+/** The tuning fields covered by the advanced parameter reset, in display order. */
 const ADVANCED_FIELDS = [
   'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'maxImages', 'maxRequestImageBytes',
   'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
+
+const APPEARANCE_FIELDS = ['showSidebarQuota', 'usagePillStyle'] as const
 
 export type { OpencodeGoSectionState } from './controller.ts'
 
@@ -786,51 +743,124 @@ function ValueField(props: ValueFieldProps) {
   )
 }
 
-/**
- * The gateway's model listing in the state the page last read.
- * @param props.models - the listing state the controller published.
- * @param props.t - section copy.
- * @returns the listing body: a progress line, the Host diagnostic, or an empty
- *   body once the capacity table can show the complete model list.
- */
-function ModelsBody({ models, t, locale, source }: {
+/** Appearance has its own reset; previews share the actual input indicator's styles. */
+function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
+  state: OpencodeGoSectionState
+  t: SectionTranslate
+  disabled: boolean
+  onEdit: (field: TextField, text: string) => void
+  onReset: (field: EditableField) => void
+}) {
+  const tokens = useGoThemeTokens()
+  const locked = disabled || state.saving
+  const styleId = 'opencode-go-usage-pill-style'
+  const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
+  return <section className={css.appearanceGroup} aria-labelledby="opencode-go-appearance-title">
+    <div className={`${css.groupHead} ${css.appearanceHead}`}>
+      <h4 id="opencode-go-appearance-title" className={css.appearanceTitle}>{t('usageAppearanceLabel')}</h4>
+      <button type="button" className={css.reset}
+        disabled={locked || !APPEARANCE_FIELDS.some(field => state[field].overridden || state[field].invalid)}
+        onClick={() => {
+          for (const field of APPEARANCE_FIELDS) {
+            if (state[field].overridden || state[field].invalid) onReset(field)
+          }
+        }}>{t('usageAppearanceReset')}</button>
+    </div>
+    <div className={css.appearanceToggle}>
+      <div className={css.appearanceCopy}>
+        <div className={css.rowLabel}>
+          <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
+          <HintMark hint={t('showSidebarQuotaHint')} />
+        </div>
+        <p className={css.appearanceHint}>{t('showSidebarQuotaSummary')}</p>
+      </div>
+      <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
+        title={t('showSidebarQuotaHint')} disabled={locked}
+        onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
+    </div>
+    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
+      aria-describedby={describedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
+      <legend className={css.appearanceLegend}>
+        <span id={`${styleId}-label`} className={css.rowTitle}>{t('usagePillStyleLabel')}</span>
+        <HintMark hint={t('usagePillStyleHint')} />
+      </legend>
+      <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
+      <div className={css.appearanceChoices}>
+        {USAGE_PILL_STYLES.map(value => <label key={value} className={css.appearanceChoice}
+          data-selected={state.usagePillStyle.text === value} data-disabled={locked}>
+          <span className={css.appearanceChoiceHead}>
+            <span>{t(`usagePillStyle_${value}`)}</span>
+            <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
+              checked={state.usagePillStyle.text === value} disabled={locked} aria-describedby={describedBy}
+              onChange={() => { onEdit('usagePillStyle', value) }} />
+          </span>
+          <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
+            <span className={`${usageCss.trigger} ${value === 'plain' ? usageCss.plain : ''} ${css.appearanceSample}`}>
+              {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
+            </span>
+          </span>
+        </label>)}
+      </div>
+      {state.usagePillStyle.invalid
+        ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+    </fieldset>
+  </section>
+}
+
+/** Compact freshness for the selected source; full timestamps stay available on hover. */
+function ModelSourceStatus({ models, source, t, locale }: {
   models: OpencodeGoModels
   source: ModelSource
   t: SectionTranslate
   locale?: string
 }) {
+  const status = models.status === 'ready' || models.status === 'failed' ? models.sources?.[source] : undefined
+  const busy = models.status === 'idle' || models.status === 'loading' || models.status === 'ready' && models.refreshing
+  const failed = models.status === 'failed' || models.status === 'ready' && models.stale
+  const label = busy ? t('modelsRefreshingShort') : failed ? t('modelsSourceFailed')
+    : status?.updatedAt === undefined && status !== undefined ? t('modelsSourceNeverFetched') : t('modelsSourceCurrent')
+  const updated = status?.updatedAt === undefined ? undefined : new Date(status.updatedAt)
+  const fullTime = updated ? t('modelsSourceUpdated', { time: updated.toLocaleString(locale) }) : undefined
+  const detail = `${t(source === 'go' ? 'modelsGoSource' : 'modelsFreeSource')}: ${label}${fullTime ? `. ${fullTime}` : ''}`
+  const sameDay = updated?.toDateString() === new Date().toDateString()
+  const progressLabel = models.status === 'ready' ? t('modelsRefreshing') : t('modelsLoading')
+  return <span className={css.modelSync} role="status" aria-label={busy ? progressLabel : detail}
+    data-state={busy ? 'loading' : failed ? 'failed' : updated ? 'ready' : 'idle'} title={detail}>
+    <span className={css.modelSyncDot} aria-hidden="true" />
+    <span>{label}</span>
+    {updated && !busy ? <time dateTime={updated.toISOString()}>{updated.toLocaleString(locale, {
+      ...(sameDay ? {} : { month: 'short', day: 'numeric' }), hour: '2-digit', minute: '2-digit', hour12: false,
+    })}</time> : null}
+  </span>
+}
+
+/** Keep only actionable failures and warnings below the catalog toolbar. */
+function ModelsBody({ models, t, source, showProgress = true }: {
+  models: OpencodeGoModels
+  source?: ModelSource
+  t: SectionTranslate
+  showProgress?: boolean
+}) {
   const sources = models.status === 'ready' || models.status === 'failed' ? models.sources : undefined
-  const sourceStatus = sources
-    ? (['go', 'free'] as const).map(source => {
-      const status = sources[source]
-      return <p className={css.hint} key={source}>
-        {t(source === 'go' ? 'modelsGoSource' : 'modelsFreeSource')}: {' '}
-        {status.error ? t('modelsSourceFailed') : t('modelsSourceCurrent')}. {' '}
-        {status.updatedAt === undefined ? t('modelsSourceNeverFetched')
-          : t('modelsSourceUpdated', { time: new Date(status.updatedAt).toLocaleString(locale) })}
-        {status.warning ? <> {status.warning}</> : null}
-      </p>
-    }) : null
   if (models.status === 'failed') {
     return (
       <>
         <p className={css.failedNote} role="alert">{t('modelsFailed')}</p>
         {models.message ? <p className={css.hint}>{models.message}</p> : null}
-        {sourceStatus}
       </>
     )
   }
-  if (models.status !== 'ready') return <p className={css.hint} role="status" aria-live="polite">{t('modelsLoading')}</p>
-  const progress = models.refreshing ? <p className={css.hint} role="status">{t('modelsRefreshing')}</p> : null
+  if (models.status !== 'ready') return showProgress ? <p className={css.hint} role="status" aria-live="polite">{t('modelsLoading')}</p> : null
+  const progress = showProgress && models.refreshing ? <p className={css.hint} role="status">{t('modelsRefreshing')}</p> : null
   if (models.stale) return <>
     {progress}
     <p className={css.failedNote} role="alert">{t('modelsStale')}</p>
     {models.message ? <p className={css.hint}>{models.message}</p> : null}
-    {sourceStatus}
   </>
-  const warning = sources?.[source].warning
-    ? <p className={css.failedNote} role="alert">{sources[source].warning}</p> : null
-  return <>{progress}{warning}{sourceStatus}{models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
+  const warnings = (source ? [source] : ['go', 'free'] as const).map(key => sources?.[key]?.warning)
+    .filter((warning): warning is string => Boolean(warning))
+  return <>{progress}{warnings.map((warning, index) => <p className={css.failedNote} role="alert" key={index}>{warning}</p>)}
+    {models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
 }
 
 /**
@@ -858,9 +888,6 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       loadModels={loadModels}
       setEnabled={setEnabled}
       setModelEnabled={setModelEnabled}
-      readAnalytics={props.readAnalytics}
-      readQuota={props.readQuota}
-      getLocale={props.getLocale}
       accountActions={{
         loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
         resetAddition: props.resetAddition, removeAccount: props.removeAccount, selectAccount: props.selectAccount,
@@ -883,30 +910,23 @@ function Loaded(props: {
   loadModels: () => void
   setEnabled: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
-  readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
-  readQuota?: (ref: string) => Promise<GoUsage>
-  getLocale?: () => string
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
+  const tokens = useGoThemeTokens()
   const [advanced, setAdvanced] = useState(false)
   // The list is the page's largest block and the tuning fields sit under it, so
   // it ships folded: a reader opens it when they came to change models.
   const [modelsOpen, setModelsOpen] = useState(false)
   const [modelSource, setModelSource] = useState<ModelSource>('go')
   const models = modelsForSource(state.models, modelSource)
-  // The analytics card unfolds into two rows — the dashboard entry and the only
-  // place a style is chosen — and the dialog is its own modal on top of that.
-  const [analyticsOpen, setAnalyticsOpen] = useState(false)
-  const [analyticsPanel, setAnalyticsPanel] = useState(false)
-  const theme = useGoTheme()
   // What the card has to report — the listing's own diagnostics and a refused
   // switch write — is not part of the fold. A failure the reader cannot see is
   // worse than a folded list, and the connection switch that can fail lives in
   // the card above, so the notices render under the header either way.
   const modelNotices = (
     <>
-      <ModelsBody models={models} source={modelSource} t={t} locale={props.locale} />
+      <ModelsBody models={modelsOpen ? models : state.models} source={modelsOpen ? modelSource : undefined} t={t} showProgress={!modelsOpen} />
       {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
     </>
   )
@@ -916,7 +936,7 @@ function Loaded(props: {
     if (state.available && state.models.status === 'idle') loadModels()
   }, [state.available, state.models.status, loadModels])
   if (!state.available) {
-    return <p className={css.intro}>{t('unavailable')}</p>
+    return <div className={css.page} style={themeStyle(tokens)}><p className={css.intro}>{t('unavailable')}</p></div>
   }
   const disabled = !state.writable
   // The provider switch says what its state means; the mark opens the sentence.
@@ -932,7 +952,7 @@ function Loaded(props: {
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
   const canResetAdvanced = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
   return (
-    <div className={css.page}>
+    <div className={css.page} style={themeStyle(tokens)}>
       <div className={css.pageBody}>
       <div className={css.pageTop}>
         <h2 className={css.title}>{t('titleLabel')}</h2>
@@ -956,48 +976,7 @@ function Loaded(props: {
         </div>
       </section>
       {accountCard}
-      {/* The card unfolds like the model and advanced cards: its first row opens
-          the dashboard, its second is the only place a style is chosen — the pill
-          and the dashboard themselves never change their own look. Folded, it
-          still names the active style, so the row answers "which one am I on". */}
-      {props.readAnalytics ? <section className={css.card}>
-        <button
-          type="button"
-          className={css.cardTrigger}
-          aria-expanded={analyticsPanel}
-          aria-controls="opencode-go-analytics"
-          onClick={() => { setAnalyticsPanel(!analyticsPanel) }}
-        >
-          <span className={css.cardTitle}>{t('analyticsCardTitle')}</span>
-          <span className={css.cardSub}>{t(GO_THEME_LABELS[theme])}</span>
-          <ChevronDown className={analyticsPanel ? css.chevronOpen : css.chevron} />
-        </button>
-        {analyticsPanel ? <div id="opencode-go-analytics" className={css.analyticsPanel}>
-          <div className={css.analyticsSection}>
-            <div className={css.analyticsCopy}>
-              <span className={css.analyticsLabel}>{t('analyticsBoardLabel')}</span>
-              <p className={css.hint}>{t('analyticsCardHint')}</p>
-            </div>
-            <Button variant="outline" size="md" onClick={() => { setAnalyticsOpen(true) }}>
-              {t('analyticsOpenBoard')}
-            </Button>
-          </div>
-          <div className={css.analyticsDivider} />
-          <div className={css.analyticsSection}>
-            <div className={css.analyticsCopy}>
-              <span className={css.analyticsLabel}>{t('themeLabel')}</span>
-              <p className={css.hint}>{t('themeHint')}</p>
-            </div>
-            <ThemePicker t={t} />
-          </div>
-        </div> : null}
-      </section> : null}
-      {/* The model card takes whatever height the page has left: its list and its
-          parameter card are the reason the page is open. It folds away exactly
-          like the tuning card does, and the listing's own refresh sits with the
-          filters it re-reads rather than in this header. Its notices stay out of
-          the fold: a refused switch write or an unreachable gateway is news
-          whether or not the list is open. */}
+      {/* Source controls share one row; failures remain visible when folded. */}
       <section className={modelsOpen ? css.cardModels : css.cardModels + ' ' + css.cardFolded}>
         <button
           type="button"
@@ -1012,8 +991,14 @@ function Loaded(props: {
         {modelsOpen
           ? (
             <div id="opencode-go-models" className={css.cardBody}>
+              <div className={css.modelToolbar}>
               <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
-                {(['go', 'free'] as const).map(source => <button key={source} type="button" role="tab"
+                {(['go', 'free'] as const).map(source => {
+                  const catalog = modelsForSource(state.models, source)
+                  const status = catalog.status === 'ready' || catalog.status === 'failed' ? catalog.sources?.[source] : undefined
+                  const label = t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')
+                  return <button key={source} type="button" role="tab" aria-label={label}
+                  title={status?.error ?? status?.warning}
                   id={`opencode-model-tab-${source}`} aria-selected={modelSource === source}
                   tabIndex={modelSource === source ? 0 : -1}
                   aria-controls="opencode-model-panel" className={css.modelTab}
@@ -1024,22 +1009,23 @@ function Loaded(props: {
                     setModelSource(next)
                     document.getElementById(`opencode-model-tab-${next}`)?.focus()
                   }}
-                  onClick={() => { setModelSource(source) }}>{t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')}</button>)}
+                  onClick={() => { setModelSource(source) }}>{label}
+                    {catalog.status === 'ready' ? <span className={css.modelTabCount} aria-hidden="true">{catalog.count}</span> : null}
+                    {status?.error || status?.warning ? <span className={css.modelTabWarning} aria-hidden="true" /> : null}
+                  </button>
+                })}
               </div>
-              <div role="tabpanel" id="opencode-model-panel" aria-labelledby={`opencode-model-tab-${modelSource}`}>
+              <div className={css.modelTools}>
+                <ModelSourceStatus models={models} source={modelSource} t={t} locale={props.locale} />
+                <Button variant="outline" size="sm"
+                  disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
+                  onClick={loadModels}>{t('modelsRefresh')}</Button>
+              </div>
+              </div>
+              <div role="tabpanel" id="opencode-model-panel" className={css.modelPanel} aria-labelledby={`opencode-model-tab-${modelSource}`}>
               {modelNotices}
               <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
                 modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-                filterAction={(
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
-                    onClick={loadModels}
-                  >
-                    {t('modelsRefresh')}
-                  </Button>
-                )}
                 onModelEnabled={props.setModelEnabled}
                 onEdit={props.editModelLimits} />
               </div>
@@ -1066,8 +1052,7 @@ function Loaded(props: {
             <div id="opencode-go-advanced" className={css.cardBody}>
               <div className={css.advancedHead}>
                 <p className={css.hint}>{t('advancedHint')}</p>
-                {/* One reset for the card: the rows carry no badges of their own, so
-                    this is the only place a value returns to its inherited default. */}
+                {/* Parameter defaults and appearance keep their separate reset scopes. */}
                 <button
                   type="button"
                   className={css.reset}
@@ -1092,6 +1077,7 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={text => { props.edit('usageDisplay', text) }}
                 />
+                <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={props.edit} onReset={props.resetField} />
                 <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-base-url"
@@ -1199,16 +1185,6 @@ function Loaded(props: {
         </a>
         {state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
       </div>
-      {props.readAnalytics ? <AnalyticsDialog
-        open={analyticsOpen}
-        onClose={() => { setAnalyticsOpen(false) }}
-        readAnalytics={props.readAnalytics}
-        readQuota={props.readQuota && state.accounts
-          ? () => props.readQuota!(state.accounts!.activeRef)
-          : undefined}
-        t={t}
-        getLocale={props.getLocale}
-      /> : null}
     </div>
   )
 }

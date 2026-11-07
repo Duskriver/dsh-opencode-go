@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readModelCost, priceMultiplierAt, matchesPricingCondition } from '../src/pricing.ts'
-import { priceUsage } from '../src/analytics.ts'
+import { readModelCost } from '../src/pricing.ts'
 import { peakMultipliers, zeroCost } from './support/data.ts'
 
 describe('gateway text tariff validation', () => {
@@ -41,9 +40,6 @@ describe('gateway text tariff validation', () => {
       { inputTokensAbove: 250000, input: 2, output: 8, cacheRead: 0.2, cacheWrite: 1.25 },
       { inputTokensAbove: 300000, input: 2, output: 8, cacheRead: 0.2, cacheWrite: 5 },
     ])
-    expect(priceUsage('arbitrary', { input: 200000, output: 10, cacheRead: 0, cacheWrite: 0 }, parsed.cost, 0)).toBe(200040)
-    expect(priceUsage('arbitrary', { input: 200000, output: 10, cacheRead: 1, cacheWrite: 0 }, parsed.cost, 0)).toBe(400040)
-    expect(priceUsage('arbitrary', { input: 250001, output: 10, cacheRead: 0, cacheWrite: 0 }, parsed.cost, 0)).toBe(500082)
   })
   it.each([null, {}, [{ when: { context: { gt: -1 } }, price: 0 }], [{ when: { context: { gt: 1.5 } }, price: 0 }],
     [{ when: { context: { gt: 1 }, unknown: {} }, price: 0 }], [{ when: { context: { gt: 1 } } }],
@@ -52,25 +48,14 @@ describe('gateway text tariff validation', () => {
   })
 })
 
-describe('dynamic UTC multipliers', () => {
-  it.each([
-    ['2026-11-02T00:59:59Z', 1], ['2026-11-02T01:00:00Z', 2], ['2026-11-02T03:59:59Z', 2],
-    ['2026-11-02T04:00:00Z', 1], ['2026-11-02T06:00:00Z', 2], ['2026-11-02T09:59:59Z', 2],
-    ['2026-11-02T10:00:00Z', 1], ['2026-11-07T02:00:00Z', 1], ['2026-11-08T07:00:00Z', 1],
-  ])('evaluates advertised weekday/hour conditions at %s', (time, factor) => {
-    const parsed = readModelCost({ ...zeroCost(), multipliers: peakMultipliers })!
-    expect(priceMultiplierAt(parsed.multipliers, Date.parse(time))).toBe(factor)
-  })
-  it('supports date changes, conjunctions and multiple matching factors without model-name rules', () => {
+describe('gateway multiplier validation', () => {
+  it('keeps a published zero tariff free with valid weekday, date and combined conditions', () => {
+    expect(readModelCost({ ...zeroCost(), multipliers: peakMultipliers })?.free).toBe(true)
     const parsed = readModelCost({ ...zeroCost(), multipliers: [
       { when: { date: { gte: '2026-12-01' } }, factor: 2 },
       { when: { all: [{ date: { lt: '2027-01-01' } }, { utc_hours: { gte: '06:00', lt: '10:00' } }] }, factor: 1.5 },
     ] })!
-    expect(priceMultiplierAt(parsed.multipliers, Date.parse('2026-11-30T23:59:59Z'))).toBe(1)
-    expect(priceMultiplierAt(parsed.multipliers, Date.parse('2026-12-01T06:00:00Z'))).toBe(3)
-    expect(priceMultiplierAt(parsed.multipliers, Date.parse('2027-01-01T06:00:00Z'))).toBe(2)
-    const cost = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, multipliers: parsed.multipliers }
-    expect(priceUsage('future-model', { input: 100, output: 100, cacheRead: 0, cacheWrite: 0 }, cost, Date.parse('2026-12-01T06:00:00Z'))).toBe(600)
+    expect(parsed.free).toBe(true)
   })
   it.each([null, {}, [{ factor: -1, when: { date: { gte: '2026-12-01' } } }],
     [{ factor: 2, when: {} }], [{ factor: 2, when: { unknown: {} } }], [{ factor: 2, when: { any: [] } }],
@@ -78,9 +63,5 @@ describe('dynamic UTC multipliers', () => {
     [{ factor: 2, when: { utc_days: { in: ['monday'] } } }],
   ])('rejects malformed multipliers, including for zero-cost entries: %j', multipliers => {
     expect(readModelCost({ ...zeroCost(), multipliers })).toBeUndefined()
-  })
-  it('handles invalid timestamps without matching a condition', () => {
-    expect(matchesPricingCondition({ date: { gte: '2026-01-01' } }, NaN)).toBe(false)
-    expect(matchesPricingCondition({ utc_days: { in: ['mon'] } }, Infinity)).toBe(false)
   })
 })

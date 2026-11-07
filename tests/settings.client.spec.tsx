@@ -2,17 +2,18 @@
 import { apply, accountCommands } from '../src/client/index.ts'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
-import { bindSnapshotSelector, createConfigForm, acceptFormWrites } from './support/client.tsx'
+import { bindSnapshotSelector, createConfigForm, acceptFormWrites, translator } from './support/client.tsx'
 import * as store from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { OpencodeGoSection, type OpencodeGoSectionProps, type OpencodeGoSectionState } from '../src/client/Section.tsx'
 import {
   OpencodeGoSectionController,
+  editableKeys,
   type OpencodeGoSettings,
-  type OpencodeGoSectionFace,
 } from '../src/client/controller.ts'
-import { en, getGoTheme, setGoTheme, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
-import type { AnalyticsQuery, AnalyticsReport } from '../src/contracts.ts'
+import { en, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
+import type { AnalyticsQuery } from '../src/contracts.ts'
+import { createAnalyticsReport } from './support/analytics.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
@@ -22,7 +23,7 @@ import { Context } from '@deepseek-ai/cordis'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import type { LocaleRuntime as HostLocaleRuntime, LocaleSettings } from '@deepseek-ai/dsh-client-locale/client'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import { UsagePill, type UsagePillProps } from '../src/client/UsagePill.tsx'
+import { UsagePill, SidebarQuota, type UsagePillProps, type SidebarQuotaProps } from '../src/client/UsagePill.tsx'
 
 describe("settings page and typed capacity editing", () => {
 
@@ -37,7 +38,7 @@ describe("settings page and typed capacity editing", () => {
   }
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
-    | 'usageDisplay'
+    | 'usageDisplay' | 'usagePillStyle' | 'showSidebarQuota'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -71,6 +72,8 @@ describe("settings page and typed capacity editing", () => {
     return {
       ...settled,
       usageDisplay: field('auto'),
+      usagePillStyle: field('badge'),
+      showSidebarQuota: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
       baseURL: field('https://opencode.ai/zen/go/v1'),
       proxyURL: field(''),
@@ -111,14 +114,14 @@ describe("settings page and typed capacity editing", () => {
   function renderSection(
     state: OpencodeGoSectionState,
     overrides: Partial<ReturnType<typeof actions>> = {},
-    options: { foldedModels?: boolean; analytics?: { readAnalytics?: (query: AnalyticsQuery) => Promise<AnalyticsReport> } } = {},
+    options: { foldedModels?: boolean; locale?: 'en' | 'zh' } = {},
   ) {
     const store = createSnapshotStore(state)
     const props = {
       ...actions(),
       ...overrides,
-      ...(options.analytics ?? {}),
-      t,
+      t: options.locale ? translator(options.locale) : t,
+      getLocale: () => options.locale === 'zh' ? 'zh-CN' : 'en-US',
       useOpencodeGo: bindSnapshotSelector(store),
     } as unknown as OpencodeGoSectionProps
     render(<OpencodeGoSection {...props} />)
@@ -141,6 +144,73 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
+    it('keeps quota appearance inside the collapsed advanced settings and stages both edits', () => {
+      const reading = actions()
+      renderSection(stateOf(), reading, { foldedModels: true })
+      expect(screen.queryByRole('switch', { name: en.showSidebarQuotaLabel })).toBeNull()
+      expect(screen.queryByRole('radiogroup', { name: en.usagePillStyleLabel })).toBeNull()
+      openAdvanced()
+      const appearance = screen.getByRole('region', { name: en.usageAppearanceLabel })
+      expect(document.getElementById('opencode-go-advanced')?.contains(appearance)).toBe(true)
+      const toggle = screen.getByRole('switch', { name: en.showSidebarQuotaLabel })
+      expect(toggle.getAttribute('aria-checked')).toBe('false')
+      fireEvent.click(toggle)
+      expect(reading.edit).toHaveBeenCalledWith('showSidebarQuota', 'true')
+      const group = screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })
+      expect(within(group).getByRole<HTMLInputElement>('radio', { name: en.usagePillStyle_badge }).checked).toBe(true)
+      fireEvent.click(within(group).getByRole('radio', { name: en.usagePillStyle_plain }))
+      expect(reading.edit).toHaveBeenCalledWith('usagePillStyle', 'plain')
+      expect(reading.save).not.toHaveBeenCalled()
+    })
+
+    it('disables appearance changes for read-only settings and resets saved appearance overrides', () => {
+      const reading = actions()
+      const state = stateOf({ showSidebarQuota: field('true', { overridden: true }), usagePillStyle: field('plain', { overridden: true }) })
+      const store = renderSection(state, reading)
+      expect(screen.getByRole('button', { name: en.advancedLabel }).textContent).toBe(en.advancedLabel)
+      openAdvanced()
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll }).disabled).toBe(true)
+      fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
+      expect(reading.resetField.mock.calls).toEqual([['showSidebarQuota'], ['usagePillStyle']])
+      act(() => { store.set({ ...state, writable: false }) })
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.showSidebarQuotaLabel }).disabled).toBe(true)
+      for (const radio of within(screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })).getAllByRole<HTMLInputElement>('radio')) {
+        expect(radio.disabled).toBe(true)
+      }
+    })
+
+    it.each((['en', 'zh'] as const).flatMap(locale => [384_000, 65_536, 32_768, undefined].map(maxTokens => ({ locale, maxTokens }))))(
+      'shows the effective output default and catalog maximum in $locale for $maxTokens tokens', ({ locale, maxTokens }) => {
+        const translate = translator(locale)
+        renderSection(stateOf({ models: listing([{ id: 'capacity', name: 'Capacity', contextWindow: 1_000_000, maxTokens }]) }), {}, { locale })
+        const output = screen.getByRole<HTMLInputElement>('spinbutton', { name: translate('limitsOutputLabel', { name: 'Capacity' }) })
+        expect(output.value).toBe('')
+        expect(output.placeholder).toBe(maxTokens === undefined ? translate('capacityMissing') : String(Math.min(maxTokens, 65_536)))
+        expect(output.getAttribute('max')).toBe(maxTokens === undefined ? null : String(maxTokens))
+        const hint = document.getElementById(output.getAttribute('aria-describedby')!)!.textContent
+        const expected = maxTokens !== undefined && maxTokens > 65_536
+          ? locale === 'zh' ? '默认：65,536 tokens（模型上限：384,000 tokens）' : 'Default: 65,536 tokens (catalog max: 384,000 tokens)'
+          : translate('capacityDefault', { value: maxTokens?.toLocaleString(locale) ?? translate('capacityMissing') })
+        expect(hint).toBe(expected)
+        const context = screen.getByRole<HTMLInputElement>('spinbutton', { name: translate('limitsContextLabel', { name: 'Capacity' }) })
+        expect(context.placeholder).toBe('1000000')
+        expect(document.getElementById(context.getAttribute('aria-describedby')!)?.textContent)
+          .toBe(translate('capacityDefault', { value: (1_000_000).toLocaleString(locale) }))
+      },
+    )
+
+    it('keeps an explicit max output override and a two-column model row with its override indicator', () => {
+      renderSection(stateOf({ models: listing([{ id: 'wide', name: 'A very long model name', maxTokens: 384_000 }]),
+        modelLimitDraft: { wide: { maxTokens: 98_304 } } }))
+      const output = screen.getByRole<HTMLInputElement>('spinbutton', { name: t('limitsOutputLabel', { name: 'A very long model name' }) })
+      expect(output.value).toBe('98304')
+      expect(output.placeholder).toBe('65536')
+      const choose = screen.getByRole('button', { name: 'A very long model name' })
+      expect(choose.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
+      expect(Array.from(choose.parentElement!.children).map(child => child.getAttribute('role'))).toEqual([null, 'switch'])
+      expect(screen.getByRole('tabpanel').contains(choose)).toBe(true)
+    })
+
     it('stages the independent Free gateway URL in advanced settings and offers reset', () => {
       const reading = actions()
       renderSection(stateOf({ freeBaseURL: field('https://free.example/v1', { overridden: true }) }), reading)
@@ -218,12 +288,13 @@ describe("settings page and typed capacity editing", () => {
       expect(document.getElementById(input.getAttribute('aria-describedby') ?? '')?.textContent).toBe(en.baseURLHint)
     })
 
-    it('groups the tuning rows under four headings', () => {
+    it('places quota appearance after usage settings and before connection settings', () => {
       renderSection(stateOf())
       openAdvanced()
       const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
       const order: [string, string][] = [
         [en.groupUsage, en.usageDisplayLabel],
+        [en.usageAppearanceLabel, en.showSidebarQuotaLabel],
         [en.groupConnection, en.baseURLLabel],
         [en.groupCacheTimeouts, en.refreshMinutesLabel],
         [en.groupImages, en.maxImagesLabel],
@@ -232,6 +303,8 @@ describe("settings page and typed capacity editing", () => {
         expect(text).toContain(heading)
         expect(text.indexOf(heading)).toBeLessThan(text.indexOf(firstRow))
       }
+      expect(text.indexOf(en.usageDisplayLabel)).toBeLessThan(text.indexOf(en.usageAppearanceLabel))
+      expect(text.indexOf(en.usageAppearanceLabel)).toBeLessThan(text.indexOf(en.groupConnection))
     })
 
     it('renders nothing until every injected seat is present', () => {
@@ -477,13 +550,17 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
     })
 
-    it('keeps the header to the title and the disclosure, with refresh on the filter row', () => {
+    it('keeps the header compact and groups refresh with the source controls', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
       expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
 
       const refresh = screen.getByRole('button', { name: en.modelsRefresh })
+      const sources = screen.getByRole('tablist', { name: en.modelSourcesLabel })
       const filters = screen.getByRole('group', { name: en.filterLabel })
-      expect(filters.contains(refresh)).toBe(true)
+      const toolbar = document.getElementById('opencode-go-models')?.firstElementChild
+      expect(toolbar?.contains(sources)).toBe(true)
+      expect(toolbar?.contains(refresh)).toBe(true)
+      expect(filters.contains(refresh)).toBe(false)
     })
 
     it('closes the model card with the tally on its own row beside the clear action', () => {
@@ -521,7 +598,7 @@ describe("settings page and typed capacity editing", () => {
 
     it('reports a reading listing, an empty listing, and a failed one', () => {
       renderSection(stateOf())
-      expect(screen.getByText(en.modelsLoading)).toBeTruthy()
+      expect(screen.getByRole('status', { name: en.modelsLoading })).toBeTruthy()
 
       cleanup()
       renderSection(stateOf({ models: listing([]) }))
@@ -681,6 +758,8 @@ describe("settings page and typed capacity editing", () => {
       renderSection(stateOf({
         usageDisplay: field('always', { overridden: true }),
         baseURL: field('https://other.test/v1', { overridden: true }),
+        showSidebarQuota: field('true', { overridden: true }),
+        usagePillStyle: field('plain', { overridden: true }),
       }), edits)
       openAdvanced()
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
@@ -961,37 +1040,12 @@ describe("settings page and typed capacity editing", () => {
     })
   })
 
-  it('opens the shared analytics dialog from the settings card', async () => {
-    const readAnalytics = vi.fn().mockResolvedValue({
-      generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
-      totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
-        cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
-      byModel: [], byDay: [],
-      coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
-        summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
-      pricing: { source: 'OpenCode /models', unpricedModels: [] },
-    })
-    setGoTheme('graphite')
-    renderSection(stateOf(), {}, { analytics: { readAnalytics } })
-    const row = screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) })
-    expect(row.getAttribute('aria-expanded')).toBe('false')
-    // Folded, the row still names the style in force.
-    expect(row.textContent).toContain(en.themeGraphite)
-    expect(screen.queryByRole('group', { name: en.themeLabel })).toBeNull()
-    await act(async () => { fireEvent.click(row) })
-    expect(row.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByText(en.analyticsBoardLabel)).toBeTruthy()
-    expect(screen.getByText(en.themeHint)).toBeTruthy()
-    const picker = screen.getByRole('group', { name: en.themeLabel })
-    expect(within(picker).getAllByRole('button')).toHaveLength(4)
-    // The style picker is the only entry: choosing one updates the store and the row.
-    await act(async () => { fireEvent.click(within(picker).getByRole('button', { name: en.themeSeaSalt })) })
-    expect(getGoTheme()).toBe('sea-salt')
-    expect(row.textContent).toContain(en.themeSeaSalt)
-    // The first row of the unfolded card opens the dashboard.
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard })) })
-    expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
-    expect(readAnalytics).toHaveBeenCalled()
+  it('keeps usage history and theme selection out of the settings page', () => {
+    renderSection(stateOf())
+    expect(screen.queryByRole('heading', { name: en.analyticsTitle })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Open dashboard|打开看板/ })).toBeNull()
+    expect(screen.queryByRole('group', { name: /^(Theme|主题)$/ })).toBeNull()
+    expect(document.querySelector('[data-theme]')).toBeNull()
   })
 })
 
@@ -1239,6 +1293,38 @@ describe('typed ConfigForm drafts and writes', () => {
     return { host, controller, actions, snapshot: actions.hooks.opencodeGo.getSnapshot }
   }
 
+  it('defaults, validates and persists sidebar visibility and pill style as typed values', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    expect(editableKeys).toEqual(expect.arrayContaining(['showSidebarQuota', 'usagePillStyle']))
+    expect(snapshot()).toMatchObject({ showSidebarQuota: { text: 'false' }, usagePillStyle: { text: 'badge' } })
+    actions.edit('showSidebarQuota', 'true')
+    actions.edit('usagePillStyle', 'plain')
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledWith([
+      { op: 'set', path: ['showSidebarQuota'], value: true },
+      { op: 'set', path: ['usagePillStyle'], value: 'plain' },
+    ], expect.any(Number))
+    expect(host.form.getSnapshot().user).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    expect(snapshot().dirty).toBe(false)
+    actions.edit('usagePillStyle', 'neon')
+    actions.edit('showSidebarQuota', '1')
+    expect(snapshot()).toMatchObject({ invalid: true, showSidebarQuota: { invalid: true }, usagePillStyle: { invalid: true } })
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('resets appearance to inherited values without changing the selected account', async () => {
+    const value = { apiKeyEnv: 'ACCOUNT_A', showSidebarQuota: false, usagePillStyle: 'badge' as const }
+    const { host, controller, actions, snapshot } = setup(value)
+    host.publish({ base: { showSidebarQuota: true, usagePillStyle: 'plain' }, user: value })
+    actions.resetField('showSidebarQuota')
+    actions.resetField('usagePillStyle')
+    await controller.save()
+    expect(snapshot()).toMatchObject({ showSidebarQuota: { text: 'true' }, usagePillStyle: { text: 'plain' } })
+    expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')
+    expect(host.form.getSnapshot().user).toEqual({ apiKeyEnv: 'ACCOUNT_A' })
+  })
+
   it.each(['baseURL', 'freeBaseURL'] as const)('validates %s drafts before saving', async field => {
     const { host, controller, actions, snapshot } = setup()
     for (const value of ['invalid', 'ftp://gateway.example', 'https://gateway.example/v1?key=x', 'https://gateway.example/v1#fragment']) {
@@ -1362,7 +1448,8 @@ describe('client registration and remote lifecycle', () => {
     const slotsRegister = vi.fn(() => () => {})
     const slotsInject = vi.fn((_slot: string, install: () => void) => install())
     const localeRegister = vi.fn(() => () => {})
-    const analyticsRead = vi.fn()
+    const analyticsRead = vi.fn(async (query: AnalyticsQuery, _signal?: AbortSignal) => ({ ok: true, value: createAnalyticsReport(query) }))
+    const analyticsExport = vi.fn(async (_query: AnalyticsQuery, _signal?: AbortSignal) => ({ ok: true, value: { filename: 'usage.csv', csv: 'date,requests\n2026-11-05,12\n' } }))
     const configForms = { get: vi.fn(() => settings.form) }
     const ctx = {
       configForms,
@@ -1377,15 +1464,32 @@ describe('client registration and remote lifecycle', () => {
         $on: vi.fn((_event: string, listener: (ref: string) => void) => { listeners.add(listener); return () => listeners.delete(listener) }),
         opencodeGoModels: { read: vi.fn(async () => ({ ok: true, value: { models: [], stale: false } })) },
         opencodeGoAccounts: { execute: vi.fn(async () => ({ ok: true, value: 'applied' })) },
-        opencodeGoAnalytics: { read: analyticsRead },
+        opencodeGoAnalytics: { read: analyticsRead, exportCsv: analyticsExport },
         credentials: { describe: vi.fn(async () => ({ ok: true, value: {} })) },
         llm: { discoverModels: vi.fn(async () => ({ ok: true, value: [] })) },
       },
       slots: { inject: slotsInject, register: slotsRegister },
     }
-    return { ctx, settings, slotsRegister, slotsInject, localeRegister, configForms, analyticsRead, listeners,
+    return { ctx, settings, slotsRegister, slotsInject, localeRegister, configForms, analyticsRead, analyticsExport, listeners,
       dispose: async () => { for (const effect of effects.splice(0).reverse()) { const dispose = await effect; if (typeof dispose === 'function') dispose() } },
     }
+  }
+
+  function conversationHarness() {
+    const harness = clientHarness()
+    harness.settings.publish({ status: 'ready', writable: true, value: { usageDisplay: 'always', apiKeyEnv: 'ACCOUNT_A', accounts: [
+      { id: 'primary', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
+    ] } })
+    const directory = createSnapshotStore<ModelDirectoryState>({ current: { provider: 'dsh-opencode-go', model: 'alpha' }, routable: true,
+      groups: [], failures: [], status: 'ready', error: null })
+    const window = { status: 'ok', percent: 10, resetsAt: '2026-12-01T00:00:00Z' }
+    const read = vi.fn(async () => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
+    Object.assign(harness.ctx, { sessions: {}, modelDirectories: { directoryFor: () => ({ store: directory }) } })
+    Object.assign(harness.ctx.remote, { session: {}, opencodeGoUsage: { read, readAccount: read } })
+    apply(harness.ctx as never)
+    const entries = harness.slotsRegister.mock.calls as unknown as Array<[{ id: string; inject: (session: string) => UsagePillProps }]>
+    const props = entries.find(([entry]) => entry.id === 'opencode-go-usage')![0].inject('session-a')
+    return { ...harness, props }
   }
 
   it('mounts the current ConfigForm and dictionaries, registers the page and releases its subscriptions', async () => {
@@ -1408,22 +1512,31 @@ describe('client registration and remote lifecycle', () => {
     expect(harness.settings.listenerCount()).toBe(0)
   })
 
-  it('cancels superseded and closed analytics queries through the registered settings page', async () => {
-    const harness = clientHarness()
+  it('forwards account-scoped history and CSV queries with cancellation through the conversation pill', async () => {
+    const harness = conversationHarness()
+    const face = harness.props
+    const query: AnalyticsQuery = { accountRef: 'ACCOUNT_A', range: '7d' }
+    const controller = new AbortController()
+    try {
+      await expect(face.readAnalytics!(query, controller.signal)).resolves.toMatchObject({ accountRef: 'ACCOUNT_A', period: '7d' })
+      await expect(face.exportAnalytics!(query, controller.signal)).resolves.toMatchObject({ filename: 'usage.csv' })
+      expect(harness.analyticsRead).toHaveBeenCalledExactlyOnceWith(query, controller.signal)
+      expect(harness.analyticsExport).toHaveBeenCalledExactlyOnceWith(query, controller.signal)
+    } finally { await harness.dispose() }
+  })
+
+  it('opens history from the conversation pill and cancels superseded or closed queries', async () => {
+    const harness = conversationHarness()
     const signals: (AbortSignal | undefined)[] = []
     harness.analyticsRead.mockImplementation((_query: AnalyticsQuery, signal?: AbortSignal) => {
       signals.push(signal)
       return new Promise(resolve => signal?.addEventListener('abort', () => resolve({ ok: false,
         error: Object.assign(new Error('cancelled'), { code: 'gateway/cancelled' }) }), { once: true }))
     })
-    apply(harness.ctx as never)
-    const registration = harness.slotsRegister.mock.calls[0]?.[0] as unknown as { inject: () => OpencodeGoSectionFace }
-    const injected = registration.inject()
-    const view = render(<OpencodeGoSection {...injected} t={key => en[key]}
-      useOpencodeGo={bindSnapshotSelector(injected.hooks.opencodeGo)} />)
+    const view = render(<UsagePill {...harness.props} />)
     try {
-      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.analyticsCardTitle) }))
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpenBoard })) })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: new RegExp(en.usageTitle) })) })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
       expect(signals).toHaveLength(1)
       expect(signals[0]?.aborted).toBe(false)
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d })) })
@@ -1477,6 +1590,43 @@ describe('client registration and remote lifecycle', () => {
     expect(harness.ctx.remote.opencodeGoAccounts.execute).toHaveBeenCalledExactlyOnceWith({ kind: 'select', ref: 'ACCOUNT_A' })
     harness.settings.publish({ writable: false })
     await expect(face.selectAccount!('ACCOUNT_A')).resolves.toBe(false)
+    await harness.dispose()
+    expect(harness.listeners.size).toBe(0)
+  })
+
+  it('registers sidebar quota at the root without requiring a conversation or model directory', async () => {
+    const harness = clientHarness()
+    harness.settings.publish({ value: { showSidebarQuota: true, usageDisplay: 'off', apiKeyEnv: 'ACCOUNT_A', accounts: [
+      { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' }, { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+    ] } })
+    const original = harness.settings.form.getSnapshot()
+    const window = { status: 'ok', percent: 12, resetsAt: '2026-12-01T00:00:00Z' }
+    const read = vi.fn(async () => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
+    const readAccount = vi.fn(async (_ref: string) => ({ ok: true, value: { rolling: window, weekly: window, monthly: window } }))
+    Object.assign(harness.ctx.remote, { opencodeGoUsage: { read, readAccount } })
+    apply(harness.ctx as never)
+    expect(harness.slotsInject).toHaveBeenCalledWith('sidebar.footer.action', expect.any(Function))
+    expect(harness.slotsInject).not.toHaveBeenCalledWith('conversation.input.right', expect.any(Function))
+    const registrations = harness.slotsRegister.mock.calls as unknown as Array<[
+      { id: string; name: string; inject: () => Omit<SidebarQuotaProps, 'wide'> }, unknown,
+    ]>
+    const [registration, component] = registrations.find(([entry]) => entry.id === 'opencode-go-sidebar-quota')!
+    expect(registration.name).toBe('sidebar.footer.action')
+    expect(component).toBe(SidebarQuota)
+    const props = registration.inject()
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(<SidebarQuota {...props} wide />) })
+    expect(screen.getByText('OpenCode Go')).toBeTruthy()
+    expect(readAccount).toHaveBeenCalledExactlyOnceWith('ACCOUNT_A')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `${en.sidebarNextAccount}: Primary` })) })
+    expect(readAccount).toHaveBeenLastCalledWith('ACCOUNT_B')
+    expect(screen.getByRole('button', { name: `${en.sidebarNextAccount}: Backup` })).toBeTruthy()
+    expect(read).not.toHaveBeenCalled()
+    expect(harness.ctx.remote.opencodeGoAccounts.execute).not.toHaveBeenCalled()
+    expect(harness.settings.form.getSnapshot()).toBe(original)
+    expect(harness.settings.set).not.toHaveBeenCalled()
+    expect(harness.settings.mutate).not.toHaveBeenCalled()
+    view.unmount()
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)
   })

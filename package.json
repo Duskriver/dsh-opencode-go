@@ -1,6 +1,6 @@
 {
   "name": "dsh-opencode-go",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenCode Go model provider and settings UI for DeepSeek Harness",
   "icon": "assets/icon.png",
   "type": "module",
@@ -223,5 +223,8 @@
     "opencode-go",
     "llm",
     "cordis"
-  ]
+  ],
+  "optionalDependencies": {
+    "bun": "1.4.4"
+  }
 }

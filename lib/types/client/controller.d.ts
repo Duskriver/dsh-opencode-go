@@ -2,12 +2,13 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import { type SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
-import { type ModelSource, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AnalyticsQuery, type AnalyticsReport, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
+import { type ModelSource, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
-export type EditableField = TextField | 'modelLimits';
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
     overridden: boolean;
@@ -98,6 +99,8 @@ export interface OpencodeGoSectionState extends FormShell {
     accounts: GoAccountsState;
     enabled: boolean;
     usageDisplay: FieldState;
+    showSidebarQuota: FieldState;
+    usagePillStyle: FieldState;
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;
     pickerFailed: boolean;
@@ -119,8 +122,6 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
         opencodeGo: SnapshotStore<OpencodeGoSectionState>;
     };
     loadModels(): void;
-    readAnalytics(query: AnalyticsQuery, signal?: AbortSignal): Promise<AnalyticsReport>;
-    readQuota(ref: string): Promise<GoUsage>;
     setEnabled(next: boolean): void;
     setModelEnabled(id: string, next: boolean): void;
 }
@@ -131,7 +132,6 @@ export declare class OpencodeGoSectionController {
     private readonly readModels;
     private readonly readUsage;
     private readonly executeAccountCommand;
-    private readonly readAnalytics;
     private readonly drafts;
     private readonly store;
     private readonly unsubscribe;
@@ -151,7 +151,7 @@ export declare class OpencodeGoSectionController {
     private accountsLoaded;
     private disposed;
     private addition;
-    constructor(scope: ConfigForm<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<GoUsage>, executeAccountCommand?: ExecuteAccountCommand, readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>);
+    constructor(scope: ConfigForm<OpencodeGoSettings>, ctx: ClientContext, readModels?: () => Promise<RemoteResult<GoModelCatalog>>, readUsage?: (ref: string) => Promise<GoUsage>, executeAccountCommand?: ExecuteAccountCommand);
     dispose(): void;
     private publish;
     private blocked;

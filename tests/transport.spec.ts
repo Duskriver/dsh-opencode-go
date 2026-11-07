@@ -426,10 +426,21 @@ describe("HTTP classification", () => {
     [402, { error: { message: 'insufficient credits' } }, 'AUTH', 'QUOTA'],
     [401, { error: { type: 'ModelError', message: 'invalid API key for this model' } }, 'AUTH', 'UNKNOWN_MODEL'],
     [401, { error: { type: 'AuthError', message: 'Access denied' } }, 'PI_AI_ERROR', 'INVALID_CREDENTIAL'],
-    [403, { error: { type: 'RegionError', message: 'Unavailable in region' } }, 'PI_AI_ERROR', 'AUTH'],
+    [403, { error: { type: 'RegionError', message: 'Unavailable in region' } }, 'AUTH', 'PERMISSION_DENIED'],
+    [403, { error: { type: 'DataPolicyError', message: 'Privacy policy restriction' } }, 'AUTH', 'PERMISSION_DENIED'],
+    [402, { error: { type: 'PermissionError', message: 'Access denied' } }, 'AUTH', 'PERMISSION_DENIED'],
+    [403, { error: { code: 'permission_denied', message: 'Access denied' } }, 'AUTH', 'PERMISSION_DENIED'],
+    [403, { error: { message: 'Access denied' } }, 'AUTH', 'PERMISSION_DENIED'],
+    [402, { message: 'Payment required' }, 'AUTH', 'PERMISSION_DENIED'],
+    [403, { error: { message: 'Invalid API key' } }, 'AUTH', 'INVALID_CREDENTIAL'],
+    [402, { error: { message: 'Expired key' } }, 'AUTH', 'INVALID_CREDENTIAL'],
     [401, { error: { message: 'insufficient credits' } }, 'AUTH', 'QUOTA'],
     [401, {}, 'AUTH', 'AUTH'],
     [429, { error: { type: 'RateLimitError' } }, 'PI_AI_ERROR', 'RATE_LIMIT'],
+    [429, { error: { type: 'FreeUsageLimitError', message: 'Free models work in OpenCode (https://opencode.ai)' } }, 'PI_AI_ERROR', 'QUOTA'],
+    [429, { type: 'FreeUsageLimitError', message: 'Free models require OpenCode' }, 'PI_AI_ERROR', 'QUOTA'],
+    [429, { error: { type: 'FreeUsageLimitError', message: 'Limit reached' } }, 'RATE_LIMIT', 'QUOTA'],
+    [500, { error: { message: 'Diagnostic: Free models work in OpenCode' } }, 'QUOTA', 'SERVER'],
     [400, {}, 'CONTEXT_WINDOW_EXCEEDED', 'CONTEXT_WINDOW_EXCEEDED'],
     [400, { error: { code: 'context_length_exceeded', message: 'Limit reached' } }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
     [422, { error: { type: 'context_window_exceeded', message: 'Limit reached' } }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
@@ -443,6 +454,40 @@ describe("HTTP classification", () => {
       fetch: async () => Response.json(body, { status }) })
     await diagnostics.fetch('https://gateway.example/v1')
     expect(await diagnostics.failureCode(fallback)).toBe(expected)
+  })
+
+  it.each([
+    { estimatedContextTokens: 70_000, maxTokens: 10_000, contextWindow: 100_000, expected: 'CONTEXT_WINDOW_EXCEEDED' },
+    { estimatedContextTokens: 79_999, maxTokens: 0, contextWindow: 100_000, expected: 'INVALID_REQUEST' },
+    { estimatedContextTokens: 80_000, maxTokens: 0, contextWindow: 100_000, expected: 'CONTEXT_WINDOW_EXCEEDED' },
+    { estimatedContextTokens: 95_000, maxTokens: 10_000, contextWindow: 100_000, expected: 'CONTEXT_WINDOW_EXCEEDED' },
+    { estimatedContextTokens: 1_000, maxTokens: 10_000, contextWindow: 100_000, expected: 'INVALID_REQUEST' },
+    { estimatedContextTokens: 95_000, maxTokens: undefined, contextWindow: 100_000, expected: 'CONTEXT_WINDOW_EXCEEDED' },
+    { estimatedContextTokens: 95_000, maxTokens: 10_000, contextWindow: undefined, expected: 'INVALID_REQUEST' },
+    { estimatedContextTokens: undefined, maxTokens: 100_000, contextWindow: 100_000, expected: 'INVALID_REQUEST' },
+    { estimatedContextTokens: 95_000, maxTokens: 10_000, contextWindow: 0, expected: 'INVALID_REQUEST' },
+  ])('uses request capacity to classify a model-only 400: %j', async ({ expected, ...budget }) => {
+    const diagnostics = new GatewayDiagnostics({ provider: 'test', model: 'test', apiKey: 'fixture-key', ...budget,
+      fetch: async () => Response.json({ model: 'test' }, { status: 400 }) })
+    await diagnostics.fetch('https://gateway.example/v1')
+    expect(await diagnostics.failureCode('INVALID_REQUEST')).toBe(expected)
+  })
+
+  it.each([
+    { status: 400, body: { model: 'test', message: 'Invalid parameter' }, expected: 'INVALID_REQUEST' },
+    { status: 400, body: { model: 'test', error: {} }, expected: 'INVALID_REQUEST' },
+    { status: 400, body: { model: 'test', message: '' }, expected: 'INVALID_REQUEST' },
+    { status: 400, body: {}, expected: 'INVALID_REQUEST' },
+    { status: 400, body: { model: 123 }, expected: 'INVALID_REQUEST' },
+    { status: 413, body: { model: 'test' }, expected: 'INVALID_REQUEST' },
+    { status: 422, body: { model: 'test' }, expected: 'INVALID_REQUEST' },
+    { status: 500, body: { model: 'test' }, expected: 'SERVER' },
+  ])('keeps unrelated failures unchanged near capacity: %j', async ({ status, body, expected }) => {
+    const diagnostics = new GatewayDiagnostics({ provider: 'test', model: 'test', apiKey: 'fixture-key',
+      estimatedContextTokens: 95_000, maxTokens: 10_000, contextWindow: 100_000,
+      fetch: async () => Response.json(body, { status }) })
+    await diagnostics.fetch('https://gateway.example/v1')
+    expect(await diagnostics.failureCode('INVALID_REQUEST')).toBe(expected)
   })
 })
 

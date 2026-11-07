@@ -16,6 +16,7 @@
 DSH already supports OpenCode Go natively. This plugin focuses on usage inside conversations, managing multiple accounts, and dedicated model and settings controls.
 
 - **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. Free shares saved keys and uses public access when none is usable.
+- **Free rate-limit protection**: honors upstream `Retry-After` and pauses new requests during cooldown. Shared Free quota/IP limits do not rotate Go accounts.
 - **Usage at a glance**: see usage beside the conversation input, then open the panel for five-hour, weekly, and monthly percentages and reset times.
 - **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
 - **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
@@ -25,8 +26,6 @@ Supports Chinese and English, following DSH's interface language. The screenshot
 ## View subscription usage
 
 Click the usage pill beside the conversation input to open the current account's subscription usage. Bars show the **percentage used**, turn amber near the limit, and red when exhausted. Each quota window shows its reset time.
-
-![Subscription usage: current account, three quota windows, and reset times](docs/assets/usage-panel.png)
 
 While visible, usage refreshes every minute. Periodic queries pause while the page is hidden and resume with a refresh when it becomes visible. Temporary failures show a warning; retained readings are marked as previous data. Click **Retry now** after a failure, or **Refresh accounts** in the Settings account card.
 
@@ -40,17 +39,19 @@ Under **Settings → OpenCode Go → Advanced settings → Usage display**, choo
 
 ## Usage analytics
 
-Open **Usage analytics** at the bottom of the conversation usage panel, or under **Settings → OpenCode Go → Usage analytics**. Both open the same dashboard. It covers **both Go and Free routes**, including closed sessions, totals input, output, and cache tokens per model, and estimates cost with each gateway’s current `/models` prices.
+Open the dashboard from the conversation input's expanded usage pill or the sidebar dashboard button.
 
-- Ranges: today, 7 days, 30 days, and 90 days. Opening scans local sessions without uploading their contents; closing the dialog stops the request. Model and pricing metadata may refresh from [OpenCode /models](https://opencode.ai/inference/go/v1/models), without sending it conversation content, account keys or per-request analytics. Normal inference sends request content to your configured model gateway, which also serves quota queries; there is no additional telemetry or analytics service.
-- Cost uses request start time, text/context-tier rates, and each model’s declared UTC weekday/hour or date multipliers. Go and Free records stay separate even for the same model ID.
-- Each model row shows only the display name and usage figures. Official quota percentages remain authoritative; the estimate is not an invoice.
-- A scan stops at 500 sessions, 500,000 events, or 12 seconds by default and says so, including why. **Scan more history** raises the session cap to 2,000; the choice is remembered locally. Session folds are reused in memory for at most five seconds and scanned again after a restart; no fold cache is written to disk.
-- DSH's native OpenCode Go route is excluded; pre-0.1.16 legacy route records are admitted by request time. A Host without `sessionQuery` shows an unavailable state.
+![Official workspace history dashboard with sample data](docs/assets/usage-history-desktop.jpg)
 
-**Themes**: switch between **Silent Black, Graphite (default), Sea Salt, and Warm Sand** under **Settings → OpenCode Go → Usage analytics**; the four previews show each palette directly. Themes follow DSH's light/dark mode and are stored locally. The pill popover and the dashboard no longer carry their own switch. The pill no longer carries the `Go ·` prefix; with multiple accounts it shows the active account's full name, truncated with an ellipsis when long, with the complete name kept in the button title and the expanded panel.
+[Narrow-screen light preview](docs/assets/usage-history-mobile.jpg) · [Model rankings and detail](docs/assets/usage-history-models.jpg), both using sample data.
 
-See [usage analytics notes](docs/usage-analytics.en.md) for the exact accounting rules and limits.
+- **One official source**: totals, daily charts and model detail use the same official daily CSV, covering requests, input/output/cache tokens and the official usage amount. Models are grouped by provider + model. Ranges are today, 7, 30 and 90 days; all dates use UTC.
+- **Independent viewing account**: defaults to the current inference account and shows only the workspace belonging to the selected key, including calls from other clients. Changing the viewing account does not change the conversation account. All three dashboard quota windows follow the selection. Anonymous Free coverage is not guaranteed.
+- **Official usage amount**: sums `cost_micro_cents` directly (`1 USD = 100,000,000` units); it does not mean an additional Go charge. Official daily aggregates may be delayed.
+- **One visual language**: settings, the usage pill, sidebar and dashboard share warm paper / charcoal surfaces and terracotta accents, following the Host's light/dark mode. Locally installed Anthropic Serif / Sans / Mono fonts are preferred, with system and CJK serif fallbacks. The dashboard becomes full-screen on narrow screens and retains daily token/request bars, model rankings and details.
+- **On-demand queries**: history loads when opening, changing account or range, or refreshing manually. The Host uses a 30-second cache; forced refresh bypasses it. History is not polled in the background. Only official model gateway configurations support it; errors remain explicit without falling back to local scans.
+
+Keys stay on the Host. Normal reports send the browser only aggregate numbers and provider / model / day; an official CSV explicitly downloaded by the user may contain member fields. See [usage analytics notes](docs/usage-analytics.en.md) for accounting and privacy details.
 
 ## Manage multiple accounts
 
@@ -159,15 +160,15 @@ dsh plugin --profile web remove dsh-opencode-go
 
 ## Architecture and verification
 
-The source contains 17 implementation modules:
+The source is organized by domain:
 
 | Domain | Modules |
 | --- | --- |
 | Plugin composition, settings and contracts | `index.ts`, `config.ts`, `contracts.ts` |
 | Requests, model catalog and protocol conversion | `adapter.ts`, `catalog.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
-| Accounts, official quota, local analytics and transport | `accounts.ts`, `analytics.ts`, `transport.ts` |
+| Accounts, official quota, official CSV history and transport | `accounts.ts`, `analytics.ts`, `transport.ts` |
 | Browser registration and typed state | `client/index.ts`, `client/controller.ts` |
-| Settings, account/model controls, usage, themes and copy | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
+| Host settings, account/model controls, usage and copy | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
 
 The browser uses DSH's `configForms`; capacities remain typed objects while editing. Images use per-request count and encoded-byte budgets, with at most four preparations per request. The package keeps its `.` and `./client` exports. Development dependencies pin DSH `0.2.1-rc.5` and Cordis `4.0.5`; runtime Cordis requires `~4.0.5`.
 
@@ -181,12 +182,12 @@ npm run check:dist
 npm run verify
 ```
 
-Fourteen test files cover host services, accounts, catalog, protocols, analytics, transport and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
+Tests cover host services, accounts, catalog, protocols, analytics, transport, Free backoff, and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
 
 ## More documentation
 
 - [Advanced guide: Headless, proxies, manual configuration, and error diagnostics](docs/advanced.en.md)
-- [Usage analytics: accounting, pricing, scan limits, and privacy](docs/usage-analytics.en.md)
+- [Usage analytics: official source, accounting, and privacy](docs/usage-analytics.en.md)
 - [Development and testing](docs/development.md)
 - [Verification notes](docs/verification.md)
 - [Issues and suggestions](https://github.com/Duskriver/dsh-opencode-go/issues)

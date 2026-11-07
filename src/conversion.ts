@@ -48,6 +48,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import { DEFAULT_REQUEST_IMAGE_MAX_BYTES, DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET } from './contracts.ts'
 import { waitWithSignal } from './transport.ts'
 import { isContextOverflow } from 'opencode-go-pi-ai'
+import { createHash } from 'node:crypto'
 
 /** Per-block half of the pi-ai replay envelope, one entry per content block. */
 export type PiAiReplayBlock =
@@ -72,6 +73,10 @@ export interface PiAiReplayResponse {
   /** Provider-native effort for historical replay; absence is preserved. */
   providerThinkingLevel?: string
   stopReason: AssistantMessage['stopReason']
+  /** Measured context footprint for the next turn's SDK output-token clamp. */
+  usage?: Pick<PiUsage, 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'totalTokens'>
+  /** Fingerprint of the request prefix and this reply that the usage measured. */
+  usageContext?: string
 }
 
 /** The validated halves of one pi-ai replay envelope. */
@@ -106,6 +111,32 @@ function emptyPiUsage(): PiUsage {
   }
 }
 
+/** Key order can change across durable JSON replay without changing the context. */
+function contextFingerprint(value: unknown): string {
+  const serialized = JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
+  return createHash('sha256').update(serialized).digest('hex')
+}
+
+function usageContextSeed(context: PiContext, provider: string, model: string): string {
+  return contextFingerprint([provider, model, context.systemPrompt ?? '', context.tools ?? []])
+}
+
+/** Exclude accounting fields and synthetic timestamps; retain replay-sensitive identity. */
+function appendUsageContext(prefix: string, message: PiMessage): string {
+  if (message.role === 'assistant') return contextFingerprint([prefix, {
+    role: message.role, api: message.api, provider: message.provider, model: message.model,
+    content: message.content, responseId: message.responseId, providerThinkingLevel: message.providerThinkingLevel,
+  }])
+  const { timestamp: _timestamp, ...content } = message
+  return contextFingerprint([prefix, content])
+}
+
+/** Capture one converted request before the SDK can mutate it while streaming. */
+export function piContextUsageKey(context: PiContext, provider: string, model: string): string {
+  return context.messages.reduce(appendUsageContext, usageContextSeed(context, provider, model))
+}
+
 /**
  * Project a successful pi-ai response into the minimal durable replay state.
  * The per-block half is index-aligned with the streamed blocks (pi-ai content
@@ -114,11 +145,15 @@ function emptyPiUsage(): PiUsage {
  * @param message - completed native pi-ai assistant response.
  * @param requestedModel - request identity stored in the assistant source; defaults to the native model.
  * @param requestedProvider - DSH route stored in the assistant source; defaults to the native provider.
+ * @param usageContext - fingerprint of the request that produced this response.
  * @returns the versioned lossless-JSON replay projection.
  */
-export function toPiReplayState(message: AssistantMessage, requestedModel = message.model, requestedProvider = message.provider): ReplayEnvelope {
+export function toPiReplayState(message: AssistantMessage, requestedModel = message.model, requestedProvider = message.provider,
+  usageContext?: string,
+): ReplayEnvelope {
   const responseModel = message.api === 'anthropic-messages' && message.model !== requestedModel
     ? message.model : message.responseModel
+  const { input, output, cacheRead, cacheWrite, totalTokens } = message.usage
   const response: PiAiReplayResponse = {
     kind: 'pi-ai',
     version: 2,
@@ -130,6 +165,10 @@ export function toPiReplayState(message: AssistantMessage, requestedModel = mess
     ...message.responseId === undefined ? {} : { responseId: message.responseId },
     ...message.providerThinkingLevel === undefined ? {} : { providerThinkingLevel: message.providerThinkingLevel },
     stopReason: message.stopReason,
+  }
+  if (hasUsage(message.usage)) {
+    response.usage = { input, output, cacheRead, cacheWrite, totalTokens }
+    if (usageContext !== undefined) response.usageContext = appendUsageContext(usageContext, { ...message, model: requestedModel })
   }
   return {
     response,
@@ -178,6 +217,18 @@ function readReplayState(value: unknown): PiAiReplayState {
   if (response['responseModel'] !== undefined && typeof response['responseModel'] !== 'string') return invalidReplay('responseModel must be a string')
   if (response['responseId'] !== undefined && typeof response['responseId'] !== 'string') return invalidReplay('responseId must be a string')
   if (response['providerThinkingLevel'] !== undefined && typeof response['providerThinkingLevel'] !== 'string') return invalidReplay('providerThinkingLevel must be a string')
+  if (response['usageContext'] !== undefined
+    && (typeof response['usageContext'] !== 'string' || !/^[a-f0-9]{64}$/.test(response['usageContext']))) {
+    return invalidReplay('usageContext must be a SHA-256 fingerprint')
+  }
+  if (response['usage'] !== undefined) {
+    const usage = response['usage']
+    if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) return invalidReplay('usage must be an object')
+    for (const field of ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'] as const) {
+      const tokens = (usage as Record<string, unknown>)[field]
+      if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens < 0) return invalidReplay(`usage ${field} must be a non-negative finite number`)
+    }
+  }
   const blocks = envelope['blocks']
   if (!Array.isArray(blocks)) return invalidReplay('blocks must be an array')
   for (const [index, value] of blocks.entries()) {
@@ -272,7 +323,7 @@ function replayedAssistant(message: HistoryMessage, source: ModelMessageSource, 
     ...state.response.responseModel === undefined ? {} : { responseModel: state.response.responseModel },
     ...state.response.responseId === undefined ? {} : { responseId: state.response.responseId },
     ...state.response.providerThinkingLevel === undefined ? {} : { providerThinkingLevel: state.response.providerThinkingLevel },
-    usage: emptyPiUsage(),
+    usage: { ...emptyPiUsage(), ...state.response.usage },
     stopReason: state.response.stopReason,
     timestamp: 0,
   }
@@ -478,22 +529,37 @@ function splitSystemPrompt(options: GenerateOptions): SystemPromptSplit {
 }
 
 /** Assemble the request-level pi-ai context envelope shared by both conversion paths. */
-function piContext(systemPrompt: string | undefined, options: GenerateOptions, messages: PiMessage[]): PiContext {
+function piContext(systemPrompt: string | undefined, options: GenerateOptions, messages: PiMessage[],
+  usageContexts: ReadonlyMap<AssistantMessage, string>,
+): PiContext {
   const tools = toolsOf(options)
-  return {
+  const context: PiContext = {
     ...systemPrompt !== undefined ? { systemPrompt } : {},
     messages,
     ...tools !== undefined && tools.length > 0 ? { tools } : {},
   }
+  let prefix = usageContextSeed(context, options.provider, options.model)
+  for (const message of messages) {
+    prefix = appendUsageContext(prefix, message)
+    // Compaction, pruning, image offloading and prompt/tool changes can leave
+    // a native reply intact while replacing the prefix its usage described.
+    // Legacy usage has no fingerprint, so it cannot safely budget this request.
+    if (message.role === 'assistant' && usageContexts.get(message) !== prefix) message.usage = emptyPiUsage()
+  }
+  return context
 }
 
 function appendAssistant(
   message: Extract<Message, { role: 'assistant' }>,
   messages: PiMessage[],
   toolNames: Map<ToolCallId, string>,
+  usageContexts: Map<AssistantMessage, string>,
   onReplayDegrade?: (reason: string) => void,
 ): void {
   const assistant = toPiAssistant(message, onReplayDegrade)
+  const replay = message.source.replayState as Partial<PiAiReplayState> | undefined
+  const usageContext = replay?.response?.usageContext
+  if (typeof usageContext === 'string') usageContexts.set(assistant, usageContext)
   for (const block of assistant.content) {
     if (block.type === 'toolCall') toolNames.set(brandString<ToolCallId>(block.id), block.name)
   }
@@ -504,6 +570,7 @@ function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: st
   assertSupportedHistory(options.messages)
   const split = splitSystemPrompt(options)
   const toolNames = new Map<ToolCallId, string>()
+  const usageContexts = new Map<AssistantMessage, string>()
   const messages: PiMessage[] = []
   for (const message of split.messages) {
     if (contentHasImage(message.content)) {
@@ -526,12 +593,12 @@ function textOnlyContext(options: GenerateOptions, onReplayDegrade?: (reason: st
       continue
     }
     if (message.role === 'assistant') {
-      appendAssistant(message, messages, toolNames, onReplayDegrade)
+      appendAssistant(message, messages, toolNames, usageContexts, onReplayDegrade)
       continue
     }
     messages.push({ role: 'user', content: flattenText(message), timestamp: 0 })
   }
-  return piContext(split.systemPrompt, options, messages)
+  return piContext(split.systemPrompt, options, messages, usageContexts)
 }
 
 /** Inputs that bind deterministic request images to one current tool execution world. */
@@ -639,6 +706,7 @@ async function toPiContextWithImages(
     byteLength: ref => (requestImages.get(ref.attachmentId) as RequestImageAttachment).bytes,
   })
   const toolNames = new Map<ToolCallId, string>()
+  const usageContexts = new Map<AssistantMessage, string>()
   const messages: PiMessage[] = []
 
   for (const message of exactMessages) {
@@ -660,14 +728,14 @@ async function toPiContextWithImages(
       continue
     }
     if (message.role === 'assistant') {
-      appendAssistant(message, messages, toolNames, onReplayDegrade)
+      appendAssistant(message, messages, toolNames, usageContexts, onReplayDegrade)
       continue
     }
     const content = await userContent(message.content, requestImages, resolveImageAccess)
     messages.push({ role: 'user', content, timestamp: 0 })
   }
 
-  return piContext(split.systemPrompt, options, messages)
+  return piContext(split.systemPrompt, options, messages, usageContexts)
 }
 
 /**
@@ -822,6 +890,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number,
  * @param requestedModel - request model identity recorded for durable replay.
  * @param requestedProvider - DSH provider identity recorded for durable replay.
  * @param reservedMaxTokens - requested output allowance before SDK context clamping.
+ * @param usageContext - fingerprint of the request whose usage may budget a later turn.
  * @returns the harness chunks, ending with measured `usage` then `finish`;
  *   failures with no measured tokens omit usage to preserve context pressure. Throws
  *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
@@ -833,6 +902,7 @@ export async function* toStreamChunks(
   requestedModel?: string,
   requestedProvider?: string,
   reservedMaxTokens?: number,
+  usageContext?: string,
 ): AsyncGenerator<StreamChunk> {
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
@@ -902,7 +972,7 @@ export async function* toStreamChunks(
         yield {
           type: 'finish',
           reason,
-          replayState: toPiReplayState(event.message, requestedModel, requestedProvider),
+          replayState: toPiReplayState(event.message, requestedModel, requestedProvider, usageContext),
         }
         return
       }

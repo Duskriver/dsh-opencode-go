@@ -26,6 +26,8 @@ export interface CompletionsScript {
   delayMs?: number
   /** Write the events and leave the response open, until the caller aborts. */
   hangOpen?: boolean
+  /** Observe whether the consumer releases a logically finished stream. */
+  onClose?: () => void
 }
 
 const servers: Server[] = []
@@ -94,6 +96,7 @@ export async function mockGateway(modelListing: {
         response.end('{"error":"script exhausted"}')
         return
       }
+      if (behavior.onClose) response.once('close', behavior.onClose)
       if (behavior.status !== undefined && behavior.status !== 200) {
         response.writeHead(behavior.status, { 'content-type': 'application/json', ...behavior.headers })
         response.end(behavior.body ?? '{}')

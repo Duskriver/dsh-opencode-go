@@ -6,6 +6,8 @@ import type { Api, Model, Provider } from './sdk-types.ts';
 import { type OpencodeGoConfig } from './config.ts';
 import { ProxyTransport } from './transport.ts';
 import { OpencodeGoCatalog } from './catalog.ts';
+import { FreeBunTransport } from './free-transport.ts';
+import { FreeChannelState } from './free-channel.ts';
 /**
  * Cap large models at 64k unless the caller or settings specify an allowance.
  * Per-model settings continue to cap explicit caller values.
@@ -28,6 +30,8 @@ export interface OpencodeGoImageAccess {
 }
 /** Host dependencies used by a single attempt, independent of account selection. */
 export interface OpencodeGoRequestExecutorOptions {
+    /** Free-only passive backoff; never consulted by the Go executor. */
+    freeChannel?: FreeChannelState;
     /** Resolve the credential reference captured with this call's endpoint; missing must fail loud. */
     resolveApiKey: (config: OpencodeGoConfig, signal?: AbortSignal) => Promise<string | undefined>;
     /**
@@ -50,9 +54,11 @@ export interface OpencodeGoRequestSnapshot {
 export declare class OpencodeGoRequestExecutor {
     private readonly options;
     private readonly transport;
-    constructor(options: OpencodeGoRequestExecutorOptions, transport: ProxyTransport);
+    private readonly freeTransport;
+    constructor(options: OpencodeGoRequestExecutorOptions, transport: ProxyTransport, freeTransport?: FreeBunTransport);
     /** One account, one SDK attempt; host recovery still owns failures after output. */
     stream(options: GenerateOptions, snapshot: OpencodeGoRequestSnapshot): AsyncIterable<StreamChunk>;
+    private attempt;
 }
 /** One request's serving account, with the identity captured before discovery. */
 export interface GoAccountSettlement {
@@ -106,6 +112,8 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private readonly resolveCatalog;
     private readonly transport;
     private readonly requestExecutor;
+    private readonly freeTransport;
+    private readonly freeChannel;
     /** Per-reference rejection deadlines, isolated by the gateway that rejected it. */
     private readonly rejectedKeys;
     /** Reference updates invalidate rejections from attempts using an older key. */

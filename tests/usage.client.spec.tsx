@@ -1,28 +1,22 @@
 // @vitest-environment jsdom
 import { describe, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import css from '../src/client/UsagePill.module.css'
-import pickerCss from '../src/client/ThemePicker.module.css'
-import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { GoUsage, AnalyticsQuery, AnalyticsReport } from '../src/contracts.ts'
-import { UsagePill } from '../src/client/UsagePill.tsx'
+import type { GoUsage, AnalyticsQuery } from '../src/contracts.ts'
+import { UsagePill, SidebarQuota } from '../src/client/UsagePill.tsx'
 import {
   en,
-  setGoTheme,
-  DEFAULT_GO_THEME,
-  GO_THEMES,
   GO_THEME_TOKENS,
-  getGoTheme,
-  subscribeGoTheme,
   themeStyle,
   useGoThemeTokens,
 } from '../src/client/presentation.ts'
 import { createConfigForm } from './support/client.tsx'
 import type { OpencodeGoSettings } from '../src/client/controller.ts'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { AnalyticsDialog } from '../src/client/AnalyticsDialog.tsx'
-import { ThemePicker } from '../src/client/Section.tsx'
+import { createAnalyticsReport } from './support/analytics.ts'
+import { historyEn } from '../src/client/dashboard-copy.ts'
 
 describe("conversation usage", () => {
   const usageSettings = (value: OpencodeGoSettings = {}) => {
@@ -33,7 +27,7 @@ describe("conversation usage", () => {
 
   let settings: ConfigForm<OpencodeGoSettings>
 
-  beforeEach(() => { vi.useFakeTimers(); settings = usageSettings().form; localStorage.clear(); setGoTheme('graphite') })
+  beforeEach(() => { vi.useFakeTimers(); settings = usageSettings().form; localStorage.clear() })
 
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
@@ -46,16 +40,6 @@ describe("conversation usage", () => {
   const updated = { ...usage, rolling: { ...usageWindow, percent: 25 }, weekly: { ...usageWindow, percent: 30 } }
 
   const transientMessage = 'usage request failed: network error (ECONNRESET)'
-
-  const analyticsReport = {
-    generatedAt: Date.UTC(2026, 9, 18), range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18) }, timeZone: 'UTC',
-    totals: { requests: 1, unsettledAttempts: 0, summaries: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0,
-      cacheWriteTokens: 0, estimatedMicroUsd: 100, pricedRequests: 1, unpricedRequests: 0, missingUsage: 0 },
-    byModel: [], byDay: [],
-    coverage: { listedSessions: 1, scannedSessions: 1, matchedSessions: 1, failedSessions: 0, eventsScanned: 2,
-      summaries: 0, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 3 },
-    pricing: { source: 'OpenCode /models', unpricedModels: [] },
-  }
 
   const directory = (provider = 'deepseek') => createSnapshotStore<ModelDirectoryState>({
     current: { provider, model: provider === 'dsh-opencode-go' ? 'deepseek-v4-pro' : 'deepseek-chat' }, routable: true,
@@ -74,6 +58,8 @@ describe("conversation usage", () => {
 
   const trigger = () => screen.getByRole<HTMLButtonElement>('button', { name: new RegExp(en.usageTitle) })
 
+  const sidebarQuota = () => screen.getByRole('group', { name: new RegExp(en.usageTitle) })
+
   const percentageLabel = (value: GoUsage) => `${en.usageRollingShort} ${value.rolling.percent}% · ${en.usageWeekShort} ${value.weekly.percent}%`
 
   const accountSuffix = (name: string) => ` · ${name}`
@@ -91,6 +77,265 @@ describe("conversation usage", () => {
   const tick = async (milliseconds = 60_000) => { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds) }) }
 
   const showDetails = () => { fireEvent.click(trigger()) }
+
+  it.each([undefined, 'badge', 'plain'] as const)('applies input quota style %s and changes it without restarting polling or closing details', async usagePillStyle => {
+    const host = usageSettings({ usageDisplay: 'always', usagePillStyle })
+    const read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<UsagePill settings={host.form} directory={directory()} readUsage={read} t={t} />) })
+    expect(trigger().classList.contains(css.plain)).toBe(usagePillStyle === 'plain')
+    showDetails()
+    const next = usagePillStyle === 'plain' ? 'badge' : 'plain'
+    await act(async () => { host.publish({ value: { usageDisplay: 'always', usagePillStyle: next } }) })
+    expect(trigger().classList.contains(css.plain)).toBe(next === 'plain')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(read).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { enabled: true, showSidebarQuota: undefined },
+    { enabled: true, showSidebarQuota: false },
+    { enabled: false, showSidebarQuota: true },
+  ])('keeps sidebar quota hidden and idle unless explicitly enabled: %j', async value => {
+    const host = usageSettings({ usageDisplay: 'always', ...value })
+    const read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={read} t={t} />) })
+    expect(screen.queryByRole('group', { name: new RegExp(en.usageTitle) })).toBeNull()
+    await tick()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('opens sidebar history independently of the viewed quota and the calling account', async () => {
+    const host = usageSettings({ usageDisplay: 'off', showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    const original = host.form.getSnapshot()
+    const selectAccount = vi.fn(async () => true)
+    const readAccountUsage = vi.fn(async (ref: string) => ({ ...usage, source: ref }))
+    const readAnalytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={vi.fn().mockResolvedValue(usage)}
+      readAccountUsage={readAccountUsage} readAnalytics={readAnalytics} selectAccount={selectAccount} t={t} getLocale={() => 'en'} />) })
+    await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
+    const quota = sidebarQuota()
+    expect(within(quota).getByText('Backup')).toBeTruthy()
+    fireEvent.click(quota)
+    expect(readAnalytics).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(within(quota).getByRole('button', { name: en.sidebarAnalytics })) })
+    const dialog = screen.getByRole('dialog', { name: en.analyticsTitle })
+    const account = within(dialog).getByRole<HTMLSelectElement>('combobox', { name: historyEn.account })
+    expect(account.value).toBe('ACCOUNT_A')
+    expect(readAnalytics).toHaveBeenCalledExactlyOnceWith({ accountRef: 'ACCOUNT_A', range: '30d' }, expect.any(AbortSignal))
+    expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_A')
+    await act(async () => { fireEvent.change(account, { target: { value: 'ACCOUNT_B' } }) })
+    expect(readAnalytics).toHaveBeenLastCalledWith({ accountRef: 'ACCOUNT_B', range: '30d' }, expect.any(AbortSignal))
+    expect(selectAccount).not.toHaveBeenCalled()
+    expect(host.form.getSnapshot()).toBe(original)
+    expect(host.set).not.toHaveBeenCalled()
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(host.unset).not.toHaveBeenCalled()
+  })
+
+  it('offers a keyboard-focusable native history button when the sidebar is collapsed', async () => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    const selectAccount = vi.fn(async () => true)
+    const readAnalytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
+    await act(async () => { render(<SidebarQuota wide={false} settings={host.form} readUsage={vi.fn().mockResolvedValue(usage)}
+      readAnalytics={readAnalytics} selectAccount={selectAccount} t={t} />) })
+    const history = screen.getByRole<HTMLButtonElement>('button', { name: en.sidebarAnalytics })
+    expect(history.tagName).toBe('BUTTON')
+    expect(history.type).toBe('button')
+    expect(history.tabIndex).toBe(0)
+    expect(history.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(history.getAttribute('aria-expanded')).toBe('false')
+    history.focus()
+    expect(document.activeElement).toBe(history)
+    await act(async () => {
+      fireEvent.keyDown(history, { key: 'Enter', code: 'Enter' })
+      // jsdom does not synthesize a native button's keyboard click default action.
+      fireEvent.click(history, { detail: 0 })
+      fireEvent.keyUp(history, { key: 'Enter', code: 'Enter' })
+    })
+    expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+    expect(history.getAttribute('aria-expanded')).toBe('true')
+    expect(readAnalytics).toHaveBeenCalledExactlyOnceWith({ accountRef: 'ACCOUNT_A', range: '30d' }, expect.any(AbortSignal))
+    expect(selectAccount).not.toHaveBeenCalled()
+  })
+
+  it('keeps sidebar quota bars passive and leaves the collapsed icon passive when no history reader is available', async () => {
+    const host = usageSettings({ usageDisplay: 'off', showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
+    const refreshed = { ...updated, monthly: { ...usageWindow, percent: 45 } }
+    const read = vi.fn().mockResolvedValueOnce(usage).mockResolvedValue(refreshed)
+    const props = { settings: host.form, readUsage: read, t }
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(<SidebarQuota {...props} wide />) })
+    expect(sidebarQuota().classList.contains(css.sidebarCard)).toBe(true)
+    expect(within(sidebarQuota()).getByText('OpenCode Go')).toBeTruthy()
+    expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(within(sidebarQuota()).getAllByRole('progressbar')).toHaveLength(3)
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_rolling }).getAttribute('value')).toBe('0')
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_weekly }).getAttribute('value')).toBe('10')
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).getAttribute('value')).toBe('7')
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).classList.contains(css.progressMonthly)).toBe(true)
+    expect(sidebarQuota().getAttribute('aria-label')).toContain(`${en.usage_monthly} 7%`)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(sidebarQuota().tabIndex).toBe(-1)
+    expect(sidebarQuota().hasAttribute('aria-haspopup')).toBe(false)
+    expect(sidebarQuota().hasAttribute('aria-expanded')).toBe(false)
+    fireEvent.click(sidebarQuota())
+    fireEvent.keyDown(sidebarQuota(), { key: 'Enter' })
+    fireEvent.keyDown(sidebarQuota(), { key: ' ' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await tick()
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(sidebarQuota().getAttribute('aria-label')).toContain(percentageLabel(updated))
+    expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).getAttribute('value')).toBe('45')
+    expect(sidebarQuota().getAttribute('aria-label')).toContain(`${en.usage_monthly} 45%`)
+    await act(async () => { view.rerender(<SidebarQuota {...props} wide={false} />) })
+    expect(sidebarQuota().classList.contains(css.sidebarIcon)).toBe(true)
+    expect(sidebarQuota().querySelector('svg')).toBeTruthy()
+    expect(sidebarQuota().textContent).toBe('')
+    expect(sidebarQuota().getAttribute('title')).toContain(`${en.usage_monthly} 45%`)
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(sidebarQuota().tabIndex).toBe(-1)
+    fireEvent.click(sidebarQuota())
+    fireEvent.keyDown(sidebarQuota(), { key: 'Enter' })
+    fireEvent.keyDown(sidebarQuota(), { key: ' ' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('follows account selections made elsewhere and refreshes its account badge', async () => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    const read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={read} t={t} />) })
+    expect(within(sidebarQuota()).getByText('Primary')).toBeTruthy()
+    await act(async () => { host.publish({ value: { ...host.form.getSnapshot().value, apiKeyEnv: 'ACCOUNT_B' } }) })
+    expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('cycles viewed accounts without changing requests or settings and remembers the view after remounting', async () => {
+    const host = usageSettings({ usageDisplay: 'always', showSidebarQuota: true, accounts: threeAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    const original = host.form.getSnapshot()
+    const read = vi.fn().mockResolvedValue(usage)
+    const selectAccount = vi.fn(async () => true)
+    const readAccountUsage = vi.fn(async (ref: string) => ({ ...usage, source: ref,
+      monthly: { ...usageWindow, percent: ref === 'ACCOUNT_B' ? 35 : ref === 'ACCOUNT_C' ? 55 : 7 },
+    }))
+    const props = { settings: host.form, readUsage: read, readAccountUsage, selectAccount, t }
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(<>
+      <SidebarQuota {...props} wide />
+      <UsagePill {...props} directory={directory()} />
+    </>) })
+    expect(original.writable).toBe(false)
+    expect(readAccountUsage).toHaveBeenCalledExactlyOnceWith('ACCOUNT_A')
+    fireEvent.click(sidebarQuota())
+    expect(readAccountUsage).toHaveBeenCalledOnce()
+    for (const [name, ref, percent] of [
+      ['Backup', 'ACCOUNT_B', '35'], ['Travel', 'ACCOUNT_C', '55'],
+      ['Primary', 'ACCOUNT_A', '7'], ['Backup', 'ACCOUNT_B', '35'],
+    ] as const) {
+      await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
+      expect(within(sidebarQuota()).getByRole('button', { name: `${en.sidebarNextAccount}: ${name}` })).toBeTruthy()
+      expect(readAccountUsage).toHaveBeenLastCalledWith(ref)
+      expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).getAttribute('value')).toBe(percent)
+      expect(trigger().textContent).toContain(percentageLabel(usage) + accountSuffix('Primary'))
+      expect(screen.queryByRole('dialog')).toBeNull()
+    }
+    expect(read).toHaveBeenCalledOnce()
+    expect(selectAccount).not.toHaveBeenCalled()
+    expect(host.form.getSnapshot()).toBe(original)
+    expect(host.set).not.toHaveBeenCalled()
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(host.unset).not.toHaveBeenCalled()
+    view.unmount()
+    await act(async () => { render(<SidebarQuota {...props} wide />) })
+    expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_B')
+    await tick()
+    expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_B')
+    expect(readAccountUsage).toHaveBeenCalledTimes(7)
+  })
+
+  it.each(['success', 'failure'] as const)('keeps the viewed account on failure and ignores a previous account’s late %s', async outcome => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: threeAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    let resolveOld!: (value: GoUsage) => void
+    let rejectOld!: (reason: Error) => void
+    const old = new Promise<GoUsage>((resolve, reject) => { resolveOld = resolve; rejectOld = reject })
+    const readPrimary = vi.fn().mockResolvedValueOnce(usage).mockResolvedValueOnce(usage)
+      .mockRejectedValueOnce(usageError()).mockResolvedValue(usage)
+    const readAccountUsage = vi.fn((ref: string) => ref === 'ACCOUNT_A' ? readPrimary()
+      : ref === 'ACCOUNT_B' ? old : Promise.reject(usageError({ source: 'account-c' })))
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} t={t} />) })
+    const next = () => fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) }))
+    await act(async () => { next() })
+    expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(within(sidebarQuota()).getAllByText('…')).toHaveLength(3)
+    await act(async () => { next() })
+    expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
+    expect(within(sidebarQuota()).getAllByText('—')).toHaveLength(3)
+    expect(within(sidebarQuota()).getByRole('status').textContent).toBe(en.usageUnavailable)
+    await act(async () => { outcome === 'success' ? resolveOld(updated) : rejectOld(usageError()) })
+    expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
+    expect(within(sidebarQuota()).getAllByText('—')).toHaveLength(3)
+    await act(async () => { next() })
+    expect(within(sidebarQuota()).getByText('Primary')).toBeTruthy()
+    expect(within(sidebarQuota()).queryByRole('status')).toBeNull()
+    await tick()
+    expect(within(sidebarQuota()).getAllByText('—')).toHaveLength(3)
+    expect(within(sidebarQuota()).getByRole('status').textContent).toBe(en.usageUnavailable)
+    await tick()
+    expect(within(sidebarQuota()).getByText('7%')).toBeTruthy()
+    expect(within(sidebarQuota()).queryByRole('status')).toBeNull()
+  })
+
+  it('falls back to the first remaining account when the viewed account is removed and leaves a single account non-interactive', async () => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: threeAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    const readAccountUsage = vi.fn(async () => usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} t={t} />) })
+    await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
+    expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    await act(async () => { host.publish({ value: { ...host.form.getSnapshot().value, accounts: [threeAccounts[0]!, threeAccounts[2]!] } }) })
+    expect(within(sidebarQuota()).getByText('Primary')).toBeTruthy()
+    expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_A')
+    await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
+    expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
+    await act(async () => { host.publish({ value: { ...host.form.getSnapshot().value, accounts: [threeAccounts[2]!], apiKeyEnv: 'ACCOUNT_C' } }) })
+    expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
+    expect(within(sidebarQuota()).queryByRole('button')).toBeNull()
+    const calls = readAccountUsage.mock.calls.length
+    fireEvent.click(sidebarQuota())
+    expect(readAccountUsage).toHaveBeenCalledTimes(calls)
+  })
+
+  it('keeps account viewing available when browser preference storage is blocked', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+    const host = usageSettings({ showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    const readAccountUsage = vi.fn(async () => usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} t={t} />) })
+    await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
+    expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_B')
+  })
+
+  it('stops sidebar polling on disable and restarts it after live settings and credential changes', async () => {
+    const host = usageSettings({ usageDisplay: 'off', showSidebarQuota: true, accounts: [] })
+    const changes = createSnapshotStore(0), read = vi.fn().mockResolvedValue(usage)
+    await act(async () => { render(<SidebarQuota wide settings={host.form} credentialChanges={changes} readUsage={read} t={t} />) })
+    expect(within(sidebarQuota()).getByText('Go')).toBeTruthy()
+    expect(read).toHaveBeenCalledOnce()
+    await act(async () => { changes.set(1) })
+    expect(read).toHaveBeenCalledTimes(2)
+    await act(async () => { host.publish({ value: { showSidebarQuota: false } }) })
+    expect(screen.queryByRole('group', { name: new RegExp(en.usageTitle) })).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await tick()
+    expect(read).toHaveBeenCalledTimes(2)
+    await act(async () => { host.publish({ value: { showSidebarQuota: true, enabled: false } }) })
+    expect(screen.queryByRole('group', { name: new RegExp(en.usageTitle) })).toBeNull()
+    await act(async () => { host.publish({ value: { showSidebarQuota: true, enabled: true } }) })
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(within(sidebarQuota()).getAllByRole('progressbar')).toHaveLength(3)
+  })
 
   it.each(['deepseek', 'opencode-go', 'dsh-opencode-go'])('keeps usage visible in always mode while using %s', async provider => {
     const host = usageSettings({ usageDisplay: 'always' })
@@ -540,7 +785,7 @@ describe("conversation usage", () => {
 
   it('opens the shared analytics dialog from the expanded panel', async () => {
     const host = usageSettings({ usageDisplay: 'always' })
-    const analytics = vi.fn().mockResolvedValue(analyticsReport)
+    const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
     await act(async () => {
       render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
         readAnalytics={analytics} t={t} />)
@@ -554,7 +799,7 @@ describe("conversation usage", () => {
   it('keeps the analytics dialog open when a credential revision bump remounts the pill', async () => {
     const host = usageSettings({ usageDisplay: 'always' })
     const credentials = createSnapshotStore<number>(0)
-    const analytics = vi.fn().mockResolvedValue(analyticsReport)
+    const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
     await act(async () => {
       render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
         readAnalytics={analytics} t={t} credentialChanges={credentials} />)
@@ -563,11 +808,11 @@ describe("conversation usage", () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
     expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
     expect(analytics).toHaveBeenCalledTimes(1)
-    // A credential change is part of the pill's remount key; the dashboard lives above
-    // that key, so it must stay open with its already-fetched report (no second read).
+    // Keep the modal open, but replace its content identity so the new key cannot
+    // continue showing the previous credential's workspace report.
     await act(async () => { credentials.set(1) })
     expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
-    expect(analytics).toHaveBeenCalledTimes(1)
+    expect(analytics).toHaveBeenCalledTimes(2)
   })
 
   it('names the active account in full no matter how many accounts follow it', async () => {
@@ -597,485 +842,70 @@ describe("conversation usage", () => {
     expect(trigger().textContent).not.toContain('9+')
   })
 
-  it('keeps the styling choice out of the popover', async () => {
+  it('uses the unified Host-following palette in the pill and its popover', async () => {
+    document.body.removeAttribute('data-ds-dark-theme')
     const host = usageSettings({ usageDisplay: 'always' })
     await act(async () => {
       render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')}
         readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
     })
     const root = trigger().parentElement as HTMLElement
-    expect(['#111214', '#f6f7f9']).toContain(root.style.getPropertyValue('--go-bg'))
+    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.light.bg)
     showDetails()
-    // The stored style still paints the pill; only the Settings page may change it.
-    await act(async () => { setGoTheme('silent-black') })
-    expect(['#101010', '#f8f8f8']).toContain(root.style.getPropertyValue('--go-bg'))
-    expect(within(openPanel()).queryByRole('group', { name: en.themeLabel })).toBeNull()
-    expect(within(openPanel()).queryByRole('button', { name: en.themeSilentBlack })).toBeNull()
-  })
-})
-
-describe("analytics dashboard", () => {
-  afterEach(() => { cleanup(); vi.restoreAllMocks() })
-
-  beforeEach(() => { localStorage.clear() })
-
-  const t = (key: keyof typeof en) => en[key]
-
-  const rect = (left: number, top: number): DOMRect => ({
-    left, top, right: left + 20, bottom: top + 20, width: 20, height: 20, x: left, y: top, toJSON: () => ({}),
-  }) as DOMRect
-
-  const report = (overrides: Partial<AnalyticsReport> = {}): AnalyticsReport => ({
-    generatedAt: Date.UTC(2026, 9, 18, 1, 0),
-    range: { from: Date.UTC(2026, 8, 18), to: Date.UTC(2026, 9, 18, 1, 0) },
-    timeZone: 'Asia/Shanghai',
-    totals: {
-      requests: 12, unsettledAttempts: 1, summaries: 2,
-      inputTokens: 1000, outputTokens: 2000, cacheReadTokens: 3000, cacheWriteTokens: 0,
-      estimatedMicroUsd: 1_234_000, pricedRequests: 10, unpricedRequests: 2, missingUsage: 0,
-    },
-    byModel: [{
-      model: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', requests: 12, missingUsage: 0,
-      inputTokens: 1000, outputTokens: 2000, cacheReadTokens: 3000, cacheWriteTokens: 0,
-      estimatedMicroUsd: 1_234_000, pricedRequests: 10, unpricedRequests: 2,
-      limitGoUsd: 100, limitGoPlusUsd: 200,
-    }],
-    byDay: [{ day: '2026-10-18', requests: 12, tokens: 6000, estimatedMicroUsd: 1_234_000 }],
-    coverage: {
-      listedSessions: 20, scannedSessions: 20, matchedSessions: 3, failedSessions: 0,
-      eventsScanned: 100, summaries: 2, legacyRequests: 0, missingUsage: 0, truncated: false, scanMs: 1500,
-    },
-    pricing: { source: 'OpenCode /models', updatedAt: Date.UTC(2026, 9, 18), unpricedModels: [] },
-    ...overrides,
-  })
-
-  it('renders totals, model limits and the estimate disclaimer', async () => {
-    const read = vi.fn().mockResolvedValue(report())
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    // The simplified table no longer carries the invocation id or the plan limits.
-    expect(screen.queryByText('deepseek-v4.1-flash')).toBeNull()
-    expect(screen.queryByText(/Go \$100/)).toBeNull()
-    expect(screen.getAllByText(/\$1\.23/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Prices: OpenCode \/models/)).toBeTruthy()
-    // Review U5: the disclaimer must name the current-price estimate semantics.
-    expect(screen.getByText(new RegExp(en.analyticsNotInvoice))).toBeTruthy()
-    expect(en.analyticsNotInvoice).toContain('current OpenCode /models prices')
-  })
-
-  it('asks for a shorter range and can scan more history', async () => {
-    const read = vi.fn().mockResolvedValue(report())
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
-    await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
-    const sevenDays = read.mock.calls[1][0]
-    expect(sevenDays.maxSessions).toBe(500)
-    expect(sevenDays.to - sevenDays.from).toBeGreaterThanOrEqual(6 * 86_400_000)
-    cleanup()
-
-    const truncated = vi.fn().mockResolvedValue(report({
-      coverage: { ...report().coverage, truncated: true, truncation: 'sessions' },
-    }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={truncated} t={t} getLocale={() => 'en'} />)
-    await screen.findByText(en.analyticsTruncated)
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsScanMore }))
-    await waitFor(() => expect(truncated.mock.calls.at(-1)?.[0].maxSessions).toBe(1000))
-  })
-
-  it('persists the scan-more choice and clamps the stored value', async () => {
-    const truncated = vi.fn().mockResolvedValue(report({
-      coverage: { ...report().coverage, truncated: true, truncation: 'sessions' },
-    }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={truncated} t={t} getLocale={() => 'en'} />)
-    await screen.findByText(en.analyticsTruncated)
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsScanMore }))
-    await waitFor(() => expect(truncated.mock.calls.at(-1)?.[0].maxSessions).toBe(1000))
-    expect(localStorage.getItem('opencode-go:analytics:maxSessions')).toBe('1000')
-    cleanup()
-
-    // Reopening keeps the previous choice (review P16/S9).
-    const restored = vi.fn().mockResolvedValue(report())
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={restored} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    expect(restored.mock.calls[0][0].maxSessions).toBe(1000)
-    cleanup()
-
-    // Stored junk clamps into the 1..2000 contract window.
-    localStorage.setItem('opencode-go:analytics:maxSessions', '9999')
-    const clampedHigh = vi.fn().mockResolvedValue(report())
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={clampedHigh} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    expect(clampedHigh.mock.calls[0][0].maxSessions).toBe(2000)
-    cleanup()
-
-    localStorage.setItem('opencode-go:analytics:maxSessions', 'not-a-number')
-    const clampedJunk = vi.fn().mockResolvedValue(report())
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={clampedJunk} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    expect(clampedJunk.mock.calls[0][0].maxSessions).toBe(500)
-  })
-
-  it('freezes the window end for one open and moves it on refresh', async () => {
-    let clock = 1_700_000_000_000
-    vi.spyOn(Date, 'now').mockImplementation(() => clock)
-    const read = vi.fn().mockResolvedValue(report())
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
-    await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
-    expect(read.mock.calls[1][0].to).toBe(read.mock.calls[0][0].to)
-    expect(read.mock.calls[1][0].from).not.toBe(read.mock.calls[0][0].from)
-
-    clock = 1_700_000_090_000
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRefresh }))
-    await waitFor(() => expect(read).toHaveBeenCalledTimes(3))
-    expect(read.mock.calls[2][0].to).toBe(clock)
-  })
-
-  it('renders a seen range instantly and revalidates in the background', async () => {
-    const read = vi.fn()
-      .mockResolvedValueOnce(report())
-      .mockResolvedValueOnce(report({ totals: { ...report().totals, requests: 700 } }))
-      .mockResolvedValueOnce(report({ totals: { ...report().totals, requests: 990 } }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    expect(screen.getAllByText('12').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
-    await screen.findByText('700')
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRange30d }))
-    // The cached 30d report renders without waiting for the network.
-    expect(screen.getAllByText('12').length).toBeGreaterThan(0)
-    expect(screen.getByText(en.analyticsStaleResults)).toBeTruthy()
-    await screen.findByText('990')
-    expect(screen.queryByText(en.analyticsStaleResults)).toBeNull()
-  })
-
-  it('labels the previous scan and the selected range while a switch is loading', async () => {
-    const clock = Date.UTC(2026, 9, 18, 12, 0)
-    vi.spyOn(Date, 'now').mockReturnValue(clock)
-    let resolveSecond: (value: AnalyticsReport) => void = () => {}
-    const read = vi.fn()
-      .mockResolvedValueOnce(report())
-      .mockReturnValueOnce(new Promise<AnalyticsReport>(resolve => { resolveSecond = resolve }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
-    expect(screen.getByRole('button', { name: en.analyticsRange7d }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByText(en.analyticsStaleResults)).toBeTruthy()
-    // The note is computed from the selected 7-day window, not the old report.
-    const dayStart = new Date(clock)
-    dayStart.setHours(0, 0, 0, 0)
-    dayStart.setDate(dayStart.getDate() - 6)
-    const expected = dayStart.toLocaleDateString('en') + ' – ' + new Date(clock - 1).toLocaleDateString('en')
-    expect(screen.getByText(expected)).toBeTruthy()
-    expect(screen.queryByText('9/18/2026 – 10/18/2026')).toBeNull()
-    resolveSecond(report({ totals: { ...report().totals, requests: 55 } }))
-    await screen.findByText('55')
-    expect(screen.queryByText(en.analyticsStaleResults)).toBeNull()
-  })
-
-  it('aborts the in-flight request when the dialog goes away', async () => {
-    const signals: (AbortSignal | undefined)[] = []
-    const read = vi.fn().mockImplementation((_query: AnalyticsQuery, signal?: AbortSignal) => {
-      signals.push(signal)
-      return new Promise<AnalyticsReport>(() => {})
-    })
-    const { unmount } = render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await waitFor(() => expect(signals).toHaveLength(1))
-    unmount()
-    expect(signals[0]?.aborted).toBe(true)
-  })
-
-  it('does not render an abort rejection as an error banner', async () => {
-    const read = vi.fn().mockImplementation((_query: AnalyticsQuery, signal?: AbortSignal) =>
-      new Promise<AnalyticsReport>((_resolve, reject) => {
-        signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { code: 'gateway/cancelled' })))
-      }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await waitFor(() => expect(read).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsRange7d }))
-    await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
-    expect(screen.queryByText(en.analyticsFailed)).toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
-
-  it('shows the coverage observability lines the Host reports', async () => {
-    const read = vi.fn().mockResolvedValue(report({
-      coverage: {
-        ...report().coverage,
-        truncated: true, truncation: 'sessions', unreadSessions: 4,
-        unattributedRequests: 2, listMs: 120, scanMs: 900, pricingMs: 40,
-      },
-    }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={read} t={t} getLocale={() => 'en'} />)
-    await screen.findByText(en.analyticsTruncated)
-    expect(screen.getByText(en.analyticsUnattributed + ' 2')).toBeTruthy()
-    expect(screen.getByText(en.analyticsUnread + ' 4')).toBeTruthy()
-    expect(screen.getByText(en.analyticsScanSegments + ' 120 / 900 / 40 ms')).toBeTruthy()
-  })
-
-  it('explains an unsupported host and an empty range', async () => {
-    const unsupported = vi.fn().mockRejectedValue(Object.assign(new Error('no history'), {
-      code: 'opencode-go/analytics-unavailable',
-      details: { reason: 'no-session-query', retryable: false },
-    }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={unsupported} t={t} getLocale={() => 'en'} />)
-    await screen.findByText(en.analyticsUnsupported)
-    cleanup()
-
-    const empty = vi.fn().mockResolvedValue(report({
-      totals: { ...report().totals, requests: 0, pricedRequests: 0, unpricedRequests: 0 },
-      byModel: [], byDay: [],
-    }))
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={empty} t={t} getLocale={() => 'en'} />)
-    await screen.findByText(en.analyticsEmpty)
-  })
-
-  it('shows quota cards and switches the daily metric', async () => {
-    const quota: GoUsage = {
-      rolling: { status: 'ok', percent: 0, resetsAt: '2026-10-18T09:35:00Z' },
-      weekly: { status: 'ok', percent: 33, resetsAt: '2026-10-19T00:00:00Z' },
-      monthly: { status: 'ok', percent: 85, resetsAt: '2026-11-10T08:32:00Z' },
-    }
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())}
-      readQuota={async () => quota} t={t} getLocale={() => 'en'} />)
-    await screen.findByText('33%')
-    // The quota row keeps the number, bar and reset time, but no state label or remainder.
-    expect(screen.queryByText('Plenty left')).toBeNull()
-    expect(screen.queryByText('67% left')).toBeNull()
-    expect(screen.getByRole('progressbar', { name: en.usage_weekly }).getAttribute('aria-valuenow')).toBe('33')
-    const cost = screen.getByRole('button', { name: en.analyticsChartSpend })
-    const tokens = screen.getByRole('button', { name: en.analyticsChartTokens })
-    expect(cost.getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(tokens)
-    expect(tokens.getAttribute('aria-pressed')).toBe('true')
-    expect(cost.getAttribute('aria-pressed')).toBe('false')
-  })
-
-  it('closes through the modal close button', async () => {
-    const close = vi.fn()
-    render(<AnalyticsDialog open onClose={close} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    fireEvent.click(screen.getByRole('button', { name: en.analyticsClose }))
-    expect(close).toHaveBeenCalled()
-  })
-
-  it('shows a day summary tooltip from the calendar and the trend', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-
-    const cell = document.querySelector('span[data-day="2026-10-18"]') as HTMLElement
-    expect(cell).toBeTruthy()
-    vi.spyOn(cell, 'getBoundingClientRect').mockReturnValue(rect(100, 50))
-    fireEvent.mouseMove(cell, { clientX: 110, clientY: 60 })
-    const tip = await screen.findByRole('tooltip')
-    expect(tip.textContent).toContain('$1.23')
-    expect(tip.textContent).toContain('12')
-    expect(tip.textContent).toContain('6K')
-
-    fireEvent.mouseLeave(document.querySelector('[class*="_daysWrap_"]') as HTMLElement)
-    expect(screen.queryByRole('tooltip')).toBeNull()
-
-    const hit = document.querySelector('rect[data-day="2026-10-18"]') as Element
-    expect(hit).toBeTruthy()
-    fireEvent.mouseMove(hit)
-    expect((await screen.findByRole('tooltip')).textContent).toContain('6K')
-  })
-
-  it('clears the day tooltip once the pointer leaves the nearest cell', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    // The fixture spans 2026-09-18 → 2026-10-18, so the dense grid has 31 cells.
-    const cells = Array.from(document.querySelectorAll('span[data-day]')) as HTMLElement[]
-    expect(cells).toHaveLength(31)
-    const target = document.querySelector('span[data-day="2026-10-18"]') as HTMLElement
-    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(rect(100, 50))
-
-    const heat = document.querySelector('[class*="_heat_"]') as HTMLElement
-    fireEvent.mouseMove(heat, { clientX: 110, clientY: 60 })
-    expect((await screen.findByRole('tooltip')).textContent).toContain('$1.23')
-
-    // 3px outside the cell still counts as "near".
-    fireEvent.mouseMove(heat, { clientX: 123, clientY: 60 })
-    expect(screen.getByRole('tooltip')).toBeTruthy()
-
-    // Empty pad far from every cell clears it.
-    fireEvent.mouseMove(heat, { clientX: 300, clientY: 60 })
-    expect(screen.queryByRole('tooltip')).toBeNull()
-  })
-
-  it('lays sparse activity onto the real calendar dates', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report({
-      byDay: [
-        { day: '2026-10-01', requests: 2, tokens: 2000, estimatedMicroUsd: 2_000_000 },
-        { day: '2026-10-18', requests: 3, tokens: 3000, estimatedMicroUsd: 3_000_000 },
-      ],
-    }))} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-
-    const heat = document.querySelector('[class*="_heat_"]') as HTMLElement
-    const pads = Array.from(heat.querySelectorAll('[class*="_heatPad_"]'))
-    const cells = Array.from(heat.querySelectorAll('span[data-day]')) as HTMLElement[]
-    // 2026-09-18 is a Friday, so a Monday-first grid needs four leading pads.
-    expect(pads).toHaveLength(4)
-    expect(cells).toHaveLength(31)
-    const indexOf = (day: string): number => cells.findIndex(cell => cell.dataset.day === day)
-    expect(indexOf('2026-10-01')).toBe(13)
-    expect(indexOf('2026-10-18')).toBe(30)
-    expect((pads.length + indexOf('2026-10-01')) % 7).toBe(3) // Thursday
-    expect((pads.length + indexOf('2026-10-18')) % 7).toBe(6) // Sunday
-
-    // A quiet day between them is still a real, hoverable cell.
-    const zeroIndex = indexOf('2026-10-10')
-    expect(zeroIndex).toBeGreaterThanOrEqual(0)
-    const zero = cells[zeroIndex]
-    vi.spyOn(zero, 'getBoundingClientRect').mockReturnValue(rect(100, 50))
-    fireEvent.mouseMove(zero, { clientX: 110, clientY: 60 })
-    const tip = await screen.findByRole('tooltip')
-    expect(tip.textContent).toContain('$0.00')
-    expect(tip.textContent).toContain('0')
-    expect(tip.textContent).toContain('10/10')
-  })
-
-  it('reports cache hit share over input and cache tokens only', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report())} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    expect(document.body.textContent).toContain('75.0%')
-    expect(document.body.textContent).toContain(en.analyticsCacheHit)
-    expect(document.body.textContent).not.toContain('50.0%')
-  })
-
-  it('prints a dash instead of a zero estimate when nothing is priced', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report({
-      totals: { ...report().totals, estimatedMicroUsd: 0, pricedRequests: 0, unpricedRequests: 2 },
-      byModel: [], byDay: [],
-    }))} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText(/In the selected range/)
-    const lead = document.querySelector('[class*="_lead_"]') as HTMLElement
-    expect(lead.textContent).toContain('—')
-    expect(document.body.textContent).not.toContain('$0.00')
-  })
-
-  it('separates unpriced models from models without usage', async () => {
-    const base = report()
-    const pricedRow = { ...base.byModel[0], model: 'priced-model', name: 'Priced Model', requests: 4, missingUsage: 0, estimatedMicroUsd: 1_000_000, pricedRequests: 4, unpricedRequests: 0 }
-    const missingRow = { ...base.byModel[0], model: 'missing-model', name: 'Missing Model', requests: 5, missingUsage: 5, estimatedMicroUsd: 0, pricedRequests: 0, unpricedRequests: 0 }
-    const unpricedRow = { ...base.byModel[0], model: 'unpriced-model', name: 'Unpriced Model', requests: 3, missingUsage: 0, estimatedMicroUsd: 0, pricedRequests: 0, unpricedRequests: 3 }
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report({
-      totals: { ...base.totals, requests: 12, estimatedMicroUsd: 1_000_000, pricedRequests: 4, unpricedRequests: 3, missingUsage: 5 },
-      byModel: [pricedRow, missingRow, unpricedRow],
-    }))} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('Priced Model')
-
-    const rowOf = (name: string): HTMLTableRowElement => screen.getByText(name, { selector: 'b' }).closest('tr') as HTMLTableRowElement
-    const costOf = (name: string): string => rowOf(name).querySelectorAll('td')[5].textContent ?? ''
-    const shareOf = (name: string): string => rowOf(name).querySelectorAll('td')[6].textContent ?? ''
-
-    expect(costOf('Missing Model')).toBe('—')
-    expect(shareOf('Missing Model')).toBe('—')
-    expect(rowOf('Missing Model').textContent).not.toContain(en.analyticsUnpriced)
-
-    expect(costOf('Unpriced Model')).toBe(en.analyticsUnpriced)
-    expect(shareOf('Unpriced Model')).toBe('—')
-
-    expect(costOf('Priced Model')).toContain('$1.00')
-    expect(shareOf('Priced Model')).toContain('100.0%')
-
-    const note = screen.getByText(new RegExp(en.analyticsCompositionFree))
-    expect(note.textContent).toContain('Unpriced Model')
-    expect(note.textContent).not.toContain('Missing Model')
-  })
-
-  it('averages the daily footer over the selected calendar days', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report({
-      totals: { ...report().totals, requests: 31, estimatedMicroUsd: 310_000_000 },
-      byDay: [
-        { day: '2026-09-18', requests: 1, tokens: 1000, estimatedMicroUsd: 200_000_000 },
-        { day: '2026-10-18', requests: 1, tokens: 1000, estimatedMicroUsd: 110_000_000 },
-      ],
-    }))} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    const foot = document.querySelector('[class*="_trendFoot_"]') as HTMLElement
-    expect(foot.textContent).toContain('$310.00')
-    expect(foot.textContent).toContain('$10.00')
-  })
-
-  it('handles a single-day range and an unknown timezone', async () => {
-    render(<AnalyticsDialog open onClose={() => {}} readAnalytics={vi.fn().mockResolvedValue(report({
-      range: { from: Date.UTC(2026, 9, 18), to: Date.UTC(2026, 9, 18, 1) },
-      timeZone: 'Not/AZone',
-      byDay: [{ day: '2026-10-18', requests: 12, tokens: 6000, estimatedMicroUsd: 1_234_000 }],
-    }))} t={t} getLocale={() => 'en'} />)
-    await screen.findAllByText('DeepSeek V4.1 Flash')
-    const heat = document.querySelector('[class*="_heat_"]') as HTMLElement
-    const cells = Array.from(heat.querySelectorAll('span[data-day]')) as HTMLElement[]
-    expect(cells).toHaveLength(1)
-    expect(cells[0].dataset.day).toBe('2026-10-18')
-    // 2026-10-18 is a Sunday, so the one cell starts six pads in.
-    expect(heat.querySelectorAll('[class*="_heatPad_"]')).toHaveLength(6)
-    expect(document.querySelectorAll('rect[data-day]')).toHaveLength(1)
-  })
-})
-
-describe("local visual preferences", () => {
-  beforeEach(() => { localStorage.clear(); setGoTheme(DEFAULT_GO_THEME) })
-
-  afterEach(() => { cleanup(); localStorage.clear(); document.body.removeAttribute('data-ds-dark-theme') })
-
-  it('defaults to graphite and persists a selection', () => {
-    expect(GO_THEMES).toHaveLength(4)
-    expect(getGoTheme()).toBe(DEFAULT_GO_THEME)
-    const listener = vi.fn()
-    const off = subscribeGoTheme(listener)
-    setGoTheme('silent-black')
-    expect(getGoTheme()).toBe('silent-black')
-    expect(localStorage.getItem('dsh-opencode-go.theme')).toBe('silent-black')
-    expect(listener).toHaveBeenCalledTimes(1)
-    off()
-    setGoTheme('graphite')
-    expect(listener).toHaveBeenCalledTimes(1)
-  })
-
-  it('carries every token into the inline style', () => {
-    const style = themeStyle(GO_THEME_TOKENS.graphite.dark) as Record<string, string>
-    expect(style['--go-accent']).toBe('#6e8bff')
-    expect(style['--go-bg']).toBe('#111214')
-    for (const key of ['--go-surface', '--go-surface-2', '--go-border', '--go-text', '--go-muted',
-      '--go-accent-2', '--go-success', '--go-warning', '--go-danger']) {
-      expect(style[key]).toBeTruthy()
-    }
-  })
-
-  it('renders four style previews, each in its own palette, and switches on click', () => {
-    const { container } = render(<ThemePicker t={key => en[key]} />)
-    expect(screen.getAllByRole('button')).toHaveLength(4)
-    expect(screen.getByRole('button', { name: en.themeGraphite }).getAttribute('aria-pressed')).toBe('true')
-    // Every tile paints its own accent, so no two previews look alike.
-    const accents = GO_THEMES.map(id =>
-      (container.querySelector('[data-theme="' + id + '"] .' + pickerCss.swatchDot) as HTMLElement).style.background)
-    expect(accents.every(Boolean)).toBe(true)
-    expect(new Set(accents).size).toBe(GO_THEMES.length)
-    fireEvent.click(screen.getByRole('button', { name: en.themeSilentBlack }))
-    expect(getGoTheme()).toBe('silent-black')
-    expect(screen.getByRole('button', { name: en.themeSilentBlack }).getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByRole('button', { name: en.themeGraphite }).getAttribute('aria-pressed')).toBe('false')
-  })
-
-  function Probe() {
-    const tokens = useGoThemeTokens()
-    return <span data-testid="probe" data-bg={tokens.bg} />
-  }
-
-  it('follows the host light/dark attribute', async () => {
-    document.body.removeAttribute('data-ds-dark-theme')
-    render(<Probe />)
-    expect(screen.getByTestId('probe').getAttribute('data-bg')).toBe(GO_THEME_TOKENS.graphite.light.bg)
+    expect(within(openPanel()).queryByRole('group', { name: /^(Theme|主题)$/ })).toBeNull()
+    expect(openPanel().querySelector('[data-theme]')).toBeNull()
     await act(async () => {
       document.body.setAttribute('data-ds-dark-theme', '')
       await Promise.resolve()
     })
-    expect(screen.getByTestId('probe').getAttribute('data-bg')).toBe(GO_THEME_TOKENS.graphite.dark.bg)
+    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.dark.bg)
+    expect(openPanel()).toBeTruthy()
+    document.body.removeAttribute('data-ds-dark-theme')
+  })
+})
+
+describe('Host-following presentation', () => {
+  beforeEach(() => { localStorage.clear(); document.body.removeAttribute('data-ds-dark-theme') })
+
+  afterEach(() => { cleanup(); localStorage.clear(); document.body.removeAttribute('data-ds-dark-theme') })
+
+  it('exposes a single palette in two Host schemes and carries every token into the style', () => {
+    expect(Object.keys(GO_THEME_TOKENS).sort()).toEqual(['dark', 'light'])
+    const style = themeStyle(GO_THEME_TOKENS.dark) as Record<string, string>
+    const properties = {
+      bg: '--go-bg', surface: '--go-surface', surface2: '--go-surface-2', border: '--go-border',
+      text: '--go-text', muted: '--go-muted', accent: '--go-accent', accent2: '--go-accent-2',
+      success: '--go-success', warning: '--go-warning', danger: '--go-danger',
+    } as const
+    for (const [key, property] of Object.entries(properties)) {
+      expect(style[property]).toBe(GO_THEME_TOKENS.dark[key as keyof typeof properties])
+    }
+    expect(style['--go-number-font']).toContain('monospace')
+  })
+
+  function Probe() {
+    const tokens = useGoThemeTokens()
+    return <span data-testid="probe" data-bg={tokens.bg} data-accent={tokens.accent} />
+  }
+
+  it('ignores a legacy skin preference and follows the Host light/dark attribute in both directions', async () => {
+    localStorage.setItem('dsh-opencode-go.theme', 'warm-sand')
+    const write = vi.spyOn(Storage.prototype, 'setItem')
+    render(<Probe />)
+    const probe = screen.getByTestId('probe')
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.light.bg)
+    await act(async () => {
+      document.body.setAttribute('data-ds-dark-theme', '')
+      await Promise.resolve()
+    })
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.dark.bg)
+    expect(probe.getAttribute('data-accent')).toBe(GO_THEME_TOKENS.dark.accent)
+    await act(async () => {
+      document.body.removeAttribute('data-ds-dark-theme')
+      await Promise.resolve()
+    })
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.light.bg)
+    expect(write).not.toHaveBeenCalled()
+    write.mockRestore()
   })
 })
