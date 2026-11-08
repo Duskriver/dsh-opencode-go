@@ -13,6 +13,8 @@ permissions:
 # - `core` is the full acceptance path (typecheck, check:dist, the full Vitest suite,
 #   installed-package smoke) against the pinned development baseline
 #   DSH 0.2.1-rc.5 / Cordis 4.0.5 / Schemastery 3.18.5.
+# - `install-pnpm` installs the real tarball with pnpm 11.28.5, strict dependency
+#   build failures and no inherited build approvals. It blocks the #87 regression.
 # - The installed DSH 0.2.2-rc.1 runtime (Cordis 4.1.0, Schemastery 3.19.0) has
 #   only been exercised manually through the headless CLI; its Web/client
 #   surface is not covered by CI yet. See docs/verification.md.
@@ -43,6 +45,19 @@ jobs:
       - run: npm ci --strict-peer-deps
       - run: npm run verify
       - run: npm run check:pack
+
+  install-pnpm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --strict-peer-deps
+      - run: npm run check:dist
+      - run: npm run check:install:pnpm
 
   compat-dsh-0.2.2:
     # Advisory only: a red run is a compatibility signal, not a merge blocker.

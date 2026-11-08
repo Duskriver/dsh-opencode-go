@@ -7,7 +7,7 @@ import { connect, type Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { FreeBunTransport, MAX_REQUEST_BODY_BYTES, freeWorkerEnvironment } from '../src/free-transport.ts'
-import { resolveFreeRuntime } from '../src/free-runtime.ts'
+import { freeRuntimePackage, resolveFreeRuntime } from '../src/free-runtime.ts'
 import { mockProxy } from './support/proxy.ts'
 
 /**
@@ -69,8 +69,25 @@ function limitedTransport(maxRequestBodyBytes: number) {
 }
 
 describe('standalone Bun Free transport', () => {
+  it.each([
+    ['darwin', 'arm64', undefined, '@oven/bun-darwin-aarch64'],
+    ['darwin', 'x64', undefined, '@oven/bun-darwin-x64'],
+    ['freebsd', 'arm64', undefined, '@oven/bun-freebsd-aarch64'],
+    ['freebsd', 'x64', undefined, '@oven/bun-freebsd-x64'],
+    ['linux', 'arm64', '2.31', '@oven/bun-linux-aarch64'],
+    ['linux', 'arm64', undefined, '@oven/bun-linux-aarch64-musl'],
+    ['linux', 'x64', '2.31', '@oven/bun-linux-x64'],
+    ['linux', 'x64', undefined, '@oven/bun-linux-x64-musl'],
+    ['android', 'arm64', undefined, '@oven/bun-linux-aarch64-android'],
+    ['android', 'x64', undefined, '@oven/bun-linux-x64-android'],
+    ['win32', 'arm64', undefined, '@oven/bun-windows-aarch64'],
+    ['win32', 'x64', undefined, '@oven/bun-windows-x64'],
+  ] as const)('selects %s/%s runtime %s', (platform, arch, glibc, expected) => {
+    expect(freeRuntimePackage(platform, arch, glibc)).toBe(expected)
+  })
+
   it('resolves the pinned official binary without an install script or OpenCode', () => {
-    expect(resolveFreeRuntime()).toMatch(/[\\/]node_modules[\\/](?:@oven[\\/]bun-|bun[\\/])/)
+    expect(resolveFreeRuntime()).toMatch(/[\\/]node_modules[\\/]@oven[\\/]bun-/)
     expect(execFileSync(resolveFreeRuntime(), ['--version'], { encoding: 'utf8' }).trim()).toBe('1.4.4')
   })
 

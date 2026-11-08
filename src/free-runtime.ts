@@ -1,4 +1,4 @@
-/** Resolve the pinned official Bun dependency, including installs with scripts disabled. */
+/** Resolve the pinned official Bun platform package without an install script. */
 import { closeSync, existsSync, openSync, readSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -17,22 +17,21 @@ function nativeBinary(path: string): boolean {
   finally { if (descriptor !== undefined) closeSync(descriptor) }
 }
 
+export function freeRuntimePackage(platform: NodeJS.Platform, arch: string, glibcVersionRuntime?: string): string {
+  const runtimePlatform = platform === 'win32' ? 'windows' : platform === 'android' ? 'linux' : platform
+  const runtimeArch = arch === 'arm64' ? 'aarch64' : arch
+  const libc = platform === 'android' ? '-android' : platform === 'linux' && !glibcVersionRuntime ? '-musl' : ''
+  return `@oven/bun-${runtimePlatform}-${runtimeArch}${libc}`
+}
+
 export function resolveFreeRuntime(): string {
   try {
     const require = createRequire(import.meta.url)
-    const manifest = require.resolve('bun/package.json')
-    // Bun's installer can select a baseline CPU binary. Prefer its native
-    // launcher when present; otherwise resolve the optional platform package.
-    const installed = join(dirname(manifest), 'bin', 'bun.exe')
-    if (nativeBinary(installed)) return installed
-    const platform = process.platform === 'win32' ? 'windows' : process.platform === 'android' ? 'linux' : process.platform
-    const arch = process.arch === 'arm64' ? 'aarch64' : process.arch
     const report = process.platform === 'linux' ? process.report?.getReport() as { header?: { glibcVersionRuntime?: string } } : undefined
-    const header = report?.header
-    const libc = process.platform === 'android' ? '-android' : process.platform === 'linux' && !header?.glibcVersionRuntime ? '-musl' : ''
-    const name = `@oven/bun-${platform}-${arch}${libc}`
-    const binary = join(dirname(createRequire(manifest).resolve(`${name}/package.json`)), 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun')
-    if (existsSync(binary)) return binary
+    const name = freeRuntimePackage(process.platform, process.arch, report?.header?.glibcVersionRuntime)
+    const manifest = require.resolve(`${name}/package.json`)
+    const binary = join(dirname(manifest), 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun')
+    if (nativeBinary(binary)) return binary
   } catch { /* Optional runtime installation may have been omitted. Go still works. */ }
   throw new LlmError('OpenCode Free requires the bundled Bun runtime. Reinstall dsh-opencode-go with optional dependencies enabled.', 'MISSING_BUN_RUNTIME')
 }

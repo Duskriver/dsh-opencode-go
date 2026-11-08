@@ -59,6 +59,7 @@
     "compile": "node scripts/build.mjs",
     "check:dist": "node scripts/build.mjs --check",
     "check:pack": "node scripts/check-pack.mjs",
+    "check:install:pnpm": "node scripts/check-pnpm-install.mjs",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "check:hygiene": "node scripts/check-source.mjs",
     "test": "vitest run",
@@ -232,6 +233,17 @@
     "cordis"
   ],
   "optionalDependencies": {
-    "bun": "1.4.4"
+    "@oven/bun-darwin-aarch64": "1.4.4",
+    "@oven/bun-darwin-x64": "1.4.4",
+    "@oven/bun-freebsd-aarch64": "1.4.4",
+    "@oven/bun-freebsd-x64": "1.4.4",
+    "@oven/bun-linux-aarch64": "1.4.4",
+    "@oven/bun-linux-aarch64-android": "1.4.4",
+    "@oven/bun-linux-aarch64-musl": "1.4.4",
+    "@oven/bun-linux-x64": "1.4.4",
+    "@oven/bun-linux-x64-android": "1.4.4",
+    "@oven/bun-linux-x64-musl": "1.4.4",
+    "@oven/bun-windows-aarch64": "1.4.4",
+    "@oven/bun-windows-x64": "1.4.4"
   }
 }

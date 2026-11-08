@@ -56,7 +56,7 @@ Free 请求自动处理限流：`FreeUsageLimitError` 返回 `FREE_QUOTA`，普�
 
 对共享免费限制及网络、超时、服务端错误，优先遵循 `Retry-After` 秒数或 HTTP 日期（不会把数小时的退避缩短成几分钟）；没有有效头时，从 60 秒开始指数退避，最多 15 分钟。冷却按免费网关与代理配置隔离，冷却期间新调用返回 `FREE_COOLDOWN`，不发送推理请求，也不自动定时重试。到期后可由用户重试；成功请求重置本地退避计数。退避计数只保存在当前插件实例内，重启后清空。
 
-Bun 通过 npm 可选依赖 `bun@1.4.4` 安装对应平台的二进制。`bun` 包自带 `postinstall`：正常安装时它会把平台二进制复制到 `bun/bin`，缺少平台包时还可能联网下载并解包；`--ignore-scripts` 只会跳过该 postinstall，插件会回退到随可选依赖安装的 `@oven/bun-<platform>` 平台包。若运行时仍不可用（例如可选依赖被 `--omit=optional` 省略或安装失败），Free 会报告 `MISSING_BUN_RUNTIME`，可重新安装插件并启用 optional dependencies；Go 通道不受影响。当前平台包支持的系统和 CPU 以 Bun 的官方发行包为准。
+Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包安装。平台包直接携带原生二进制，不使用 `bun` 包装包，也没有安装脚本，因此 pnpm 不会要求批准 Bun 的 `postinstall`。包管理器根据系统、CPU 和 libc 选择对应包；若运行时不可用（例如可选依赖被 `--omit=optional` 省略或安装失败），Free 会报告 `MISSING_BUN_RUNTIME`，可重新安装插件并启用 optional dependencies；Go 通道不受影响。Free 默认关闭不会自动省略可选运行时下载。当前支持的系统和 CPU 以这些 Bun 官方平台包为准。
 
 每个 Free HTTP 请求使用一个 worker，默认最多并发 4 个，其余请求可排队或取消。请求通过标准输入传递，响应头和原始 SSE 字节通过标准输出返回；Key 不进入命令行参数或临时文件。消费者停止、超时、取消或卸载插件都会终止相关请求并回收 worker。单个请求体上限为 64 MiB，base64 编码后的 worker IPC 包上限为 256 MiB；worker 自身在读取 stdin 时也会累计校验该包上限。HTTP/HTTPS 代理由 Bun 连接；SOCKS5 使用该请求专属、带随机认证凭据的本机字节隧道，中继只允许连接本次请求的目标 host（大小写不敏感、IP 规范化比较），对无数据往来的连接设 120 秒空闲超时，目标 TLS 握手仍由 Bun 完成。代理失败不会回退到直连。
 

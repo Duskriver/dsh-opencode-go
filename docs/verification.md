@@ -8,7 +8,7 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `^4.0.5`. The Host
 
 | Surface | DSH / Cordis / Schemastery | Verification | Status |
 | --- | --- | --- | --- |
-| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:hygiene`, `check:dist`, 1005 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the P0/P1/P2 hardening batches (886 tests at the original 2026-11-06 baseline) |
+| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:hygiene`, `check:dist`, 1017 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-08 after the #87 runtime-packaging fix (1005 tests on 2026-11-07; 886 at the original 2026-11-06 baseline) |
 | Native/Classic redesign | pinned `0.2.1-rc.5` development peers | `typecheck`, `check:hygiene`, `check:dist`, 1021 Vitest tests, `verify:installed` and `check:pack` | Pass, 2026-11-08 on macOS with Node 24.22.1 / npm 12.2.1 |
 | Installed desktop CLI, Host side | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | rebuilt plugin loaded in an isolated headless profile; one loopback inference completed | Partial: headless Host smoke only, recorded before the dashboard migration |
 | Installed Web registration | `0.2.2-rc.1` | workspace 0.3.0 installed and applied; live Config exposes `appearanceTheme=native|classic` with Native default; settings, composer and sidebar Slot occupants are active | Partial: registration only, no visual/computed-style capture |
@@ -31,6 +31,8 @@ The current Web installation verifies the live schema and Slot registrations, bu
 | `npm run verify` | Types, artifact comparison, full Vitest suite and installed-package smoke pass |
 
 `verify` includes `typecheck`, `check:hygiene`, `test:ci` and `verify:installed`; `test:ci` includes `check:dist` and `npm test`. `npm run check:pack` asserts the tarball contents and runs as a separate CI step. CI runs this same acceptance path after `npm ci --strict-peer-deps` on Linux and Windows with Node 22.19 and 24. Those CI jobs are configured and enforce the 0.2.1-rc.5 baseline only; the baseline results above are from macOS. The 0.2.2-rc.1 matrix row is not part of CI yet.
+
+`npm run check:install:pnpm` is a separate network-dependent installation check, deliberately outside the default `verify` chain. On macOS ARM64 it reproduced #87 before the fix with `ERR_PNPM_IGNORED_BUILDS: bun@1.4.4` and exit 1; after the fix, the same pnpm 11.28.5 / strict-build / isolated-approval command installed the final tarball successfully and executed `@oven/bun-darwin-aarch64@1.4.4 --version`. The blocking `install-pnpm` CI job runs the same check on Ubuntu. Other OS/libc combinations have pure mapping tests, but no live pnpm installation matrix yet.
 
 ## Official-history source check
 

@@ -114,7 +114,7 @@ Key 留在 Host；常规报告只向浏览器传递聚合数字与 provider / mo
 - **复用已存账号（受端点绑定约束）**：Free 与 Go 共用账号列表，但只有在 `freeBaseURL` 的 hostname 为 `opencode.ai`（官方平台地址），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才会复用已存账号 Key 并遵循“自动使用备用账号”设置；其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并记录不含密钥的诊断信息。
 - **无 Key 时匿名公共访问**：没有可用 Key 时以 `Bearer public` 发起匿名公共访问。
 - **官方 CLI 身份**：请求以官方 OpenCode CLI 的 `opencode/latest/2.2.5/cli` User-Agent 发出，而不是 DSH 自身的归属 UA。
-- **独立 Bun 运行时**：Free 推理通过 optional dependency `bun@1.4.4` 启动独立 HTTP worker；`bun` 包自带 `postinstall`，安装期可能下载 / 解包平台原生二进制。禁用安装脚本或缺少可选依赖时的表现见下方 FAQ。
+- **独立 Bun 运行时**：Free 推理通过 `optionalDependencies` 中版本锁定为 1.4.4 的官方 `@oven/bun-*` 平台包启动独立 HTTP worker。平台包直接提供原生二进制，不需要 `bun` 包装包或其 `postinstall`，因此无需批准 Bun 构建脚本；缺少可选依赖时的表现见下方 FAQ。
 - **限流保护**：遵循上游 `Retry-After`，冷却期间新请求直接返回 `FREE_COOLDOWN`；共享免费额度 / IP 限制不会触发 Go 换号。
 
 > ⚠️ **风险提示**：Free 通道依赖上游公开的免费入口并以官方 CLI 身份发出请求，可能违反 OpenCode / 上游服务条款，也可能触发上游风控、限流或账号限制。是否开启以及使用频度由你自行判断并承担风险；请勿在生产环境或大规模自动化调用中使用。
@@ -194,7 +194,7 @@ Free 通道默认关闭（显式 opt-in）。请到 **设置 → OpenCode Go →
 <details>
 <summary><strong>Q: Free 通道为什么需要额外的 Bun 运行时？</strong></summary>
 
-Free 推理通过 `optionalDependencies` 中的 `bun@1.4.4` 启动独立 HTTP worker。`bun` 包自带 `postinstall`，正常安装时会把对应平台的原生二进制复制到 `bun/bin`（缺少平台包时还可能联网下载并解包）；安装时若禁用脚本（`--ignore-scripts`），插件会回退到随可选依赖安装的 `@oven/bun-<platform>` 平台包。若运行时仍不可用（例如可选依赖被 `--omit=optional` 省略或安装失败），Free 会报 `MISSING_BUN_RUNTIME`，重新安装插件并启用 optional dependencies 即可恢复；Go 通道完全不受影响。
+Free 推理直接使用 `optionalDependencies` 中版本锁定为 1.4.4 的官方 `@oven/bun-<platform>` 平台包启动独立 HTTP worker。平台包直接携带原生二进制，没有安装脚本，也不需要批准 `bun` 的 `postinstall`；包管理器只安装与当前系统、CPU 和 libc 匹配的运行时。若可选依赖被 `--omit=optional` 省略或未能安装，Free 会报 `MISSING_BUN_RUNTIME`，重新安装插件并启用 optional dependencies 即可恢复；Go 通道完全不受影响。Free 默认关闭并不会自动省略这项可选运行时下载。
 </details>
 
 <details>

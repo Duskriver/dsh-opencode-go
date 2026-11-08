@@ -37,7 +37,7 @@
 ### Free 通道（默认关闭）
 
 - Free 通道是显式 opt-in。开启后请求会以官方 OpenCode CLI 的 User-Agent 发往平台公共免费入口，可能违反上游条款，也可能触发风控、限流或账号限制；风险由使用者自行承担，不建议用于生产或大规模自动化。
-- Free 通过 npm 可选依赖 `bun@1.4.4` 启动独立 worker。`bun` 包自带 `postinstall`，安装期可能下载或解包平台原生二进制；`--ignore-scripts` 只跳过该 postinstall（插件会回退到 `@oven/bun-<platform>` 平台包）。若可选依赖不可用，Free 报 `MISSING_BUN_RUNTIME`，Go 通道不受影响。
+- Free 通过版本锁定为 1.4.4 的官方 `@oven/bun-*` npm 可选平台包启动独立 worker。平台包直接提供原生二进制，不使用 `bun` 包装包或安装期脚本，因此不需要批准 Bun 的 `postinstall`；原生运行时仍属于上游供应链信任范围。若可选依赖不可用，Free 报 `MISSING_BUN_RUNTIME`，Go 通道不受影响。
 - Free worker 以独立进程运行，并从显式环境 allowlist 启动，**不再继承宿主 `process.env`**：`NODE_EXTRA_CA_CERTS`、`NODE_TLS_REJECT_UNAUTHORIZED`、`NODE_OPTIONS`、`LD_PRELOAD`、`DYLD_INSERT_LIBRARIES` 以及代理环境变量不会传入 worker。依赖这些环境变量注入自定义 CA 或 TLS 覆盖的部署需要改用其他受支持方式，不要依赖该行为。
 
 ### 插件模型

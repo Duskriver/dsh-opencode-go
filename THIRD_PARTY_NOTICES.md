@@ -12,4 +12,4 @@ The bundled Google SDK's HTTP fetch call is modified at build time to use the pl
 
 The GitHub icon in the settings footer comes from Simple Icons, distributed under CC0 1.0 Universal.
 
-Free HTTP transport uses the official `bun@1.4.4` optional dependency and its platform packages. Bun is maintained by Oven and contributors and distributed under its upstream license and third-party notices; the runtime remains a separate npm dependency rather than part of this package's JavaScript bundle. See [Bun's license](https://github.com/oven-sh/bun/blob/bun-v1.4.4/LICENSE.md). The HTTP worker and Node bridge in this project are original code.
+Free HTTP transport directly uses the official `@oven/bun-*` optional platform packages, all pinned to Bun 1.4.4, rather than the script-bearing `bun` wrapper package. Bun is maintained by Oven and contributors and distributed under its upstream license and third-party notices; the runtime remains a separate npm dependency rather than part of this package's JavaScript bundle. See [Bun's license](https://github.com/oven-sh/bun/blob/bun-v1.4.4/LICENSE.md). The HTTP worker and Node bridge in this project are original code.

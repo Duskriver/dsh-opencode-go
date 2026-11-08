@@ -8,11 +8,16 @@
 ### Added
 
 - 新增 `appearanceTheme` 界面主题设置（`native` / `classic`），默认 `native`；未设置该字段的旧配置缺省使用 Native。
+- 新增 `npm run check:install:pnpm`：用 pnpm 11.28.5 在隔离 consumer 中安装实际 tarball，禁用已有构建批准并启用严格构建失败策略，同时验证匹配平台的 Bun 二进制可以执行；CI 以非 advisory job 运行该安装检查。
 
 ### Changed
 
 - 设置页、用量胶囊、侧栏与历史看板共用布局和内部主题 token：Native 通过 Host 公开语义 token 跟随 DSH 与第三方主题的颜色、字体、圆角等，无法解析时使用中性 fallback；Classic 保留暖纸 / 炭灰、陶土色与衬线风格，不跟随 Host 或第三方主题覆盖这些品牌 token。
 - 主题切换不再改变组件布局；样式边界收敛到插件自有组件与共享 token 层，移除对宿主私有样式的越界覆盖。输入栏 `badge` / `plain` 样式及侧栏额度设置行为不变。
+
+### Fixed
+
+- Free 运行时改为直接声明版本锁定的官方 `@oven/bun-*` 可选平台包，移除带 `postinstall` 的 `bun` 包装依赖，修复 pnpm 11 在未批准构建脚本时安装或升级失败并回滚的问题（#87）。平台运行时仍会下载；Go 与现有 `MISSING_BUN_RUNTIME` 降级语义不变。
 
 ## [0.3.0] - 2026-11-07
 
