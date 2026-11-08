@@ -28,6 +28,10 @@ export declare const DEFAULT_USAGE_DISPLAY: UsageDisplayMode;
 export declare const USAGE_PILL_STYLES: readonly ["badge", "plain"];
 export type UsagePillStyle = typeof USAGE_PILL_STYLES[number];
 export declare const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle;
+/** Global plugin appearance, shared by Host validation and browser settings. */
+export declare const OPENCODE_GO_THEMES: readonly ["native", "classic"];
+export type OpencodeGoTheme = typeof OPENCODE_GO_THEMES[number];
+export declare const DEFAULT_OPENCODE_GO_THEME: OpencodeGoTheme;
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
     id: string;
@@ -118,6 +122,8 @@ export interface OpencodeGoConfig {
     showSidebarQuota: boolean;
     /** Appearance of the conversation input's quota trigger. */
     usagePillStyle: UsagePillStyle;
+    /** Global plugin appearance theme. */
+    appearanceTheme: OpencodeGoTheme;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
     /** Legacy credential reference, kept in sync with the first/current account. */

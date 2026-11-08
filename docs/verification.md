@@ -9,15 +9,17 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `^4.0.5`. The Host
 | Surface | DSH / Cordis / Schemastery | Verification | Status |
 | --- | --- | --- | --- |
 | Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:hygiene`, `check:dist`, 1005 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-07 after the P0/P1/P2 hardening batches (886 tests at the original 2026-11-06 baseline) |
+| Native/Classic redesign | pinned `0.2.1-rc.5` development peers | `typecheck`, `check:hygiene`, `check:dist`, 1021 Vitest tests, `verify:installed` and `check:pack` | Pass, 2026-11-08 on macOS with Node 24.22.1 / npm 12.2.1 |
 | Installed desktop CLI, Host side | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | rebuilt plugin loaded in an isolated headless profile; one loopback inference completed | Partial: headless Host smoke only, recorded before the dashboard migration |
-| Web/client surface (`dsh.client`) | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | settings page, usage pill, model picker and history dashboard against a running 0.2.2 Web profile | **Not covered / pending** |
+| Installed Web registration | `0.2.2-rc.1` | workspace 0.3.0 installed and applied; live Config exposes `appearanceTheme=native|classic` with Native default; settings, composer and sidebar Slot occupants are active | Partial: registration only, no visual/computed-style capture |
+| Web/client visual surface (`dsh.client`) | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | Native/Classic × light/dark, desktop/narrow layouts, focus, reduced motion and third-party token overrides | **Not covered / pending** |
 
-The Web/client surface is the part not yet verified on 0.2.2-rc.1. The client bundle contract (`window.__ModuleLoader__.load`, the baseline module table and `dsh.client.inject`) was only compared statically with the 0.2.2-rc.1 shipped client bundles; no browser session against a 0.2.2-rc.1 Web profile has been recorded.
+The current Web installation verifies the live schema and Slot registrations, but not what the browser paints. No browser-control channel was available for computed styles, responsive geometry, console inspection or new screenshots. The client bundle contract (`window.__ModuleLoader__.load`, the baseline module table and `dsh.client.inject`) was also compared statically with the 0.2.2-rc.1 shipped client bundles.
 
 ### Pending
 
 - Advisory CI job `compat-dsh-0.2.2` (job-level `continue-on-error: true`, push/manual-dispatch only) probes the installed DSH `0.2.2-rc.1` Host path: it packs this package, installs it together with the official `@deepseek-ai/dsh@0.2.2-rc.1` CLI and the pinned rc.1 host packages into a temporary consumer, then runs `node --expose-internals scripts/installed-smoke.mjs <consumer>`. A red run is a compatibility signal, not a merge blocker; promote it to a required check once the install path has stayed green for a release cycle and a stable 0.2.2 host exists. This covers the Host path only — the Web/client row above remains pending.
-- Manual Web check on a 0.2.2-rc.1 server: enable the plugin, confirm the settings section and usage pill mount, then exercise the history dashboard with a real account.
+- Manual Web visual check on the installed 0.2.2-rc.1 profile: exercise Native/Classic × light/dark on settings, quota, sidebar and history; test narrow layouts, focus/reduced motion and temporary Host-token overrides; restore the user's settings and capture replacement Native screenshots.
 
 ## Recorded baseline before the dashboard migration
 
@@ -62,7 +64,7 @@ Backend migration checks use synthetic CSVs, synthetic keys and loopback service
 
 The rewritten `GoAnalyticsService` was also checked directly against Console with the current desktop key on 2026-11-06: both the 30-day report and CSV export succeeded. The report contained 30 calendar days and 13 provider/model rows, with no member fields or key; the explicitly requested CSV retained its 14 official columns and contained no key. This was a read-only check, with no inference or profile changes.
 
-Real-browser layout checks used synthetic preview data. The narrow view fills 390×844 without horizontal page overflow; charts and detail tables scroll within their own regions. Account/range changes and model detail were exercised. Previews: [desktop](assets/usage-history-desktop.jpg), [narrow light](assets/usage-history-mobile.jpg), [models](assets/usage-history-models.jpg).
+Real-browser Classic layout checks used synthetic preview data before Native became the default. The narrow view fills 390×844 without horizontal page overflow; charts and detail tables scroll within their own regions. Account/range changes and model detail were exercised. Classic previews: [desktop](assets/usage-history-desktop.jpg), [narrow light](assets/usage-history-mobile.jpg), [models](assets/usage-history-models.jpg).
 
 ## Regression scope
 

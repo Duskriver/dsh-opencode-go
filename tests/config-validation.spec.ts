@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { DEFAULT_CONFIG, PlainConfig, assertBaseURL, validateGoConfig } from '../src/config.ts'
 import {
+  DEFAULT_OPENCODE_GO_THEME,
   MAX_THINKING_BUDGET_TOKENS,
+  OPENCODE_GO_THEMES,
   PROFILE_ENTRY_ID,
   SETTINGS_NAMESPACE,
   assertProxyURL,
@@ -69,6 +71,20 @@ describe('proxy URL credentials', () => {
     expect(assertProxyURL(proxy)).toContain('proxy-user')
     expect(() => validateGoConfig(config({ proxyURL: proxy }))).not.toThrow()
     expect(() => validateGoConfig(config({ proxyURL: 'https://plain.example:8443' }))).not.toThrow()
+  })
+})
+
+describe('appearance theme configuration', () => {
+  it('defaults old profiles to native and accepts exactly native or classic', () => {
+    expect(OPENCODE_GO_THEMES).toEqual(['native', 'classic'])
+    expect(DEFAULT_OPENCODE_GO_THEME).toBe('native')
+    expect(DEFAULT_CONFIG.appearanceTheme).toBe('native')
+    expect(PlainConfig({}).appearanceTheme).toBe('native')
+    expect(PlainConfig({ appearanceTheme: 'native' }).appearanceTheme).toBe('native')
+    expect(PlainConfig({ appearanceTheme: 'classic' }).appearanceTheme).toBe('classic')
+    for (const appearanceTheme of ['system', 'Native', '', true, 1]) {
+      expect(() => PlainConfig({ appearanceTheme: appearanceTheme as never }), JSON.stringify(appearanceTheme)).toThrow()
+    }
   })
 })
 

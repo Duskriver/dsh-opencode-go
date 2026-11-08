@@ -1,5 +1,6 @@
-/** English and Chinese copy and the shared, Host-following presentation tokens. */
+/** English and Chinese copy and the shared Native/Classic presentation tokens. */
 import { useEffect, useState, type CSSProperties } from 'react'
+import { DEFAULT_OPENCODE_GO_THEME, type OpencodeGoTheme } from '../contracts.ts'
 
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
 
@@ -211,8 +212,13 @@ export const en = {
   groupFree: 'Free channel',
   freeEnabledLabel: 'Enable the Free channel',
   freeEnabledHint: 'Off by default. When enabled, the Free route reuses a saved account key; without a usable key it falls back to anonymous public access, and requests are sent with the official OpenCode CLI user agent. This may violate upstream terms or trigger rate limiting or risk controls.',
-  usageAppearanceLabel: 'Quota appearance',
+  usageAppearanceLabel: 'Appearance',
   usageAppearanceReset: 'Reset appearance',
+  appearanceThemeLabel: 'Interface theme',
+  appearanceThemeHint: 'DSH Native follows the Host and third-party themes through their public tokens. OpenCode Go Classic keeps the plugin’s warm paper, terracotta and serif style.',
+  appearanceThemePreviewHint: 'Preview both themes below. Save to apply your choice to every OpenCode Go surface.',
+  appearanceTheme_native: 'DSH Native (default)',
+  appearanceTheme_classic: 'OpenCode Go Classic',
   showSidebarQuotaLabel: 'Show quota in the sidebar',
   showSidebarQuotaSummary: 'View account quotas in the sidebar, independently of the input indicator.',
   showSidebarQuotaHint: 'Shows a quota card in the expanded sidebar and an icon when collapsed. Click the account name to cycle through account quotas without changing request order; the viewed account is remembered on this device. Refreshes every minute, independently of the input indicator.',
@@ -474,8 +480,13 @@ export const zh: typeof en = {
   groupFree: '免费通道',
   freeEnabledLabel: '启用免费通道',
   freeEnabledHint: '默认关闭。开启后，Free 路由复用已保存的账号 Key；没有可用 Key 时退回匿名公共访问，且请求以官方 OpenCode CLI 的 User-Agent 发出。这可能违反上游条款或触发限流/风控。',
-  usageAppearanceLabel: '额度外观',
+  usageAppearanceLabel: '外观',
   usageAppearanceReset: '恢复默认外观',
+  appearanceThemeLabel: '界面主题',
+  appearanceThemeHint: 'DSH Native 通过公开 token 跟随宿主和第三方主题；OpenCode Go Classic 保留插件自己的暖纸色、陶土色和衬线风格。',
+  appearanceThemePreviewHint: '下方可预览两种主题，保存后将选择应用到所有 OpenCode Go 界面。',
+  appearanceTheme_native: 'DSH Native（默认）',
+  appearanceTheme_classic: 'OpenCode Go Classic',
   showSidebarQuotaLabel: '在侧边栏显示额度',
   showSidebarQuotaSummary: '在侧边栏查看各账号额度，独立于输入栏显示。',
   showSidebarQuotaHint: '侧边栏展开时显示额度卡片，收起时显示图标。点击账号名循环查看各账号额度，不改变请求顺序，并在本机记住查看对象。开启后每分钟刷新，独立于输入栏额度显示。',
@@ -531,95 +542,142 @@ export const zh: typeof en = {
 /** Every copy key this page's dictionaries must supply. */
 export type OpencodeGoKey = keyof typeof en
 
-/** Warm paper/charcoal surfaces shared by every plugin-owned view. */
+/** All visual values shared by the settings, quota and history surfaces. */
 export interface GoThemeTokens {
   readonly bg: string
   readonly surface: string
   readonly surface2: string
   readonly border: string
-  /** Control boundary that keeps WCAG 1.4.11 3:1 against both surfaces. */
+  /** Control boundary whose local fallback keeps WCAG 1.4.11 3:1 on every surface. */
   readonly borderStrong: string
   readonly text: string
   readonly muted: string
   readonly accent: string
+  /** Output-token chart series; Native derives it from the Host success token. */
   readonly accent2: string
   readonly accentSoft: string
   readonly onAccent: string
   readonly cacheRead: string
   readonly cacheWrite: string
+  /** A complete box-shadow declaration, not merely a shadow color. */
   readonly shadow: string
   readonly success: string
   readonly warning: string
   readonly danger: string
+  readonly font: string
+  readonly displayFont: string
+  readonly numberFont: string
+  readonly radiusSmall: string
+  readonly radiusControl: string
+  readonly radiusPill: string
+  readonly radiusOption: string
+  readonly radiusCard: string
+  readonly radiusPopover: string
+  readonly radiusModal: string
+  readonly focusWidth: string
+  readonly displayWeight: string
+  readonly displayTracking: string
 }
 
-/** Host color scheme followed by {@link GO_THEME_TOKENS}. */
+/** Host color scheme followed by both visual themes. */
 export type GoThemeScheme = 'dark' | 'light'
 
-/**
- * Pure fallback values, used when a Host alias token is absent and as the static
- * baseline for the WCAG contrast assertions. The chart series colors and the
- * strong control border have no Host token, so these constants are painted as-is.
- */
+const CLASSIC_FONT = '"Anthropic Sans Web", "Anthropic Sans", "Styrene B", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
+const CLASSIC_DISPLAY_FONT = '"Anthropic Serif Web", "Anthropic Serif", "Tiempos Text", Charter, "Songti SC", "Noto Serif SC", SimSun, Georgia, serif'
+const CLASSIC_NUMBER_FONT = '"Anthropic Mono Web", "Anthropic Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace'
+const NATIVE_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
+const NATIVE_NUMBER_FONT = '"SFMono-Regular", Consolas, "Liberation Mono", monospace'
+
+/** Classic is deliberately independent from Host and third-party theme overrides. */
 export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   dark: {
     bg: '#242422', surface: '#2d2c29', surface2: '#353430', border: '#49473f', borderStrong: '#8a877d',
     text: '#eceae3', muted: '#b7b4a8', accent: '#e7a18a', accent2: '#b09a87',
-    accentSoft: '#49342b', onAccent: '#382017', cacheRead: '#8f8678', cacheWrite: '#a5aa8c', shadow: '#00000040',
-    success: '#9bc6a7', warning: '#d6b274', danger: '#e6a09c',
+    accentSoft: '#49342b', onAccent: '#382017', cacheRead: '#8f8678', cacheWrite: '#a5aa8c',
+    shadow: '0 18px 48px #00000040', success: '#9bc6a7', warning: '#d6b274', danger: '#e6a09c',
+    font: CLASSIC_FONT, displayFont: CLASSIC_DISPLAY_FONT, numberFont: CLASSIC_NUMBER_FONT,
+    radiusSmall: '4px', radiusControl: '8px', radiusPill: '99px', radiusOption: '6px', radiusCard: '10px', radiusPopover: '12px', radiusModal: '14px',
+    focusWidth: '2px', displayWeight: '400', displayTracking: '-.025em',
   },
   light: {
     bg: '#faf9f5', surface: '#fffefb', surface2: '#f0eee7', border: '#dedbd2', borderStrong: '#736f66',
-    text: '#30312e', muted: '#6b6a61', accent: '#a94e35', accent2: '#9f8b78',
-    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#8a7a66', cacheWrite: '#858c6b', shadow: '#28261b18',
-    success: '#38654c', warning: '#8c6526', danger: '#a83e42',
+    text: '#30312e', muted: '#6b6a61', accent: '#a94e35', accent2: '#8a735f',
+    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#8a7a66', cacheWrite: '#858c6b',
+    shadow: '0 18px 48px #28261b18', success: '#38654c', warning: '#8c6526', danger: '#a83e42',
+    font: CLASSIC_FONT, displayFont: CLASSIC_DISPLAY_FONT, numberFont: CLASSIC_NUMBER_FONT,
+    radiusSmall: '4px', radiusControl: '8px', radiusPill: '99px', radiusOption: '6px', radiusCard: '10px', radiusPopover: '12px', radiusModal: '14px',
+    focusWidth: '2px', displayWeight: '400', displayTracking: '-.025em',
   },
 }
 
-/**
- * One palette in the Host's two color schemes: surfaces, text, borders, the brand
- * accent and the on-accent foreground read the Host alias tokens first and keep
- * the local paper/charcoal values only as fallbacks. This lets third-party themes
- * and the Host's font/color settings reach every plugin-owned surface.
- * @param scheme - the Host's active color scheme.
- * @returns the merged tokens.
- */
-function hostTheme(scheme: GoThemeScheme): GoThemeTokens {
-  const fallback = GO_THEME_FALLBACKS[scheme]
+/** Neutral fallbacks used only when Native cannot resolve a Host token. */
+export const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
+  dark: {
+    bg: '#0f0f0f', surface: '#212123', surface2: '#292929', border: '#3c3c3d', borderStrong: '#a2a4a6',
+    text: '#f5f5f5', muted: '#a2a4a6', accent: '#7aaaff', accent2: '#4ed17e',
+    accentSoft: '#1c2b45', onAccent: '#0f0f0f', cacheRead: '#a2a4a6', cacheWrite: '#f7ad31',
+    shadow: '0 18px 48px #00000066', success: '#4ed17e', warning: '#f7ad31', danger: '#f87171',
+    font: NATIVE_FONT, displayFont: NATIVE_FONT, numberFont: NATIVE_NUMBER_FONT,
+    radiusSmall: '4px', radiusControl: '8px', radiusPill: '8px', radiusOption: '8px', radiusCard: '12px', radiusPopover: '12px', radiusModal: '16px',
+    focusWidth: '2px', displayWeight: '600', displayTracking: 'normal',
+  },
+  light: {
+    bg: '#fafafa', surface: '#ffffff', surface2: '#f5f5f5', border: '#e5e5e5', borderStrong: '#7f8287',
+    text: '#292929', muted: '#65676b', accent: '#4176e6', accent2: '#2f7d4f',
+    accentSoft: '#edf3fe', onAccent: '#ffffff', cacheRead: '#65676b', cacheWrite: '#9a5b07',
+    shadow: '0 18px 48px #00000026', success: '#2f7d4f', warning: '#9a5b07', danger: '#b4232d',
+    font: NATIVE_FONT, displayFont: NATIVE_FONT, numberFont: NATIVE_NUMBER_FONT,
+    radiusSmall: '4px', radiusControl: '8px', radiusPill: '8px', radiusOption: '8px', radiusCard: '12px', radiusPopover: '12px', radiusModal: '16px',
+    focusWidth: '2px', displayWeight: '600', displayTracking: 'normal',
+  },
+}
+
+/** Native consumes only Host semantics; every declaration retains a neutral fallback. */
+function nativeTheme(scheme: GoThemeScheme): GoThemeTokens {
+  const fallback = NATIVE_THEME_FALLBACKS[scheme]
   return {
     bg: `var(--dsw-alias-bg-base, ${fallback.bg})`,
     surface: `var(--dsw-alias-bg-layer-1, ${fallback.surface})`,
     surface2: `var(--dsw-alias-bg-layer-2, ${fallback.surface2})`,
     border: `var(--dsw-alias-border-l1, ${fallback.border})`,
-    borderStrong: fallback.borderStrong,
+    borderStrong: `var(--dsw-alias-border-l2, ${fallback.borderStrong})`,
     text: `var(--dsw-alias-label-primary, ${fallback.text})`,
     muted: `var(--dsw-alias-label-secondary, ${fallback.muted})`,
     accent: `var(--dsw-alias-brand-primary, ${fallback.accent})`,
-    accent2: fallback.accent2,
+    accent2: `var(--dsw-alias-state-success-primary, ${fallback.accent2})`,
     accentSoft: `color-mix(in srgb, var(--dsw-alias-brand-primary, ${fallback.accent}) 16%, var(--dsw-alias-bg-base, ${fallback.bg}))`,
-    onAccent: `var(--dsw-alias-label-primary-foreground, ${fallback.onAccent})`,
-    cacheRead: fallback.cacheRead,
-    cacheWrite: fallback.cacheWrite,
-    shadow: fallback.shadow,
-    success: fallback.success,
-    warning: fallback.warning,
-    danger: fallback.danger,
+    onAccent: `var(--dsw-alias-bg-base, ${fallback.onAccent})`,
+    cacheRead: `var(--dsw-alias-state-idle-primary, ${fallback.cacheRead})`,
+    cacheWrite: `var(--dsw-alias-state-warn-primary, ${fallback.cacheWrite})`,
+    shadow: `var(--dsw-elevation-prominent, ${fallback.shadow})`,
+    success: `var(--dsw-alias-state-success-primary, ${fallback.success})`,
+    warning: `var(--dsw-alias-state-warn-primary, ${fallback.warning})`,
+    danger: `var(--dsw-alias-state-error-primary, ${fallback.danger})`,
+    font: `var(--dsw-font-family, var(--dsh-font-family-text, ${fallback.font}))`,
+    displayFont: `var(--dsw-font-family, var(--dsh-font-family-text, ${fallback.displayFont}))`,
+    numberFont: `var(--ds-font-family-code, var(--dsh-font-family-code, ${fallback.numberFont}))`,
+    radiusSmall: `var(--dsw-radius-xs, ${fallback.radiusSmall})`,
+    radiusControl: `var(--dsw-radius-sm, ${fallback.radiusControl})`,
+    radiusPill: `var(--dsw-radius-sm, ${fallback.radiusPill})`,
+    radiusOption: `var(--dsw-radius-sm, ${fallback.radiusOption})`,
+    radiusCard: `var(--dsw-radius-md, ${fallback.radiusCard})`,
+    radiusPopover: `var(--dsw-radius-md, ${fallback.radiusPopover})`,
+    radiusModal: `var(--dsw-radius-lg, ${fallback.radiusModal})`,
+    focusWidth: `var(--dsw-focus-ring-width, ${fallback.focusWidth})`,
+    displayWeight: fallback.displayWeight,
+    displayTracking: fallback.displayTracking,
   }
 }
 
-/** The unified tokens for the Host's current scheme. */
-export const GO_THEME_TOKENS: Record<GoThemeScheme, GoThemeTokens> = {
-  dark: hostTheme('dark'),
-  light: hostTheme('light'),
+/** Theme first, color scheme second: Native follows the Host, Classic stays branded. */
+export const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeScheme, GoThemeTokens>> = {
+  native: { dark: nativeTheme('dark'), light: nativeTheme('light') },
+  classic: { dark: GO_THEME_FALLBACKS.dark, light: GO_THEME_FALLBACKS.light },
 }
 
-/**
- * Follow the Host's light/dark scheme. The layout presenter marks a dark body
- * with `data-ds-dark-theme`; the attribute is observed so switching the Host
- * theme updates the surfaces without a reload.
- */
-export function useHostScheme(): 'dark' | 'light' {
-  const [scheme, setScheme] = useState<'dark' | 'light'>(() =>
+/** Follow the Host's body color-scheme marker without adding a Theme service dependency. */
+export function useHostScheme(): GoThemeScheme {
+  const [scheme, setScheme] = useState<GoThemeScheme>(() =>
     typeof document === 'undefined' || document.body?.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light')
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -629,7 +687,6 @@ export function useHostScheme(): 'dark' | 'light' {
       setScheme(body.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light')
     }
     update()
-    // The SSR/client fixture ships a minimal DOM; observing is an enhancement.
     if (typeof MutationObserver === 'undefined') return
     const observer = new MutationObserver(update)
     observer.observe(body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
@@ -638,19 +695,12 @@ export function useHostScheme(): 'dark' | 'light' {
   return scheme
 }
 
-/** The unified tokens for the Host's current scheme. */
-export function useGoThemeTokens(): GoThemeTokens {
-  const scheme = useHostScheme()
-  return GO_THEME_TOKENS[scheme]
+/** Resolve one visual theme in the Host's current color scheme. */
+export function useGoThemeTokens(theme: OpencodeGoTheme = DEFAULT_OPENCODE_GO_THEME): GoThemeTokens {
+  return GO_THEME_TOKENS[theme][useHostScheme()]
 }
 
-/**
- * Inline custom properties consumed by settings, quota surfaces and history.
- * The Host's font settings come first and the local branded stacks stay as
- * fallbacks; no font file is fetched, so offline machines keep their system fonts.
- * @param tokens - the active palette.
- * @returns a style object carrying every `--go-*` variable.
- */
+/** Internal derived custom properties; third-party themes customize the Host tokens instead. */
 export function themeStyle(tokens: GoThemeTokens): CSSProperties {
   return {
     '--go-bg': tokens.bg,
@@ -670,8 +720,18 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-success': tokens.success,
     '--go-warning': tokens.warning,
     '--go-danger': tokens.danger,
-    '--go-font': 'var(--dsh-font-family-text, "Anthropic Sans Web", "Anthropic Sans", "Styrene B", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif)',
-    '--go-display-font': '"Anthropic Serif Web", "Anthropic Serif", "Tiempos Text", Charter, "Songti SC", "Noto Serif SC", SimSun, Georgia, serif',
-    '--go-number-font': 'var(--dsh-font-family-code, "Anthropic Mono Web", "Anthropic Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace)',
+    '--go-font': tokens.font,
+    '--go-display-font': tokens.displayFont,
+    '--go-number-font': tokens.numberFont,
+    '--go-radius-small': tokens.radiusSmall,
+    '--go-radius-control': tokens.radiusControl,
+    '--go-radius-pill': tokens.radiusPill,
+    '--go-radius-option': tokens.radiusOption,
+    '--go-radius-card': tokens.radiusCard,
+    '--go-radius-popover': tokens.radiusPopover,
+    '--go-radius-modal': tokens.radiusModal,
+    '--go-focus-width': tokens.focusWidth,
+    '--go-display-weight': tokens.displayWeight,
+    '--go-display-tracking': tokens.displayTracking,
   } as CSSProperties
 }

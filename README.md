@@ -15,6 +15,8 @@
 
 DSH 原生支持接入 OpenCode Go，但原生模式无法满足复杂的生产与日常开发需求（如多账号无感容灾、会话级 Prompt 缓存绑定、会话内实时额度透视等）。本插件基于 Cordis 微内核架构，在提供完整模型协议转换的同时，带来了流畅的客户端 UI 与企业级容灾体验。
 
+文档中的现有界面截图展示 **Classic** 主题；默认的 **Native** 主题会跟随当前 DSH 的颜色、字体与几何 token。
+
 ---
 
 ## ✨ 核心特性
@@ -98,7 +100,7 @@ dsh plugin --profile web add dsh-opencode-go
 - **官方 CSV 单一来源**：请求、输入 / 输出 / 缓存 Token、官方用量金额、每日图表与模型明细来自同一份官方每日 CSV；provider + model 区分同名模型。支持今日、7 / 30 / 90 天，日期统一使用 UTC。
 - **独立查看账号**：默认当前调用账号，只查看所选 Key 所属工作区，包含其他客户端；切换查看账号不改变对话账号。看板的三个额度窗口跟随所选账号。匿名 Free 覆盖不作保证。
 - **官方用量金额**：直接汇总 `cost_micro_cents`（1 美元 = 1 亿单位），不等同于 Go 额外扣款。官方日汇总可能延迟。
-- **统一界面**：设置页、用量胶囊、侧栏与看板统一采用暖纸色 / 炭灰色和陶土色强调，跟随宿主明暗。优先使用本地 Anthropic Serif / Sans / Mono 字体，中文标题配衬线回退；宽屏弹窗、窄屏全屏，保留 Token 堆叠或请求日柱图、模型排行与明细。
+- **双主题统一界面**：设置页、用量胶囊、侧栏与看板共用布局，通过 `appearanceTheme` 选择 **DSH Native（默认）** 或 **OpenCode Go Classic**，并跟随宿主明暗模式；主题差异见[分组高级设置](#分组高级设置)。宽屏弹窗、窄屏全屏，保留 Token 堆叠或请求日柱图、模型排行与明细。
 - **按需查询**：打开、切账号、切区间或手动刷新时查询，Host 短缓存 30 秒，强制刷新绕过缓存，不后台轮询历史。仅官方模型网关支持历史查询；错误明确显示，不回退本地扫描。
 
 Key 留在 Host；常规报告只向浏览器传递聚合数字与 provider / model / day。用户主动下载的官方 CSV 可包含成员字段。完整口径见[用量统计说明](docs/usage-analytics.md)。
@@ -139,7 +141,7 @@ src/
     ├── Section.tsx              宿主设置页、账号卡片与模型编辑器
     ├── UsagePill.tsx            会话额度胶囊
     ├── AnalyticsDialog.tsx      官方历史用量看板
-    └── presentation.ts          多语言、明暗配色与显示格式
+    └── presentation.ts          多语言、Native / Classic 主题 token 与显示格式
 ```
 
 账号操作在内存串行队列中直接更新凭据与设置。模型容量草稿始终保留为对象；图片按单次请求限制数量、编码字节及最多四路并行准备。宿主仅使用 DSH `0.2.1-rc.5` 起提供的设置与图片卸载接口。包的 `.` 与 `./client` 导出路径保持不变。
@@ -166,6 +168,7 @@ OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插�
 
 ![高级设置：分组配置、提示入口和统一恢复默认](docs/assets/advanced-settings.png)
 
+- **界面主题**：在 **用量设置 → 外观** 中将 `appearanceTheme` 设为 `native` 或 `classic`。**Native（默认）** 通过 Host 公开语义 token 跟随 DSH 与第三方主题的颜色、字体、圆角、阴影和焦点样式，token 不可解析时使用中性 fallback；未设置该字段的旧配置也缺省使用 Native。**Classic** 保留暖纸 / 炭灰、陶土色强调与 Anthropic Serif / Sans / Mono、中文衬线回退，不跟随 Host 或第三方主题覆盖这些品牌 token，但仍按宿主明暗模式切换 Classic 配色。输入栏额度样式仍为 `badge`（默认）/ `plain`，侧栏额度显示仍是独立开关且默认关闭。
 - **网络代理**：支持填入 HTTP、HTTPS 或 SOCKS5 代理地址（如 `socks5://127.0.0.1:1080`），保存后即时应用于对话、用量查询与模型刷新。
 - **超时控制**：分别支持配置请求准备超时（`requestPreparationTimeoutMs`）、整轮请求超时（`requestTimeoutMs`）以及流空闲看门狗阈值（`streamIdleTimeoutMs`）。
 - **免费通道（opt-in）**：默认关闭；开启后注册 `DSH OpenCode Free` 路由、拉取平台免费模型；已存 Key 仅在 `freeBaseURL` 为官方域名或与 `baseURL` 同 origin 时复用，否则退回匿名公共访问；关闭后该路由撤回，进行中的请求允许完成。

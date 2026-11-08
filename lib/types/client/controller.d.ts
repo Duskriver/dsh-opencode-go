@@ -2,12 +2,12 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import { type SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
-import { type ModelSource, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
+import { type ModelSource, type OpencodeGoTheme, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "appearanceTheme", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
-export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "appearanceTheme", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
@@ -115,6 +115,9 @@ export interface OpencodeGoSectionState extends FormShell {
     showSidebarQuota: FieldState;
     freeEnabled: FieldState;
     usagePillStyle: FieldState;
+    appearanceTheme: FieldState;
+    /** Last saved theme; text drafts preview without switching the applied interface. */
+    appliedAppearanceTheme: OpencodeGoTheme;
     modelVisibility: Readonly<Record<string, boolean>>;
     pickerSaving: boolean;
     pickerFailed: boolean;

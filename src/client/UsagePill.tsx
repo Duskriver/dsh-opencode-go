@@ -10,6 +10,8 @@ import {
   PROVIDER_ID,
   DEFAULT_USAGE_DISPLAY,
   DEFAULT_USAGE_PILL_STYLE,
+  DEFAULT_OPENCODE_GO_THEME,
+  type OpencodeGoTheme,
   type UsagePillStyle,
   accountsOf,
   accountRefOf,
@@ -151,6 +153,7 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
     try { return globalThis.localStorage?.getItem(sidebarAccountStorageKey) ?? null } catch { return null }
   })
   const mode = config.value?.usageDisplay ?? DEFAULT_USAGE_DISPLAY
+  const appearanceTheme = config.value?.appearanceTheme ?? DEFAULT_OPENCODE_GO_THEME
   const visible = config.status === 'ready' && config.value?.enabled !== false
     && (variant === 'pill'
       ? mode === 'always' || mode === 'auto' && provider === PROVIDER_ID
@@ -185,23 +188,23 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
       accounts={accounts} activeRef={activeRef} writable={config.writable}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
-      analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
+      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling. */}
     {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
       readAnalytics={props.readAnalytics} exportAnalytics={props.exportAnalytics} readQuota={readDialogQuota}
       accounts={accounts} activeRef={callingRef}
       contextKey={JSON.stringify([credentialRevision, config.value?.baseURL, config.value?.proxyURL])}
-      t={props.t} getLocale={props.getLocale} /> : null}
+      theme={appearanceTheme} t={props.t} getLocale={props.getLocale} /> : null}
   </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle }:
+function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, appearanceTheme }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
     onNextAccount?: () => void
-    variant: UsageVariant; pillStyle: UsagePillStyle
+    variant: UsageVariant; pillStyle: UsagePillStyle; appearanceTheme: OpencodeGoTheme
   }) {
   const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
@@ -213,7 +216,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
   const [rovingIndex, setRovingIndex] = useState(0)
-  const tokens = useGoThemeTokens()
+  const tokens = useGoThemeTokens(appearanceTheme)
   const root = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)

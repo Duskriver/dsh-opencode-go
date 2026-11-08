@@ -1,12 +1,12 @@
-/* Warm quota surfaces, with the same local typography and palette as settings. */
-.root { position: relative; display: inline-flex; min-width: 0; font-family: var(--go-font); color: var(--go-text, var(--dsw-alias-label-primary, CanvasText)); }
+/* Native Host tokens or the independent Classic palette, selected at the root. */
+.root { position: relative; display: inline-flex; min-width: 0; font-family: var(--go-font); color: var(--go-text); }
 .trigger { box-sizing: border-box; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%;
-  padding: 6px 10px; border: 1px solid var(--go-border); border-radius: 99px; background: var(--go-surface);
+  padding: 6px 10px; border: 1px solid var(--go-border); border-radius: var(--go-radius-pill); background: var(--go-surface);
   color: var(--go-text); font: inherit; font-size: 11.5px; line-height: 1.5; white-space: nowrap; cursor: pointer; }
 .trigger:hover, .trigger:focus-visible { border-color: color-mix(in srgb, var(--go-accent) 65%, var(--go-border)); background: var(--go-surface-2); }
 .trigger.plain { padding: 4px 6px; border-color: transparent; background: transparent; color: inherit; }
 .trigger.plain:hover, .trigger.plain:focus-visible { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
-.trigger:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+.trigger:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .pillStatus { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
 .pillStatus[data-warning] { background: var(--go-warning); }
 .reading { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
@@ -24,19 +24,19 @@
 
 .panel { position: absolute; bottom: calc(100% + 9px); right: 0; z-index: 100; box-sizing: border-box;
   display: flex; flex-direction: column; width: 352px; max-width: calc(100vw - 48px); max-height: 72vh;
-  border: 1px solid var(--go-border); border-radius: 12px; color: var(--go-text); font-size: 12px;
-  box-shadow: 0 18px 48px var(--go-shadow); isolation: isolate; }
+  border: 1px solid var(--go-border); border-radius: var(--go-radius-popover); color: var(--go-text); font-size: 12px;
+  box-shadow: var(--go-shadow); isolation: isolate; }
 /* The panel takes focus only when no action inside can: keep the ring for that fallback. */
 .panel:focus { outline: none; }
-.panel:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+.panel:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--go-surface); pointer-events: none; }
 .body { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; box-sizing: border-box;
   overflow-y: auto; overscroll-behavior: contain; padding: 7px 16px 12px; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
 .panelTitle, .panelHead { flex: none; display: flex; align-items: center; min-height: 46px; padding: 0; border-bottom: 1px solid var(--go-border);
-  color: var(--go-text); font-family: var(--go-display-font); font-size: 17px; font-weight: 400; letter-spacing: -.025em; }
+  color: var(--go-text); font-family: var(--go-display-font); font-size: 17px; font-weight: var(--go-display-weight); letter-spacing: var(--go-display-tracking); }
 .panelHead { gap: 8px; }
 .panelHead strong { font-size: 17px; font-weight: 400; letter-spacing: 0; color: var(--go-text); }
-.back { display: grid; place-items: center; width: 24px; height: 26px; margin-left: -5px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--go-muted); cursor: pointer; }
+.back { display: grid; place-items: center; width: 24px; height: 26px; margin-left: -5px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
 .back:hover { color: var(--go-text); background: var(--go-surface-2); }
 .icon { flex: none; width: 14px; height: 14px; }
 .tick { flex: none; width: 15px; height: 15px; color: var(--go-accent); }
@@ -45,25 +45,25 @@
 .accHead { display: flex; align-items: center; gap: 7px; min-height: 48px; }
 .dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
 .accName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
-.tag { flex: none; padding: 1px 6px; border-radius: 4px; background: var(--go-accent-soft); color: var(--go-accent); font-size: 11px; line-height: 1.6; }
-.switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 4px 5px; border: 0; border-radius: 4px;
+.tag { flex: none; padding: 1px 6px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 11px; line-height: 1.6; }
+.switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 4px 5px; border: 0; border-radius: var(--go-radius-small);
   background: none; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
 .switch:hover:not(:disabled) { background: var(--go-surface-2); }
 .switch:disabled { opacity: .5; cursor: default; }
 .option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 9px;
-  border: 0; background: none; color: var(--go-text); font: inherit; text-align: left; cursor: pointer; }
+  border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); font: inherit; text-align: left; cursor: pointer; }
 .option:hover:not(:disabled), .option[data-selected] { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
 .option:disabled { opacity: .5; cursor: default; }
 .optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .option[data-selected] .optionName { font-weight: 500; }
 .hint { margin: 10px 0 2px; color: var(--go-muted); font-size: 11.5px; line-height: 1.7; }
-.warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 4px 4px 0;
+.warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 var(--go-radius-small) var(--go-radius-small) 0;
   background: color-mix(in srgb, var(--go-warning) 7%, transparent); color: var(--go-text); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .warning p { margin: 4px 0 0; }
-.retry { align-self: flex-start; padding: 4px 8px; margin-bottom: 8px; border: 1px solid var(--go-border); border-radius: 4px;
+.retry { align-self: flex-start; padding: 4px 8px; margin-bottom: 8px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small);
   background: transparent; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
 .retry:disabled { opacity: .5; cursor: default; }
-.back:focus-visible, .switch:focus-visible, .option:focus-visible, .retry:focus-visible { outline: 2px solid var(--go-accent); outline-offset: -2px; }
+.back:focus-visible, .switch:focus-visible, .option:focus-visible, .retry:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 
 .window { padding: 15px 0; }
 .windowRow { display: flex; align-items: center; gap: 12px; }
@@ -88,20 +88,20 @@
 .analyticsEntry > .icon:first-child { color: var(--go-accent); }
 .analyticsEntry > .icon:last-child { color: var(--go-muted); }
 .analyticsEntry:hover { color: var(--go-accent); }
-.analyticsEntry:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; border-radius: 2px; }
+.analyticsEntry:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; border-radius: var(--go-radius-small); }
 
 /* The account badge cycles the viewed quota only. History has its own action. */
 .sidebarRoot { display: flex; width: 100%; min-width: 0; }
 .sidebarRoot[data-wide='false'] { width: 36px; min-width: 36px; flex: none; }
 .sidebarCard, .sidebarIcon { box-sizing: border-box; border: 1px solid var(--go-border); background: var(--go-surface); color: var(--go-text); font: inherit; }
-.sidebarCard { display: flex; flex-direction: column; align-items: stretch; gap: 11px; width: 100%; min-width: 0; padding: 14px 12px 6px; border-radius: 10px; text-align: left; }
+.sidebarCard { display: flex; flex-direction: column; align-items: stretch; gap: 11px; width: 100%; min-width: 0; padding: 14px 12px 6px; border-radius: var(--go-radius-card); text-align: left; }
 .sidebarHead { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 1px; }
-.sidebarHead > strong { flex: none; font-family: var(--go-display-font); font-size: 15px; font-weight: 400; white-space: nowrap; letter-spacing: -.03em; }
-.sidebarBadge { min-width: 0; margin-left: auto; padding: 1px 5px; border: 1px solid var(--go-border); border-radius: 3px;
+.sidebarHead > strong { flex: none; font-family: var(--go-display-font); font-size: 15px; font-weight: var(--go-display-weight); white-space: nowrap; letter-spacing: var(--go-display-tracking); }
+.sidebarBadge { min-width: 0; margin-left: auto; padding: 1px 5px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small);
   background: transparent; color: var(--go-muted); font-size: 11px; line-height: 1.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebarAccountButton { font-family: inherit; cursor: pointer; }
 .sidebarAccountButton:hover { color: var(--go-accent); border-color: var(--go-accent); }
-.sidebarAccountButton:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+.sidebarAccountButton:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .sidebarWindow { display: grid; grid-template-columns: 44px minmax(0, 1fr) 36px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
 .sidebarWindow > span { color: var(--go-muted); white-space: nowrap; }
 .sidebarWindow > strong { text-align: right; font-family: var(--go-number-font); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
@@ -111,15 +111,12 @@
 .sidebarHistory span { flex: 1; }
 .sidebarHistory > .icon:first-child { color: var(--go-accent); }
 .sidebarHistory:hover { color: var(--go-text); }
-.sidebarHistory:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 1px; border-radius: 2px; }
-.sidebarIcon { display: grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: 7px; color: var(--go-accent); }
+.sidebarHistory:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 1px; border-radius: var(--go-radius-small); }
+.sidebarIcon { display: grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: var(--go-radius-control); color: var(--go-accent); }
 button.sidebarIcon { cursor: pointer; }
 button.sidebarIcon:hover { background: var(--go-surface-2); border-color: var(--go-accent); }
-button.sidebarIcon:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 2px; }
+button.sidebarIcon:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .sidebarIcon .icon { width: 17px; height: 17px; }
-/* Stack the quota card with the Host footer's other plugin entries. */
-:global([class*="_footArea"] [class*="_footerActions"]):has(.sidebarRoot) { flex-direction: column; }
-
 @media (max-width: 360px) {
   .windowRow { gap: 8px; }
   .windowReset { padding-left: 56px; }

@@ -13,6 +13,8 @@ import {
   USAGE_DISPLAY_MODES,
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
+  DEFAULT_OPENCODE_GO_THEME,
+  OPENCODE_GO_THEMES,
   ACCOUNT_REF_PATTERN,
   DEFAULT_ACCOUNT_REF,
   MAX_ACCOUNTS,
@@ -48,6 +50,7 @@ const fields = {
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   showSidebarQuota: z.boolean().default(false),
   usagePillStyle: z.union(USAGE_PILL_STYLES.map(style => z.const(style))).default(DEFAULT_USAGE_PILL_STYLE),
+  appearanceTheme: z.union(OPENCODE_GO_THEMES.map(theme => z.const(theme))).default(DEFAULT_OPENCODE_GO_THEME),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   // A bare environment variable name: an empty string would otherwise pass the
   // schema, then never match any account (accountRefOf normalizes it away) and

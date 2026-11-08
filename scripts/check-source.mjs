@@ -3,8 +3,10 @@
  * tracked `src/`, `scripts/` and `tests/` sources must be UTF-8 without a BOM,
  * use LF line endings, carry no trailing whitespace and end with exactly one
  * newline. Tabs are rejected in `src/` and `scripts/`; `tests/` is exempt
- * because fixtures may embed literal tab characters. Run as
- * `npm run check:hygiene`, which is part of `npm run verify`.
+ * because fixtures may embed literal tab characters. Client CSS also rejects
+ * important declarations, direct Host color aliases, and global selectors that
+ * reach Host hash classes or parent structures. Run as `npm run check:hygiene`,
+ * part of `npm run verify`.
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -38,6 +40,13 @@ for (const path of files) {
     if (/[ \t]+$/.test(line)) problems.push(`${path}:${position}: trailing whitespace`)
     if (TAB_FREE_PREFIXES.some(prefix => path.startsWith(prefix)) && line.includes('\t')) {
       problems.push(`${path}:${position}: tab character is not allowed in src/ or scripts/`)
+    }
+    if (path.startsWith('src/client/') && path.endsWith('.css')) {
+      if (line.includes('!important')) problems.push(`${path}:${position}: important CSS declaration is not allowed`)
+      if (line.includes('--dsw-alias-')) problems.push(`${path}:${position}: Host colors belong in presentation.ts; consume internal --go-* tokens`)
+      if (/:global\(.*(?:\[class\*=|:has\(>)/.test(line)) {
+        problems.push(`${path}:${position}: global selector must not target Host hash classes or parent structures`)
+      }
     }
   }
   if (text.length > 0) {

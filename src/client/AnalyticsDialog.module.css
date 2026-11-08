@@ -1,34 +1,34 @@
-/* The same warm, editorial palette and type used by settings and quota surfaces. */
-.shell { width: min(1100px, 100%); max-height: 100%; padding: 0; gap: 0; border-radius: 14px; overflow: auto; scrollbar-width: thin; }
+/* Native Host tokens or Classic editorial colors, shared with every other surface. */
+.shell { width: min(1100px, 100%); max-height: 100%; padding: 0; gap: 0; border-radius: var(--go-radius-modal); overflow: auto; scrollbar-width: thin; }
 .dashboard { flex-shrink: 0; color: var(--go-text); background: var(--go-bg); font-family: var(--go-font); font-size: 13px; line-height: 1.6; padding: 26px 32px 24px; }
 .dashboard, .dashboard * { box-sizing: border-box; }
 .dashboard button, .dashboard select { font: inherit; }
 .dashboard button { cursor: pointer; color: inherit; }
 .dashboard button:disabled { cursor: default; opacity: .45; }
-.dashboard button:focus-visible, .dashboard select:focus-visible, .tableScroll:focus-visible { outline: 2px solid var(--go-accent); outline-offset: 3px; }
+.dashboard button:focus-visible, .dashboard select:focus-visible, .tableScroll:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 3px; }
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 30px; }
-.brand { display: flex; align-items: center; gap: 11px; font-family: var(--go-display-font); font-size: 23px; font-weight: 400; letter-spacing: -.04em; }
-.brandIcon { flex: none; width: 33px; height: 33px; display: grid; place-items: center; background: var(--go-accent-soft); border-radius: 9px; color: var(--go-accent); }
+.brand { display: flex; align-items: center; gap: 11px; font-family: var(--go-display-font); font-size: 23px; font-weight: var(--go-display-weight); letter-spacing: var(--go-display-tracking); }
+.brandIcon { flex: none; width: 33px; height: 33px; display: grid; place-items: center; background: var(--go-accent-soft); border-radius: var(--go-radius-control); color: var(--go-accent); }
 .brandIcon svg, .iconButton svg, .exportButton svg { width: 17px; height: 17px; }
-.iconButton { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 7px; background: transparent; border: 0; border-radius: 7px; }
+.iconButton { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 7px; background: transparent; border: 0; border-radius: var(--go-radius-control); }
 .iconButton:hover { background: var(--go-surface-2); }
 .heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
-.heading h1 { font-family: var(--go-display-font); font-size: 30px; line-height: 1.3; font-weight: 400; letter-spacing: -.025em; margin: 0 0 8px; }
+.heading h1 { font-family: var(--go-display-font); font-size: 30px; line-height: 1.3; font-weight: var(--go-display-weight); letter-spacing: var(--go-display-tracking); margin: 0 0 8px; }
 .heading p, .sectionHead p { margin: 0; font-size: 12px; color: var(--go-muted); }
 .source { display: flex; align-items: center; gap: 7px; color: var(--go-muted); font-size: 11px; white-space: nowrap; }
 .source i { width: 5px; height: 5px; background: var(--go-success); border-radius: 50%; }
 .toolbar { display: flex; align-items: center; gap: 10px; padding: 0; flex-wrap: wrap; }
 .accountSelect { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .accountSelect > span { color: var(--go-muted); font-size: 12px; }
-.accountSelect select { color: var(--go-text); background: var(--go-surface); border: 1px solid var(--go-border-strong); border-radius: 7px; height: 34px; padding: 0 26px 0 10px; min-width: 0; max-width: 205px; text-overflow: ellipsis; }
+.accountSelect select { color: var(--go-text); background: var(--go-surface); border: 1px solid var(--go-border-strong); border-radius: var(--go-radius-control); height: 34px; padding: 0 26px 0 10px; min-width: 0; max-width: 205px; text-overflow: ellipsis; }
 .rangeGroup, .segmented { display: inline-flex; align-items: center; gap: 3px; }
 .rangeGroup { margin-left: auto; }
-.rangeGroup button, .segmented button { border: 0; border-radius: 6px; min-height: 31px; padding: 5px 10px; background: transparent; color: var(--go-muted); font-size: 12px; white-space: nowrap; }
+.rangeGroup button, .segmented button { border: 0; border-radius: var(--go-radius-option); min-height: 31px; padding: 5px 10px; background: transparent; color: var(--go-muted); font-size: 12px; white-space: nowrap; }
 .rangeGroup button:hover, .segmented button:hover { color: var(--go-text); }
 .rangeGroup button[aria-pressed=true], .segmented button[aria-pressed=true] { background: var(--go-surface-2); color: var(--go-text); }
 .utc { color: var(--go-muted); font-size: 11px; font-family: var(--go-number-font); }
 .toolbarActions { display: flex; align-items: center; gap: 7px; }
-.exportButton { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; border: 1px solid var(--go-border-strong); background: var(--go-surface); border-radius: 7px; padding: 6px 11px; font-size: 12px !important; }
+.dashboard .exportButton { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; border: 1px solid var(--go-border-strong); background: var(--go-surface); border-radius: var(--go-radius-control); padding: 6px 11px; font-size: 12px; }
 .exportButton:hover { background: var(--go-surface-2); }
 .statusRow { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 14px; min-height: 35px; padding: 8px 0; font-size: 11px; color: var(--go-muted); }
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 0 27px; }
@@ -77,7 +77,7 @@
 .barStack i { display: block; min-height: 0; }
 .zeroDot { position: absolute; bottom: 0; width: 100%; height: 2px; background: var(--go-border); z-index: -1; }
 .xAxis { grid-column: 2; display: flex; justify-content: space-between; padding-top: 10px; font-size: 11px; color: var(--go-muted); }
-.dayDetail { display: flex; align-items: center; gap: 20px; padding: 14px 16px; min-height: 68px; margin-top: 12px; background: var(--go-surface-2); border-radius: 8px; flex-wrap: wrap; }
+.dayDetail { display: flex; align-items: center; gap: 20px; padding: 14px 16px; min-height: 68px; margin-top: 12px; background: var(--go-surface-2); border-radius: var(--go-radius-control); flex-wrap: wrap; }
 .dayDetail > div { display: flex; flex-direction: column; margin-right: auto; }
 .dayDetail strong { font-size: 13px; font-weight: 500; }
 .dayDetail small, .dayDetail > span { color: var(--go-muted); font-size: 11px; }
@@ -94,7 +94,7 @@
 .rankRow > b, .rankRow > small { font-family: var(--go-number-font); text-align: right; }
 .rankRow > b { font-size: 12px; font-weight: 400; }
 .rankRow > small { font-size: 11px; color: var(--go-muted); }
-.expandButton { display: block; margin: 16px auto 0; background: transparent; border: 0; padding: 6px 9px; color: var(--go-accent) !important; font-size: 12px !important; }
+.dashboard .expandButton { display: block; margin: 16px auto 0; background: transparent; border: 0; padding: 6px 9px; color: var(--go-accent); font-size: 12px; }
 .tableScroll { overflow: auto; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
 .details table { width: 100%; min-width: 890px; border-collapse: collapse; font-size: 12px; }
 .details th { color: var(--go-muted); font-weight: 400; padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--go-border); white-space: nowrap; }
@@ -106,7 +106,7 @@
 .details td small { font-size: 11px; color: var(--go-muted); }
 .details tbody tr:hover { background: var(--go-surface-2); }
 .footer { display: flex; flex-direction: column; gap: 5px; margin-top: 24px; font-size: 11px; color: var(--go-muted); }
-.notice { display: flex; align-items: center; justify-content: space-between; gap: 15px; background: color-mix(in srgb, var(--go-warning) 8%, var(--go-bg)); color: var(--go-text); border: 1px solid color-mix(in srgb, var(--go-warning) 35%, var(--go-border)); border-radius: 8px; padding: 12px 14px; font-size: 12px; margin: 0 0 18px; }
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 15px; background: color-mix(in srgb, var(--go-warning) 8%, var(--go-bg)); color: var(--go-text); border: 1px solid color-mix(in srgb, var(--go-warning) 35%, var(--go-border)); border-radius: var(--go-radius-control); padding: 12px 14px; font-size: 12px; margin: 0 0 18px; }
 .notice button { background: transparent; border: 0; padding: 4px; color: var(--go-accent); white-space: nowrap; }
 .state { min-height: 240px; display: flex; align-items: center; justify-content: center; flex-direction: column; color: var(--go-muted); }
 .state > svg, .empty > svg { width: 30px; height: 30px; opacity: .5; }
@@ -115,9 +115,8 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .barStack { transition: none; } }
 @media (max-width: 760px) {
-  /* Only this dialog fills the viewport; the Host's other modals keep their inset. */
-  :global(div):has(> .shell) { padding: var(--dsh-frame-overlay-top, 0px) 0 0; }
-  .shell { width: 100%; max-width: 100%; height: 100%; max-height: 100%; flex-shrink: 0; border-radius: 0; }
+  /* Fill the viewport from the dialog's own shell, below the Host's safe area. */
+  .shell { position: fixed; inset: var(--dsh-frame-overlay-top, 0px) 0 0; width: auto; max-width: none; height: auto; max-height: none; flex-shrink: 0; border-radius: 0; }
   .dashboard { min-height: 100%; padding: 22px 20px; }
   .header { margin-bottom: 25px; }
   .heading { margin-bottom: 21px; }

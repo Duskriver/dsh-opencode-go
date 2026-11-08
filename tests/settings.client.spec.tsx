@@ -42,7 +42,7 @@ describe("settings page and typed capacity editing", () => {
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
     | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
-    | 'usageDisplay' | 'usagePillStyle' | 'showSidebarQuota' | 'freeEnabled'
+    | 'usageDisplay' | 'usagePillStyle' | 'appearanceTheme' | 'showSidebarQuota' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -55,6 +55,7 @@ describe("settings page and typed capacity editing", () => {
     saving: false,
     failed: false,
     enabled: true,
+    appliedAppearanceTheme: 'native',
     modelVisibility: {},
     pickerSaving: false,
     pickerFailed: false,
@@ -78,6 +79,7 @@ describe("settings page and typed capacity editing", () => {
       ...settled,
       usageDisplay: field('auto'),
       usagePillStyle: field('badge'),
+      appearanceTheme: field('native'),
       showSidebarQuota: field('false'),
       freeEnabled: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
@@ -152,14 +154,19 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
-    it('keeps quota appearance inside the collapsed advanced settings and stages both edits', () => {
+    it('keeps appearance inside the collapsed advanced settings and stages all three edits', () => {
       const reading = actions()
       renderSection(stateOf(), reading, { foldedModels: true })
       expect(screen.queryByRole('switch', { name: en.showSidebarQuotaLabel })).toBeNull()
+      expect(screen.queryByRole('radiogroup', { name: en.appearanceThemeLabel })).toBeNull()
       expect(screen.queryByRole('radiogroup', { name: en.usagePillStyleLabel })).toBeNull()
       openAdvanced()
       const appearance = screen.getByRole('region', { name: en.usageAppearanceLabel })
       expect(document.getElementById('opencode-go-advanced')?.contains(appearance)).toBe(true)
+      const theme = screen.getByRole('radiogroup', { name: en.appearanceThemeLabel })
+      expect(within(theme).getByRole<HTMLInputElement>('radio', { name: en.appearanceTheme_native }).checked).toBe(true)
+      fireEvent.click(within(theme).getByRole('radio', { name: en.appearanceTheme_classic }))
+      expect(reading.edit).toHaveBeenCalledWith('appearanceTheme', 'classic')
       const toggle = screen.getByRole('switch', { name: en.showSidebarQuotaLabel })
       expect(toggle.getAttribute('aria-checked')).toBe('false')
       fireEvent.click(toggle)
@@ -171,17 +178,32 @@ describe("settings page and typed capacity editing", () => {
       expect(reading.save).not.toHaveBeenCalled()
     })
 
+    it('keeps the applied page theme Native while a Classic draft is only previewed', () => {
+      renderSection(stateOf({ appearanceTheme: field('classic'), appliedAppearanceTheme: 'native' }), {}, { foldedModels: true })
+      const page = document.querySelector('[style*="--go-bg"]') as HTMLElement
+      expect(page.style.getPropertyValue('--go-display-font')).toContain('--dsw-font-family')
+      openAdvanced()
+      const theme = screen.getByRole('radiogroup', { name: en.appearanceThemeLabel })
+      expect(within(theme).getByRole<HTMLInputElement>('radio', { name: en.appearanceTheme_classic }).checked).toBe(true)
+      const previews = within(theme).getAllByText(`${en.usageRollingShort} 24% · ${en.usageWeekShort} 48%`)
+      expect(previews.some(sample => sample.parentElement?.style.getPropertyValue('--go-display-font').includes('Anthropic Serif'))).toBe(true)
+      expect(page.style.getPropertyValue('--go-display-font')).toContain('--dsw-font-family')
+    })
+
     it('disables appearance changes for read-only settings and resets saved appearance overrides', () => {
       const reading = actions()
-      const state = stateOf({ showSidebarQuota: field('true', { overridden: true }), usagePillStyle: field('plain', { overridden: true }) })
+      const state = stateOf({ appearanceTheme: field('classic', { overridden: true }), showSidebarQuota: field('true', { overridden: true }), usagePillStyle: field('plain', { overridden: true }) })
       const store = renderSection(state, reading)
       expect(screen.getByRole('button', { name: en.advancedLabel }).textContent).toBe(en.advancedLabel)
       openAdvanced()
       expect(screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll }).disabled).toBe(true)
       fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
-      expect(reading.resetField.mock.calls).toEqual([['showSidebarQuota'], ['usagePillStyle']])
+      expect(reading.resetField.mock.calls).toEqual([['appearanceTheme'], ['showSidebarQuota'], ['usagePillStyle']])
       act(() => { store.set({ ...state, writable: false }) })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.showSidebarQuotaLabel }).disabled).toBe(true)
+      for (const radio of within(screen.getByRole('radiogroup', { name: en.appearanceThemeLabel })).getAllByRole<HTMLInputElement>('radio')) {
+        expect(radio.disabled).toBe(true)
+      }
       for (const radio of within(screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })).getAllByRole<HTMLInputElement>('radio')) {
         expect(radio.disabled).toBe(true)
       }
@@ -1401,6 +1423,20 @@ describe('typed ConfigForm drafts and writes', () => {
     actions.edit('usagePillStyle', 'neon')
     actions.edit('showSidebarQuota', '1')
     expect(snapshot()).toMatchObject({ invalid: true, showSidebarQuota: { invalid: true }, usagePillStyle: { invalid: true } })
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('stages and saves the visual theme without changing the applied theme early', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    expect(snapshot()).toMatchObject({ appearanceTheme: { text: 'native' }, appliedAppearanceTheme: 'native' })
+    actions.edit('appearanceTheme', 'classic')
+    expect(snapshot()).toMatchObject({ appearanceTheme: { text: 'classic' }, appliedAppearanceTheme: 'native', dirty: true })
+    await controller.save()
+    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'set', path: ['appearanceTheme'], value: 'classic' }], expect.any(Number))
+    expect(snapshot()).toMatchObject({ appearanceTheme: { text: 'classic' }, appliedAppearanceTheme: 'classic', dirty: false })
+    actions.edit('appearanceTheme', 'system')
+    expect(snapshot()).toMatchObject({ appearanceTheme: { invalid: true }, appliedAppearanceTheme: 'classic', invalid: true })
     await controller.save()
     expect(host.mutate).toHaveBeenCalledTimes(1)
   })

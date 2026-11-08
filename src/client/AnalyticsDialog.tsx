@@ -1,7 +1,7 @@
 /** Official workspace history, built from a single Console snapshot. */
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AnalyticsDayRow, AnalyticsExport, AnalyticsModelRow, AnalyticsQuery, AnalyticsRange, AnalyticsReport, AnalyticsTotals, GoAccount, GoUsage } from '../contracts.ts'
+import { DEFAULT_OPENCODE_GO_THEME, type AnalyticsDayRow, type AnalyticsExport, type AnalyticsModelRow, type AnalyticsQuery, type AnalyticsRange, type AnalyticsReport, type AnalyticsTotals, type GoAccount, type GoUsage, type OpencodeGoTheme } from '../contracts.ts'
 import { themeStyle, useGoThemeTokens, type en } from './presentation.ts'
 import css from './AnalyticsDialog.module.css'
 
@@ -55,11 +55,13 @@ export interface AnalyticsDialogProps {
   readQuota?: (ref: string) => Promise<GoUsage>
   accounts: readonly GoAccount[]; activeRef: string; contextKey?: string | number
   t: AnalyticsTranslate; getLocale?: () => string
+  /** Defaults to Native for embedded callers and older tests. */
+  theme?: OpencodeGoTheme
 }
 export function AnalyticsDialog(props: AnalyticsDialogProps) {
   return <Modal open={props.open} onClose={props.onClose} title={props.t('analyticsTitle')} headless className={css.shell}>{props.open ? <Dashboard key={props.contextKey} {...props} /> : null}</Modal>
 }
-function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQuota, onClose, t, getLocale }: AnalyticsDialogProps) {
+function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQuota, onClose, t, getLocale, theme = DEFAULT_OPENCODE_GO_THEME }: AnalyticsDialogProps) {
   const [selected, setSelected] = useState(activeRef)
   const accountRef = accounts.some(a => a.apiKeyEnv === selected) ? selected : accounts.find(a => a.apiKeyEnv === activeRef)?.apiKeyEnv ?? accounts[0]?.apiKeyEnv ?? ''
   const [range, setRange] = useState<AnalyticsRange>('30d'), [revision, setRevision] = useState(0)
@@ -70,7 +72,7 @@ function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQu
   const [exporting, setExporting] = useState(false), [exportFailed, setExportFailed] = useState(false)
   const force = useRef(false), exporter = useRef<AbortController | null>(null)
   const readers = useRef({ readAnalytics, readQuota, exportAnalytics }); readers.current = { readAnalytics, readQuota, exportAnalytics }
-  const tokens = useGoThemeTokens(), locale = getLocale?.()
+  const tokens = useGoThemeTokens(theme), locale = getLocale?.()
   const key = JSON.stringify([accountRef, range]), report = snapshot?.key === key ? snapshot.value : null, error = failure?.key === key ? failure.error : null
   useEffect(() => {
     if (!accountRef) { setLoading(false); setSnapshot(null); setFailure(null); return }

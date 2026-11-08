@@ -1,5 +1,6 @@
-/** English and Chinese copy and the shared, Host-following presentation tokens. */
+/** English and Chinese copy and the shared Native/Classic presentation tokens. */
 import { type CSSProperties } from 'react';
+import { type OpencodeGoTheme } from '../contracts.ts';
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
 export declare const en: {
     accountsTitle: string;
@@ -211,6 +212,11 @@ export declare const en: {
     freeEnabledHint: string;
     usageAppearanceLabel: string;
     usageAppearanceReset: string;
+    appearanceThemeLabel: string;
+    appearanceThemeHint: string;
+    appearanceThemePreviewHint: string;
+    appearanceTheme_native: string;
+    appearanceTheme_classic: string;
     showSidebarQuotaLabel: string;
     showSidebarQuotaSummary: string;
     showSidebarQuotaHint: string;
@@ -266,50 +272,53 @@ export declare const en: {
 export declare const zh: typeof en;
 /** Every copy key this page's dictionaries must supply. */
 export type OpencodeGoKey = keyof typeof en;
-/** Warm paper/charcoal surfaces shared by every plugin-owned view. */
+/** All visual values shared by the settings, quota and history surfaces. */
 export interface GoThemeTokens {
     readonly bg: string;
     readonly surface: string;
     readonly surface2: string;
     readonly border: string;
-    /** Control boundary that keeps WCAG 1.4.11 3:1 against both surfaces. */
+    /** Control boundary whose local fallback keeps WCAG 1.4.11 3:1 on every surface. */
     readonly borderStrong: string;
     readonly text: string;
     readonly muted: string;
     readonly accent: string;
+    /** Output-token chart series; Native derives it from the Host success token. */
     readonly accent2: string;
     readonly accentSoft: string;
     readonly onAccent: string;
     readonly cacheRead: string;
     readonly cacheWrite: string;
+    /** A complete box-shadow declaration, not merely a shadow color. */
     readonly shadow: string;
     readonly success: string;
     readonly warning: string;
     readonly danger: string;
+    readonly font: string;
+    readonly displayFont: string;
+    readonly numberFont: string;
+    readonly radiusSmall: string;
+    readonly radiusControl: string;
+    readonly radiusPill: string;
+    readonly radiusOption: string;
+    readonly radiusCard: string;
+    readonly radiusPopover: string;
+    readonly radiusModal: string;
+    readonly focusWidth: string;
+    readonly displayWeight: string;
+    readonly displayTracking: string;
 }
-/** Host color scheme followed by {@link GO_THEME_TOKENS}. */
+/** Host color scheme followed by both visual themes. */
 export type GoThemeScheme = 'dark' | 'light';
-/**
- * Pure fallback values, used when a Host alias token is absent and as the static
- * baseline for the WCAG contrast assertions. The chart series colors and the
- * strong control border have no Host token, so these constants are painted as-is.
- */
+/** Classic is deliberately independent from Host and third-party theme overrides. */
 export declare const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
-/** The unified tokens for the Host's current scheme. */
-export declare const GO_THEME_TOKENS: Record<GoThemeScheme, GoThemeTokens>;
-/**
- * Follow the Host's light/dark scheme. The layout presenter marks a dark body
- * with `data-ds-dark-theme`; the attribute is observed so switching the Host
- * theme updates the surfaces without a reload.
- */
-export declare function useHostScheme(): 'dark' | 'light';
-/** The unified tokens for the Host's current scheme. */
-export declare function useGoThemeTokens(): GoThemeTokens;
-/**
- * Inline custom properties consumed by settings, quota surfaces and history.
- * The Host's font settings come first and the local branded stacks stay as
- * fallbacks; no font file is fetched, so offline machines keep their system fonts.
- * @param tokens - the active palette.
- * @returns a style object carrying every `--go-*` variable.
- */
+/** Neutral fallbacks used only when Native cannot resolve a Host token. */
+export declare const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
+/** Theme first, color scheme second: Native follows the Host, Classic stays branded. */
+export declare const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeScheme, GoThemeTokens>>;
+/** Follow the Host's body color-scheme marker without adding a Theme service dependency. */
+export declare function useHostScheme(): GoThemeScheme;
+/** Resolve one visual theme in the Host's current color scheme. */
+export declare function useGoThemeTokens(theme?: OpencodeGoTheme): GoThemeTokens;
+/** Internal derived custom properties; third-party themes customize the Host tokens instead. */
 export declare function themeStyle(tokens: GoThemeTokens): CSSProperties;

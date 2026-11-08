@@ -13,6 +13,9 @@ import {
   USAGE_DISPLAY_MODES,
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
+  DEFAULT_OPENCODE_GO_THEME,
+  OPENCODE_GO_THEMES,
+  type OpencodeGoTheme,
   SETTINGS_NAMESPACE,
   type OpencodeGoConfig,
   type OpencodeGoSettings,
@@ -33,7 +36,7 @@ export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } 
 
 export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
-export const TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'showSidebarQuota', 'freeEnabled', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
+export const TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
   'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget',
   'requestImageMaxBytes'] as const
 
@@ -92,6 +95,7 @@ export const NUMERIC_FIELD_LIMITS: Partial<Record<TextField, NumericFieldLimit>>
 function formatField(field: TextField, value: unknown): string {
   if (field === 'usageDisplay') return typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY
   if (field === 'usagePillStyle') return typeof value === 'string' ? value : DEFAULT_USAGE_PILL_STYLE
+  if (field === 'appearanceTheme') return typeof value === 'string' ? value : DEFAULT_OPENCODE_GO_THEME
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return String(value === true)
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 }
@@ -99,6 +103,7 @@ function formatField(field: TextField, value: unknown): string {
 function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'usageDisplay') return USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as OpencodeGoConfig['usageDisplay'] } : undefined
   if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as OpencodeGoConfig['usagePillStyle'] } : undefined
+  if (field === 'appearanceTheme') return OPENCODE_GO_THEMES.some(theme => theme === text) ? { kind: 'set', value: text as OpencodeGoTheme } : undefined
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
@@ -213,6 +218,9 @@ export interface OpencodeGoSectionState extends FormShell {
   showSidebarQuota: FieldState
   freeEnabled: FieldState
   usagePillStyle: FieldState
+  appearanceTheme: FieldState
+  /** Last saved theme; text drafts preview without switching the applied interface. */
+  appliedAppearanceTheme: OpencodeGoTheme
   modelVisibility: Readonly<Record<string, boolean>>
   pickerSaving: boolean
   pickerFailed: boolean
@@ -344,6 +352,7 @@ export class OpencodeGoSectionController {
       dirty: plan.length > 0, invalid: plan.some(item => !item.write), saving: this.saving || this.accountBusy, failed: this.failed,
       accounts: this.accountState(), enabled: snapshot.value?.enabled ?? true,
       ...Object.fromEntries(TEXT_FIELDS.map(field => [field, this.field(field)])) as Record<TextField, FieldState>,
+      appliedAppearanceTheme: snapshot.value?.appearanceTheme ?? DEFAULT_OPENCODE_GO_THEME,
       modelVisibility: snapshot.value?.modelVisibility ?? {}, pickerSaving: this.pickerSaving, pickerFailed: this.pickerFailed,
       enabledFailed: this.enabledFailed,
       models: this.models,

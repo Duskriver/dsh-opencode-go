@@ -21,7 +21,7 @@ DSH already supports OpenCode Go natively. This plugin focuses on usage inside c
 - **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
 - **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
 
-Supports Chinese and English, following DSH's interface language. The screenshots below show the Chinese interface.
+Supports Chinese and English, following DSH's interface language. The existing screenshots below show the Chinese **Classic** theme; the default **Native** theme follows the active DSH color, typography, and geometry tokens.
 
 ## View subscription usage
 
@@ -48,7 +48,7 @@ Open the dashboard from the conversation input's expanded usage pill or the side
 - **One official source**: totals, daily charts and model detail use the same official daily CSV, covering requests, input/output/cache tokens and the official usage amount. Models are grouped by provider + model. Ranges are today, 7, 30 and 90 days; all dates use UTC.
 - **Independent viewing account**: defaults to the current inference account and shows only the workspace belonging to the selected key, including calls from other clients. Changing the viewing account does not change the conversation account. All three dashboard quota windows follow the selection. Anonymous Free coverage is not guaranteed.
 - **Official usage amount**: sums `cost_micro_cents` directly (`1 USD = 100,000,000` units); it does not mean an additional Go charge. Official daily aggregates may be delayed.
-- **One visual language**: settings, the usage pill, sidebar and dashboard share warm paper / charcoal surfaces and terracotta accents, following the Host's light/dark mode. Locally installed Anthropic Serif / Sans / Mono fonts are preferred, with system and CJK serif fallbacks. The dashboard becomes full-screen on narrow screens and retains daily token/request bars, model rankings and details.
+- **Two themes, shared layouts**: settings, the usage pill, sidebar and dashboard use the same component layouts. `appearanceTheme` selects **DSH Native (default)** or **OpenCode Go Classic**, with light/dark schemes following the Host; see [Grouped advanced settings](#grouped-advanced-settings) for the theme behavior. The dashboard becomes full-screen on narrow screens and retains daily token/request bars, model rankings and details.
 - **On-demand queries**: history loads when opening, changing account or range, or refreshing manually. The Host uses a 30-second cache; forced refresh bypasses it. History is not polled in the background. Only official model gateway configurations support it; errors remain explicit without falling back to local scans.
 
 Keys stay on the Host. Normal reports send the browser only aggregate numbers and provider / model / day; an official CSV explicitly downloaded by the user may contain member fields. See [usage analytics notes](docs/usage-analytics.en.md) for accounting and privacy details.
@@ -140,6 +140,8 @@ Streaming, reasoning, tool calls, and image input depend on model capabilities. 
 
 Advanced settings are grouped into **Usage settings**, **Connection**, **Cache and timeouts**, and **Image handling**. Hover over a question mark for help. **Reset all to defaults** clears the card's custom overrides; save to apply the reset. The current account selection is preserved.
 
+Under **Usage settings → Appearance**, set `appearanceTheme` to `native` or `classic`. **Native (default)** follows DSH and third-party themes through public Host semantic tokens for colors, fonts, radii, shadows and focus styling, with neutral fallbacks when a Host token cannot be resolved. Existing profiles without this field also default to Native. **Classic** retains warm paper / charcoal surfaces, terracotta accents, and preferred Anthropic Serif / Sans / Mono fonts with system and CJK serif fallbacks; Host and third-party themes do not override these brand tokens, while the Host's light/dark mode still selects the Classic scheme. **Input quota style** remains `badge` (default) or `plain`, and **Show quota in the sidebar** remains an independent switch, off by default.
+
 ![Advanced settings: grouped controls, hints, and a shared reset action](docs/assets/advanced-settings.png)
 
 HTTP, HTTPS, and SOCKS5 proxies are supported. After saving, subsequent conversations, catalog updates, and usage queries use the proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
@@ -188,7 +190,7 @@ The source is organized by domain:
 | Requests, model catalog and protocol conversion | `adapter.ts`, `catalog.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
 | Accounts, official quota, official CSV history and transport | `accounts.ts`, `analytics.ts`, `transport.ts` |
 | Browser registration and typed state | `client/index.ts`, `client/controller.ts` |
-| Host settings, account/model controls, usage and copy | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
+| Host settings, account/model controls, usage and Native/Classic presentation | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
 
 The `x-opencode-session` header carries a stable form of the conversation ID for gateway cache affinity: printable ASCII IDs pass through unchanged, and only non-printable or plugin-reserved IDs are hashed (sha256 + base64url); neither form contains message content. The browser uses DSH's `configForms`; capacities remain typed objects while editing. Images use per-request count and encoded-byte budgets, with at most four preparations per request. The package keeps its `.` and `./client` exports. Development dependencies pin DSH `0.2.1-rc.5` and Cordis `4.0.5`; runtime Cordis requires `^4.0.5`.
 

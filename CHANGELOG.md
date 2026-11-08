@@ -3,6 +3,17 @@
 本文件记录 dsh-opencode-go 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- 新增 `appearanceTheme` 界面主题设置（`native` / `classic`），默认 `native`；未设置该字段的旧配置缺省使用 Native。
+
+### Changed
+
+- 设置页、用量胶囊、侧栏与历史看板共用布局和内部主题 token：Native 通过 Host 公开语义 token 跟随 DSH 与第三方主题的颜色、字体、圆角等，无法解析时使用中性 fallback；Classic 保留暖纸 / 炭灰、陶土色与衬线风格，不跟随 Host 或第三方主题覆盖这些品牌 token。
+- 主题切换不再改变组件布局；样式边界收敛到插件自有组件与共享 token 层，移除对宿主私有样式的越界覆盖。输入栏 `badge` / `plain` 样式及侧栏额度设置行为不变。
+
 ## [0.3.0] - 2026-11-07
 
 ### Added

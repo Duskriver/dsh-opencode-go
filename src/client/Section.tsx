@@ -11,7 +11,9 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   type en,
+  GO_THEME_TOKENS,
   useGoThemeTokens,
+  useHostScheme,
   themeStyle,
 } from './presentation.ts'
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
@@ -42,6 +44,7 @@ import {
   type InputModality,
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
+  OPENCODE_GO_THEMES,
 } from '../contracts.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 
@@ -652,7 +655,7 @@ function numericBounds(field: TextField): { numeric: true; min?: number; max?: n
   }
 }
 
-const APPEARANCE_FIELDS = ['showSidebarQuota', 'usagePillStyle'] as const
+const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'usagePillStyle'] as const
 
 export type { OpencodeGoSectionState } from './controller.ts'
 
@@ -778,8 +781,12 @@ function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
   onEdit: (field: TextField, text: string) => void
   onReset: (field: EditableField) => void
 }) {
-  const tokens = useGoThemeTokens()
+  const scheme = useHostScheme()
+  const draftTheme = state.appearanceTheme.text === 'classic' ? 'classic' : 'native'
+  const tokens = GO_THEME_TOKENS[draftTheme][scheme]
   const locked = disabled || state.saving
+  const themeId = 'opencode-go-appearance-theme'
+  const themeDescribedBy = state.appearanceTheme.invalid ? `${themeId}-hint ${themeId}-error` : `${themeId}-hint`
   const styleId = 'opencode-go-usage-pill-style'
   const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
   return <section className={css.appearanceGroup} aria-labelledby="opencode-go-appearance-title">
@@ -793,6 +800,32 @@ function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
           }
         }}>{t('usageAppearanceReset')}</button>
     </div>
+    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
+      aria-describedby={themeDescribedBy} aria-invalid={state.appearanceTheme.invalid || undefined}>
+      <legend className={css.appearanceLegend}>
+        <span id={`${themeId}-label`} className={css.rowTitle}>{t('appearanceThemeLabel')}</span>
+        <HintMark hint={t('appearanceThemeHint')} />
+      </legend>
+      <p id={`${themeId}-hint`} className={css.appearanceHint}>{t('appearanceThemePreviewHint')}</p>
+      <div className={css.appearanceChoices}>
+        {OPENCODE_GO_THEMES.map(value => <label key={value} className={css.appearanceChoice}
+          data-selected={state.appearanceTheme.text === value} data-disabled={locked}>
+          <span className={css.appearanceChoiceHead}>
+            <span>{t(`appearanceTheme_${value}`)}</span>
+            <input type="radio" name={themeId} value={value} className={css.appearanceRadio}
+              checked={state.appearanceTheme.text === value} disabled={locked} aria-describedby={themeDescribedBy}
+              onChange={() => { onEdit('appearanceTheme', value) }} />
+          </span>
+          <span className={css.appearancePreview} style={themeStyle(GO_THEME_TOKENS[value][scheme])} aria-hidden="true">
+            <span className={`${usageCss.trigger} ${css.appearanceSample}`}>
+              {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
+            </span>
+          </span>
+        </label>)}
+      </div>
+      {state.appearanceTheme.invalid
+        ? <p id={`${themeId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+    </fieldset>
     <div className={css.appearanceToggle}>
       <div className={css.appearanceCopy}>
         <div className={css.rowLabel}>
@@ -940,7 +973,7 @@ function Loaded(props: {
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
-  const tokens = useGoThemeTokens()
+  const tokens = useGoThemeTokens(state.appliedAppearanceTheme)
   const [advanced, setAdvanced] = useState(false)
   // The list is the page's largest block and the tuning fields sit under it, so
   // it ships folded: a reader opens it when they came to change models.

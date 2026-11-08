@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AnalyticsQuery, AnalyticsReport, GoUsage } from '../src/contracts.ts'
 import { AnalyticsDialog, historyMoney, historyNumber, type AnalyticsDialogProps } from '../src/client/AnalyticsDialog.tsx'
-import { en, zh } from '../src/client/presentation.ts'
+import { en, GO_THEME_TOKENS, zh } from '../src/client/presentation.ts'
 import css from '../src/client/AnalyticsDialog.module.css'
 import { analyticsCounts, createAnalyticsReport } from './support/analytics.ts'
 import './support/client.tsx'
@@ -30,6 +30,17 @@ describe('official history dashboard', () => {
     expect(screen.getByText(en.analyticsAmountHint)).toBeTruthy()
     expect(document.querySelectorAll('[data-day]')).toHaveLength(2)
     expect(document.body.textContent).not.toMatch(/Scanning|unsettled|unpriced|session coverage/i)
+  })
+
+  it('uses Native by default and applies Classic to the same dashboard when selected', async () => {
+    const view = render(<AnalyticsDialog {...props()} />)
+    await screen.findAllByText('deepseek-v4.1-flash')
+    const dashboard = document.querySelector(`.${css.dashboard}`) as HTMLElement
+    expect(dashboard.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.native.light.bg)
+    expect(dashboard.style.getPropertyValue('--go-display-font')).toContain('--dsw-font-family')
+    view.rerender(<AnalyticsDialog {...props({ theme: 'classic' })} />)
+    expect(dashboard.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.classic.light.bg)
+    expect(dashboard.style.getPropertyValue('--go-display-font')).toContain('Anthropic Serif')
   })
 
   it('renders the dashboard copy from the active locale dictionary in Chinese', async () => {

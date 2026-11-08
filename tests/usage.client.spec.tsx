@@ -4,7 +4,7 @@ import css from '../src/client/UsagePill.module.css'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { GoUsage, AnalyticsQuery } from '../src/contracts.ts'
+import type { GoUsage, AnalyticsQuery, OpencodeGoTheme } from '../src/contracts.ts'
 import { UsagePill, SidebarQuota } from '../src/client/UsagePill.tsx'
 import {
   en,
@@ -970,7 +970,7 @@ describe("conversation usage", () => {
     expect(trigger().textContent).not.toContain('9+')
   })
 
-  it('uses the unified Host-following palette in the pill and its popover', async () => {
+  it('uses the Native Host-following palette by default in the pill and its popover', async () => {
     document.body.removeAttribute('data-ds-dark-theme')
     const host = usageSettings({ usageDisplay: 'always' })
     await act(async () => {
@@ -978,7 +978,7 @@ describe("conversation usage", () => {
         readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
     })
     const root = trigger().parentElement as HTMLElement
-    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.light.bg)
+    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.native.light.bg)
     showDetails()
     expect(within(openPanel()).queryByRole('group', { name: /^(Theme|主题)$/ })).toBeNull()
     expect(openPanel().querySelector('[data-theme]')).toBeNull()
@@ -986,34 +986,48 @@ describe("conversation usage", () => {
       document.body.setAttribute('data-ds-dark-theme', '')
       await Promise.resolve()
     })
-    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.dark.bg)
+    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.native.dark.bg)
     expect(openPanel()).toBeTruthy()
     document.body.removeAttribute('data-ds-dark-theme')
   })
+
+  it('uses the saved Classic selection in the pill instead of the Native default', async () => {
+    document.body.removeAttribute('data-ds-dark-theme')
+    const host = usageSettings({ usageDisplay: 'always', appearanceTheme: 'classic' })
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(usage)} t={t} />)
+    })
+    const root = trigger().parentElement as HTMLElement
+    expect(root.style.getPropertyValue('--go-bg')).toBe(GO_THEME_TOKENS.classic.light.bg)
+    expect(root.style.getPropertyValue('--go-display-font')).toContain('Anthropic Serif')
+    showDetails()
+    expect(openPanel()).toBeTruthy()
+  })
 })
 
-describe('Host-following presentation', () => {
+describe('Native and Classic presentation', () => {
   beforeEach(() => { localStorage.clear(); document.body.removeAttribute('data-ds-dark-theme') })
 
   afterEach(() => { cleanup(); localStorage.clear(); document.body.removeAttribute('data-ds-dark-theme') })
 
-  it('exposes a single palette in two Host schemes and carries every token into the style', () => {
-    expect(Object.keys(GO_THEME_TOKENS).sort()).toEqual(['dark', 'light'])
-    const style = themeStyle(GO_THEME_TOKENS.dark) as Record<string, string>
+  it('exposes two visual themes in two Host schemes and carries every token into the style', () => {
+    expect(Object.keys(GO_THEME_TOKENS).sort()).toEqual(['classic', 'native'])
+    const style = themeStyle(GO_THEME_TOKENS.native.dark) as Record<string, string>
     const properties = {
       bg: '--go-bg', surface: '--go-surface', surface2: '--go-surface-2', border: '--go-border',
       text: '--go-text', muted: '--go-muted', accent: '--go-accent', accent2: '--go-accent-2',
       success: '--go-success', warning: '--go-warning', danger: '--go-danger',
     } as const
     for (const [key, property] of Object.entries(properties)) {
-      expect(style[property]).toBe(GO_THEME_TOKENS.dark[key as keyof typeof properties])
+      expect(style[property]).toBe(GO_THEME_TOKENS.native.dark[key as keyof typeof properties])
     }
     expect(style['--go-number-font']).toContain('monospace')
   })
 
-  function Probe() {
-    const tokens = useGoThemeTokens()
-    return <span data-testid="probe" data-bg={tokens.bg} data-accent={tokens.accent} />
+  function Probe({ theme }: { theme?: OpencodeGoTheme }) {
+    const tokens = useGoThemeTokens(theme)
+    return <span data-testid="probe" data-bg={tokens.bg} data-accent={tokens.accent} data-display-font={tokens.displayFont} />
   }
 
   it('ignores a legacy skin preference and follows the Host light/dark attribute in both directions', async () => {
@@ -1021,19 +1035,32 @@ describe('Host-following presentation', () => {
     const write = vi.spyOn(Storage.prototype, 'setItem')
     render(<Probe />)
     const probe = screen.getByTestId('probe')
-    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.light.bg)
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.native.light.bg)
     await act(async () => {
       document.body.setAttribute('data-ds-dark-theme', '')
       await Promise.resolve()
     })
-    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.dark.bg)
-    expect(probe.getAttribute('data-accent')).toBe(GO_THEME_TOKENS.dark.accent)
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.native.dark.bg)
+    expect(probe.getAttribute('data-accent')).toBe(GO_THEME_TOKENS.native.dark.accent)
     await act(async () => {
       document.body.removeAttribute('data-ds-dark-theme')
       await Promise.resolve()
     })
-    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.light.bg)
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.native.light.bg)
     expect(write).not.toHaveBeenCalled()
     write.mockRestore()
+  })
+
+  it('selects Classic explicitly without reading or writing a legacy local preference', async () => {
+    render(<Probe theme="classic" />)
+    const probe = screen.getByTestId('probe')
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.classic.light.bg)
+    expect(probe.getAttribute('data-display-font')).toContain('Anthropic Serif')
+    await act(async () => {
+      document.body.setAttribute('data-ds-dark-theme', '')
+      await Promise.resolve()
+    })
+    expect(probe.getAttribute('data-bg')).toBe(GO_THEME_TOKENS.classic.dark.bg)
+    expect(probe.getAttribute('data-accent')).toBe(GO_THEME_TOKENS.classic.dark.accent)
   })
 })

@@ -6,7 +6,7 @@ The dashboard shows official history for the workspace belonging to the selected
 
 ## Entry points and accounts
 
-Open it from the conversation's expanded usage pill or the sidebar dashboard button. Settings no longer include a usage analytics card or theme picker.
+Open it from the conversation's expanded usage pill or the sidebar dashboard button. Settings no longer include a usage analytics card; the interface theme picker is under **Settings → OpenCode Go → Advanced settings → Usage settings → Appearance**.
 
 The dashboard has an independent viewing-account selector, defaulting to the account currently used for inference. Changing it only changes the dashboard scope; it does not switch the account for subsequent conversations or combine all saved accounts. The dashboard's five-hour, weekly and monthly quota windows follow the selected account and use official quota percentages.
 
@@ -43,7 +43,7 @@ Only source-supported metrics are shown. Local session coverage, summary-call co
 ## Presentation and refresh
 
 - A wide-screen dialog becomes full-screen on narrow screens, with stacked daily token bars or daily request bars, model rankings and detail.
-- Settings, the pill, expanded sidebar and dashboard share warm paper / charcoal surfaces and terracotta accents, following the Host's light/dark mode. There is no theme picker. Locally installed Anthropic Serif / Sans / Mono fonts are preferred, with system and CJK serif fallbacks. Settings recolor the Host's existing controls only within the plugin section.
+- Settings, the pill, expanded sidebar and dashboard share component layouts and internal tokens, following the Host's light/dark mode. `appearanceTheme: native` (the default) follows DSH and third-party themes through public Host semantic tokens for colors, fonts, radii and more, with neutral fallbacks for unresolved tokens. `classic` retains warm paper / charcoal surfaces, terracotta accents, and preferred local Anthropic Serif / Sans / Mono fonts with system and CJK serif fallbacks; Host and third-party themes do not override these brand tokens. Existing profiles without the field default to Native, while the input's `badge` / `plain` styles and the sidebar quota switch keep their existing behavior.
 - History queries run only when opening the dashboard, changing the viewing account or range, or refreshing manually. There is no background history polling; closing the dashboard cancels its active query.
 - The Host caches official reports and CSVs for 30 seconds, isolated by credential, account, network configuration, range and UTC date. A forced manual refresh bypasses the cache.
 - Authentication, permission, network and data-format errors show an explicit failure, without falling back to local session scans or fabricated zero usage.
