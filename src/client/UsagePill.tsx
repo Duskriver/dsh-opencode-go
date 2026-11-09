@@ -97,6 +97,13 @@ function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
   })
 }
 
+/** Panel timestamps keep the date and minutes: seconds only add noise at this size. */
+function panelDateTime(value: string | number, locale?: string): string {
+  return new Date(value).toLocaleString(locale, {
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
 /** Bars turn amber near the limit and red once the window is exhausted. */
 function usageLevel(window: UsageWindow): string | undefined {
   if (window.status === 'rate-limited' || window.percent >= 100) return css.limited
@@ -472,7 +479,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
         {notice ? <p className={css.warning} role="status">
           {t(notice.reason === 'quota' ? 'accountFallbackQuota' : 'accountFallbackCredential')}{' '}
           {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
-          {' · '}{new Date(notice.at).toLocaleString(getLocale?.())}
+          {' · '}{panelDateTime(notice.at, getLocale?.())}
         </p> : null}
         {failure ? <div className={css.warning} role="alert">
           <strong>{t('usageRefreshFailed')}</strong>
@@ -489,7 +496,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
             </div>
             <progress className={[usageLevel(usage[key]), key === 'rolling' ? css.progressRolling : key === 'weekly' ? css.progressWeekly : css.progressMonthly].filter(Boolean).join(' ')}
               aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
-            <div className={css.cellReset}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
+            <div className={css.cellReset}>{t('usageResets')} {panelDateTime(usage[key].resetsAt, getLocale?.())}</div>
             {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
           </div>)}
           {readAnalytics ? <button type="button" className={`${css.cell} ${css.historyCell}`} aria-haspopup="dialog"
@@ -500,7 +507,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           </button> : null}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
         {current ? <div className={css.actions}>
-          <span className={css.updated}>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</span>
+          <span className={css.updated}>{t('usageLastUpdated')} {panelDateTime(current.updatedAt, getLocale?.())}</span>
           {!failure ? <button type="button" className={css.refresh} disabled={refreshing}
             onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRefresh')}</button> : null}
         </div> : null}

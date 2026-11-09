@@ -33,38 +33,38 @@
 .panel:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--go-surface); pointer-events: none; }
 .body { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; box-sizing: border-box;
-  padding: 6px 16px 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+  padding: 10px 16px 14px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
 .panelHead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0;
-  border-bottom: 1px solid var(--go-border); color: var(--go-text); }
-.panelHead strong { font-family: var(--go-display-font); font-size: 15px; font-weight: 600; letter-spacing: 0; line-height: 20px; color: var(--go-text); }
+  color: var(--go-text); }
+.panelHead strong { font-family: var(--go-display-font); font-size: 15px; font-weight: 600; letter-spacing: 0; line-height: 21px; color: var(--go-text); }
 .back { display: grid; place-items: center; width: 24px; height: 26px; margin-left: -5px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
 .back:hover { color: var(--go-text); background: var(--go-surface-2); }
 .icon { flex: none; width: 14px; height: 14px; }
 .tick { flex: none; width: 14px; height: 14px; color: var(--go-accent); }
 
 /* The reading header carries the active account as its single drill-down entry. */
-.accChip { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; max-width: 100%; min-width: 0;
-  padding: 3px 6px; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted);
-  font-family: var(--go-font); font-size: 11.5px; line-height: 16px; text-align: left; cursor: default; }
+.accChip { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; max-width: 100%; min-width: 0;
+  padding: 4px 7px; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted);
+  font-family: var(--go-font); font-size: 12px; line-height: 17px; text-align: left; cursor: default; }
 button.accChip { cursor: pointer; }
 button.accChip:hover:not(:disabled) { background: var(--go-surface-2); }
 button.accChip:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 button.accChip:disabled { opacity: .5; cursor: default; }
 .dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
-.tag { flex: none; padding: 0 4px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 10px; line-height: 15px; }
+.tag { flex: none; padding: 1px 5px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 10.5px; line-height: 16px; }
 .accChipName { min-width: 0; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); font-weight: 500; }
 .accChip .icon { width: 11px; height: 11px; }
 
 /* Three quota windows as one 2x2 gauge grid; the history entry fills the fourth cell. */
-.grid { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+.grid { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .grid[data-cells='3'] .cell:last-child { grid-column: 1 / -1; }
-.cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin: 0; padding: 8px 9px 7px;
+.cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; padding: 10px 11px 9px;
   border: 1px solid var(--go-border); border-radius: var(--go-radius-option); background: var(--go-surface);
   color: var(--go-text); font-family: var(--go-font); text-align: left; }
-.cellHead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; line-height: 16px; }
-.cellLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--go-muted); }
-.cellPercent { flex: none; font-family: var(--go-number-font); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.cell progress { display: block; width: 100%; min-width: 0; height: 5px; appearance: none; border: 0;
+.cellHead { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; line-height: 17px; }
+.cellLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--go-muted); }
+.cellPercent { flex: none; font-family: var(--go-number-font); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cell progress { display: block; width: 100%; min-width: 0; height: 6px; appearance: none; border: 0;
   border-radius: 99px; background: color-mix(in srgb, var(--go-text) 9%, var(--go-surface)); }
 .cell progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
 .cell progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
@@ -72,7 +72,7 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .cell progress.high { --go-progress: var(--go-warning); }
 .cell progress.limited { --go-progress: var(--go-danger); }
 .progressRolling, .progressWeekly, .progressMonthly { --go-progress: var(--go-accent); }
-.cellReset { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; line-height: 13px; color: var(--go-muted); }
+.cellReset { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 15px; color: var(--go-muted); }
 .limitedText { font-size: 10px; line-height: 14px; color: var(--go-danger); }
 .historyCell { flex-direction: row; align-items: center; justify-content: center; gap: 6px; cursor: pointer; background: none; }
 .historyCell .icon:first-child { width: 15px; height: 15px; color: var(--go-accent); }
@@ -81,23 +81,23 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .historyCell:hover { background: var(--go-surface-2); }
 .historyCell:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 
-.actions { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 7px;
-  border-top: 1px solid var(--go-border); font-size: 10.5px; line-height: 16px; color: var(--go-muted); }
+.actions { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 12px;
+  font-size: 11px; line-height: 17px; color: var(--go-muted); }
 .actions .updated { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
-.actions .refresh { flex: none; padding: 1px 2px; border: 0; border-radius: var(--go-radius-small); background: none;
-  color: var(--go-accent); font-family: var(--go-font); font-size: 10.5px; line-height: 16px; cursor: pointer; }
+.actions .refresh { flex: none; padding: 2px 4px; border: 0; border-radius: var(--go-radius-small); background: none;
+  color: var(--go-accent); font-family: var(--go-font); font-size: 11px; line-height: 17px; cursor: pointer; }
 .actions .refresh:hover:not(:disabled) { background: var(--go-surface-2); }
 .actions .refresh:disabled { opacity: .5; cursor: default; }
 .actions .refresh:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 
 /* Account drill-down: the list insets its rounded rows so the corners never touch
    the header rule or the list dividers, and an opaque tint keeps the edge crisp. */
-.list { flex: none; padding: 4px 0 2px; }
+.list { flex: none; padding: 6px 0 4px; }
 .divider { height: 1px; background: var(--go-border); }
-.list .divider { margin: 2px 10px; }
-.option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px;
+.list .divider { margin: 4px 10px; }
+.option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 11px;
   border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); font: inherit;
-  line-height: 18px; text-align: left; cursor: pointer; }
+  line-height: 19px; text-align: left; cursor: pointer; }
 .option:hover:not(:disabled):not([data-selected]) { background: var(--go-surface-2); }
 .option[data-selected] { background: var(--go-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--go-accent) 22%, transparent); }
 .option[data-selected]:hover { background: var(--go-accent-soft); }
@@ -105,7 +105,7 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .option:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 .optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .option[data-selected] .optionName { font-weight: 500; }
-.hint { margin: 8px 0 2px; color: var(--go-muted); font-size: 11px; line-height: 17px; }
+.hint { margin: 10px 0 4px; color: var(--go-muted); font-size: 11.5px; line-height: 18px; }
 .warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 var(--go-radius-small) var(--go-radius-small) 0;
   background: color-mix(in srgb, var(--go-warning) 7%, transparent); color: var(--go-text); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .warning p { margin: 4px 0 0; }

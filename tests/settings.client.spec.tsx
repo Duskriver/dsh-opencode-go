@@ -1360,7 +1360,10 @@ describe("installed Host localization", () => {
     fireEvent.click(screen.getByRole('button', { name: `${copy.usageTitle}: ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }))
     expect(screen.getByRole('dialog', { name: copy.usageTitle })).toBeTruthy()
     expect(screen.getByRole('progressbar', { name: copy.usage_monthly })).toBeTruthy()
-    expect(screen.getAllByText(`${copy.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString(active)}`)).toHaveLength(3)
+    // Panel timestamps stop at minutes: seconds only add noise at this size.
+    expect(screen.getAllByText(`${copy.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString(active, {
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })}`)).toHaveLength(3)
   })
 
   it('honors an explicit Host English preference over a Chinese browser', async () => {
@@ -1389,7 +1392,9 @@ describe("installed Host localization", () => {
     expect(refreshInput).toHaveProperty('value', '30')
     expect(snapshot().dirty).toBe(true)
     expect(screen.getByRole('dialog', { name: en.usageTitle })).toBeTruthy()
-    expect(screen.getAllByText(`${en.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString('en')}`)).toHaveLength(3)
+    expect(screen.getAllByText(`${en.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString('en', {
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })}`)).toHaveLength(3)
     expect(host.set).toHaveBeenCalledExactlyOnceWith('preference', 'en')
     expect(readModels).toHaveBeenCalledTimes(1)
     expect(readUsage).toHaveBeenCalledTimes(1)
