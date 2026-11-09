@@ -1,1 +1,4 @@
-/lib/** text eol=lf linguist-generated=true
+# 全部文本文件固定 LF：check:hygiene 拒绝 CRLF，而 windows-latest CI
+# 默认 core.autocrlf=true 会把工作区检出成 CRLF。
+* text=auto eol=lf
+/lib/** linguist-generated=true

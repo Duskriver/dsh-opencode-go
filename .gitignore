@@ -6,6 +6,9 @@ coverage/
 video/out/
 .verification-root
 mockups/
+# 本地代码审查报告（review/ 为工作产物，不入库）
+review/
+
 # 本地构建产物与上游检查缓存（不入库）
 /out/
 .upstream-watch/
