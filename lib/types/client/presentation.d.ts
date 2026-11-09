@@ -278,16 +278,18 @@ export interface GoThemeTokens {
     readonly surface: string;
     readonly surface2: string;
     readonly border: string;
-    /** Control boundary whose local fallback keeps WCAG 1.4.11 3:1 on every surface. */
+    /** Control boundary; a checked local value so WCAG 1.4.11 3:1 never depends on Host tokens. */
     readonly borderStrong: string;
     readonly text: string;
     readonly muted: string;
     readonly accent: string;
-    /** Output-token chart series; Native derives it from the Host success token. */
+    /** Output-token chart series; a checked local value, not the Host status-dot color. */
     readonly accent2: string;
     readonly accentSoft: string;
     readonly onAccent: string;
+    /** Cache-read chart series; a checked local value, not the Host status-dot color. */
     readonly cacheRead: string;
+    /** Cache-write chart series; a checked local value, not the Host status-dot color. */
     readonly cacheWrite: string;
     /** A complete box-shadow declaration, not merely a shadow color. */
     readonly shadow: string;
@@ -312,7 +314,11 @@ export interface GoThemeTokens {
 export type GoThemeScheme = 'dark' | 'light';
 /** Classic is deliberately independent from Host and third-party theme overrides. */
 export declare const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
-/** Neutral fallbacks used only when Native cannot resolve a Host token. */
+/**
+ * Neutral values used when Native cannot resolve a Host token, and the resolved
+ * value of every contrast-checked token: those must keep WCAG 1.4.11 3:1
+ * whatever palette Host or a third-party theme supplies.
+ */
 export declare const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
 /** Theme first, color scheme second: Native follows the Host, Classic stays branded. */
 export declare const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeScheme, GoThemeTokens>>;

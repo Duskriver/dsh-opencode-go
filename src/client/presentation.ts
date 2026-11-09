@@ -548,16 +548,18 @@ export interface GoThemeTokens {
   readonly surface: string
   readonly surface2: string
   readonly border: string
-  /** Control boundary whose local fallback keeps WCAG 1.4.11 3:1 on every surface. */
+  /** Control boundary; a checked local value so WCAG 1.4.11 3:1 never depends on Host tokens. */
   readonly borderStrong: string
   readonly text: string
   readonly muted: string
   readonly accent: string
-  /** Output-token chart series; Native derives it from the Host success token. */
+  /** Output-token chart series; a checked local value, not the Host status-dot color. */
   readonly accent2: string
   readonly accentSoft: string
   readonly onAccent: string
+  /** Cache-read chart series; a checked local value, not the Host status-dot color. */
   readonly cacheRead: string
+  /** Cache-write chart series; a checked local value, not the Host status-dot color. */
   readonly cacheWrite: string
   /** A complete box-shadow declaration, not merely a shadow color. */
   readonly shadow: string
@@ -610,7 +612,11 @@ export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   },
 }
 
-/** Neutral fallbacks used only when Native cannot resolve a Host token. */
+/**
+ * Neutral values used when Native cannot resolve a Host token, and the resolved
+ * value of every contrast-checked token: those must keep WCAG 1.4.11 3:1
+ * whatever palette Host or a third-party theme supplies.
+ */
 export const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   dark: {
     bg: '#0f0f0f', surface: '#212123', surface2: '#292929', border: '#3c3c3d', borderStrong: '#a2a4a6',
@@ -632,7 +638,11 @@ export const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   },
 }
 
-/** Native consumes only Host semantics; every declaration retains a neutral fallback. */
+/**
+ * Native follows Host semantics for surfaces, text, accent and status colors.
+ * The contrast-checked control boundary and state chart series keep their
+ * local value; see the comment on the returned object.
+ */
 function nativeTheme(scheme: GoThemeScheme): GoThemeTokens {
   const fallback = NATIVE_THEME_FALLBACKS[scheme]
   return {
@@ -640,15 +650,20 @@ function nativeTheme(scheme: GoThemeScheme): GoThemeTokens {
     surface: `var(--dsw-alias-bg-layer-1, ${fallback.surface})`,
     surface2: `var(--dsw-alias-bg-layer-2, ${fallback.surface2})`,
     border: `var(--dsw-alias-border-l1, ${fallback.border})`,
-    borderStrong: `var(--dsw-alias-border-l2, ${fallback.borderStrong})`,
+    // Contrast-checked tokens stay Host-independent on purpose: Host's
+    // border-l2 is a hairline divider and its state-* colors are status dots,
+    // not data-viz series, so following them drops text inputs and chart bars
+    // below the WCAG 1.4.11 3:1 contract this file and docs/development.md
+    // promise. They are the only color tokens Native does not take from Host.
+    borderStrong: fallback.borderStrong,
     text: `var(--dsw-alias-label-primary, ${fallback.text})`,
     muted: `var(--dsw-alias-label-secondary, ${fallback.muted})`,
     accent: `var(--dsw-alias-brand-primary, ${fallback.accent})`,
-    accent2: `var(--dsw-alias-state-success-primary, ${fallback.accent2})`,
+    accent2: fallback.accent2,
     accentSoft: `color-mix(in srgb, var(--dsw-alias-brand-primary, ${fallback.accent}) 16%, var(--dsw-alias-bg-base, ${fallback.bg}))`,
     onAccent: `var(--dsw-alias-bg-base, ${fallback.onAccent})`,
-    cacheRead: `var(--dsw-alias-state-idle-primary, ${fallback.cacheRead})`,
-    cacheWrite: `var(--dsw-alias-state-warn-primary, ${fallback.cacheWrite})`,
+    cacheRead: fallback.cacheRead,
+    cacheWrite: fallback.cacheWrite,
     shadow: `var(--dsw-elevation-prominent, ${fallback.shadow})`,
     success: `var(--dsw-alias-state-success-primary, ${fallback.success})`,
     warning: `var(--dsw-alias-state-warn-primary, ${fallback.warning})`,

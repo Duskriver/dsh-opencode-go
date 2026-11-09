@@ -8,7 +8,7 @@ import {
   type GoThemeTokens,
 } from '../src/client/presentation.ts'
 
-/** Relative luminance from WCAG 2.x; only static local fallback hex is measured. */
+/** Relative luminance from WCAG 2.x; only tokens that resolve to static hex are measured. */
 function luminance(hex: string): number {
   const channel = (offset: number): number => {
     const value = parseInt(hex.slice(offset, offset + 2), 16) / 255
@@ -47,22 +47,52 @@ for (const [theme, fallbacks] of [['native', NATIVE_THEME_FALLBACKS], ['classic'
   })
 }
 
+/**
+ * Host surfaces observed in DSH 0.2.2: light resolves to white, dark layers are
+ * #151517/#232324/#2c2c2e. The contrast-checked tokens must clear 3:1 on that
+ * whole range because a Host or third-party theme can paint any of them.
+ */
+const HOST_SURFACE_ANCHORS: Record<GoThemeScheme, readonly string[]> = {
+  light: ['#ffffff', '#fafafa', '#f5f5f5'],
+  dark: ['#151517', '#232324', '#2c2c2e'],
+}
+
+/**
+ * Host's `border-l2` is a hairline divider and its `state-*` colors are status
+ * dots, not data-viz series, so these must never follow a Host var().
+ */
+const HOST_INDEPENDENT_TOKENS = ['borderStrong', 'accent2', 'cacheRead', 'cacheWrite'] as const
+
+describe('Native contrast-checked tokens ignore the Host palette', () => {
+  it.each(SCHEMES)('resolves the strong control boundary and state chart series to static values in %s', scheme => {
+    const tokens = GO_THEME_TOKENS.native[scheme]
+    for (const token of HOST_INDEPENDENT_TOKENS) {
+      expect(tokens[token], `${scheme} ${token} must not follow a Host var()`).toMatch(/^#[0-9a-f]{6}$/)
+    }
+  })
+
+  it.each(SCHEMES)('keeps them at WCAG 1.4.11 3:1 across the Host surface range in %s', scheme => {
+    const tokens = GO_THEME_TOKENS.native[scheme]
+    for (const token of HOST_INDEPENDENT_TOKENS) {
+      for (const surface of HOST_SURFACE_ANCHORS[scheme]) {
+        expectContrastAtLeast3(tokens[token], surface, `${scheme} ${token}/host ${surface}`)
+      }
+    }
+  })
+})
+
 describe('Native theme follows public Host semantics', () => {
-  it.each(SCHEMES)('maps all color, state and dataviz values with neutral fallbacks in %s', scheme => {
+  it.each(SCHEMES)('maps Host color, state and elevation values with neutral fallbacks in %s', scheme => {
     const tokens = GO_THEME_TOKENS.native[scheme], fallback = NATIVE_THEME_FALLBACKS[scheme]
     const mapped: ReadonlyArray<readonly [keyof GoThemeTokens, string]> = [
       ['bg', '--dsw-alias-bg-base'],
       ['surface', '--dsw-alias-bg-layer-1'],
       ['surface2', '--dsw-alias-bg-layer-2'],
       ['border', '--dsw-alias-border-l1'],
-      ['borderStrong', '--dsw-alias-border-l2'],
       ['text', '--dsw-alias-label-primary'],
       ['muted', '--dsw-alias-label-secondary'],
       ['accent', '--dsw-alias-brand-primary'],
-      ['accent2', '--dsw-alias-state-success-primary'],
       ['onAccent', '--dsw-alias-bg-base'],
-      ['cacheRead', '--dsw-alias-state-idle-primary'],
-      ['cacheWrite', '--dsw-alias-state-warn-primary'],
       ['shadow', '--dsw-elevation-prominent'],
       ['success', '--dsw-alias-state-success-primary'],
       ['warning', '--dsw-alias-state-warn-primary'],
