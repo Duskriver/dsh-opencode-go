@@ -109,12 +109,17 @@ describe('standalone Bun Free transport', () => {
     expect(call.args).toEqual(['--no-env-file', expect.stringMatching(/free-http-worker\.(?:js|ts)$/)])
     // The real child environment is exactly the production allowlist result.
     expect(call.env).toEqual(freeWorkerEnvironment())
+    // Windows matches variable names case-insensitively and the allowlist keeps
+    // the spelling the host itself uses (GitHub's Windows runners spell the
+    // system root in upper case), so compare on the folded name instead of one
+    // particular capitalisation.
+    const forwarded = Object.keys(call.env ?? {}).map(name => name.toUpperCase())
     for (const name of ['OPENCODE_API_KEY', 'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_EXTRA_CA_CERTS',
-      'NODE_OPTIONS', 'HTTPS_PROXY', 'http_proxy', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'BUN_BE_BUN']) {
-      expect(call.env).not.toHaveProperty(name)
+      'NODE_OPTIONS', 'HTTPS_PROXY', 'HTTP_PROXY', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'BUN_BE_BUN']) {
+      expect(forwarded).not.toContain(name)
     }
-    if (process.platform === 'win32') expect(call.env).toHaveProperty('SystemRoot')
-    else expect(call.env).not.toHaveProperty('SystemRoot')
+    if (process.platform === 'win32') expect(forwarded).toContain('SYSTEMROOT')
+    else expect(forwarded).not.toContain('SYSTEMROOT')
   })
 
   it('streams before upstream EOF and preserves binary bytes with backpressure', async () => {
