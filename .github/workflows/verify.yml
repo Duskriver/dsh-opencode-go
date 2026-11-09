@@ -18,10 +18,11 @@ permissions:
 # - The installed DSH 0.2.2-rc.1 runtime (Cordis 4.1.0, Schemastery 3.19.0) has
 #   only been exercised manually through the headless CLI; its Web/client
 #   surface is not covered by CI yet. See docs/verification.md.
-# - `compat-dsh-0.2.2` is an advisory probe of the installed DSH 0.2.2-rc.1 Host
-#   path: it packs this package, installs it with the official CLI and the
-#   pinned rc.1 host packages into a temporary consumer, then runs the same
-#   installed-package smoke. It is allowed to fail (`continue-on-error`) and runs
+# - `compat-dsh-0-2-2` is an advisory probe of the installed DSH 0.2.2-rc.1 Host
+#   path (a job id may only contain letters, digits, `-` and `_`, so the dotted
+#   version is spelled out): it packs this package, installs it with the official
+#   CLI and the pinned rc.1 host packages into a temporary consumer, then runs
+#   the same installed-package smoke. It is allowed to fail (`continue-on-error`) and runs
 #   on push/dispatch only, so a red run is a signal, not a merge blocker. Promote
 #   it to a required check once the official CLI install path has stayed green
 #   for a release cycle and a stable 0.2.2 host exists. The Web/client surface
@@ -59,7 +60,7 @@ jobs:
       - run: npm run check:dist
       - run: npm run check:install:pnpm
 
-  compat-dsh-0.2.2:
+  compat-dsh-0-2-2:
     # Advisory only: a red run is a compatibility signal, not a merge blocker.
     if: github.event_name != 'pull_request'
     continue-on-error: true
