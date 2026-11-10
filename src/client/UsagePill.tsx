@@ -111,12 +111,12 @@ function usageLevel(window: UsageWindow): string | undefined {
 }
 
 /** The panel's own glyphs: no host icon set is required, and each one carries its meaning in text. */
-function ChevronRight() {
-  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
-}
-
 function ChevronLeft() {
   return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>
+}
+
+function ChevronRight() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
 }
 
 function ChevronDown() {
@@ -488,27 +488,28 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
         </div> : null}
         {failure ? <button type="button" className={css.retry} disabled={refreshing}
           onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRetry')}</button> : null}
-        {usage ? <div className={css.grid} data-cells={readAnalytics ? '4' : '3'}>
-          {(['rolling', 'weekly', 'monthly'] as const).map(key => <div className={css.cell} key={key}>
-            <div className={css.cellHead}>
-              <span className={css.cellLabel}>{t(`usage_${key}`)}</span>
-              <strong className={css.cellPercent}>{usage[key].percent}%</strong>
+        {usage ? <div className={css.windows}>
+          {(['rolling', 'weekly', 'monthly'] as const).map(key => <div className={css.win} key={key}>
+            <div className={css.meta}>
+              <span className={css.winLabel}>{t(`usage_${key}`)}</span>
+              <span className={css.winReset}>{t('usageResets')} {panelDateTime(usage[key].resetsAt, getLocale?.())}</span>
+              <strong className={css.winPercent}>{usage[key].percent}%</strong>
             </div>
             <progress className={[usageLevel(usage[key]), key === 'rolling' ? css.progressRolling : key === 'weekly' ? css.progressWeekly : css.progressMonthly].filter(Boolean).join(' ')}
               aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
-            <div className={css.cellReset}>{t('usageResets')} {panelDateTime(usage[key].resetsAt, getLocale?.())}</div>
             {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
           </div>)}
-          {readAnalytics ? <button type="button" className={`${css.cell} ${css.historyCell}`} aria-haspopup="dialog"
+        </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
+        {readAnalytics || current ? <div className={css.actions}>
+          {readAnalytics ? <button type="button" className={css.hist} aria-haspopup="dialog"
             onClick={() => { setOpen(false); onAnalyticsOpenChange(true) }}>
             <ChartIcon />
             <span>{t('analyticsOpen')}</span>
-            <ChevronRight />
           </button> : null}
-        </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
-        {current ? <div className={css.actions}>
-          <span className={css.updated}>{t('usageLastUpdated')} {panelDateTime(current.updatedAt, getLocale?.())}</span>
-          {!failure ? <button type="button" className={css.refresh} disabled={refreshing}
+          {current
+            ? <span className={css.updated}>{t('usageLastUpdated')} {panelDateTime(current.updatedAt, getLocale?.())}</span>
+            : <span className={css.updated} />}
+          {current && !failure ? <button type="button" className={css.refresh} disabled={refreshing}
             onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRefresh')}</button> : null}
         </div> : null}
       </>}
