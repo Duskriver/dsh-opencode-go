@@ -333,8 +333,8 @@
 .pageTop {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 0 0 24px;
+  gap: 6px;
+  padding: 0 0 16px;
 }
 
 .title {
@@ -358,7 +358,7 @@
 .pageTabs {
   display: flex;
   gap: 2px;
-  margin: 0 0 14px;
+  margin: 0 0 10px;
   padding: 3px;
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-control);
@@ -401,7 +401,28 @@
   background: var(--go-accent);
 }
 
-.tabPanel { min-height: 120px; }
+/* Panels are flex columns so the model card can still take whatever height the
+   page leaves, exactly as it did before the page was split into tabs. */
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+/* Inside a tab the cards are separated by whitespace, not by a hairline: a rule
+   directly under the tab strip (and between two cards) read as a stray line. */
+.tabPanel .card,
+.tabPanel .cardModels {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.tabPanel .card + .card,
+.tabPanel .card + .cardModels,
+.tabPanel .cardModels + .card {
+  margin-top: 18px;
+}
 
 /* Hairlines separate concerns; only editable fields and account rows are filled. */
 .card,
@@ -454,6 +475,7 @@
 .cardTitle {
   flex: 1;
   min-width: 0;
+  margin: 0;
   font-family: var(--go-display-font);
   font-size: 17px;
   font-weight: 500;
