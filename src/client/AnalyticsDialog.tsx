@@ -1,5 +1,5 @@
 /** Official workspace history, built from a single Console snapshot. */
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { DEFAULT_OPENCODE_GO_THEME, type AnalyticsDayRow, type AnalyticsExport, type AnalyticsModelRow, type AnalyticsQuery, type AnalyticsRange, type AnalyticsReport, type AnalyticsTotals, type GoAccount, type GoUsage, type OpencodeGoTheme } from '../contracts.ts'
 import { themeStyle, useGoThemeTokens, type en } from './presentation.ts'
@@ -17,8 +17,41 @@ const LABELS = {
 } as const satisfies Record<typeof PARTS[number], keyof typeof en>
 const WINDOW_LABELS = { rolling: 'usage_rolling', weekly: 'usage_weekly', monthly: 'usage_monthly' } as const satisfies Record<'rolling' | 'weekly' | 'monthly', keyof typeof en>
 
+const numberFormatters = new Map<string, Intl.NumberFormat>()
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function getNumberFormat(locale?: string, compact = false): Intl.NumberFormat {
+  const key = `${locale ?? ''}:${compact ? 'compact' : 'standard'}`
+  let fmt = numberFormatters.get(key)
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(locale, compact ? { notation: 'compact', maximumFractionDigits: 1 } : {})
+    numberFormatters.set(key, fmt)
+  }
+  return fmt
+}
+
+function getMoneyFormat(locale?: string, digits = 2): Intl.NumberFormat {
+  const key = `${locale ?? ''}:money:${digits}`
+  let fmt = numberFormatters.get(key)
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits })
+    numberFormatters.set(key, fmt)
+  }
+  return fmt
+}
+
+function getDateTimeFormat(locale: string | undefined, variant: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale ?? ''}:${variant}`
+  let fmt = dateTimeFormatters.get(key)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(locale, options)
+    dateTimeFormatters.set(key, fmt)
+  }
+  return fmt
+}
+
 export function historyNumber(value: string, locale?: string, compact = false): string {
-  return new Intl.NumberFormat(locale, compact ? { notation: 'compact', maximumFractionDigits: 1 } : {}).format(BigInt(value))
+  return getNumberFormat(locale, compact).format(BigInt(value))
 }
 
 /** Keep micro-cents exact through rounding: one dollar is 100,000,000 units. */
@@ -27,13 +60,16 @@ export function historyMoney(value: string, locale?: string): string {
   const unit = 10n ** BigInt(8 - digits), base = 10n ** BigInt(digits)
   const rounded = (raw + unit / 2n) / unit
   const fraction = String(rounded % base).padStart(digits, '0')
-  return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits })
+  return getMoneyFormat(locale, digits)
     .formatToParts(rounded / base).map(part => part.type === 'fraction' ? fraction : part.value).join('')
 }
 
 function percent(part: string, total: string): number { return BigInt(total) === 0n ? 0 : Number(BigInt(part) * 100_000n / BigInt(total)) / 1000 }
 function metricText(row: AnalyticsTotals, metric: Metric, locale?: string): string { return metric === 'costMicroCents' ? historyMoney(row[metric], locale) : historyNumber(row[metric], locale, true) }
-function dayText(day: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(day + 'T00:00:00Z')) }
+function dayText(day: string, locale?: string): string {
+  return getDateTimeFormat(locale, 'dayText', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    .format(new Date(day + 'T00:00:00Z'))
+}
 function errorDetails(error: unknown): Record<string, unknown> {
   return error && typeof error === 'object' && 'code' in error && error.code === 'opencode-go/analytics-unavailable' && 'details' in error && error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : {}
 }
@@ -120,7 +156,7 @@ function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQu
       <div className={css.rangeGroup} role="group" aria-label={t('analyticsRange')}>{RANGES.map(value => <button type="button" key={value} aria-pressed={value === range} onClick={() => { setRange(value) }}>{t(RANGE_LABELS[value])}</button>)}</div><span className={css.utc}>UTC</span>
       <div className={css.toolbarActions}><button type="button" className={css.iconButton} onClick={refresh} disabled={loading || !accountRef} aria-label={t('analyticsRefresh')} title={t('analyticsRefresh')}><Icon name="refresh" /></button>{exportAnalytics ? <button type="button" className={css.exportButton} onClick={() => { void download() }} disabled={exporting || !report} title={t('analyticsExportHint')}><Icon name="download" />{exporting ? t('analyticsExporting') : t('analyticsExport')}</button> : null}</div>
     </div>
-    <div className={css.statusRow} aria-live="polite"><span>{report ? `${t('analyticsRefreshed')} ${new Date(report.generatedAt).toLocaleTimeString(locale, { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })} UTC` : ''}</span>{loading && report ? <span>{t('analyticsRefreshing')}</span> : null}</div>
+    <div className={css.statusRow} aria-live="polite"><span>{report ? `${t('analyticsRefreshed')} ${getDateTimeFormat(locale, 'utcTime', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' }).format(new Date(report.generatedAt))} UTC` : ''}</span>{loading && report ? <span>{t('analyticsRefreshing')}</span> : null}</div>
     {exportFailed ? <p className={css.notice} role="alert">{t('analyticsExportFailed')}</p> : null}
     {!accountRef ? <div className={css.state}><Icon name="chart" /><p>{t('analyticsNoAccounts')}</p></div> : null}
     {error ? <div className={css.notice} role="alert"><span>{report ? t('analyticsStale') : errorText(error, t)}</span><button type="button" onClick={refresh} disabled={loading}>{t('analyticsRetry')}</button></div> : null}
@@ -142,12 +178,13 @@ function Kpis({ report, t, locale }: { report: AnalyticsReport; t: AnalyticsTran
   </section>
 }
 function QuotaStrip({ quota, t, locale }: { quota: GoUsage; t: AnalyticsTranslate; locale?: string }) {
-  return <section className={css.quotaStrip} aria-label={t('analyticsQuota')}><span className={css.quotaTitle}>{t('analyticsQuota')}</span>{(['rolling', 'weekly', 'monthly'] as const).map(key => { const item = quota[key]; return <div key={key} className={css.quotaWindow} data-level={item.status === 'rate-limited' || item.percent >= 100 ? 'limited' : item.percent >= 80 ? 'high' : 'ok'} title={`${t('usageResets')} ${new Date(item.resetsAt).toLocaleString(locale, { timeZone: 'UTC' })} UTC`}><span>{t(WINDOW_LABELS[key])}<b>{item.percent}%</b></span><progress max={100} value={item.percent} aria-label={t(WINDOW_LABELS[key])} /></div> })}</section>
+  return <section className={css.quotaStrip} aria-label={t('analyticsQuota')}><span className={css.quotaTitle}>{t('analyticsQuota')}</span>{(['rolling', 'weekly', 'monthly'] as const).map(key => { const item = quota[key]; return <div key={key} className={css.quotaWindow} data-level={item.status === 'rate-limited' || item.percent >= 100 ? 'limited' : item.percent >= 80 ? 'high' : 'ok'} title={`${t('usageResets')} ${getDateTimeFormat(locale, 'utcDateTime', { timeZone: 'UTC', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).format(new Date(item.resetsAt))} UTC`}><span>{t(WINDOW_LABELS[key])}<b>{item.percent}%</b></span><progress max={100} value={item.percent} aria-label={t(WINDOW_LABELS[key])} /></div> })}</section>
 }
 function Trend({ days, t, locale }: { days: AnalyticsDayRow[]; t: AnalyticsTranslate; locale?: string }) {
   const [mode, setMode] = useState<'tokens' | 'requests'>('tokens'), [active, setActive] = useState<number | null>(null), [pinned, setPinned] = useState<number | null>(null)
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
-  const maximum = days.reduce((max, day) => BigInt(day[mode]) > max ? BigInt(day[mode]) : max, 0n), selected = days[active ?? pinned ?? -1]
+  const maximum = useMemo(() => days.reduce((max, day) => BigInt(day[mode]) > max ? BigInt(day[mode]) : max, 0n), [days, mode])
+  const selected = days[active ?? pinned ?? -1]
   const focusDay = (index: number): void => { const next = Math.max(0, Math.min(days.length - 1, index)); setActive(next); buttons.current[next]?.focus() }
   const keyboard = (event: KeyboardEvent, index: number): void => {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); focusDay(index + (event.key === 'ArrowLeft' ? -1 : 1)) }
@@ -156,22 +193,33 @@ function Trend({ days, t, locale }: { days: AnalyticsDayRow[]; t: AnalyticsTrans
     // stays unhandled so the Host's Modal still owns closing the dialog.
     if (event.key === 'Escape' && (pinned !== null || active !== null)) { event.stopPropagation(); setPinned(null); setActive(null) }
   }
+  const dayLabels = useMemo(() => days.map(day => `${day.day} · ${historyNumber(day.requests, locale)} ${t('analyticsRequests')} · ${historyNumber(day.tokens, locale)} ${t('analyticsTokens')}`), [days, locale, t])
   return <section className={css.trend}><div className={css.sectionHead}><div><h2>{t('analyticsByDay')}</h2><p>{t('analyticsTrendHint')}</p></div><div className={css.segmented} role="group" aria-label={t('analyticsByDay')}><button type="button" aria-pressed={mode === 'tokens'} onClick={() => { setMode('tokens') }}>{t('analyticsTokensMode')}</button><button type="button" aria-pressed={mode === 'requests'} onClick={() => { setMode('requests') }}>{t('analyticsRequestsMode')}</button></div></div>
     <div className={css.legend}>{mode === 'tokens' ? PARTS.map(part => <span key={part}><i data-part={part} />{t(LABELS[part])}</span>) : <span><i data-part="requests" />{t('analyticsRequests')}</span>}</div>
     <div className={css.chartScroll}><div className={css.chart} style={{ minWidth: `${Math.max(380, days.length * 11)}px` }}><div className={css.yAxis}><span>{historyNumber(String(maximum), locale, true)}</span><span>{historyNumber(String(maximum / 2n), locale, true)}</span><span>0</span></div>
       <div className={css.plot} role="group" aria-label={t('analyticsChartHelp')} style={{ gridTemplateColumns: `repeat(${Math.max(1, days.length)}, minmax(3px, 1fr))` }} onPointerLeave={() => { setActive(pinned) }}><div className={css.gridlines} aria-hidden="true"><i /><i /><i /></div>
         {days.map((day, index) => <button type="button" key={day.day} ref={node => { buttons.current[index] = node }} className={css.dayBar} data-day={day.day} data-selected={selected?.day === day.day || undefined} aria-pressed={pinned === index} tabIndex={index === (active ?? pinned ?? days.length - 1) ? 0 : -1}
-          aria-label={`${day.day} · ${historyNumber(day.requests, locale)} ${t('analyticsRequests')} · ${historyNumber(day.tokens, locale)} ${t('analyticsTokens')}`} onPointerEnter={() => { setActive(index) }} onFocus={() => { setActive(index) }} onKeyDown={event => { keyboard(event, index) }} onClick={() => { setPinned(pinned === index ? null : index); setActive(index) }}>
+          aria-label={dayLabels[index]} onPointerEnter={() => { setActive(index) }} onFocus={() => { setActive(index) }} onKeyDown={event => { keyboard(event, index) }} onClick={() => { setPinned(pinned === index ? null : index); setActive(index) }}>
           <span className={css.barStack} style={{ height: `${Math.max(day[mode] === '0' ? 0 : 0.6, percent(day[mode], String(maximum)))}%` }}>{mode === 'requests' ? <i data-part="requests" style={{ flex: 1 }} /> : PARTS.map(part => <i key={part} data-part={part} style={{ flex: percent(day[part], day.tokens) }} />)}</span><span className={css.zeroDot} />
         </button>)}
       </div><div className={css.xAxis}><span>{days[0] ? dayText(days[0].day, locale) : '—'}</span><span>{days.length > 2 ? dayText(days[Math.floor(days.length / 2)].day, locale) : ''}</span><span>{days.length > 1 ? dayText(days.at(-1)!.day, locale) : ''}</span></div></div></div>
     <div className={css.dayDetail} aria-live={pinned === null ? 'off' : 'polite'}>{selected ? <><div><strong>{dayText(selected.day, locale)}</strong><small>UTC</small></div><span>{t('analyticsRequests')}<b>{historyNumber(selected.requests, locale)}</b></span>{PARTS.map(part => <span key={part}>{t(LABELS[part])}<b>{historyNumber(selected[part], locale, true)}</b></span>)}<span>{t('analyticsSpend')}<b>{historyMoney(selected.costMicroCents, locale)}</b></span></> : <p>{t('analyticsSelectDay')}</p>}</div>
   </section>
 }
+
+function compareModels(a: AnalyticsModelRow, b: AnalyticsModelRow, field: keyof AnalyticsTotals, asc = false): number {
+  const left = BigInt(a[field]), right = BigInt(b[field])
+  return (left === right ? a.model.localeCompare(b.model) || a.provider.localeCompare(b.provider) : left > right ? -1 : 1) * (asc ? -1 : 1)
+}
+
 function Models({ rows, totals, t, locale }: { rows: AnalyticsModelRow[]; totals: AnalyticsTotals; t: AnalyticsTranslate; locale?: string }) {
   const [metric, setMetric] = useState<Metric>('tokens'), [expanded, setExpanded] = useState(false), [sort, setSort] = useState<{ field: keyof AnalyticsTotals; ascending: boolean }>({ field: 'tokens', ascending: false })
-  const compare = (a: AnalyticsModelRow, b: AnalyticsModelRow, field: keyof AnalyticsTotals, asc = false): number => { const left = BigInt(a[field]), right = BigInt(b[field]); return (left === right ? a.model.localeCompare(b.model) || a.provider.localeCompare(b.provider) : left > right ? -1 : 1) * (asc ? -1 : 1) }
-  const ranked = [...rows].sort((a, b) => compare(a, b, metric)), visible = expanded ? ranked : ranked.slice(0, 6)
+  const ranked = useMemo(() => [...rows].sort((a, b) => compareModels(a, b, metric)), [rows, metric])
+  const visible = useMemo(() => expanded ? ranked : ranked.slice(0, 6), [expanded, ranked])
+  const sortedRows = useMemo(() => {
+    if (sort.field === metric && !sort.ascending) return ranked
+    return [...rows].sort((a, b) => compareModels(a, b, sort.field, sort.ascending))
+  }, [rows, sort.field, sort.ascending, metric, ranked])
   const fields = [
     ['requests', 'analyticsRequests'], ['tokens', 'analyticsTokens'], ['inputTokens', 'analyticsInput'],
     ['outputTokens', 'analyticsOutput'], ['cacheReadTokens', 'analyticsCacheRead'], ['cacheWriteTokens', 'analyticsCacheWrite'],
@@ -182,6 +230,6 @@ function Models({ rows, totals, t, locale }: { rows: AnalyticsModelRow[]; totals
     <div className={css.rankList}>{visible.map((row, index) => <div key={JSON.stringify([row.provider, row.model])} className={css.rankRow}><span className={css.rankIndex}>{String(index + 1).padStart(2, '0')}</span><div className={css.rankIdentity}><span>{row.model}</span><small>{row.provider}</small></div><div className={css.rankTrack}><i style={{ width: `${percent(row[metric], ranked[0]?.[metric] ?? '0')}%` }} /></div><b>{metricText(row, metric, locale)}</b><small>{percent(row[metric], totals[metric]).toFixed(1)}%</small></div>)}</div>
     {rows.length > 6 ? <button type="button" className={css.expandButton} onClick={() => { setExpanded(value => !value) }}>{expanded ? t('analyticsFewerModels') : `${t('analyticsAllModels')} (${rows.length})`}</button> : null}
   </section><section className={css.details}><div className={css.sectionHead}><h2>{t('analyticsDetails')}</h2><span>{rows.length} {t('analyticsModels')}</span></div><div className={css.tableScroll} tabIndex={0} role="region" aria-label={t('analyticsDetails')}><table><thead><tr><th>{t('analyticsModel')}</th>{fields.map(([field, label]) => <th key={field} aria-sort={sort.field === field ? sort.ascending ? 'ascending' : 'descending' : 'none'}><button type="button" onClick={() => { setSort({ field, ascending: sort.field === field ? !sort.ascending : false }) }}>{t(label)}{sort.field === field ? sort.ascending ? ' ↑' : ' ↓' : ''}</button></th>)}<th>{t('analyticsShare')}</th></tr></thead><tbody>
-    {[...rows].sort((a, b) => compare(a, b, sort.field, sort.ascending)).map(row => <tr key={JSON.stringify([row.provider, row.model])}><td><strong>{row.model}</strong><small>{row.provider}</small></td>{fields.map(([field]) => <td key={field} title={field === 'costMicroCents' ? undefined : historyNumber(row[field], locale)}>{field === 'costMicroCents' ? historyMoney(row[field], locale) : historyNumber(row[field], locale, true)}</td>)}<td>{percent(row.tokens, totals.tokens).toFixed(1)}%</td></tr>)}
+    {sortedRows.map(row => <tr key={JSON.stringify([row.provider, row.model])}><td><strong>{row.model}</strong><small>{row.provider}</small></td>{fields.map(([field]) => <td key={field} title={field === 'costMicroCents' ? undefined : historyNumber(row[field], locale)}>{field === 'costMicroCents' ? historyMoney(row[field], locale) : historyNumber(row[field], locale, true)}</td>)}<td>{percent(row.tokens, totals.tokens).toFixed(1)}%</td></tr>)}
     </tbody></table></div></section></>
 }

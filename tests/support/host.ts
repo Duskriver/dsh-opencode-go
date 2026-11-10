@@ -73,6 +73,7 @@ export function accountHarness(initial: Partial<OpencodeGoConfig> = { accounts: 
       validateGoConfig(next)
       config = next
       revision++
+      manager.settingsChanged()
     }),
   }
   const credentials = {
@@ -86,6 +87,6 @@ export function accountHarness(initial: Partial<OpencodeGoConfig> = { accounts: 
   return {
     manager, settings, credentials, secrets, writable, warn, disconnect,
     value: () => structuredClone(config), revision: () => revision,
-    externalEdit: (patch: Partial<OpencodeGoConfig>) => { config = { ...config, ...structuredClone(patch) }; revision++ },
+    externalEdit: (patch: Partial<OpencodeGoConfig>) => { config = { ...config, ...structuredClone(patch) }; revision++; manager.settingsChanged() },
   }
 }

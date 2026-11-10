@@ -34,12 +34,10 @@
 /* The reading follows the bar: a bar wide enough to answer "how close to the
    limit" at a glance, with the number right after it. */
 .accountPercent { flex: none; margin-left: auto; text-align: right; font-family: var(--go-number-font); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--go-text); }
-.accountBar { position: relative; flex: 1; min-width: 0; height: 5px; border-radius: 99px; background: var(--go-surface-2); overflow: hidden; }
+.accountBar { position: relative; flex: 1; min-width: 0; height: 5px; border-radius: 99px; background: var(--go-track); overflow: hidden; }
 .accountBarFill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--go-accent); }
 .accountBar[data-level='high'] .accountBarFill { background: var(--go-warning); }
 .accountBar[data-level='limited'] .accountBarFill { background: var(--go-danger); }
-/* Quarter marks: "three quarters spent" reads without measuring pixels. */
-.accountBarTick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--go-surface); }
 .accountReset { flex: none; text-align: right; white-space: nowrap; font-size: 10.5px; color: var(--go-muted); }
 .accountIdle { font-size: 11px; line-height: 1.5; color: var(--go-muted); }
 .accountToggle { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
@@ -59,8 +57,8 @@
 .accountRow[data-drop='before']::after { top: -6px; opacity: 1; }
 .accountRow[data-drop='after']::after { bottom: -6px; opacity: 1; }
 .accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
-.accountUsage progress { display: block; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; overflow: hidden; background: var(--go-surface-2); --go-progress: var(--go-accent); accent-color: var(--go-progress); margin: 8px 0; }
-.accountUsage progress::-webkit-progress-bar { background: var(--go-surface-2); }
+.accountUsage progress { display: block; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; overflow: hidden; background: var(--go-track); --go-progress: var(--go-accent); accent-color: var(--go-progress); margin: 8px 0; }
+.accountUsage progress::-webkit-progress-bar { background: transparent; }
 .accountUsage progress::-webkit-progress-value { background: var(--go-progress); border-radius: 99px; }
 .accountUsage progress::-moz-progress-bar { background: var(--go-progress); border-radius: 99px; }
 .accountUsage progress[data-level='high'] { --go-progress: var(--go-warning); }

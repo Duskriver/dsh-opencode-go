@@ -65,26 +65,27 @@ async function compile(output) {
   // private pi-ai implementation without its unrelated providers/dependencies.
   const hostExternals = ['@deepseek-ai/*', 'undici', 'openai', '@anthropic-ai/sdk']
   const host = await build({
-    entryPoints: ['src/index.ts'], outfile: join(output, 'index.js'), bundle: true,
+    entryPoints: ['src/index.ts'], outdir: output, splitting: true, chunkNames: 'chunk-[hash]', bundle: true,
     external: hostExternals, format: 'esm', platform: 'node', target: 'node22', metafile: true,
     plugins: [googleFetchEsbuildPlugin()],
     banner: { js: "import { createRequire as __createRequire } from 'node:module'; var require = __createRequire(import.meta.url);" },
   })
   // esbuild retains generated Google JSDoc with indented blank lines. Normalize
   // only parsed documentation comments, preserving all runtime strings verbatim.
-  const hostPath = join(output, 'index.js')
-  let code = await readFile(hostPath, 'utf8')
-  const parsed = ts.createSourceFile(hostPath, code, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS)
-  const comments = new Map()
-  function visit(node) {
-    for (const comment of node.jsDoc ?? []) comments.set(comment.pos, comment.end)
-    ts.forEachChild(node, visit)
+  for (const hostPath of Object.keys(host.metafile.outputs).filter(path => path.endsWith('.js'))) {
+    let code = await readFile(hostPath, 'utf8')
+    const parsed = ts.createSourceFile(hostPath, code, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS)
+    const comments = new Map()
+    function visit(node) {
+      for (const comment of node.jsDoc ?? []) comments.set(comment.pos, comment.end)
+      ts.forEachChild(node, visit)
+    }
+    visit(parsed)
+    for (const [start, end] of [...comments].sort(([a], [b]) => b - a)) {
+      code = code.slice(0, start) + code.slice(start, end).replace(/[ \t]+$/gm, '') + code.slice(end)
+    }
+    await writeFile(hostPath, code)
   }
-  visit(parsed)
-  for (const [start, end] of [...comments].sort(([a], [b]) => b - a)) {
-    code = code.slice(0, start) + code.slice(start, end).replace(/[ \t]+$/gm, '') + code.slice(end)
-  }
-  await writeFile(hostPath, code)
   // Standalone Bun executes only this HTTP worker, never the host/agent bundle.
   await build({
     entryPoints: ['src/free-http-worker.ts'], outfile: join(output, 'free-http-worker.js'),
@@ -169,7 +170,7 @@ async function compile(output) {
   }
   const result = await build({
     entryPoints: ['src/client/index.ts'], outfile: join(output, 'client.js'), bundle: true, format: 'cjs', platform: 'browser', target: 'es2022', jsx: 'automatic', external,
-    define: { 'process.env.NODE_ENV': '"production"' }, plugins: [cssPlugin], metafile: true,
+    define: { 'process.env.NODE_ENV': '"production"' }, plugins: [cssPlugin], metafile: true, minify: true,
     banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(pkg.name)}, factory: (require) => { var module = { exports: {} }; var exports = module.exports;` },
     footer: { js: 'return module.exports; } });' },
   })

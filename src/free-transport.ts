@@ -139,12 +139,12 @@ export class FreeBunTransport {
     let relay: Awaited<ReturnType<typeof openSocksTunnel>> | undefined
     let started = false
     try {
-      let body: string | undefined
+      let body: Buffer | undefined
       if (!['GET', 'HEAD'].includes(request.method)) {
         const bytes = Buffer.from(await waitWithSignal(() => request.arrayBuffer(), signal))
         // Streamed bodies may omit or misstate Content-Length; enforce the real size.
         if (bytes.byteLength > maxBodyBytes) throw new RangeError(`Free HTTP request body exceeds the ${maxBodyBytes} byte limit`)
-        body = bytes.toString('base64')
+        if (bytes.byteLength > 0) body = bytes
       }
       signal.throwIfAborted()
       // The relay may only reach this request's target host: a local process
@@ -158,11 +158,13 @@ export class FreeBunTransport {
       }
       signal.throwIfAborted()
       const packet: FreeHttpRequest = {
-        url: request.url, method: request.method, headers: [...request.headers], body,
+        url: request.url, method: request.method, headers: [...request.headers],
+        ...(body ? { bodyLength: body.byteLength } : {}),
         redirect: request.redirect, ...proxy ? { proxy: relay?.url ?? proxy } : {},
       }
-      const serialized = JSON.stringify(packet)
-      if (Buffer.byteLength(serialized) > MAX_PACKET_BYTES) throw new RangeError('Free HTTP request exceeds the 256 MiB IPC limit')
+      const serialized = JSON.stringify(packet) + '\n'
+      const metadataBytes = Buffer.byteLength(serialized)
+      if (metadataBytes + (body?.byteLength ?? 0) > MAX_PACKET_BYTES) throw new RangeError('Free HTTP request exceeds the 256 MiB IPC limit')
       const env = freeWorkerEnvironment()
       const child = spawn(executable, ['--no-env-file', worker], {
         env, cwd: dirname(worker), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
@@ -175,7 +177,7 @@ export class FreeBunTransport {
       }))
       this.workers.add(closed)
       void closed.finally(() => this.workers.delete(closed))
-      return await this.response(child, request, signal, serialized)
+      return await this.response(child, request, signal, serialized, body)
     } catch (error) {
       // Spawned workers release their slot only after process/tunnel teardown.
       if (!started) { release(); await relay?.close() }
@@ -183,7 +185,7 @@ export class FreeBunTransport {
     }
   }
 
-  private response(child: ChildProcessWithoutNullStreams, request: Request, signal: AbortSignal, packet: string): Promise<Response> {
+  private response(child: ChildProcessWithoutNullStreams, request: Request, signal: AbortSignal, packet: string, body?: Buffer): Promise<Response> {
     return new Promise((resolve, reject) => {
       let buffer = Buffer.alloc(0)
       let received = false
@@ -256,7 +258,12 @@ export class FreeBunTransport {
       })
       signal.addEventListener('abort', abort, { once: true })
       if (signal.aborted) { abort(); return }
-      child.stdin.end(packet)
+      if (body) {
+        child.stdin.write(packet)
+        child.stdin.end(body)
+      } else {
+        child.stdin.end(packet)
+      }
     })
   }
 

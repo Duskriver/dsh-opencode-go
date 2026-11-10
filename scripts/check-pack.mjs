@@ -32,6 +32,7 @@ const REQUIRED_FILES = [
   'docs/usage-analytics.en.md',
   'docs/verification.md',
   'docs/assets/logo-light.png',
+  'docs/assets/logo-dark.png',
   'examples/headless.patch.yml',
   'examples/migrate-from-fork.patch.yml',
   // THIRD_PARTY_NOTICES.md points here for the pi packages' upstream license.

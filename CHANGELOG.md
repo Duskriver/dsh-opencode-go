@@ -9,7 +9,7 @@
 
 - 新增 `appearanceTheme` 界面主题设置（`native` / `classic`），默认 `native`；未设置该字段的旧配置缺省使用 Native。
 - 新增 `npm run check:install:pnpm`：用 pnpm 11.28.5 在隔离 consumer 中安装实际 tarball，禁用已有构建批准并启用严格构建失败策略，同时验证匹配平台的 Bun 二进制可以执行；CI 以非 advisory job 运行该安装检查。
-- 测试加固：新增 25 个回归用例（官方 HTTPS 端点凭据绑定正反用例、SOCKS 中继空闲预算派生/流量续期与 adapter 预算透传、图表柱体实绘 88% 不透明度合成对比度、聚焦柱图的 Escape 优先级），并修正设置页“主题选择不在设置页”的过时断言；`npm test` 现为 21 个文件 / 1062 个用例。
+- 测试加固：新增 25 个回归用例（官方 HTTPS 端点凭据绑定正反用例、SOCKS 中继空闲预算派生/流量续期与 adapter 预算透传、图表柱体实绘 88% 不透明度合成对比度、聚焦柱图的 Escape 优先级），并修正设置页“主题选择不在设置页”的过时断言；`npm test` 现为 21 个文件 / 1073 个用例。
 
 ### Changed
 
@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- 修复评审问题：历史看板额度重置提示恢复 UTC 日期与时间；账户列表在 `readUsage` 未返回时即发布 `configured / loading` 状态（未配置 Key 不再等待所有网络读取），各账户读取完成后逐行更新；Google SDK 懒加载失败后不再永久缓存 rejected Promise；`GoAccountManager.capture()` 继续避免热路径调用 `settings.describe()`，同时通过 `settings/document-updated` 事件围栏外部 `A -> C -> A` 编辑，过期的回退结算会被拒绝（新增回归测试）。
+- 修复设置页额度进度条在 Native 浅色主题下不可见：轨道原本使用宿主 `layer-2` 表面色，默认 Native 浅色下与卡片同为白色（约 1.0:1，中性 fallback 也只有约 1.1:1），1% 等小幅值时只剩一小段填充，像散落的色块。现统一为派生 `--go-track`（主题文字色 18% 混入背景），设置页行内额度条与展开的三档额度条、用量弹层、侧栏和历史看板的额度条与模型占比条共用；轨道在浅色下约 1.4:1、深色下约 1.7:1，受检的 Native/Classic fallback 调色板中填充与轨道保持 ≥2.5:1 可分辨（Native accent 会跟随 Host，第三方主题 accent 不在该断言范围内），`theme.client.spec.ts` 新增轨道可见性与样式表漂移断言。同时去掉行内额度条原有的 25% / 50% / 75% 白色刻度：轨道不可见时它们也看不见，轨道可见后却把整条切成了四段。
 - 修复 Native 主题的对比度回退：强控件边界（`borderStrong`）与图表状态系列（`accent2` / `cacheRead` / `cacheWrite`）不再映射 Host 的 `border-l2` 发丝线与 `state-*` 状态点色（它们不保证控件边界与图表所需的非文本对比度），改为使用插件受控静态值，恢复 WCAG 1.4.11 3:1；`theme.client.spec.ts` 新增对 Host 实际表面范围（浅色白、深色 `#151517` / `#232324` / `#2c2c2e`）的断言，防止默认主题再次静默回退。
 - Free 运行时改为直接声明版本锁定的官方 `@oven/bun-*` 可选平台包，移除带 `postinstall` 的 `bun` 包装依赖，修复 pnpm 11 在未批准构建脚本时安装或升级失败并回滚的问题（#87）。平台运行时仍会下载；Go 与现有 `MISSING_BUN_RUNTIME` 降级语义不变。
 - 修复 Free 凭据绑定：官方 host 分支现在同时要求 `https:` 与默认端口，`http://opencode.ai` 与 `https://opencode.ai:8443` 不再复用已保存的付费 Key，改为匿名 `Bearer public`，避免明文或非官方监听路径收到账号凭据（其它自定义 host 原本就不复用）。

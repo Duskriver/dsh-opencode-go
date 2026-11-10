@@ -32,7 +32,7 @@ import {
 } from './config.ts'
 import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
 import { GoAnalyticsService } from './analytics.ts'
-import { accountsOf, accountRefOf, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
+import { accountsOf, accountRefOf, PROFILE_ENTRY_ID, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
 import { ProxyTransport } from './transport.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -106,6 +106,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   ctx.plugin(GoAccountsService, { manager: accountManager })
   ctx.inject(['settings', 'credentials'], ready => {
     ready.effect(() => accountManager.connect(ready.settings, ready.credentials))
+    // Fence edits made outside the manager so a stale fallback cannot settle after A -> C -> A.
+    ready.on('settings/document-updated', ns => { if (ns === PROFILE_ENTRY_ID) accountManager.settingsChanged() })
   })
   const transport = new ProxyTransport()
   ctx.effect(() => () => transport.dispose())

@@ -32,6 +32,15 @@ describe('official history dashboard', () => {
     expect(document.body.textContent).not.toMatch(/Scanning|unsettled|unpriced|session coverage/i)
   })
 
+  it('keeps the UTC date and time in each quota reset tooltip', async () => {
+    const resetsAt = '2026-11-07T13:45:30Z'
+    const timed: GoUsage = { ...quota, rolling: { ...quota.rolling, resetsAt } }
+    render(<AnalyticsDialog {...props({ readQuota: async () => timed })} />)
+    const expected = `${en.usageResets} ${new Date(resetsAt).toLocaleString('en', { timeZone: 'UTC' })} UTC`
+    await waitFor(() => { expect(document.querySelector(`[title="${expected}"]`)).not.toBeNull() })
+    expect(expected).toMatch(/1:45:30/)
+  })
+
   it('uses Native by default and applies Classic to the same dashboard when selected', async () => {
     const view = render(<AnalyticsDialog {...props()} />)
     await screen.findAllByText('deepseek-v4.1-flash')

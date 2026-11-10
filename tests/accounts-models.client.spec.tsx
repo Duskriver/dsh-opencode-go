@@ -652,7 +652,7 @@ describe("account cards, quota rows and ordering", () => {
     fixture.controller.dispose()
   })
 
-  it('draws the row quota as one wide bar with quarter marks and a trailing reading', async () => {
+  it('draws the row quota as one continuous bar with a trailing reading', async () => {
     const fixture = setup()
     await fixture.controller.refreshAccounts()
     render(<AccountsCard state={fixture.controller.accountState()} actions={fixture.actions} writable t={t} />)
@@ -660,8 +660,9 @@ describe("account cards, quota rows and ordering", () => {
     const bar = screen.getByRole('progressbar', { name: `Primary ${en.usage_rolling}` })
     expect(bar.getAttribute('aria-valuenow')).toBe('10')
     expect(bar.getAttribute('data-level')).toBe('ok')
-    // One fill plus the three quarter marks, and the fill is the reading itself.
-    expect(bar.querySelectorAll('span')).toHaveLength(4)
+    // The fill is the reading itself and the track behind it is one piece: quarter
+    // marks would cut the now-visible track into segments that read as separate bars.
+    expect(bar.querySelectorAll('span')).toHaveLength(1)
     expect((bar.firstElementChild as HTMLElement).style.width).toBe('10%')
     fixture.controller.dispose()
   })
@@ -732,6 +733,31 @@ describe("account cards, quota rows and ordering", () => {
     fireEvent.click(within(row).getByRole('button', { name: en.accountRename }))
     expect(within(row).getByLabelText(en.accountName)).toBeTruthy()
     expect(screen.queryByRole('button', { name: en.accountAdd })).toBeNull()
+    fixture.controller.dispose()
+  })
+
+  it('publishes loading and unconfigured rows before any slow usage read settles, then updates each row as it settles', async () => {
+    const fixture = setup()
+    fixture.secrets.delete('ACCOUNT_B')
+    const pending = Promise.withResolvers<GoUsage>()
+    fixture.read.mockImplementation(() => pending.promise)
+    const store = fixture.controller.inject().hooks.opencodeGo
+    const refreshing = fixture.controller.refreshAccounts()
+    await vi.waitFor(() => { expect(fixture.read).toHaveBeenCalledWith('ACCOUNT_A') })
+    const [a, b] = store.getSnapshot().accounts.entries
+    expect(a).toMatchObject({ apiKeyEnv: 'ACCOUNT_A', configured: true, loading: true })
+    expect(a!.usage).toBeUndefined()
+    expect(b).toMatchObject({ apiKeyEnv: 'ACCOUNT_B', configured: false })
+    render(<AccountsCard state={store.getSnapshot().accounts} actions={fixture.actions} writable t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+    expect(screen.getAllByText(en.usageLoading).length).toBeGreaterThan(0)
+    expect(screen.queryByText(en.usageUnavailable)).toBeNull()
+    expect(screen.getByText(en.keyMissing)).toBeTruthy()
+    pending.resolve(usage('ACCOUNT_A', 42))
+    await refreshing
+    const settled = store.getSnapshot().accounts.entries[0]!
+    expect(settled).toMatchObject({ configured: true, usage: { rolling: { percent: 42 } } })
+    expect(settled.loading).toBeFalsy()
     fixture.controller.dispose()
   })
 

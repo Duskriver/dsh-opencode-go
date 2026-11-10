@@ -5,6 +5,7 @@ import {
   GO_THEME_FALLBACKS,
   GO_THEME_TOKENS,
   NATIVE_THEME_FALLBACKS,
+  QUOTA_TRACK_PERCENT,
   themeStyle,
   type GoThemeScheme,
   type GoThemeTokens,
@@ -68,6 +69,16 @@ for (const [theme, fallbacks] of [['native', NATIVE_THEME_FALLBACKS], ['classic'
       for (const surface of SURFACES) expectContrastAtLeast3(tokens.borderStrong, tokens[surface], `${scheme} borderStrong/${surface}`)
       expect(contrast(tokens.borderStrong, tokens.surface)).toBeGreaterThan(contrast(tokens.border, tokens.surface))
     })
+
+    it.each(SCHEMES)('keeps the quota track visible on every surface in %s', scheme => {
+      const tokens = fallbacks[scheme]
+      for (const surface of SURFACES) {
+        const track = blend(tokens.text, tokens[surface], QUOTA_TRACK_ALPHA)
+        expectQuotaTrackVisible(track, tokens[surface], `${scheme} ${theme} track/${surface}`)
+        expect(contrast(tokens.accent, track), `${scheme} ${theme} fill/track ${surface}: ${tokens.accent} on ${track}`)
+          .toBeGreaterThanOrEqual(2.5)
+      }
+    })
   })
 }
 
@@ -90,6 +101,21 @@ const HOST_INDEPENDENT_TOKENS = ['borderStrong', 'accent2', 'cacheRead', 'cacheW
 /** The state-derived chart series are painted as bars, so they composite with the bar opacity. */
 const HOST_STATE_CHART_SERIES = ['accent2', 'cacheRead', 'cacheWrite'] as const
 
+/** The quota track is the text colour mixed into the backdrop, so it composites at this opacity. */
+const QUOTA_TRACK_ALPHA = QUOTA_TRACK_PERCENT / 100
+
+/**
+ * A track is the frame that tells a reader the bar exists: it is informative
+ * shape, not text, so the contract is visibility rather than WCAG text
+ * contrast. Layer-2 alone is within a few RGB points of a Native light card
+ * (about 1.1:1), which is why the track mixes text into the backdrop; 1.3:1 is
+ * the weakest track the mix may produce, and the fill must stay separable from
+ * it so "how full" still reads at a glance.
+ */
+function expectQuotaTrackVisible(track: string, surface: string, label: string): void {
+  expect(contrast(track, surface), `${label}: track ${track} on ${surface}`).toBeGreaterThanOrEqual(1.3)
+}
+
 describe('Native contrast-checked tokens ignore the Host palette', () => {
   it.each(SCHEMES)('resolves the strong control boundary and state chart series to static values in %s', scheme => {
     const tokens = GO_THEME_TOKENS.native[scheme]
@@ -104,6 +130,14 @@ describe('Native contrast-checked tokens ignore the Host palette', () => {
       for (const surface of HOST_SURFACE_ANCHORS[scheme]) {
         expectContrastAtLeast3(tokens[token], surface, `${scheme} ${token}/host ${surface}`)
       }
+    }
+  })
+
+  it.each(SCHEMES)('keeps the quota track visible across the Host surface range in %s', scheme => {
+    const text = NATIVE_THEME_FALLBACKS[scheme].text
+    for (const surface of HOST_SURFACE_ANCHORS[scheme]) {
+      const track = blend(text, surface, QUOTA_TRACK_ALPHA)
+      expectQuotaTrackVisible(track, surface, `${scheme} track/host ${surface}`)
     }
   })
 
@@ -189,9 +223,11 @@ describe('themeStyle', () => {
       '--go-cache-read', '--go-cache-write', '--go-shadow', '--go-success', '--go-warning', '--go-danger',
       '--go-font', '--go-display-font', '--go-number-font', '--go-radius-small', '--go-radius-control',
       '--go-radius-pill', '--go-radius-option', '--go-radius-card', '--go-radius-popover', '--go-radius-modal', '--go-focus-width',
-      '--go-display-weight', '--go-display-tracking', '--go-chart-bar-opacity',
+      '--go-display-weight', '--go-display-tracking', '--go-track', '--go-chart-bar-opacity',
     ]
     for (const property of expected) expect(style[property], property).toBeTruthy()
+    expect(style['--go-track']).toContain('color-mix(in srgb,')
+    expect(style['--go-track']).toContain(`${QUOTA_TRACK_PERCENT}%`)
     for (const property of ['--go-font', '--go-display-font', '--go-number-font']) {
       expect(style[property]).not.toContain('url(')
       expect(style[property]).not.toContain('@import')
@@ -218,5 +254,56 @@ describe('AnalyticsDialog chart-bar rendering', () => {
     const customProperty = painted.match(/^var\(--go-chart-bar-opacity,\s*(\d*\.?\d+)\)$/)
     expect(customProperty, `.barStack opacity must read var(--go-chart-bar-opacity, <fallback>), got ${painted}`).not.toBeNull()
     expect(Number(customProperty![1])).toBe(CHART_BAR_OPACITY)
+  })
+})
+
+/**
+ * Every quota track must paint the token the contrast tests measure; a surface
+ * layer would vanish again. The track colour is translucent, so it may be
+ * painted exactly once: WebKit layers `::-webkit-progress-bar` over the
+ * element's own background, and a second translucent coat would darken the
+ * track past the measured ratio (Firefox paints only the element background,
+ * which is why the element carries the colour).
+ */
+describe('quota bar tracks', () => {
+  const tracks: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ['Section.module.css', ['.accountBar', '.accountUsage progress']],
+    ['AnalyticsDialog.module.css', ['.quotaWindow progress', '.rankTrack']],
+    ['UsagePill.module.css', ['.win progress', '.sidebarWindow progress']],
+  ]
+  const clearedPseudoBars: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ['Section.module.css', ['.accountUsage progress::-webkit-progress-bar']],
+    ['AnalyticsDialog.module.css', ['.quotaWindow progress::-webkit-progress-bar']],
+    ['UsagePill.module.css', ['.win progress::-webkit-progress-bar', '.sidebarWindow progress::-webkit-progress-bar']],
+  ]
+
+  function ruleBody(css: string, selector: string): string | null {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = css.match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`))
+    return match ? match[1]! : null
+  }
+
+  it('paints every quota track with the visible track token', () => {
+    for (const [file, selectors] of tracks) {
+      const css = readFileSync(new URL(`../src/client/${file}`, import.meta.url), 'utf8')
+      for (const selector of selectors) {
+        const body = ruleBody(css, selector)
+        expect(body, `${file} ${selector} rule must exist`).not.toBeNull()
+        expect(body, `${file} ${selector} must paint var(--go-track)`).toContain('var(--go-track)')
+        expect(body, `${file} ${selector} must not paint a surface layer`).not.toContain('--go-surface-2')
+      }
+    }
+  })
+
+  it('clears the WebKit progress bar so the translucent track is painted once', () => {
+    for (const [file, selectors] of clearedPseudoBars) {
+      const css = readFileSync(new URL(`../src/client/${file}`, import.meta.url), 'utf8')
+      for (const selector of selectors) {
+        const body = ruleBody(css, selector)
+        expect(body, `${file} ${selector} rule must exist`).not.toBeNull()
+        expect(body, `${file} ${selector} must stay transparent`).toMatch(/background:\s*transparent/)
+        expect(body, `${file} ${selector} must not repeat the track colour`).not.toContain('var(--go-track)')
+      }
+    }
   })
 })

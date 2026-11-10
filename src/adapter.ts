@@ -305,7 +305,7 @@ export class OpencodeGoRequestExecutor {
           ? this.freeTransport.forProxy(config.proxyURL, config.streamIdleTimeoutMs)
           : this.transport.forProxy(config.proxyURL),
         contextWindow: model.contextWindow, maxTokens: maxTokens ?? model.maxTokens,
-        estimatedContextTokens: estimateContextTokens(transcript).tokens,
+        get estimatedContextTokens(): number { return estimateContextTokens(transcript).tokens },
       })
       onDiagnostics?.(diagnostics)
       // GatewayDiagnostics classifies the HTTP response, but the finish failure

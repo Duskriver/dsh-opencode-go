@@ -19,10 +19,18 @@ try {
     if (stdinBytes > MAX_PACKET_BYTES) throw new RangeError('Free HTTP worker input exceeds the 256 MiB limit')
     chunks.push(bytes)
   }
-  const input = JSON.parse(Buffer.concat(chunks).toString()) as FreeHttpRequest
+  const raw = Buffer.concat(chunks, stdinBytes)
+  const newline = raw.indexOf(10)
+  const headerBytes = newline >= 0 ? raw.subarray(0, newline) : raw
+  const trailingBody = newline >= 0 && newline + 1 < raw.byteLength ? raw.subarray(newline + 1) : undefined
+  const input = JSON.parse(headerBytes.toString()) as FreeHttpRequest
+  if (input.bodyLength !== undefined && (trailingBody?.byteLength ?? 0) !== input.bodyLength) {
+    throw new TypeError('Free HTTP worker body length mismatch')
+  }
+  const bodyBytes = trailingBody ?? (input.body === undefined ? undefined : Buffer.from(input.body, 'base64'))
   const options: RequestInit & { proxy?: string } = {
     method: input.method, headers: input.headers, redirect: input.redirect,
-    ...(input.body === undefined ? {} : { body: new Uint8Array(Buffer.from(input.body, 'base64')) }),
+    ...(bodyBytes === undefined ? {} : { body: new Uint8Array(bodyBytes.buffer, bodyBytes.byteOffset, bodyBytes.byteLength) }),
     ...(input.proxy ? { proxy: input.proxy } : {}),
   }
   const response = await fetch(input.url, options)

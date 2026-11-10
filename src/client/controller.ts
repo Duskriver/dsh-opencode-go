@@ -515,18 +515,27 @@ export class OpencodeGoSectionController {
         return
       }
       this.accountFailure = undefined
+      // Publish every row's key state (and the loading marker) once, before any
+      // slow usage read, so unconfigured keys and spinners appear immediately.
+      const previousRows = new Map(accounts.map(account => [account.apiKeyEnv, this.accountRows.get(account.apiKeyEnv)]))
+      for (const account of accounts) {
+        const ref = account.apiKeyEnv
+        const info = described.value[ref]
+        if (info?.configured) this.accountRows.set(ref, { ...previousRows.get(ref), ...account, configured: true,
+          writable: info.writable, loading: true, failed: false })
+        else this.accountRows.set(ref, { ...account, configured: false, writable: info?.writable ?? true })
+      }
+      this.publish()
       await Promise.all(accounts.map(async account => {
         const ref = account.apiKeyEnv
         const info = described.value[ref]
-        const previous = this.accountRows.get(ref)
-        this.accountRows.set(ref, { ...previous, ...account, configured: info?.configured ?? false,
-          writable: info?.writable ?? true, loading: info?.configured === true, failed: false })
-        this.publish()
-        if (!info?.configured) { this.accountRows.set(ref, { ...account, configured: false, writable: info?.writable ?? true }); return }
+        const previous = previousRows.get(ref)
+        if (!info?.configured) return
         try {
           const usage = await this.readUsage(ref)
           if (this.disposed || epoch !== this.accountEpoch) return
           this.accountRows.set(ref, { ...account, configured: true, writable: info.writable, usage, updatedAt: Date.now() })
+          this.publish()
         } catch (error) {
           if (this.disposed || epoch !== this.accountEpoch) return
           const details = error && typeof error === 'object' && 'code' in error && error.code === 'opencode-go/usage-unavailable'
@@ -539,8 +548,8 @@ export class OpencodeGoSectionController {
           this.accountRows.set(ref, { ...account, configured: true, writable: info.writable, failed: true,
             problem: message.length > 512 ? message.slice(0, 512) + '…' : message,
             ...(retain ? { usage: previous.usage, updatedAt: previous.updatedAt, stale: true } : {}) })
+          this.publish()
         }
-        this.publish()
       }))
     } catch (error) {
       if (epoch === this.accountEpoch) {

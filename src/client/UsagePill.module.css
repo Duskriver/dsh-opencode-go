@@ -65,7 +65,7 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .winPercent { flex: none; width: 36px; text-align: right; font-family: var(--go-number-font); font-size: 12.5px;
   font-weight: 600; font-variant-numeric: tabular-nums; }
 .win progress { display: block; width: 100%; min-width: 0; height: 6px; appearance: none; border: 0;
-  border-radius: 99px; background: color-mix(in srgb, var(--go-text) 9%, var(--go-surface)); }
+  border-radius: 99px; background: var(--go-track); }
 .win progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
 .win progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
 .win progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
@@ -128,7 +128,7 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .sidebarWindow { display: grid; grid-template-columns: 44px minmax(0, 1fr) 36px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
 .sidebarWindow > span { color: var(--go-muted); white-space: nowrap; }
 .sidebarWindow > strong { text-align: right; font-family: var(--go-number-font); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
-.sidebarWindow progress { display: block; flex: 1; min-width: 0; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; background: var(--go-surface-2); }
+.sidebarWindow progress { display: block; flex: 1; min-width: 0; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; background: var(--go-track); }
 .sidebarWindow progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
 .sidebarWindow progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
 .sidebarWindow progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }

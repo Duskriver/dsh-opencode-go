@@ -4,6 +4,7 @@ export interface FreeHttpRequest {
     method: string;
     headers: [string, string][];
     body?: string;
+    bodyLength?: number;
     redirect: RequestRedirect;
     proxy?: string;
 }

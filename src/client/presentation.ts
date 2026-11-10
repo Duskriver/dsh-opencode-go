@@ -607,6 +607,16 @@ const NATIVE_NUMBER_FONT = '"SFMono-Regular", Consolas, "Liberation Mono", monos
  */
 export const CHART_BAR_OPACITY = 0.88
 
+/**
+ * Share of the theme's text colour mixed into a quota bar's track. Native light
+ * can paint the layer a card sits on with the card's own colour, so a track
+ * made of that surface token disappears against it; mixing text into the
+ * backdrop keeps the bar legible on every Host surface the pale layer cannot
+ * guarantee (about 1.4:1 against light surfaces, 1.7:1 in dark). Exported so
+ * the contrast tests composite exactly the percentage the stylesheet paints.
+ */
+export const QUOTA_TRACK_PERCENT = 18
+
 /** Classic is deliberately independent from Host and third-party theme overrides. */
 export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   dark: {
@@ -732,9 +742,37 @@ export function useGoThemeTokens(theme: OpencodeGoTheme = DEFAULT_OPENCODE_GO_TH
   return GO_THEME_TOKENS[theme][useHostScheme()]
 }
 
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+
+const DEFAULT_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: 'numeric', month: 'numeric', day: 'numeric',
+  hour: 'numeric', minute: 'numeric', second: 'numeric',
+}
+
+/** Format a date/time stamp using a module-level cached Intl.DateTimeFormat instance. */
+export function formatDateTime(
+  value: number | string | Date,
+  locale?: string,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  const date = value instanceof Date ? value : new Date(value)
+  const resolved = options ?? DEFAULT_DATE_TIME_OPTIONS
+  const key = `${locale ?? ''}:${options ? JSON.stringify(options) : 'default'}`
+  let fmt = dateTimeFormatters.get(key)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(locale, resolved)
+    dateTimeFormatters.set(key, fmt)
+  }
+  return fmt.format(date)
+}
+
+const themeStyleCache = new WeakMap<GoThemeTokens, CSSProperties>()
+
 /** Internal derived custom properties; third-party themes customize the Host tokens instead. */
 export function themeStyle(tokens: GoThemeTokens): CSSProperties {
-  return {
+  let style = themeStyleCache.get(tokens)
+  if (style) return style
+  style = {
     '--go-bg': tokens.bg,
     '--go-surface': tokens.surface,
     '--go-surface-2': tokens.surface2,
@@ -765,6 +803,9 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-focus-width': tokens.focusWidth,
     '--go-display-weight': tokens.displayWeight,
     '--go-display-tracking': tokens.displayTracking,
+    '--go-track': `color-mix(in srgb, ${tokens.text} ${QUOTA_TRACK_PERCENT}%, transparent)`,
     '--go-chart-bar-opacity': String(CHART_BAR_OPACITY),
   } as CSSProperties
+  themeStyleCache.set(tokens, style)
+  return style
 }

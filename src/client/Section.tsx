@@ -11,12 +11,13 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   type en,
+  formatDateTime,
   GO_THEME_TOKENS,
   useGoThemeTokens,
   useHostScheme,
   themeStyle,
 } from './presentation.ts'
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
   GoAccountsActions,
   GoAccountsState,
@@ -67,9 +68,6 @@ type Editor = { kind: 'add' | 'rename' | 'key' | 'remove'; ref?: string }
 /** The three quota windows, in the order the panel reads them. */
 const WINDOWS = ['rolling', 'weekly', 'monthly'] as const
 
-/** Where the wide bar carries its quarter marks. */
-const TICKS = [25, 50, 75] as const
-
 /**
  * The rolling window's reset as a countdown: the row keeps the one number a reader
  * acts on, and the opened detail carries the absolute stamps.
@@ -99,8 +97,8 @@ function barLevel(window: { percent: number; status: string }): 'ok' | 'high' | 
  * happened otherwise. */
 function stampText(at: number, locale?: string): string {
   const date = new Date(at)
-  const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
-  return date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString(locale)} ${time}`
+  const time = formatDateTime(date, locale, { hour: '2-digit', minute: '2-digit' })
+  return date.toDateString() === new Date().toDateString() ? time : `${formatDateTime(date, locale, { year: 'numeric', month: 'numeric', day: 'numeric' })} ${time}`
 }
 
 /** The drag handle: six dots, the page's reorder affordance and the drag source. */
@@ -250,7 +248,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         <progress data-level={barLevel(account.usage![window])} max={100}
           value={Math.min(100, account.usage![window].percent)}
           aria-label={`${label} ${t(`usage_${window}`)}`} />
-        <span className={css.hint}>{t('usageResets')} {new Date(account.usage![window].resetsAt).toLocaleString(locale)}</span>
+        <span className={css.hint}>{t('usageResets')} {formatDateTime(account.usage![window].resetsAt, locale)}</span>
       </div>)}
     </div> : <p className={css.hint}>{t(account.loading ? 'usageLoading' : 'usageUnavailable')}</p>}
     <div className={css.accountActions}>
@@ -271,7 +269,7 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
         <ChevronDown className={open ? css.chevronOpen : css.chevron} />
       </button>
       <span className={css.trailing}>
-        {updatedAt > 0 ? <span className={css.cardStamp} title={new Date(updatedAt).toLocaleString(locale)}>
+        {updatedAt > 0 ? <span className={css.cardStamp} title={formatDateTime(updatedAt, locale)}>
           {t('usageLastUpdated')} {stampText(updatedAt, locale)}
         </span> : null}
         <Button variant="outline" size="sm" disabled={state.refreshing}
@@ -375,7 +373,6 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                         aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
                         aria-label={`${label} ${t('usage_rolling')}`}>
                         <span className={css.accountBarFill} style={{ width: `${Math.min(100, rolling.percent)}%` }} />
-                        {TICKS.map(at => <span key={at} className={css.accountBarTick} style={{ left: `${at}%` }} />)}
                       </span>
                       <span className={css.accountReset}>{resetText(rolling.resetsAt, t)}</span>
                     </> : <span className={css.accountIdle}>{account.configured === false
@@ -441,25 +438,34 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const [selected, setSelected] = useState<string>()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
-    const timer = setInterval(() => { setNow(Date.now()) }, 60_000)
-    return () => { clearInterval(timer) }
+    const update = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      setNow(Date.now())
+    }
+    const timer = setInterval(update, 3_600_000)
+    document.addEventListener('visibilitychange', update)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', update)
+    }
   }, [])
   // Saved overrides never establish membership: only a successful gateway listing does.
-  const all = sortModels(models.status === 'ready' ? models.entries : [], now)
+  const modelEntries = models.status === 'ready' ? models.entries : undefined
+  const all = useMemo(() => sortModels(modelEntries ?? [], now), [modelEntries, now])
   const normalized = query.trim().toLocaleLowerCase()
-  const entries = all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
-    && (filter === 'all' || filter === 'new' && isNewModel(model, now)
-      || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)]) || filter === 'deprecated' && model.deprecated))
-  const model = entries.find(entry => entry.id === selected) ?? entries[0]
-  const visibilityDisabled = disabled || visibilitySaving
-  const customized = all.filter(entry => hasCapacityOverride(draft[modelSettingsKey(entry)])).length
+  const customized = useMemo(() => all.filter(entry => hasCapacityOverride(draft[modelSettingsKey(entry)])).length, [all, draft])
   const ownKeys = Object.keys(draft).filter(key => key.startsWith(`${FREE_PROVIDER_ID}/`) === (source === 'free'))
-  const filters = [
+  const filters = useMemo(() => [
     ['all', 'filterAll', all.length],
     ['new', 'filterNew', all.filter(entry => isNewModel(entry, now)).length],
     ['custom', 'filterCustom', customized],
     ['deprecated', 'filterDeprecated', all.filter(entry => entry.deprecated).length],
-  ] as const
+  ] as const, [all, now, customized])
+  const entries = useMemo(() => all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
+    && (filter === 'all' || filter === 'new' && isNewModel(model, now)
+      || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)]) || filter === 'deprecated' && model.deprecated)), [all, normalized, filter, now, draft])
+  const model = entries.find(entry => entry.id === selected) ?? entries[0]
+  const visibilityDisabled = disabled || visibilitySaving
   const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | number[] | undefined): void => {
     const current = draft[id] === null ? { contextWindow: null, maxTokens: null, thinkingBudgets: null } : draft[id] ?? {}
     onEdit({ ...draft, [id]: { ...current, [field]: value ?? null } })
@@ -885,7 +891,7 @@ function ModelSourceStatus({ models, source, t, locale }: {
   const label = busy ? t('modelsRefreshingShort') : failed ? t('modelsSourceFailed')
     : status?.updatedAt === undefined && status !== undefined ? t('modelsSourceNeverFetched') : t('modelsSourceCurrent')
   const updated = status?.updatedAt === undefined ? undefined : new Date(status.updatedAt)
-  const fullTime = updated ? t('modelsSourceUpdated', { time: updated.toLocaleString(locale) }) : undefined
+  const fullTime = updated ? t('modelsSourceUpdated', { time: formatDateTime(updated, locale) }) : undefined
   const detail = `${t(source === 'go' ? 'modelsGoSource' : 'modelsFreeSource')}: ${label}${fullTime ? `. ${fullTime}` : ''}`
   const sameDay = updated?.toDateString() === new Date().toDateString()
   const progressLabel = models.status === 'ready' ? t('modelsRefreshing') : t('modelsLoading')
@@ -893,7 +899,7 @@ function ModelSourceStatus({ models, source, t, locale }: {
     data-state={busy ? 'loading' : failed ? 'failed' : updated ? 'ready' : 'idle'} title={detail}>
     <span className={css.modelSyncDot} aria-hidden="true" />
     <span>{label}</span>
-    {updated && !busy ? <time dateTime={updated.toISOString()}>{updated.toLocaleString(locale, {
+    {updated && !busy ? <time dateTime={updated.toISOString()}>{formatDateTime(updated, locale, {
       ...(sameDay ? {} : { month: 'short', day: 'numeric' }), hour: '2-digit', minute: '2-digit', hour12: false,
     })}</time> : null}
   </span>
@@ -983,7 +989,9 @@ function Loaded(props: {
   // landing state, and the other tabs carry the former cards' contents.
   const [tab, setTab] = useState<SettingsTab>('overview')
   const [modelSource, setModelSource] = useState<ModelSource>('go')
-  const models = modelsForSource(state.models, modelSource)
+  const goModels = useMemo(() => modelsForSource(state.models, 'go'), [state.models])
+  const freeModels = useMemo(() => modelsForSource(state.models, 'free'), [state.models])
+  const models = modelSource === 'go' ? goModels : freeModels
   // The model tab carries the listing's own diagnostics and a refused switch write.
   const modelNotices = (
     <>
@@ -1091,7 +1099,7 @@ function Loaded(props: {
               <div className={css.modelToolbar}>
               <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
                 {(['go', 'free'] as const).map(source => {
-                  const catalog = modelsForSource(state.models, source)
+                  const catalog = source === 'go' ? goModels : freeModels
                   const status = catalog.status === 'ready' || catalog.status === 'failed' ? catalog.sources?.[source] : undefined
                   const label = t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')
                   return <button key={source} type="button" role="tab" aria-label={label}

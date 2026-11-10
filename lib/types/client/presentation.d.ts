@@ -323,6 +323,15 @@ export type GoThemeScheme = 'dark' | 'light';
  * the rendered color with this value instead of measuring the raw token.
  */
 export declare const CHART_BAR_OPACITY = 0.88;
+/**
+ * Share of the theme's text colour mixed into a quota bar's track. Native light
+ * can paint the layer a card sits on with the card's own colour, so a track
+ * made of that surface token disappears against it; mixing text into the
+ * backdrop keeps the bar legible on every Host surface the pale layer cannot
+ * guarantee (about 1.4:1 against light surfaces, 1.7:1 in dark). Exported so
+ * the contrast tests composite exactly the percentage the stylesheet paints.
+ */
+export declare const QUOTA_TRACK_PERCENT = 18;
 /** Classic is deliberately independent from Host and third-party theme overrides. */
 export declare const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
 /**
@@ -337,5 +346,7 @@ export declare const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeSche
 export declare function useHostScheme(): GoThemeScheme;
 /** Resolve one visual theme in the Host's current color scheme. */
 export declare function useGoThemeTokens(theme?: OpencodeGoTheme): GoThemeTokens;
+/** Format a date/time stamp using a module-level cached Intl.DateTimeFormat instance. */
+export declare function formatDateTime(value: number | string | Date, locale?: string, options?: Intl.DateTimeFormatOptions): string;
 /** Internal derived custom properties; third-party themes customize the Host tokens instead. */
 export declare function themeStyle(tokens: GoThemeTokens): CSSProperties;

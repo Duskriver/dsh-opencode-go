@@ -24,7 +24,7 @@ import {
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { OpencodeGoSettings } from './controller.ts'
 import { AnalyticsDialog } from './AnalyticsDialog.tsx'
-import { themeStyle, useGoThemeTokens } from './presentation.ts'
+import { formatDateTime, themeStyle, useGoThemeTokens } from './presentation.ts'
 
 export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
@@ -99,7 +99,7 @@ function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
 
 /** Panel timestamps keep the date and minutes: seconds only add noise at this size. */
 function panelDateTime(value: string | number, locale?: string): string {
-  return new Date(value).toLocaleString(locale, {
+  return formatDateTime(value, locale, {
     year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 }
@@ -194,7 +194,7 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
     })
   }
   return visible ? <>
-    <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts])}
+    <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts.map(a => [a.id, a.apiKeyEnv])])}
       {...props} readUsage={variant === 'pill' ? props.readUsage : readSidebarUsage}
       accounts={accounts} activeRef={activeRef} writable={config.writable}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
@@ -344,7 +344,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   /** A timed-out refresh keeps the last reading but must say when it was taken.
    *  Existing copy only: the panel's own `usageLastUpdated` label plus a clock time. */
   const staleUpdated = stale && !failure && current
-    ? ` · ${t('usageLastUpdated')} ${new Date(current.updatedAt).toLocaleTimeString(getLocale?.(), { hour: '2-digit', minute: '2-digit' })}`
+    ? ` · ${t('usageLastUpdated')} ${formatDateTime(current.updatedAt, getLocale?.(), { hour: '2-digit', minute: '2-digit' })}`
     : ''
   const label = usage
     ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${sidebar ? ` · ${t('usage_monthly')} ${usage.monthly.percent}%` : ''}${failure || stale ? ` · ${t('usageStaleShort')}` : ''}${staleUpdated}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`

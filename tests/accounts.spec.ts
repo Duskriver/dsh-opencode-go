@@ -604,6 +604,24 @@ describe('serialized account commands and primary selection', () => {
     expect(host.value().apiKeyEnv).toBe(backup.apiKeyEnv)
   })
 
+  it('rejects a stale fallback settlement after an external A -> C -> A edit without a capture in between', async () => {
+    const host = accountHarness({ accounts: [primary, backup], apiKeyEnv: primary.apiKeyEnv, autoSwitch: true })
+    const generation = host.manager.capture()
+    const config = host.value()
+    const describe = vi.spyOn(host.settings, 'describe')
+    host.externalEdit({ accounts: [backup, primary], apiKeyEnv: backup.apiKeyEnv })
+    host.externalEdit({ accounts: [primary, backup], apiKeyEnv: primary.apiKeyEnv })
+    expect(host.value()).toEqual(config)
+    const notice = { fromRef: primary.apiKeyEnv, toRef: backup.apiKeyEnv, reason: 'quota' as const, at: Date.now() }
+    host.manager.settle({ seq: 1, generation, config, ref: backup.apiKeyEnv, notice })
+    await Promise.resolve()
+    expect(host.settings.mutate).not.toHaveBeenCalled()
+    expect(host.value().apiKeyEnv).toBe(primary.apiKeyEnv)
+    expect(host.manager.lastSwitch()).toBeUndefined()
+    // The fence must not serialize every settings namespace on hot paths.
+    expect(describe).not.toHaveBeenCalled()
+  })
+
   it.each([
     { status: 401, message: 'unauthorized' },
     { status: 403, message: 'invalid API key' },

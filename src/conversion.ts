@@ -132,9 +132,15 @@ function appendUsageContext(prefix: string, message: PiMessage): string {
   return contextFingerprint([prefix, content])
 }
 
+const usageKeys = new WeakMap<PiContext, { provider: string; model: string; key: string }>()
+
 /** Capture one converted request before the SDK can mutate it while streaming. */
 export function piContextUsageKey(context: PiContext, provider: string, model: string): string {
-  return context.messages.reduce(appendUsageContext, usageContextSeed(context, provider, model))
+  const cached = usageKeys.get(context)
+  if (cached && cached.provider === provider && cached.model === model) return cached.key
+  const key = context.messages.reduce(appendUsageContext, usageContextSeed(context, provider, model))
+  usageKeys.set(context, { provider, model, key })
+  return key
 }
 
 /**
@@ -538,6 +544,12 @@ function piContext(systemPrompt: string | undefined, options: GenerateOptions, m
     messages,
     ...tools !== undefined && tools.length > 0 ? { tools } : {},
   }
+  if (usageContexts.size === 0) {
+    for (const message of messages) {
+      if (message.role === 'assistant') message.usage = emptyPiUsage()
+    }
+    return context
+  }
   let prefix = usageContextSeed(context, options.provider, options.model)
   for (const message of messages) {
     prefix = appendUsageContext(prefix, message)
@@ -546,6 +558,7 @@ function piContext(systemPrompt: string | undefined, options: GenerateOptions, m
     // Legacy usage has no fingerprint, so it cannot safely budget this request.
     if (message.role === 'assistant' && usageContexts.get(message) !== prefix) message.usage = emptyPiUsage()
   }
+  usageKeys.set(context, { provider: options.provider, model: options.model, key: prefix })
   return context
 }
 
