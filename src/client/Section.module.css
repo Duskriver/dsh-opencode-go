@@ -364,8 +364,13 @@
   color: var(--go-muted);
 }
 
-/* One tab per class of settings: the page keeps its title, the tabs own the rest. */
+/* One tab per class of settings: the page keeps its title, the tabs own the rest.
+   The strip is the page's only navigation, so it stays put while the panel under
+   it scrolls; without that a long tab takes the way out of it out of reach. */
 .pageTabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   gap: 2px;
   margin: 0 0 10px;
@@ -432,6 +437,37 @@
 .tabPanel .card + .cardModels,
 .tabPanel .cardModels + .card {
   margin-top: 18px;
+}
+
+/* A panel's first block must not add its own lead under the tab strip: the card
+   body's top padding separates stacked blocks, and above the first block there
+   is only the tab strip. The overview supplies the same lead on its first row
+   directly, because it has no card body up there. */
+.tabPanel > .card > .cardBody,
+.tabPanel > .cardModels > .cardBody {
+  padding-top: 0;
+}
+
+.tabPanel .overviewRows > .card:first-child {
+  padding-top: 10px;
+}
+
+/* The overview's two switches and the account summary read as one list: equal
+   vertical rhythm and a hairline between rows instead of three separate cards
+   with their own margins. Declared after the tab-panel spacing on purpose: it
+   has to outrank those rules. */
+.tabPanel .overviewRows > .card,
+.tabPanel .overviewRows > .card + .card {
+  margin-top: 0;
+  padding: 0 0 14px;
+  border-top: 0;
+}
+
+/* The first row starts right under the tab strip; the hairline and the 14px
+   above each later row give every gap the same 28px of air. */
+.tabPanel .overviewRows > .card + .card {
+  padding-top: 14px;
+  border-top: 0.5px solid var(--go-border);
 }
 
 /* Hairlines separate concerns; only editable fields and account rows are filled. */
@@ -523,6 +559,10 @@
   gap: 10px;
   padding: 14px 0 0;
 }
+
+/* Card-level actions sit under the fields: a title row above them only repeated
+   the tab label and pushed the first setting down. */
+.cardActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
 .cardBody > .input {
   width: 100%;
@@ -732,7 +772,10 @@
   grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
   flex: 1 1 auto;
   min-height: 260px;
-  max-height: 560px;
+  /* Both panes share one frame height, so the list and the parameter card stop
+     together; the ceiling keeps the whole frame at roughly four fifths of its
+     former height. */
+  max-height: 448px;
   border: 0.5px solid var(--go-border);
   border-radius: var(--go-radius-card);
   overflow: hidden;
