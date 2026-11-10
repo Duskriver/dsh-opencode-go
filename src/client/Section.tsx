@@ -634,7 +634,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 
 /** The tuning fields covered by the advanced parameter reset, in display order. */
 const ADVANCED_FIELDS = [
-  'freeEnabled', 'usageDisplay', 'baseURL', 'freeBaseURL', 'proxyURL',
+  'freeEnabled', 'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs',
   'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
@@ -656,6 +656,12 @@ function numericBounds(field: TextField): { numeric: true; min?: number; max?: n
 }
 
 const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'usagePillStyle'] as const
+/** The appearance tab also owns the quota display mode, so one reset covers that card. */
+const APPEARANCE_TAB_FIELDS = [...APPEARANCE_FIELDS, 'usageDisplay'] as const
+
+/** The page's top-level tabs, in reading order. */
+const SETTINGS_TABS = ['overview', 'models', 'appearance', 'advanced'] as const
+type SettingsTab = typeof SETTINGS_TABS[number]
 
 export type { OpencodeGoSectionState } from './controller.ts'
 
@@ -773,13 +779,12 @@ function ValueField(props: ValueFieldProps) {
   )
 }
 
-/** Appearance has its own reset; previews share the actual input indicator's styles. */
-function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
+/** Appearance controls; the card above them owns the heading and reset. */
+function QuotaAppearance({ state, t, disabled, onEdit }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
   disabled: boolean
   onEdit: (field: TextField, text: string) => void
-  onReset: (field: EditableField) => void
 }) {
   const scheme = useHostScheme()
   const draftTheme = state.appearanceTheme.text === 'classic' ? 'classic' : 'native'
@@ -789,17 +794,8 @@ function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
   const themeDescribedBy = state.appearanceTheme.invalid ? `${themeId}-hint ${themeId}-error` : `${themeId}-hint`
   const styleId = 'opencode-go-usage-pill-style'
   const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
-  return <section className={css.appearanceGroup} aria-labelledby="opencode-go-appearance-title">
-    <div className={`${css.groupHead} ${css.appearanceHead}`}>
-      <h4 id="opencode-go-appearance-title" className={css.appearanceTitle}>{t('usageAppearanceLabel')}</h4>
-      <button type="button" className={css.reset}
-        disabled={locked || !APPEARANCE_FIELDS.some(field => state[field].overridden || state[field].invalid)}
-        onClick={() => {
-          for (const field of APPEARANCE_FIELDS) {
-            if (state[field].overridden || state[field].invalid) onReset(field)
-          }
-        }}>{t('usageAppearanceReset')}</button>
-    </div>
+  return <div className={css.appearanceGroup}>
+    <div className={css.rows}>
     <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
       aria-describedby={themeDescribedBy} aria-invalid={state.appearanceTheme.invalid || undefined}>
       <legend className={css.appearanceLegend}>
@@ -864,7 +860,8 @@ function QuotaAppearance({ state, t, disabled, onEdit, onReset }: {
       {state.usagePillStyle.invalid
         ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
     </fieldset>
-  </section>
+    </div>
+  </div>
 }
 
 /** Compact freshness for the selected source; full timestamps stay available on hover. */
@@ -974,19 +971,15 @@ function Loaded(props: {
 }) {
   const { t, state, loadModels } = props
   const tokens = useGoThemeTokens(state.appliedAppearanceTheme)
-  const [advanced, setAdvanced] = useState(false)
-  // The list is the page's largest block and the tuning fields sit under it, so
-  // it ships folded: a reader opens it when they came to change models.
-  const [modelsOpen, setModelsOpen] = useState(false)
+  // Tabs keep one class of settings on screen at a time: the overview is the
+  // landing state, and the other tabs carry the former cards' contents.
+  const [tab, setTab] = useState<SettingsTab>('overview')
   const [modelSource, setModelSource] = useState<ModelSource>('go')
   const models = modelsForSource(state.models, modelSource)
-  // What the card has to report — the listing's own diagnostics and a refused
-  // switch write — is not part of the fold. A failure the reader cannot see is
-  // worse than a folded list, and the connection switch that can fail lives in
-  // the card above, so the notices render under the header either way.
+  // The model tab carries the listing's own diagnostics and a refused switch write.
   const modelNotices = (
     <>
-      <ModelsBody models={modelsOpen ? models : state.models} source={modelsOpen ? modelSource : undefined} t={t} showProgress={!modelsOpen} />
+      <ModelsBody models={models} source={modelSource} t={t} />
       {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
     </>
   )
@@ -1016,6 +1009,14 @@ function Loaded(props: {
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
   const canResetAdvanced = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  const appearanceOverridden = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden)
+  const canResetAppearance = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  const tabs: { id: SettingsTab; label: string; marked?: boolean }[] = [
+    { id: 'overview', label: t('settingsTabOverview') },
+    { id: 'models', label: t('settingsTabModels'), marked: state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale },
+    { id: 'appearance', label: t('settingsTabAppearance'), marked: appearanceOverridden },
+    { id: 'advanced', label: t('settingsTabAdvanced'), marked: advancedOverridden },
+  ]
   return (
     <div className={css.page} style={themeStyle(tokens)}>
       <div className={css.pageBody}>
@@ -1023,6 +1024,26 @@ function Loaded(props: {
         <h2 className={css.title}>{t('titleLabel')}</h2>
         <p className={css.intro}>{t('intro')}</p>
       </div>
+      <div className={css.pageTabs} role="tablist" aria-label={t('settingsTabsLabel')}>
+        {tabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`opencode-go-tab-${item.id}`}
+          aria-selected={tab === item.id} aria-controls={`opencode-go-panel-${item.id}`}
+          data-marked={item.marked ? '' : undefined}
+          tabIndex={tab === item.id ? 0 : -1} className={css.pageTab}
+          onClick={() => { setTab(item.id) }}
+          onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+            event.preventDefault()
+            const next = event.key === 'Home' ? SETTINGS_TABS[0]
+              : event.key === 'End' ? SETTINGS_TABS[SETTINGS_TABS.length - 1]
+              : SETTINGS_TABS[(index + (event.key === 'ArrowRight' ? 1 : SETTINGS_TABS.length - 1)) % SETTINGS_TABS.length]
+            setTab(next)
+            document.getElementById(`opencode-go-tab-${next}`)?.focus()
+          }}>
+          {item.label}
+          {item.marked ? <span className={css.tabMark} title={t('overridden')} aria-hidden="true" /> : null}
+        </button>)}
+      </div>
+      {tab === 'overview' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-overview" aria-labelledby="opencode-go-tab-overview">
       <section className={css.card}>
         <div className={css.cardHead}>
           <h3 className={css.cardTitle}>{t('enabledLabel')}<HintMark hint={enabledHint} /></h3>
@@ -1042,21 +1063,11 @@ function Loaded(props: {
         {state.enabledFailed ? <p className={css.failedNote} role="alert">{t('enabledFailed')}</p> : null}
       </section>
       {accountCard}
-      {/* Source controls share one row; failures remain visible when folded. */}
-      <section className={modelsOpen ? css.cardModels : css.cardModels + ' ' + css.cardFolded}>
-        <button
-          type="button"
-          className={css.cardTrigger}
-          aria-expanded={modelsOpen}
-          aria-controls="opencode-go-models"
-          onClick={() => { setModelsOpen(!modelsOpen) }}
-        >
-          <span className={css.cardTitle}>{t('modelsLabel')}</span>
-          <ChevronDown className={modelsOpen ? css.chevronOpen : css.chevron} />
-        </button>
-        {modelsOpen
-          ? (
-            <div id="opencode-go-models" className={css.cardBody}>
+      </div> : null}
+      {tab === 'models' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-models" aria-labelledby="opencode-go-tab-models">
+      <section className={css.cardModels}>
+        <div className={css.cardHead}><h3 className={css.cardTitle}>{t('modelsLabel')}</h3></div>
+        <div id="opencode-go-models" className={css.cardBody}>
               <div className={css.modelToolbar}>
               <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
                 {(['go', 'free'] as const).map(source => {
@@ -1095,44 +1106,57 @@ function Loaded(props: {
                 onModelEnabled={props.setModelEnabled}
                 onEdit={props.editModelLimits} />
               </div>
-            </div>
-          )
-          : <div className={css.cardNotes}>{modelNotices}</div>}
+        </div>
       </section>
-      {/* Everything a working setup never needs stays folded at the foot of the
-          page, under the card that owns the values it inherits. */}
+      </div> : null}
+      {tab === 'appearance' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-appearance" aria-labelledby="opencode-go-tab-appearance">
       <section className={css.card}>
-        <button
-          type="button"
-          className={css.cardTrigger}
-          aria-expanded={advanced}
-          aria-controls="opencode-go-advanced"
-          onClick={() => { setAdvanced(!advanced) }}
-        >
-          <span className={css.cardTitle}>{t('advancedLabel')}</span>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('usageAppearanceLabel')}</h3>
+          <button type="button" className={css.reset}
+            disabled={disabled || state.saving || !canResetAppearance}
+            onClick={() => {
+              for (const field of APPEARANCE_TAB_FIELDS) {
+                if (state[field].overridden || state[field].invalid) props.resetField(field)
+              }
+            }}>
+            {t('usageAppearanceReset')}
+          </button>
+        </div>
+        <div className={css.cardBody}>
+          <div className={css.rows}>
+            <ValueField
+              id="opencode-go-usage-display"
+              label={t('usageDisplayLabel')}
+              hint={t('usageDisplayHint')}
+              field={state.usageDisplay}
+              options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
+              {...fieldProps}
+              onEdit={text => { props.edit('usageDisplay', text) }}
+            />
+            <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={props.edit} />
+          </div>
+        </div>
+      </section>
+      </div> : null}
+      {tab === 'advanced' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-advanced" aria-labelledby="opencode-go-tab-advanced">
+      <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('advancedLabel')}</h3>
           {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
-          <ChevronDown className={advanced ? css.chevronOpen : css.chevron} />
-        </button>
-        {advanced
-          ? (
-            <div id="opencode-go-advanced" className={css.cardBody}>
-              <div className={css.advancedHead}>
-                <p className={css.hint}>{t('advancedHint')}</p>
-                {/* Parameter defaults and appearance keep their separate reset scopes. */}
-                <button
-                  type="button"
-                  className={css.reset}
-                  disabled={disabled || !canResetAdvanced}
-                  onClick={() => {
-                    for (const field of ADVANCED_FIELDS) {
-                      if (state[field].overridden || state[field].invalid) props.resetField(field)
-                    }
-                  }}
-                >
-                  {t('advancedResetAll')}
-                </button>
-              </div>
-              <div className={css.rows}>
+          <button type="button" className={css.reset}
+            disabled={disabled || state.saving || !canResetAdvanced}
+            onClick={() => {
+              for (const field of ADVANCED_FIELDS) {
+                if (state[field].overridden || state[field].invalid) props.resetField(field)
+              }
+            }}>
+            {t('advancedResetAll')}
+          </button>
+        </div>
+        <div className={css.cardBody}>
+          <p className={css.hint}>{t('advancedHint')}</p>
+          <div className={css.rows}>
                 <div className={css.groupHead}>{t('groupFree')}</div>
                 <div className={css.row}>
                   <div className={css.rowLabel}>
@@ -1151,17 +1175,6 @@ function Loaded(props: {
                   </div>
                   <p id="opencode-go-free-enabled-hint" className={css.rowHint}>{t('freeEnabledHint')}</p>
                 </div>
-                <div className={css.groupHead}>{t('groupUsage')}</div>
-                <ValueField
-                  id="opencode-go-usage-display"
-                  label={t('usageDisplayLabel')}
-                  hint={t('usageDisplayHint')}
-                  field={state.usageDisplay}
-                  options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
-                  {...fieldProps}
-                  onEdit={text => { props.edit('usageDisplay', text) }}
-                />
-                <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={props.edit} onReset={props.resetField} />
                 <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-base-url"
@@ -1263,11 +1276,10 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
                 />
-              </div>
-            </div>
-          )
-          : null}
+          </div>
+        </div>
       </section>
+      </div> : null}
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>
       <div className={css.actions}>
