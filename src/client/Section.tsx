@@ -1038,7 +1038,6 @@ function Loaded(props: {
       <div className={css.pageBody}>
       <div className={css.pageTop}>
         <h2 className={css.title}>{t('titleLabel')}</h2>
-        <p className={css.intro}>{t('intro')}</p>
       </div>
       <div className={css.pageTabs} role="tablist" aria-label={t('settingsTabsLabel')}>
         {tabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`opencode-go-tab-${item.id}`}
@@ -1060,6 +1059,7 @@ function Loaded(props: {
         </button>)}
       </div>
       {tab === 'overview' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-overview" aria-labelledby="opencode-go-tab-overview">
+      <div className={css.overviewRows}>
       <section className={css.card}>
         <div className={css.cardHead}>
           <h3 className={css.cardTitle}>{t('enabledLabel')}<HintMark hint={enabledHint} /></h3>
@@ -1091,10 +1091,10 @@ function Loaded(props: {
         </div>
       </section>
       {accountCard}
+      </div>
       </div> : null}
       {tab === 'models' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-models" aria-labelledby="opencode-go-tab-models">
       <section className={css.cardModels}>
-        <div className={css.cardHead}><h3 className={css.cardTitle}>{t('modelsLabel')}</h3></div>
         <div id="opencode-go-models" className={css.cardBody}>
               <div className={css.modelToolbar}>
               <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
@@ -1139,18 +1139,6 @@ function Loaded(props: {
       </div> : null}
       {tab === 'appearance' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-appearance" aria-labelledby="opencode-go-tab-appearance">
       <section className={css.card}>
-        <div className={css.cardHead}>
-          <h3 className={css.cardTitle}>{t('usageAppearanceLabel')}</h3>
-          <button type="button" className={css.reset}
-            disabled={disabled || state.saving || !canResetAppearance}
-            onClick={() => {
-              for (const field of APPEARANCE_TAB_FIELDS) {
-                if (state[field].overridden || state[field].invalid) props.resetField(field)
-              }
-            }}>
-            {t('usageAppearanceReset')}
-          </button>
-        </div>
         <div className={css.cardBody}>
           <div className={css.rows}>
             <ValueField
@@ -1164,24 +1152,24 @@ function Loaded(props: {
             />
             <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={props.edit} />
           </div>
+          {/* The reset action closes the card: a title row above the fields only
+              repeated the tab label and pushed the first setting down. */}
+          <div className={css.cardActions}>
+            <button type="button" className={css.reset}
+              disabled={disabled || state.saving || !canResetAppearance}
+              onClick={() => {
+                for (const field of APPEARANCE_TAB_FIELDS) {
+                  if (state[field].overridden || state[field].invalid) props.resetField(field)
+                }
+              }}>
+              {t('usageAppearanceReset')}
+            </button>
+          </div>
         </div>
       </section>
       </div> : null}
       {tab === 'advanced' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-advanced" aria-labelledby="opencode-go-tab-advanced">
       <section className={css.card}>
-        <div className={css.cardHead}>
-          <h3 className={css.cardTitle}>{t('advancedLabel')}</h3>
-          {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
-          <button type="button" className={css.reset}
-            disabled={disabled || state.saving || !canResetAdvanced}
-            onClick={() => {
-              for (const field of ADVANCED_FIELDS) {
-                if (state[field].overridden || state[field].invalid) props.resetField(field)
-              }
-            }}>
-            {t('advancedResetAll')}
-          </button>
-        </div>
         <div className={css.cardBody}>
           <div className={css.rows}>
                 <div className={css.groupHead}>{t('groupConnection')}</div>
@@ -1285,6 +1273,20 @@ function Loaded(props: {
                   {...fieldProps}
                   onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
                 />
+          </div>
+          {/* The reset action closes the card, so the tab strip is followed by the
+              first setting instead of a title row that repeated the tab label. */}
+          <div className={css.cardActions}>
+            {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
+            <button type="button" className={css.reset}
+              disabled={disabled || state.saving || !canResetAdvanced}
+              onClick={() => {
+                for (const field of ADVANCED_FIELDS) {
+                  if (state[field].overridden || state[field].invalid) props.resetField(field)
+                }
+              }}>
+              {t('advancedResetAll')}
+            </button>
           </div>
         </div>
       </section>

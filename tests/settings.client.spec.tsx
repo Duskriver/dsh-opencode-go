@@ -624,9 +624,10 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.queryByRole('alert')).toBeNull()
     })
 
-    it('keeps the header compact and groups refresh with the source controls', () => {
+    it('groups refresh with the source controls under the tab strip that names the page', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
-      expect(screen.getByRole('heading', { level: 3, name: en.modelsLabel })).toBeTruthy()
+      // The models tab already says "Models": the card must not repeat it as a heading.
+      expect(screen.queryByRole('heading', { level: 3, name: en.modelsLabel })).toBeNull()
 
       const refresh = screen.getByRole('button', { name: en.modelsRefresh })
       const sources = screen.getByRole('tablist', { name: en.modelSourcesLabel })
@@ -707,11 +708,17 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
     })
 
-    it('gives each tab a plain heading without a summary line', () => {
+    it('names each tab only in the tab strip, not again inside the panel', () => {
       renderSection(stateOf())
+      // Appearance and advanced keep their reset actions, but the headings that
+      // repeated the tab label above them are gone.
       openAdvanced()
-      const heading = screen.getByRole('heading', { level: 3, name: en.advancedLabel })
-      expect(heading.textContent).toBe(en.advancedLabel)
+      expect(screen.queryByRole('heading', { level: 3, name: en.advancedLabel })).toBeNull()
+      expect(screen.getByRole('button', { name: en.advancedResetAll })).toBeTruthy()
+
+      selectTab('appearance')
+      expect(screen.queryByRole('heading', { level: 3, name: en.usageAppearanceLabel })).toBeNull()
+      expect(screen.getByRole('button', { name: en.usageAppearanceReset })).toBeTruthy()
     })
 
     it('wires each tab to the panel it controls', () => {
@@ -1338,7 +1345,9 @@ describe("installed Host localization", () => {
 
   function expectCopy(active: 'zh' | 'en'): void {
     const copy = active === 'zh' ? zh : en
-    expect(screen.getByText(copy.intro)).toBeTruthy()
+    // The title is the only prose above the tab strip: the intro line was dropped
+    // so the tabs sit closer to the top of the page.
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(copy.titleLabel)
     expect(screen.getAllByText(copy.newBadge).length).toBeGreaterThan(0)
     expect(screen.getByText(copy.configurationMissing)).toBeTruthy()
     expect(screen.getByRole('button', { name: copy.modelsRefresh })).toBeTruthy()
