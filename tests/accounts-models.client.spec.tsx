@@ -41,9 +41,14 @@ describe("model availability and picker visibility", () => {
     return { host, read, snapshot: face.hooks.opencodeGo.getSnapshot }
   }
 
-  /** Open the model card the way a reader does, for the tests that read inside it. */
+  /** Select the models tab the way a reader does, for the tests that read inside it. */
   async function openModels(): Promise<void> {
-    await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
+    await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-models') as HTMLElement) })
+  }
+
+  /** Tuning fields live on the advanced tab. */
+  async function openAdvanced(): Promise<void> {
+    await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-advanced') as HTMLElement) })
   }
 
   /** The shipped posture is folded; most of these tests read the list and its switches. */
@@ -205,15 +210,19 @@ describe("model availability and picker visibility", () => {
 
     it('preserves unrelated drafts and committed switch values when a write fails', async () => {
       const { host, snapshot } = await mountOpen()
-      fireEvent.click(screen.getByText(en.advancedLabel))
+      await openAdvanced()
       fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '30' } })
+      await openModels()
       await flip('Old')
-      expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
       expect(snapshot().dirty).toBe(true)
       host.set.mockRejectedValueOnce(new Error('write refused'))
       await flip('Old')
       expect(checked('Old')).toBe(true)
       expect(screen.getByRole('alert').textContent).toBe(en.pickerFailed)
+      // The staged tuning draft survives the trip between tabs and the failed write.
+      await openAdvanced()
+      expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
+      await openModels()
       fireEvent.click(screen.getByRole('button', { name: en.discard }))
       expect(checked('Old')).toBe(true)
     })
@@ -234,14 +243,19 @@ describe("model availability and picker visibility", () => {
       const { host } = await mountOpen()
       let finish!: (accepted: boolean) => void
       host.set.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve }))
-      fireEvent.click(screen.getByText(en.advancedLabel))
+      await openAdvanced()
       fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '30' } })
+      await openModels()
       fireEvent.click(toggle('Alpha'))
       expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(true)
-      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.enabledLabel }).disabled).toBe(true)
       expect(toggle('Alpha').disabled).toBe(true)
       expect(toggle('Old').disabled).toBe(true)
+      // The provider switch lives on the overview tab and shares the pending latch.
+      await openAdvanced()
+      await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-overview') as HTMLElement) })
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.enabledLabel }).disabled).toBe(true)
       await act(async () => { finish(false) })
+      await openModels()
       expect(checked('Alpha')).toBe(true) // unacknowledged write did not change the switch
       expect(screen.getByRole('alert').textContent).toBe(en.pickerFailed)
       await act(async () => { host.publish({ writable: false }) })
@@ -323,11 +337,14 @@ describe("model availability and picker visibility", () => {
       expect(document.getElementById('opencode-go-models')).toBeNull()
     })
 
-    it('reports an unreachable listing without opening the card', async () => {
+    it('marks the models tab when the listing is stale, and reports it inside', async () => {
       await mount({ catalog: { models, stale: true, error: 'request timed out' } })
+      // The overview stays quiet; the tab carries the mark and the detail lives inside.
+      expect(screen.getByRole('tab', { name: en.settingsTabModels }).hasAttribute('data-marked')).toBe(true)
+      expect(document.getElementById('opencode-go-models')).toBeNull()
+      await openModels()
       expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
       expect(screen.getByText('request timed out')).toBeTruthy()
-      expect(document.getElementById('opencode-go-models')).toBeNull()
     })
 
   })
@@ -649,28 +666,32 @@ describe("account cards, quota rows and ordering", () => {
     fixture.controller.dispose()
   })
 
-  it('lays a row out as fixed columns, so a longer name cannot move the bar', async () => {
+  it('lays a row out as two lines, so a longer name cannot move the bar', async () => {
     const fixture = setup()
     await fixture.controller.refreshAccounts()
     const state = fixture.controller.accountState()
     const main = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
       .closest('[data-account-row]')!.querySelector('[data-account-main]') as HTMLElement
+    const body = () => main().children[1] as HTMLElement
+    const top = () => body().children[0] as HTMLElement
+    const meta = () => body().children[1] as HTMLElement
     const { unmount } = render(<AccountsCard state={state} actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    // Handle, name, key state, bar, reading, reset, disclosure: the flexible
-    // spacer that let a long name push every later column is gone.
-    expect(Array.from(main().children).map(child => child.tagName)).toEqual(
-      ['BUTTON', 'STRONG', 'SPAN', 'SPAN', 'SPAN', 'SPAN', 'BUTTON'])
-    expect(main().children[3]!.getAttribute('role')).toBe('progressbar')
-    // The name column is fixed and may ellipsise, so the full value stays reachable.
-    expect(main().children[1]!.getAttribute('title')).toBe('Primary')
+    // Handle + summary column; inside it the identity line and the quota line.
+    expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'DIV'])
+    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'SPAN', 'BUTTON'])
+    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN', 'SPAN'])
+    expect(meta().children[0]!.getAttribute('role')).toBe('progressbar')
+    // The name may ellipsise, so the full value stays reachable.
+    expect(top().children[0]!.getAttribute('title')).toBe('Primary')
     unmount()
-    // A row with nothing to read yet keeps that grid: its message spans the bar,
-    // the reading and the countdown instead of adding a column.
+    // A row with nothing to read yet keeps the two lines: the message takes the
+    // quota line, so the identity line and the disclosure stay put.
     render(<AccountsCard state={{ ...state, entries: state.entries.map(entry => ({ ...entry, usage: undefined, loading: true })) }}
       actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'STRONG', 'SPAN', 'SPAN', 'BUTTON'])
+    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'BUTTON'])
+    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN'])
     expect(screen.getAllByText(en.usageLoading)).toHaveLength(2)
     fixture.controller.dispose()
   })

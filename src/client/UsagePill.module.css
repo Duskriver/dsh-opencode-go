@@ -22,73 +22,96 @@
 }
 @container (max-width: 360px) { .unit { display: none; } }
 
+/* The popover keeps its own line-height so the Host's inherited 24px rhythm cannot
+   stretch single-line rows; every text block below declares its own line box. */
 .panel { position: absolute; bottom: calc(100% + 9px); right: 0; z-index: 100; box-sizing: border-box;
   display: flex; flex-direction: column; width: 352px; max-width: calc(100vw - 48px); max-height: 72vh;
   border: 1px solid var(--go-border); border-radius: var(--go-radius-popover); color: var(--go-text); font-size: 12px;
-  box-shadow: var(--go-shadow); isolation: isolate; }
+  line-height: 1.45; box-shadow: var(--go-shadow); isolation: isolate; }
 /* The panel takes focus only when no action inside can: keep the ring for that fallback. */
 .panel:focus { outline: none; }
 .panel:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--go-surface); pointer-events: none; }
 .body { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; box-sizing: border-box;
-  overflow-y: auto; overscroll-behavior: contain; padding: 7px 16px 12px; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
-.panelTitle, .panelHead { flex: none; display: flex; align-items: center; min-height: 46px; padding: 0; border-bottom: 1px solid var(--go-border);
-  color: var(--go-text); font-family: var(--go-display-font); font-size: 17px; font-weight: var(--go-display-weight); letter-spacing: var(--go-display-tracking); }
-.panelHead { gap: 8px; }
-.panelHead strong { font-size: 17px; font-weight: 400; letter-spacing: 0; color: var(--go-text); }
+  padding: 10px 16px 14px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+.panelHead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0;
+  color: var(--go-text); }
+.panelHead strong { font-family: var(--go-display-font); font-size: 15px; font-weight: 600; letter-spacing: 0; line-height: 21px; color: var(--go-text); }
 .back { display: grid; place-items: center; width: 24px; height: 26px; margin-left: -5px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
 .back:hover { color: var(--go-text); background: var(--go-surface-2); }
 .icon { flex: none; width: 14px; height: 14px; }
-.tick { flex: none; width: 15px; height: 15px; color: var(--go-accent); }
-.tile { flex: none; overflow: hidden; }
-.divider { height: 1px; background: var(--go-border); }
-.accHead { display: flex; align-items: center; gap: 7px; min-height: 48px; }
+.tick { flex: none; width: 14px; height: 14px; color: var(--go-accent); }
+
+/* The reading header carries the active account as its single drill-down entry. */
+.accChip { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; max-width: 100%; min-width: 0;
+  padding: 4px 7px; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted);
+  font-family: var(--go-font); font-size: 12px; line-height: 17px; text-align: left; cursor: default; }
+button.accChip { cursor: pointer; }
+button.accChip:hover:not(:disabled) { background: var(--go-surface-2); }
+button.accChip:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
+button.accChip:disabled { opacity: .5; cursor: default; }
 .dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
-.accName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
-.tag { flex: none; padding: 1px 6px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 11px; line-height: 1.6; }
-.switch { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 4px 5px; border: 0; border-radius: var(--go-radius-small);
-  background: none; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
-.switch:hover:not(:disabled) { background: var(--go-surface-2); }
-.switch:disabled { opacity: .5; cursor: default; }
-.option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 9px;
-  border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); font: inherit; text-align: left; cursor: pointer; }
-.option:hover:not(:disabled), .option[data-selected] { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
+.tag { flex: none; padding: 1px 5px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 10.5px; line-height: 16px; }
+.accChipName { min-width: 0; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); font-weight: 500; }
+.accChip .icon { width: 11px; height: 11px; }
+
+/* Three quota windows: an information line (label · reset · percent) above a full-width bar. */
+.windows { flex: none; display: flex; flex-direction: column; margin-top: 4px; }
+.win { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; }
+.meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; line-height: 17px; }
+.winLabel { flex: none; font-size: 11.5px; color: var(--go-muted); }
+.winReset { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+  font-size: 10.5px; line-height: 15px; color: var(--go-muted); }
+.winPercent { flex: none; width: 36px; text-align: right; font-family: var(--go-number-font); font-size: 12.5px;
+  font-weight: 600; font-variant-numeric: tabular-nums; }
+.win progress { display: block; width: 100%; min-width: 0; height: 6px; appearance: none; border: 0;
+  border-radius: 99px; background: color-mix(in srgb, var(--go-text) 9%, var(--go-surface)); }
+.win progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
+.win progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.win progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.win progress.high { --go-progress: var(--go-warning); }
+.win progress.limited { --go-progress: var(--go-danger); }
+.progressRolling, .progressWeekly, .progressMonthly { --go-progress: var(--go-accent); }
+.limitedText { font-size: 10px; line-height: 14px; color: var(--go-danger); }
+
+.actions { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 8px;
+  font-size: 11px; line-height: 17px; color: var(--go-muted); }
+.actions .hist { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: -4px; padding: 2px 4px;
+  border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-text);
+  font-family: var(--go-font); font-size: 11.5px; line-height: 17px; cursor: pointer; }
+.actions .hist .icon { width: 14px; height: 14px; color: var(--go-accent); }
+.actions .hist:hover, .actions .hist:active { background: var(--go-surface-2); }
+.actions .hist:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+.actions .updated { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.actions .refresh { flex: none; padding: 2px 4px; border: 0; border-radius: var(--go-radius-small); background: none;
+  color: var(--go-accent); font-family: var(--go-font); font-size: 11px; line-height: 17px; cursor: pointer; }
+.actions .refresh:hover:not(:disabled) { background: var(--go-surface-2); }
+.actions .refresh:disabled { opacity: .5; cursor: default; }
+.actions .refresh:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+
+/* Account drill-down: the list insets its rounded rows so the corners never touch
+   the header rule or the list dividers, and an opaque tint keeps the edge crisp. */
+.list { flex: none; padding: 6px 0 4px; }
+.divider { height: 1px; background: var(--go-border); }
+.list .divider { margin: 4px 10px; }
+.option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 11px;
+  border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); font: inherit;
+  line-height: 19px; text-align: left; cursor: pointer; }
+.option:hover:not(:disabled):not([data-selected]) { background: var(--go-surface-2); }
+.option[data-selected] { background: var(--go-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--go-accent) 22%, transparent); }
+.option[data-selected]:hover { background: var(--go-accent-soft); }
 .option:disabled { opacity: .5; cursor: default; }
+.option:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 .optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .option[data-selected] .optionName { font-weight: 500; }
-.hint { margin: 10px 0 2px; color: var(--go-muted); font-size: 11.5px; line-height: 1.7; }
+.hint { margin: 10px 0 4px; color: var(--go-muted); font-size: 11.5px; line-height: 18px; }
 .warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 var(--go-radius-small) var(--go-radius-small) 0;
   background: color-mix(in srgb, var(--go-warning) 7%, transparent); color: var(--go-text); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
 .warning p { margin: 4px 0 0; }
 .retry { align-self: flex-start; padding: 4px 8px; margin-bottom: 8px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small);
   background: transparent; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
 .retry:disabled { opacity: .5; cursor: default; }
-.back:focus-visible, .switch:focus-visible, .option:focus-visible, .retry:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
-
-.window { padding: 15px 0; }
-.windowRow { display: flex; align-items: center; gap: 12px; }
-.windowLabel { flex: none; width: 48px; color: var(--go-muted); font-size: 12px; }
-.windowPercent { flex: none; width: 43px; text-align: right; font-family: var(--go-number-font); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
-.window progress, .sidebarWindow progress { display: block; flex: 1; min-width: 0; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px;
-  background: var(--go-surface-2); }
-.window progress::-webkit-progress-bar, .sidebarWindow progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
-.window progress::-webkit-progress-value, .sidebarWindow progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
-.window progress::-moz-progress-bar, .sidebarWindow progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
-.window progress { min-width: 50px; }
-.windowReset { margin-top: 7px; padding-left: 60px; color: var(--go-muted); font-size: 11px; line-height: 1.6; }
-.progressRolling, .progressWeekly, .progressMonthly { --go-progress: var(--go-accent); }
-.window progress.high, .sidebarWindow progress.high { --go-progress: var(--go-warning); }
-.window progress.limited, .sidebarWindow progress.limited { --go-progress: var(--go-danger); }
-.limitedText { margin-top: 5px; color: var(--go-danger); font-size: 11px; }
-.foot { display: flex; align-items: center; justify-content: space-between; gap: 7px; padding-top: 10px; color: var(--go-muted); font-size: 11px; line-height: 1.6; }
-.foot > span { min-width: 0; }
-.analyticsEntry { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; margin-top: 3px; padding: 0;
-  border: 0; border-top: 1px solid var(--go-border); background: transparent; color: var(--go-text); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
-.analyticsEntry span { flex: 1; min-width: 0; }
-.analyticsEntry > .icon:first-child { color: var(--go-accent); }
-.analyticsEntry > .icon:last-child { color: var(--go-muted); }
-.analyticsEntry:hover { color: var(--go-accent); }
-.analyticsEntry:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; border-radius: var(--go-radius-small); }
+.retry:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 
 /* The account badge cycles the viewed quota only. History has its own action. */
 .sidebarRoot { display: flex; width: 100%; min-width: 0; }
@@ -105,6 +128,12 @@
 .sidebarWindow { display: grid; grid-template-columns: 44px minmax(0, 1fr) 36px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
 .sidebarWindow > span { color: var(--go-muted); white-space: nowrap; }
 .sidebarWindow > strong { text-align: right; font-family: var(--go-number-font); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.sidebarWindow progress { display: block; flex: 1; min-width: 0; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; background: var(--go-surface-2); }
+.sidebarWindow progress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
+.sidebarWindow progress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.sidebarWindow progress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.sidebarWindow progress.high { --go-progress: var(--go-warning); }
+.sidebarWindow progress.limited { --go-progress: var(--go-danger); }
 .sidebarStatus { color: var(--go-warning); font-size: 11px; }
 .sidebarHistory { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 33px; margin-top: 2px; padding: 0;
   border: 0; border-top: 1px solid var(--go-border); background: transparent; color: var(--go-muted); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
@@ -117,8 +146,3 @@ button.sidebarIcon { cursor: pointer; }
 button.sidebarIcon:hover { background: var(--go-surface-2); border-color: var(--go-accent); }
 button.sidebarIcon:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .sidebarIcon .icon { width: 17px; height: 17px; }
-@media (max-width: 360px) {
-  .windowRow { gap: 8px; }
-  .windowReset { padding-left: 56px; }
-  .foot { align-items: flex-start; }
-}

@@ -97,6 +97,13 @@ function withRefreshTimeout(read: () => Promise<GoUsage>): Promise<GoUsage> {
   })
 }
 
+/** Panel timestamps keep the date and minutes: seconds only add noise at this size. */
+function panelDateTime(value: string | number, locale?: string): string {
+  return new Date(value).toLocaleString(locale, {
+    year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
 /** Bars turn amber near the limit and red once the window is exhausted. */
 function usageLevel(window: UsageWindow): string | undefined {
   if (window.status === 'rate-limited' || window.percent >= 100) return css.limited
@@ -104,12 +111,16 @@ function usageLevel(window: UsageWindow): string | undefined {
 }
 
 /** The panel's own glyphs: no host icon set is required, and each one carries its meaning in text. */
+function ChevronLeft() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>
+}
+
 function ChevronRight() {
   return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
 }
 
-function ChevronLeft() {
-  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>
+function ChevronDown() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>
 }
 
 function ChartIcon() {
@@ -413,7 +424,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           </button>
           <strong>{t('accountSwitchTitle')}</strong>
         </div>
-        <div className={css.tile} role="listbox" aria-label={t('accountSwitchTitle')} aria-orientation="vertical"
+        <div className={css.list} role="listbox" aria-label={t('accountSwitchTitle')} aria-orientation="vertical"
           onKeyDown={event => {
             if (event.key === 'Escape') { event.stopPropagation(); setView('usage'); focusTrigger(); return }
             const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'))
@@ -446,23 +457,29 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
         {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
         <p className={css.hint}>{t('accountSwitchHint')}</p>
       </> : <>
-        <div className={css.panelTitle}>{t('usageTitle')}</div>
-        {accounts.length ? <div className={css.tile}>
-          <div className={css.accHead}>
-            <span className={css.dot} />
-            <span className={css.accName}>{accountName}</span>
-            {accounts.length > 1 ? <span className={css.tag}>{t('accountPreferredTag')}</span> : null}
-            {accounts.length > 1 ? <button type="button" className={css.switch} disabled={!switchable || switching}
-              aria-haspopup="listbox" onClick={() => { setView('accounts') }}>
-              {t('accountSwitchAction')}{accounts.length > 1 ? ' · ' + accounts.length : ''}<ChevronRight />
-            </button> : null}
-          </div>
-        </div> : null}
+        <div className={css.panelHead}>
+          <strong>{t('usageTitle')}</strong>
+          {accounts.length ? (switchable
+            ? <button type="button" className={css.accChip} aria-haspopup="listbox" disabled={switching}
+              aria-label={`${t('accountSwitchAction')} · ${accountName} · ${t('accountPreferredTag')}`}
+              onClick={() => { setView('accounts') }}>
+              <span className={css.dot} />
+              <span className={css.accChipName}>{accountName}</span>
+              {accounts.length > 1 ? <span className={css.tag}>{t('accountPreferredTag')}</span> : null}
+              <ChevronDown />
+            </button>
+            : <span className={css.accChip}>
+              <span className={css.dot} />
+              <span className={css.accChipName}>{accountName}</span>
+              {accounts.length > 1 ? <span className={css.tag}>{t('accountPreferredTag')}</span> : null}
+            </span>)
+            : null}
+        </div>
         {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
         {notice ? <p className={css.warning} role="status">
           {t(notice.reason === 'quota' ? 'accountFallbackQuota' : 'accountFallbackCredential')}{' '}
           {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
-          {' · '}{new Date(notice.at).toLocaleString(getLocale?.())}
+          {' · '}{panelDateTime(notice.at, getLocale?.())}
         </p> : null}
         {failure ? <div className={css.warning} role="alert">
           <strong>{t('usageRefreshFailed')}</strong>
@@ -471,30 +488,28 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
         </div> : null}
         {failure ? <button type="button" className={css.retry} disabled={refreshing}
           onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRetry')}</button> : null}
-        {usage ? <div className={css.tile}>
-          {(['rolling', 'weekly', 'monthly'] as const).map((key, index) => <Fragment key={key}>
-            {index ? <div className={css.divider} /> : null}
-            <div className={css.window}>
-              <div className={css.windowRow}>
-                <span className={css.windowLabel}>{t(`usage_${key}`)}</span>
-                <progress className={[usageLevel(usage[key]), key === 'rolling' ? css.progressRolling : key === 'weekly' ? css.progressWeekly : css.progressMonthly].filter(Boolean).join(' ')}
-                  aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
-                <strong className={css.windowPercent}>{usage[key].percent}%</strong>
-              </div>
-              <div className={css.windowReset}>{t('usageResets')} {new Date(usage[key].resetsAt).toLocaleString(getLocale?.())}</div>
-              {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
+        {usage ? <div className={css.windows}>
+          {(['rolling', 'weekly', 'monthly'] as const).map(key => <div className={css.win} key={key}>
+            <div className={css.meta}>
+              <span className={css.winLabel}>{t(`usage_${key}`)}</span>
+              <span className={css.winReset}>{t('usageResets')} {panelDateTime(usage[key].resetsAt, getLocale?.())}</span>
+              <strong className={css.winPercent}>{usage[key].percent}%</strong>
             </div>
-          </Fragment>)}
+            <progress className={[usageLevel(usage[key]), key === 'rolling' ? css.progressRolling : key === 'weekly' ? css.progressWeekly : css.progressMonthly].filter(Boolean).join(' ')}
+              aria-label={t(`usage_${key}`)} max={100} value={Math.min(100, usage[key].percent)} />
+            {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
+          </div>)}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
-        {readAnalytics ? <button type="button" className={css.analyticsEntry} aria-haspopup="dialog"
-          onClick={() => { setOpen(false); onAnalyticsOpenChange(true) }}>
-          <ChartIcon />
-          <span>{t('analyticsOpen')}</span>
-          <ChevronRight />
-        </button> : null}
-        {current ? <div className={css.foot}>
-          <span>{t('usageLastUpdated')} {new Date(current.updatedAt).toLocaleString(getLocale?.())}</span>
-          {!failure ? <button type="button" className={css.switch} disabled={refreshing}
+        {readAnalytics || current ? <div className={css.actions}>
+          {readAnalytics ? <button type="button" className={css.hist} aria-haspopup="dialog"
+            onClick={() => { setOpen(false); onAnalyticsOpenChange(true) }}>
+            <ChartIcon />
+            <span>{t('analyticsOpen')}</span>
+          </button> : null}
+          {current
+            ? <span className={css.updated}>{t('usageLastUpdated')} {panelDateTime(current.updatedAt, getLocale?.())}</span>
+            : <span className={css.updated} />}
+          {current && !failure ? <button type="button" className={css.refresh} disabled={refreshing}
             onClick={() => { retry.current() }}>{t(refreshing ? 'usageRefreshing' : 'usageRefresh')}</button> : null}
         </div> : null}
       </>}

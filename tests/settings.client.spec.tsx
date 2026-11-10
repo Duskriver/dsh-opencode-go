@@ -141,29 +141,38 @@ describe("settings page and typed capacity editing", () => {
     return store
   }
 
-  /** The page's advanced disclosure starts collapsed; open it before its fields. */
-  function openAdvanced(): void {
-    fireEvent.click(screen.getByText(en.advancedLabel))
+  type SettingsTabId = 'overview' | 'models' | 'appearance' | 'advanced'
+
+  /** Select a settings tab by id so the helper works in either locale. */
+  function selectTab(tab: SettingsTabId): void {
+    const button = document.getElementById(`opencode-go-tab-${tab}`)
+    if (button !== null) fireEvent.click(button)
   }
 
-  /** The model card ships folded; open it before its list and its capacities. */
+  /** Tuning fields live in the advanced tab. */
+  function openAdvanced(): void {
+    selectTab('advanced')
+  }
+
+  /** Model list and capacities live in the models tab. */
   function openModelLimits(): void {
-    // Nothing is served in the unavailable posture, and then there is no card.
-    const trigger = document.querySelector('[aria-controls="opencode-go-models"]')
+    // Nothing is served in the unavailable posture, and then there is no tab strip.
+    const trigger = document.getElementById('opencode-go-tab-models')
     if (trigger !== null) fireEvent.click(trigger)
   }
 
   describe('OpencodeGoSection', () => {
-    it('keeps appearance inside the collapsed advanced settings and stages all three edits', () => {
+    it('keeps appearance on its own tab and stages all three edits', () => {
       const reading = actions()
       renderSection(stateOf(), reading, { foldedModels: true })
       expect(screen.queryByRole('switch', { name: en.showSidebarQuotaLabel })).toBeNull()
       expect(screen.queryByRole('radiogroup', { name: en.appearanceThemeLabel })).toBeNull()
       expect(screen.queryByRole('radiogroup', { name: en.usagePillStyleLabel })).toBeNull()
-      openAdvanced()
-      const appearance = screen.getByRole('region', { name: en.usageAppearanceLabel })
-      expect(document.getElementById('opencode-go-advanced')?.contains(appearance)).toBe(true)
+      selectTab('appearance')
+      const panel = document.getElementById('opencode-go-panel-appearance') as HTMLElement
+      expect(panel.textContent).toContain(en.usageDisplayLabel)
       const theme = screen.getByRole('radiogroup', { name: en.appearanceThemeLabel })
+      expect(panel.contains(theme)).toBe(true)
       expect(within(theme).getByRole<HTMLInputElement>('radio', { name: en.appearanceTheme_native }).checked).toBe(true)
       fireEvent.click(within(theme).getByRole('radio', { name: en.appearanceTheme_classic }))
       expect(reading.edit).toHaveBeenCalledWith('appearanceTheme', 'classic')
@@ -182,7 +191,7 @@ describe("settings page and typed capacity editing", () => {
       renderSection(stateOf({ appearanceTheme: field('classic'), appliedAppearanceTheme: 'native' }), {}, { foldedModels: true })
       const page = document.querySelector('[style*="--go-bg"]') as HTMLElement
       expect(page.style.getPropertyValue('--go-display-font')).toContain('--dsw-font-family')
-      openAdvanced()
+      selectTab('appearance')
       const theme = screen.getByRole('radiogroup', { name: en.appearanceThemeLabel })
       expect(within(theme).getByRole<HTMLInputElement>('radio', { name: en.appearanceTheme_classic }).checked).toBe(true)
       const previews = within(theme).getAllByText(`${en.usageRollingShort} 24% · ${en.usageWeekShort} 48%`)
@@ -194,9 +203,7 @@ describe("settings page and typed capacity editing", () => {
       const reading = actions()
       const state = stateOf({ appearanceTheme: field('classic', { overridden: true }), showSidebarQuota: field('true', { overridden: true }), usagePillStyle: field('plain', { overridden: true }) })
       const store = renderSection(state, reading)
-      expect(screen.getByRole('button', { name: en.advancedLabel }).textContent).toBe(en.advancedLabel)
-      openAdvanced()
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.advancedResetAll }).disabled).toBe(true)
+      selectTab('appearance')
       fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
       expect(reading.resetField.mock.calls).toEqual([['appearanceTheme'], ['showSidebarQuota'], ['usagePillStyle']])
       act(() => { store.set({ ...state, writable: false }) })
@@ -238,7 +245,7 @@ describe("settings page and typed capacity editing", () => {
       const choose = screen.getByRole('button', { name: 'A very long model name' })
       expect(choose.querySelector('[title="' + en.overridden + '"]')).toBeTruthy()
       expect(Array.from(choose.parentElement!.children).map(child => child.getAttribute('role'))).toEqual([null, 'switch'])
-      expect(screen.getByRole('tabpanel').contains(choose)).toBe(true)
+      expect(screen.getByRole('tabpanel', { name: en.settingsTabModels }).contains(choose)).toBe(true)
     })
 
     it('stages the independent Free gateway URL in advanced settings and offers reset', () => {
@@ -259,7 +266,7 @@ describe("settings page and typed capacity editing", () => {
       const reading = actions()
       renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)
       expect(screen.queryByRole('radiogroup', { name: en.usageDisplayLabel })).toBeNull()
-      openAdvanced()
+      selectTab('appearance')
       const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
       const choices = within(group).getAllByRole('radio')
       expect(choices.map(choice => choice.textContent))
@@ -268,45 +275,43 @@ describe("settings page and typed capacity editing", () => {
       fireEvent.click(choices[2])
       expect(reading.edit).toHaveBeenCalledWith('usageDisplay', 'off')
       expect(reading.save).not.toHaveBeenCalled()
-      fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
+      fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
       expect(reading.resetField).toHaveBeenCalledWith('usageDisplay')
     })
 
     it('disables usage display editing in a read-only deployment', () => {
       renderSection(stateOf({ writable: false }))
-      openAdvanced()
+      selectTab('appearance')
       const choices = within(screen.getByRole('radiogroup', { name: en.usageDisplayLabel })).getAllByRole('radio')
       expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
     })
 
-    it('stages the Free channel opt-in from advanced settings and offers reset', () => {
+    it('stages the Free channel opt-in from the overview, next to the provider switch', () => {
       const reading = actions()
-      renderSection(stateOf({ freeEnabled: field('true', { overridden: true }) }), reading)
-      // Off by default and folded away until a reader opens the advanced card.
-      expect(screen.queryByRole('switch', { name: en.freeEnabledLabel })).toBeNull()
-      openAdvanced()
-      expect(screen.getByText(en.groupFree)).toBeTruthy()
-      expect(screen.getByText(en.freeEnabledHint)).toBeTruthy()
+      renderSection(stateOf({ freeEnabled: field('true', { overridden: true }) }), reading, { foldedModels: true })
       const free = screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel })
       expect(free.getAttribute('aria-checked')).toBe('true')
       expect(free.title).toBe(en.freeEnabledHint)
       fireEvent.click(free)
       expect(reading.edit).toHaveBeenCalledExactlyOnceWith('freeEnabled', 'false')
       expect(reading.save).not.toHaveBeenCalled()
+
+      // The tuning reset no longer owns the Free channel.
+      selectTab('advanced')
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
-      expect(reading.resetField).toHaveBeenCalledWith('freeEnabled')
+      expect(reading.resetField).not.toHaveBeenCalledWith('freeEnabled')
+      expect(screen.queryByText(en.groupFree)).toBeNull()
     })
 
     it('disables the Free channel switch in a read-only deployment', () => {
-      renderSection(stateOf({ writable: false }))
-      openAdvanced()
+      renderSection(stateOf({ writable: false }), {}, { foldedModels: true })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel }).disabled).toBe(true)
     })
 
     it('moves the segmented selection with the arrow keys', () => {
       const reading = actions()
       renderSection(stateOf({ usageDisplay: field('auto') }), reading)
-      openAdvanced()
+      selectTab('appearance')
       const group = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
       within(group).getAllByRole('radio')[0].focus()
       fireEvent.keyDown(group, { key: 'ArrowRight' })
@@ -342,23 +347,26 @@ describe("settings page and typed capacity editing", () => {
       expect(document.getElementById(input.getAttribute('aria-describedby') ?? '')?.textContent).toBe(en.baseURLHint)
     })
 
-    it('places quota appearance after usage settings and before connection settings', () => {
+    it('keeps quota display above the appearance controls and out of the advanced tab', () => {
       renderSection(stateOf())
-      openAdvanced()
-      const text = document.getElementById('opencode-go-advanced')?.textContent ?? ''
+      selectTab('appearance')
+      const appearance = document.getElementById('opencode-go-panel-appearance')?.textContent ?? ''
+      expect(appearance).toContain(en.usageDisplayLabel)
+      expect(appearance).toContain(en.showSidebarQuotaLabel)
+      expect(appearance.indexOf(en.usageDisplayLabel)).toBeLessThan(appearance.indexOf(en.showSidebarQuotaLabel))
+
+      selectTab('advanced')
+      const advanced = document.getElementById('opencode-go-panel-advanced')?.textContent ?? ''
       const order: [string, string][] = [
-        [en.groupUsage, en.usageDisplayLabel],
-        [en.usageAppearanceLabel, en.showSidebarQuotaLabel],
         [en.groupConnection, en.baseURLLabel],
         [en.groupCacheTimeouts, en.refreshMinutesLabel],
         [en.groupImages, en.maxImagesLabel],
       ]
       for (const [heading, firstRow] of order) {
-        expect(text).toContain(heading)
-        expect(text.indexOf(heading)).toBeLessThan(text.indexOf(firstRow))
+        expect(advanced).toContain(heading)
+        expect(advanced.indexOf(heading)).toBeLessThan(advanced.indexOf(firstRow))
       }
-      expect(text.indexOf(en.usageDisplayLabel)).toBeLessThan(text.indexOf(en.usageAppearanceLabel))
-      expect(text.indexOf(en.usageAppearanceLabel)).toBeLessThan(text.indexOf(en.groupConnection))
+      expect(advanced).not.toContain(en.usageDisplayLabel)
     })
 
     it('renders nothing until every injected seat is present', () => {
@@ -396,7 +404,7 @@ describe("settings page and typed capacity editing", () => {
 
     it('reflects the switch state and writes the flip straight through', () => {
       const reading = actions()
-      renderSection(stateOf({ enabled: true }), reading)
+      renderSection(stateOf({ enabled: true }), reading, { foldedModels: true })
 
       const control = screen.getByRole('switch', { name: en.enabledLabel })
       expect(control.getAttribute('aria-checked')).toBe('true')
@@ -411,7 +419,7 @@ describe("settings page and typed capacity editing", () => {
     })
 
     it('explains the withdrawn state while the switch is off', () => {
-      renderSection(stateOf({ enabled: false }))
+      renderSection(stateOf({ enabled: false }), {}, { foldedModels: true })
 
       const control = screen.getByRole('switch', { name: en.enabledLabel })
       expect(control.getAttribute('aria-checked')).toBe('false')
@@ -419,7 +427,7 @@ describe("settings page and typed capacity editing", () => {
     })
 
     it('locks the switch with the same read-only document that locks the form', () => {
-      renderSection(stateOf({ writable: false }))
+      renderSection(stateOf({ writable: false }), {}, { foldedModels: true })
 
       expect(screen.getByRole('switch', { name: en.enabledLabel }).hasAttribute('disabled')).toBe(true)
     })
@@ -576,46 +584,49 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.queryByRole('button', { name: en.limitsResetAll })).toBeNull()
     })
 
-    it('ships the model card folded and opens it on demand', () => {
+    it('keeps the model editor on its own tab', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
-      const trigger = screen.getByRole('button', { name: en.modelsLabel })
-      expect(trigger.getAttribute('aria-expanded')).toBe('false')
       expect(document.getElementById('opencode-go-models')).toBeNull()
       expect(screen.queryByRole('group', { name: en.modelsLabel })).toBeNull()
+      const modelsTab = () => screen.getByRole('tab', { name: en.settingsTabModels })
+      expect(modelsTab().getAttribute('aria-selected')).toBe('false')
 
-      fireEvent.click(trigger)
-      expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      selectTab('models')
+      expect(modelsTab().getAttribute('aria-selected')).toBe('true')
       expect(document.getElementById('opencode-go-models')).not.toBeNull()
       expect(screen.getByRole('group', { name: en.modelsLabel })).toBeTruthy()
 
-      fireEvent.click(trigger)
-      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      selectTab('overview')
       expect(document.getElementById('opencode-go-models')).toBeNull()
     })
 
-    it('keeps what the model card reports out of the fold', () => {
-      // The card ships folded, so a notice behind it is a notice nobody reads:
-      // the refused switch write and the listing's own diagnostics both show.
+    it('marks the models tab when the list has something to report', () => {
+      // A notice behind another tab is a notice nobody reads: the tab carries a mark,
+      // and the notice itself lives on the models tab.
       renderSection(stateOf({ pickerFailed: true, models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
-      expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+      const modelsTab = () => screen.getByRole('tab', { name: en.settingsTabModels })
+      expect(modelsTab().hasAttribute('data-marked')).toBe(true)
+      expect(screen.queryByText(en.pickerFailed)).toBeNull()
+      selectTab('models')
       expect(screen.getByText(en.pickerFailed)).toBeTruthy()
 
       cleanup()
       renderSection(stateOf({ models: { status: 'failed', message: 'offline' } }), {}, { foldedModels: true })
-      expect(screen.getByRole('button', { name: en.modelsLabel }).getAttribute('aria-expanded')).toBe('false')
+      expect(screen.getByRole('tab', { name: en.settingsTabModels }).hasAttribute('data-marked')).toBe(true)
+      selectTab('models')
       expect(screen.getByText(en.modelsFailed)).toBeTruthy()
       expect(screen.getByText('offline')).toBeTruthy()
 
-      // A healthy listing still leaves the folded card with nothing to say.
+      // A healthy listing still leaves the tab unmarked.
       cleanup()
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }), {}, { foldedModels: true })
+      expect(screen.getByRole('tab', { name: en.settingsTabModels }).hasAttribute('data-marked')).toBe(false)
       expect(screen.queryByRole('alert')).toBeNull()
-      expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
     })
 
     it('keeps the header compact and groups refresh with the source controls', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
-      expect(screen.getByRole('button', { name: en.modelsLabel }).textContent).toBe(en.modelsLabel)
+      expect(screen.getByRole('heading', { level: 3, name: en.modelsLabel })).toBeTruthy()
 
       const refresh = screen.getByRole('button', { name: en.modelsRefresh })
       const sources = screen.getByRole('tablist', { name: en.modelSourcesLabel })
@@ -685,57 +696,48 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.getByText<HTMLButtonElement>(en.modelsRefresh).disabled).toBe(true)
     })
 
-    it('keeps the tuning fields collapsed until the disclosure is opened', () => {
+    it('keeps the tuning fields on the advanced tab, which is marked when customized', () => {
       renderSection(stateOf({ refreshMinutes: field('30', { overridden: true }) }))
 
       expect(screen.queryByLabelText(en.baseURLLabel)).toBeNull()
-      // The collapsed row still says a tuning field carries a user value.
-      expect(screen.getByRole('button', { name: new RegExp(en.advancedLabel) }).textContent).toContain(en.overridden)
-      expect(screen.queryByText(en.advancedHint)).toBeNull()
+      expect(screen.getByRole('tab', { name: en.settingsTabAdvanced }).hasAttribute('data-marked')).toBe(true)
 
       openAdvanced()
       expect(screen.getByLabelText(en.baseURLLabel)).toHaveProperty('value', 'https://opencode.ai/zen/go/v1')
       expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
-      expect(screen.getByRole('button', { name: new RegExp(en.accountsTitle) })).toBeTruthy()
     })
 
-    it('keeps the advanced header to its title, with no summary line', () => {
+    it('gives each tab a plain heading without a summary line', () => {
       renderSection(stateOf())
-      const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
-      // The row is the title and the disclosure chevron; the tuning summary that used
-      // to sit between them said what the card already says once it is open.
-      expect(trigger.textContent).toBe(en.advancedLabel)
-      expect(trigger.querySelectorAll('span')).toHaveLength(1)
+      openAdvanced()
+      const heading = screen.getByRole('heading', { level: 3, name: en.advancedLabel })
+      expect(heading.textContent).toBe(en.advancedLabel)
     })
 
-    it('ties the advanced disclosure to the region it controls', () => {
+    it('wires each tab to the panel it controls', () => {
       renderSection(stateOf())
-      const trigger = screen.getByText(en.advancedLabel).closest('button') as HTMLButtonElement
-      expect(trigger.getAttribute('aria-expanded')).toBe('false')
-      expect(trigger.getAttribute('aria-controls')).toBe('opencode-go-advanced')
+      const advancedTab = screen.getByRole('tab', { name: en.settingsTabAdvanced })
+      expect(advancedTab.getAttribute('aria-selected')).toBe('false')
+      expect(advancedTab.getAttribute('aria-controls')).toBe('opencode-go-panel-advanced')
+      expect(document.getElementById('opencode-go-panel-advanced')).toBeNull()
 
-      fireEvent.click(trigger)
-      expect(trigger.getAttribute('aria-expanded')).toBe('true')
-      expect(document.getElementById('opencode-go-advanced')).not.toBeNull()
+      fireEvent.click(advancedTab)
+      expect(screen.getByRole('tab', { name: en.settingsTabAdvanced }).getAttribute('aria-selected')).toBe('true')
+      expect(document.getElementById('opencode-go-panel-advanced')).not.toBeNull()
     })
 
-    it('reads down the page as connection, models, then tuning', () => {
+    it('orders the tabs as overview, models, appearance and advanced', () => {
       renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model' }]) }))
       expect(screen.getByRole('heading', { level: 2 }).textContent).toBe(en.titleLabel)
-      // Account management sits between the provider switch and model settings.
-      const sequence = [
-        screen.getByRole('switch', { name: en.enabledLabel }),
-        screen.getByRole('button', { name: new RegExp(en.accountsTitle) }),
-        screen.getByRole('group', { name: en.modelsLabel }),
-        screen.getByText(en.advancedLabel),
-      ]
-      for (let index = 1; index < sequence.length; index += 1) {
-        const relation = sequence[index - 1].compareDocumentPosition(sequence[index])
-        expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-      }
-      // The tuning card is the last thing on the page, under the list it tunes.
-      const tuning = screen.getByText(en.advancedLabel).closest('section') as HTMLElement
-      expect(tuning.parentElement?.lastElementChild).toBe(tuning)
+      const labels = within(screen.getByRole('tablist', { name: en.settingsTabsLabel }))
+        .getAllByRole('tab').map(tab => tab.textContent)
+      expect(labels).toEqual([en.settingsTabOverview, en.settingsTabModels, en.settingsTabAppearance, en.settingsTabAdvanced])
+
+      // The overview keeps the provider switch and account management together.
+      selectTab('overview')
+      const enabledSwitch = screen.getByRole('switch', { name: en.enabledLabel })
+      const accountsButton = screen.getByRole('button', { name: new RegExp(en.accountsTitle) })
+      expect(enabledSwitch.compareDocumentPosition(accountsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
     it('stages edits through the injected actions and resets on demand', () => {
@@ -840,7 +842,7 @@ describe("settings page and typed capacity editing", () => {
       }
     })
 
-    it('returns only the customized rows from the card reset', () => {
+    it('returns only the customized rows from each reset', () => {
       const edits = actions()
       renderSection(stateOf({
         usageDisplay: field('always', { overridden: true }),
@@ -850,7 +852,12 @@ describe("settings page and typed capacity editing", () => {
       }), edits)
       openAdvanced()
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
-      expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(['baseURL', 'usageDisplay'])
+      expect(edits.resetField.mock.calls.map(call => call[0]).sort()).toEqual(['baseURL'])
+
+      selectTab('appearance')
+      fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
+      expect(edits.resetField.mock.calls.map(call => call[0]).sort())
+        .toEqual(['baseURL', 'showSidebarQuota', 'usageDisplay', 'usagePillStyle'])
     })
 
     it('keeps the card reset out of reach while every row inherits its value', () => {
@@ -860,7 +867,7 @@ describe("settings page and typed capacity editing", () => {
     })
 
     it('carries the provider hint as the switch description, behind its mark', () => {
-      renderSection(stateOf())
+      renderSection(stateOf(), {}, { foldedModels: true })
       // The Switch primitive forwards no aria-describedby, so the sentence rides the
       // one channel it does forward while the mark opens it in the Host's bubble.
       expect(screen.getByRole('switch', { name: en.enabledLabel }).getAttribute('title')).toBe(en.enabledHint)
@@ -1177,7 +1184,7 @@ describe("advanced settings reset", () => {
     render(<OpencodeGoSection {...controller.inject()} t={key => en[key]}
       useOpencodeGo={bindSnapshotSelector(controller.inject().hooks.opencodeGo)} />)
     await act(async () => { await Promise.resolve() })
-    fireEvent.click(screen.getByText(en.advancedLabel))
+    fireEvent.click(document.getElementById('opencode-go-tab-advanced') as HTMLElement)
     return { host, controller }
   }
 
@@ -1326,8 +1333,8 @@ describe("installed Host localization", () => {
       </>
     }
     await act(async () => { render(<Surfaces />) })
-    // The model card ships folded; the copy checks read the list inside it.
-    await act(async () => { fireEvent.click(document.querySelector('[aria-controls="opencode-go-models"]') as HTMLElement) })
+    // The copy checks read the model tab; select it the way a reader would.
+    await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-models') as HTMLElement) })
     return { snapshot: face.hooks.opencodeGo.getSnapshot, readModels, readUsage }
   }
 
@@ -1360,7 +1367,10 @@ describe("installed Host localization", () => {
     fireEvent.click(screen.getByRole('button', { name: `${copy.usageTitle}: ${copy.usageRollingShort} 0% · ${copy.usageWeekShort} 10%` }))
     expect(screen.getByRole('dialog', { name: copy.usageTitle })).toBeTruthy()
     expect(screen.getByRole('progressbar', { name: copy.usage_monthly })).toBeTruthy()
-    expect(screen.getAllByText(`${copy.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString(active)}`)).toHaveLength(3)
+    // Panel timestamps stop at minutes: seconds only add noise at this size.
+    expect(screen.getAllByText(`${copy.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString(active, {
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })}`)).toHaveLength(3)
   })
 
   it('honors an explicit Host English preference over a Chinese browser', async () => {
@@ -1375,7 +1385,7 @@ describe("installed Host localization", () => {
     const { locale, host } = createLocale(['zh-CN'])
     const { snapshot, readModels, readUsage } = await mountSurfaces(locale)
     const t = locale.bind(namespace)
-    fireEvent.click(screen.getByText(zh.advancedLabel))
+    fireEvent.click(document.getElementById('opencode-go-tab-advanced') as HTMLElement)
     const refreshInput = screen.getByLabelText(zh.refreshMinutesLabel)
     fireEvent.change(refreshInput, { target: { value: '30' } })
     fireEvent.click(screen.getByRole('button', { name: `${zh.usageTitle}: ${zh.usageRollingShort} 0% · ${zh.usageWeekShort} 10%` }))
@@ -1384,12 +1394,17 @@ describe("installed Host localization", () => {
     await act(async () => { locale.setLocale('en') })
 
     expect(locale.bind(namespace)).toBe(t)
-    expectCopy('en')
+    // The advanced tab keeps its staged draft across the locale change.
     expect(screen.getByLabelText(en.refreshMinutesLabel)).toBe(refreshInput)
     expect(refreshInput).toHaveProperty('value', '30')
     expect(snapshot().dirty).toBe(true)
+    // Translated model copy lives on the models tab; select it to read it.
+    await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-models') as HTMLElement) })
+    expectCopy('en')
     expect(screen.getByRole('dialog', { name: en.usageTitle })).toBeTruthy()
-    expect(screen.getAllByText(`${en.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString('en')}`)).toHaveLength(3)
+    expect(screen.getAllByText(`${en.usageResets} ${new Date(windowUsage.resetsAt).toLocaleString('en', {
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })}`)).toHaveLength(3)
     expect(host.set).toHaveBeenCalledExactlyOnceWith('preference', 'en')
     expect(readModels).toHaveBeenCalledTimes(1)
     expect(readUsage).toHaveBeenCalledTimes(1)

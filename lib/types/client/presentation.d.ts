@@ -210,6 +210,11 @@ export declare const en: {
     groupFree: string;
     freeEnabledLabel: string;
     freeEnabledHint: string;
+    settingsTabsLabel: string;
+    settingsTabOverview: string;
+    settingsTabModels: string;
+    settingsTabAppearance: string;
+    settingsTabAdvanced: string;
     usageAppearanceLabel: string;
     usageAppearanceReset: string;
     appearanceThemeLabel: string;
