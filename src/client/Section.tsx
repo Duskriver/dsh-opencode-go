@@ -355,27 +355,33 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
                   }}>
                   <GripIcon />
                 </button>
-                <strong className={css.accountName} title={label}>{label}</strong>
-                <span className={css.accountState}>
-                  <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
-                  {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
-                </span>
-                {rolling ? <>
-                  <span className={css.accountBar} role="progressbar" data-level={barLevel(rolling)}
-                    aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
-                    aria-label={`${label} ${t('usage_rolling')}`}>
-                    <span className={css.accountBarFill} style={{ width: `${Math.min(100, rolling.percent)}%` }} />
-                    {TICKS.map(at => <span key={at} className={css.accountBarTick} style={{ left: `${at}%` }} />)}
-                  </span>
-                  <span className={css.accountPercent}>{rolling.percent}%</span>
-                  <span className={css.accountReset}>{resetText(rolling.resetsAt, t)}</span>
-                </> : <span className={css.accountIdle}>{account.configured === false
-                  ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>}
-                <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
-                  aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}
-                  onClick={() => { setDetails(expanded ? null : account.apiKeyEnv) }}>
-                  <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
-                </button>
+                <div className={css.accountBody}>
+                  <div className={css.accountTop}>
+                    <strong className={css.accountName} title={label}>{label}</strong>
+                    <span className={css.accountState}>
+                      <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
+                      {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
+                    </span>
+                    {rolling ? <span className={css.accountPercent}>{rolling.percent}%</span> : null}
+                    <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
+                      aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}
+                      onClick={() => { setDetails(expanded ? null : account.apiKeyEnv) }}>
+                      <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
+                    </button>
+                  </div>
+                  <div className={css.accountMeta}>
+                    {rolling ? <>
+                      <span className={css.accountBar} role="progressbar" data-level={barLevel(rolling)}
+                        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
+                        aria-label={`${label} ${t('usage_rolling')}`}>
+                        <span className={css.accountBarFill} style={{ width: `${Math.min(100, rolling.percent)}%` }} />
+                        {TICKS.map(at => <span key={at} className={css.accountBarTick} style={{ left: `${at}%` }} />)}
+                      </span>
+                      <span className={css.accountReset}>{resetText(rolling.resetsAt, t)}</span>
+                    </> : <span className={css.accountIdle}>{account.configured === false
+                      ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>}
+                  </div>
+                </div>
               </div>
               {account.failed ? <div className={css.accountProblems} role="alert">
                 <p className={css.failedNote}>{account.problem ?? t(account.stale ? 'usageStaleHint' : 'usageRefreshFailed')}</p>
@@ -388,16 +394,18 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
           </Fragment>
         })}
       </div>
-      {editor ? (editor.kind === 'add' ? editorForm() : null)
-        : <Button className={css.addAccount} variant="primary" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
+      {editor ? (editor.kind === 'add' ? editorForm() : null) : null}
+      <div className={css.accountsFoot}>
+        {editor ? null : <Button className={css.addAccount} variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
           onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
-      <div className={css.field}>
-        <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}<HintMark hint={t('accountAutoSwitchHint')} /></span>
-          <Switch checked={state.autoSwitch} disabled={disabled} label={t('accountAutoSwitch')}
-            // The Switch primitive carries no aria-describedby; title is the one
-            // channel it forwards, and the mark opens the same sentence in a bubble.
-            title={t('accountAutoSwitchHint')}
-            onChange={next => { void actions.setAutoSwitch(next) }} /></div>
+        <div className={css.field}>
+          <div className={css.head}><span className={css.label}>{t('accountAutoSwitch')}<HintMark hint={t('accountAutoSwitchHint')} /></span>
+            <Switch checked={state.autoSwitch} disabled={disabled} label={t('accountAutoSwitch')}
+              // The Switch primitive carries no aria-describedby; title is the one
+              // channel it forwards, and the mark opens the same sentence in a bubble.
+              title={t('accountAutoSwitchHint')}
+              onChange={next => { void actions.setAutoSwitch(next) }} /></div>
+        </div>
       </div>
     </div> : null}
   </section>

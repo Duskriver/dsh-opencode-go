@@ -666,28 +666,32 @@ describe("account cards, quota rows and ordering", () => {
     fixture.controller.dispose()
   })
 
-  it('lays a row out as fixed columns, so a longer name cannot move the bar', async () => {
+  it('lays a row out as two lines, so a longer name cannot move the bar', async () => {
     const fixture = setup()
     await fixture.controller.refreshAccounts()
     const state = fixture.controller.accountState()
     const main = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
       .closest('[data-account-row]')!.querySelector('[data-account-main]') as HTMLElement
+    const body = () => main().children[1] as HTMLElement
+    const top = () => body().children[0] as HTMLElement
+    const meta = () => body().children[1] as HTMLElement
     const { unmount } = render(<AccountsCard state={state} actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    // Handle, name, key state, bar, reading, reset, disclosure: the flexible
-    // spacer that let a long name push every later column is gone.
-    expect(Array.from(main().children).map(child => child.tagName)).toEqual(
-      ['BUTTON', 'STRONG', 'SPAN', 'SPAN', 'SPAN', 'SPAN', 'BUTTON'])
-    expect(main().children[3]!.getAttribute('role')).toBe('progressbar')
-    // The name column is fixed and may ellipsise, so the full value stays reachable.
-    expect(main().children[1]!.getAttribute('title')).toBe('Primary')
+    // Handle + summary column; inside it the identity line and the quota line.
+    expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'DIV'])
+    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'SPAN', 'BUTTON'])
+    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN', 'SPAN'])
+    expect(meta().children[0]!.getAttribute('role')).toBe('progressbar')
+    // The name may ellipsise, so the full value stays reachable.
+    expect(top().children[0]!.getAttribute('title')).toBe('Primary')
     unmount()
-    // A row with nothing to read yet keeps that grid: its message spans the bar,
-    // the reading and the countdown instead of adding a column.
+    // A row with nothing to read yet keeps the two lines: the message takes the
+    // quota line, so the identity line and the disclosure stay put.
     render(<AccountsCard state={{ ...state, entries: state.entries.map(entry => ({ ...entry, usage: undefined, loading: true })) }}
       actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'STRONG', 'SPAN', 'SPAN', 'BUTTON'])
+    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'BUTTON'])
+    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN'])
     expect(screen.getAllByText(en.usageLoading)).toHaveLength(2)
     fixture.controller.dispose()
   })

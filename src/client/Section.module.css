@@ -4,7 +4,7 @@
    too: a slot-0 or end-of-list mark is painted in it, so a release there has to
    land on this element rather than on the card behind it. Padding keeps the rows
    exactly where the margins put them. */
-.accounts { display: grid; gap: 10px; margin: 8px 0; padding: 6px 0; }
+.accounts { display: flex; flex-direction: column; gap: 0; margin: 10px 0 2px; padding: 0; }
 /* One row per account: the summary line stays readable, and the detail opens under
    it. The row hosts the drag handle, so nothing inside it may swallow the pointer;
    the drop handlers live on the list, which leaves a row only needing to be
@@ -14,35 +14,41 @@
    their key state, their bar and their countdown. Only the bar's track takes
    slack, which is why the name and state columns may clip a long value instead of
    pushing their neighbours. */
-.accountRow { position: relative; border: 1px solid var(--go-border); border-radius: var(--go-radius-card); background: var(--go-surface); }
+.accountRow { position: relative; border: 0; border-radius: 0; background: none; }
+.accountRow + .accountRow { border-top: 1px solid var(--go-border); }
 .accountRow[data-dragging='true'] { opacity: .55; }
-.accountMain { display: grid; grid-template-columns: 16px minmax(90px, 1fr) 84px minmax(48px, 1fr) 38px 100px 14px; align-items: center; gap: 10px; padding: 14px 12px; }
-.accountHandle { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--go-muted); cursor: grab; -webkit-user-drag: element; }
+/* Two lines per row: identity and reading on the first, the bar and its reset
+   countdown on the second. The handle spans both lines as the drag source. */
+.accountMain { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; padding: 10px 2px 9px; }
+.accountBody { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.accountTop { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 18px; }
+.accountMeta { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 15px; line-height: 15px; }
+.accountHandle { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: grab; opacity: .4; transition: opacity 120ms ease; -webkit-user-drag: element; }
+.accountRow:hover .accountHandle, .accountHandle:focus-visible { opacity: 1; }
 .accountHandle:disabled { cursor: default; opacity: .5; }
 .accountHandle:focus-visible, .accountToggle:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; border-radius: var(--go-radius-small); }
-.accountName { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; font-weight: 500; color: var(--go-text); }
-.accountState { min-width: 0; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--go-muted); }
+.accountName { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12.5px; font-weight: 600; color: var(--go-text); }
+.accountState { flex: 0 1 auto; min-width: 0; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--go-muted); }
 .accountDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--go-success); }
 .accountDot[data-off='true'] { background: var(--go-warning); }
 /* The reading follows the bar: a bar wide enough to answer "how close to the
    limit" at a glance, with the number right after it. */
-.accountPercent { text-align: right; font-family: var(--go-number-font); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--go-text); }
-.accountBar { position: relative; height: 6px; border-radius: 99px; background: var(--go-surface-2); overflow: hidden; }
+.accountPercent { flex: none; margin-left: auto; text-align: right; font-family: var(--go-number-font); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--go-text); }
+.accountBar { position: relative; flex: 1; min-width: 0; height: 5px; border-radius: 99px; background: var(--go-surface-2); overflow: hidden; }
 .accountBarFill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--go-accent); }
 .accountBar[data-level='high'] .accountBarFill { background: var(--go-warning); }
 .accountBar[data-level='limited'] .accountBarFill { background: var(--go-danger); }
 /* Quarter marks: "three quarters spent" reads without measuring pixels. */
 .accountBarTick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--go-surface); }
-.accountReset { text-align: right; font-size: 11.5px; color: var(--go-muted); }
-/* A row with nothing to read yet speaks across the bar, the reading and the
-   countdown instead of squeezing into one column. */
-.accountIdle { grid-column: 4 / 7; text-align: right; font-size: 11.5px; line-height: 1.5; color: var(--go-muted); }
-.accountToggle { display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--go-muted); cursor: pointer; }
-.accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 11px 9px 36px; }
+.accountReset { flex: none; text-align: right; white-space: nowrap; font-size: 10.5px; color: var(--go-muted); }
+.accountIdle { font-size: 11px; line-height: 1.5; color: var(--go-muted); }
+.accountToggle { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
+.accountToggle:hover { background: var(--go-surface-2); color: var(--go-text); }
+.accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 9px 28px; }
 .accountRetry { flex: none; border: none; background: none; padding: 0; font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--go-accent); cursor: pointer; }
 .accountRetry:disabled { color: var(--go-muted); cursor: default; }
 .accountHandle:active { cursor: grabbing; }
-.accountDetail { display: flex; flex-direction: column; gap: 10px; padding: 16px 12px 16px 38px; border-top: 1px solid var(--go-border); }
+.accountDetail { display: flex; flex-direction: column; gap: 10px; padding: 12px 2px 14px 28px; border-top: 1px solid var(--go-border); }
 /* The insertion mark: the edge bar the dragged row would land on, centred in the
    grid gap and drawn inside the row it belongs to. It must never take part in the
    layout — a mark that pushed the rows down would move the pointer's own target
@@ -61,10 +67,14 @@
 .accountUsage progress[data-level='limited'] { --go-progress: var(--go-danger); }
 .accountUsage .hint { display: block; overflow-wrap: anywhere; }
 .accountActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.addAccount { align-self: flex-start; min-height: 32px; }
+/* Add-account and the fallback switch share the closing row of the card. */
+.accountsFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.addAccount { align-self: center; min-height: 30px; }
+.accountsFoot .field { flex: 0 1 auto; align-items: flex-end; padding: 0; }
+.accountsFoot .head { gap: 8px; }
 /* The row's editor sits inside the row it edits: same inset as the detail, one
    step quieter than the card, and every control on the page's own type scale. */
-.accountEditor { display: flex; flex-direction: column; gap: 8px; margin: 0 11px 10px 36px; padding: 10px 12px;
+.accountEditor { display: flex; flex-direction: column; gap: 8px; margin: 0 2px 10px 28px; padding: 10px 12px;
   border: 0.5px solid var(--go-border); border-radius: var(--go-radius-card);
   background: var(--go-surface-2); }
 .accountEditorHead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
