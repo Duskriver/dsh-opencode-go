@@ -286,27 +286,25 @@ describe("settings page and typed capacity editing", () => {
       expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
     })
 
-    it('stages the Free channel opt-in from advanced settings and offers reset', () => {
+    it('stages the Free channel opt-in from the overview, next to the provider switch', () => {
       const reading = actions()
-      renderSection(stateOf({ freeEnabled: field('true', { overridden: true }) }), reading)
-      // Off by default and folded away until a reader opens the advanced card.
-      expect(screen.queryByRole('switch', { name: en.freeEnabledLabel })).toBeNull()
-      openAdvanced()
-      expect(screen.getByText(en.groupFree)).toBeTruthy()
-      expect(screen.getByText(en.freeEnabledHint)).toBeTruthy()
+      renderSection(stateOf({ freeEnabled: field('true', { overridden: true }) }), reading, { foldedModels: true })
       const free = screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel })
       expect(free.getAttribute('aria-checked')).toBe('true')
       expect(free.title).toBe(en.freeEnabledHint)
       fireEvent.click(free)
       expect(reading.edit).toHaveBeenCalledExactlyOnceWith('freeEnabled', 'false')
       expect(reading.save).not.toHaveBeenCalled()
+
+      // The tuning reset no longer owns the Free channel.
+      selectTab('advanced')
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
-      expect(reading.resetField).toHaveBeenCalledWith('freeEnabled')
+      expect(reading.resetField).not.toHaveBeenCalledWith('freeEnabled')
+      expect(screen.queryByText(en.groupFree)).toBeNull()
     })
 
     it('disables the Free channel switch in a read-only deployment', () => {
-      renderSection(stateOf({ writable: false }))
-      openAdvanced()
+      renderSection(stateOf({ writable: false }), {}, { foldedModels: true })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel }).disabled).toBe(true)
     })
 
@@ -360,7 +358,6 @@ describe("settings page and typed capacity editing", () => {
       selectTab('advanced')
       const advanced = document.getElementById('opencode-go-panel-advanced')?.textContent ?? ''
       const order: [string, string][] = [
-        [en.groupFree, en.freeEnabledLabel],
         [en.groupConnection, en.baseURLLabel],
         [en.groupCacheTimeouts, en.refreshMinutesLabel],
         [en.groupImages, en.maxImagesLabel],
@@ -704,7 +701,6 @@ describe("settings page and typed capacity editing", () => {
 
       expect(screen.queryByLabelText(en.baseURLLabel)).toBeNull()
       expect(screen.getByRole('tab', { name: en.settingsTabAdvanced }).hasAttribute('data-marked')).toBe(true)
-      expect(screen.queryByText(en.advancedHint)).toBeNull()
 
       openAdvanced()
       expect(screen.getByLabelText(en.baseURLLabel)).toHaveProperty('value', 'https://opencode.ai/zen/go/v1')
@@ -716,7 +712,6 @@ describe("settings page and typed capacity editing", () => {
       openAdvanced()
       const heading = screen.getByRole('heading', { level: 3, name: en.advancedLabel })
       expect(heading.textContent).toBe(en.advancedLabel)
-      expect(screen.getByText(en.advancedHint)).toBeTruthy()
     })
 
     it('wires each tab to the panel it controls', () => {

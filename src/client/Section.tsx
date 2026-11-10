@@ -634,7 +634,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 
 /** The tuning fields covered by the advanced parameter reset, in display order. */
 const ADVANCED_FIELDS = [
-  'freeEnabled', 'baseURL', 'freeBaseURL', 'proxyURL',
+  'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs',
   'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
@@ -1062,6 +1062,18 @@ function Loaded(props: {
         </div>
         {state.enabledFailed ? <p className={css.failedNote} role="alert">{t('enabledFailed')}</p> : null}
       </section>
+      <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('freeEnabledLabel')}<HintMark hint={t('freeEnabledHint')} /></h3>
+          <Switch
+            checked={state.freeEnabled.text === 'true'}
+            label={t('freeEnabledLabel')}
+            title={t('freeEnabledHint')}
+            disabled={disabled || state.saving}
+            onChange={next => { props.edit('freeEnabled', String(next)) }}
+          />
+        </div>
+      </section>
       {accountCard}
       </div> : null}
       {tab === 'models' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-models" aria-labelledby="opencode-go-tab-models">
@@ -1155,26 +1167,7 @@ function Loaded(props: {
           </button>
         </div>
         <div className={css.cardBody}>
-          <p className={css.hint}>{t('advancedHint')}</p>
           <div className={css.rows}>
-                <div className={css.groupHead}>{t('groupFree')}</div>
-                <div className={css.row}>
-                  <div className={css.rowLabel}>
-                    <span className={css.rowTitle}>{t('freeEnabledLabel')}</span>
-                    <HintMark hint={t('freeEnabledHint')} />
-                  </div>
-                  <div className={css.rowControl}>
-                    <Switch
-                      checked={state.freeEnabled.text === 'true'}
-                      label={t('freeEnabledLabel')}
-                      // The Switch primitive carries no aria-describedby; title is the one channel it forwards.
-                      title={t('freeEnabledHint')}
-                      disabled={disabled || state.saving}
-                      onChange={next => { props.edit('freeEnabled', String(next)) }}
-                    />
-                  </div>
-                  <p id="opencode-go-free-enabled-hint" className={css.rowHint}>{t('freeEnabledHint')}</p>
-                </div>
                 <div className={css.groupHead}>{t('groupConnection')}</div>
                 <ValueField
                   id="opencode-go-base-url"
