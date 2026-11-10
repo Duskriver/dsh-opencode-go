@@ -600,6 +600,13 @@ const CLASSIC_NUMBER_FONT = '"Anthropic Mono Web", "Anthropic Mono", "SFMono-Reg
 const NATIVE_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
 const NATIVE_NUMBER_FONT = '"SFMono-Regular", Consolas, "Liberation Mono", monospace'
 
+/**
+ * Opacity of an unselected chart bar. CSS paints the `--go-chart-*` series as
+ * a translucent layer over the page surface, so contrast checks must composite
+ * the rendered color with this value instead of measuring the raw token.
+ */
+export const CHART_BAR_OPACITY = 0.88
+
 /** Classic is deliberately independent from Host and third-party theme overrides. */
 export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   dark: {
@@ -614,7 +621,7 @@ export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   light: {
     bg: '#faf9f5', surface: '#fffefb', surface2: '#f0eee7', border: '#dedbd2', borderStrong: '#736f66',
     text: '#30312e', muted: '#6b6a61', accent: '#a94e35', accent2: '#8a735f',
-    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#8a7a66', cacheWrite: '#858c6b',
+    accentSoft: '#f5e7df', onAccent: '#ffffff', cacheRead: '#8a7766', cacheWrite: '#787c6b',
     shadow: '0 18px 48px #28261b18', success: '#38654c', warning: '#8c6526', danger: '#a83e42',
     font: CLASSIC_FONT, displayFont: CLASSIC_DISPLAY_FONT, numberFont: CLASSIC_NUMBER_FONT,
     radiusSmall: '4px', radiusControl: '8px', radiusPill: '99px', radiusOption: '6px', radiusCard: '10px', radiusPopover: '12px', radiusModal: '14px',
@@ -758,5 +765,6 @@ export function themeStyle(tokens: GoThemeTokens): CSSProperties {
     '--go-focus-width': tokens.focusWidth,
     '--go-display-weight': tokens.displayWeight,
     '--go-display-tracking': tokens.displayTracking,
+    '--go-chart-bar-opacity': String(CHART_BAR_OPACITY),
   } as CSSProperties
 }

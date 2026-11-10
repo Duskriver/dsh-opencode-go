@@ -111,7 +111,7 @@ Key 留在 Host；常规报告只向浏览器传递聚合数字与 provider / mo
 
 开启后：
 
-- **复用已存账号（受端点绑定约束）**：Free 与 Go 共用账号列表，但只有在 `freeBaseURL` 的 hostname 为 `opencode.ai`（官方平台地址），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才会复用已存账号 Key 并遵循“自动使用备用账号”设置；其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并记录不含密钥的诊断信息。
+- **复用已存账号（受端点绑定约束）**：Free 与 Go 共用账号列表，但只有在 `freeBaseURL` 是官方 HTTPS 端点（hostname 为 `opencode.ai`、协议为 `https:` 且使用默认端口），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才会复用已存账号 Key 并遵循“自动使用备用账号”设置；`http://opencode.ai`、自定义端口的 `opencode.ai` 以及其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并记录不含密钥的诊断信息。
 - **无 Key 时匿名公共访问**：没有可用 Key 时以 `Bearer public` 发起匿名公共访问。
 - **官方 CLI 身份**：请求以官方 OpenCode CLI 的 `opencode/latest/2.2.5/cli` User-Agent 发出，而不是 DSH 自身的归属 UA。
 - **独立 Bun 运行时**：Free 推理通过 `optionalDependencies` 中版本锁定为 1.4.4 的官方 `@oven/bun-*` 平台包启动独立 HTTP worker。平台包直接提供原生二进制，不需要 `bun` 包装包或其 `postinstall`，因此无需批准 Bun 构建脚本；缺少可选依赖时的表现见下方 FAQ。

@@ -8,8 +8,8 @@ The minimum supported Host is DSH `>=0.2.1-rc.5`, with Cordis `^4.0.5`. The Host
 
 | Surface | DSH / Cordis / Schemastery | Verification | Status |
 | --- | --- | --- | --- |
-| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:hygiene`, `check:dist`, 1017 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-08 after the #87 runtime-packaging fix (1005 tests on 2026-11-07; 886 at the original 2026-11-06 baseline) |
-| Native/Classic redesign | pinned `0.2.1-rc.5` development peers | `typecheck`, `check:hygiene`, `check:dist`, 1037 Vitest tests, `verify:installed` and `check:pack` | Pass, 2026-11-09 on macOS with Node 24.22.1 / npm 12.2.1; re-run after the Native contrast fix kept the strong control boundary and state chart series on Host-independent checked values (1021 tests on 2026-11-08) |
+| Full acceptance baseline | `0.2.1-rc.5` / `4.0.5` / `3.18.5` | `typecheck`, `check:hygiene`, `check:dist`, 1062 Vitest tests and `verify:installed` (Host route plus remote registration) | Pass, re-run 2026-11-09 after the test-hardening batch (1037 tests before it; 886 at the original 2026-11-06 baseline) |
+| Native/Classic redesign | pinned `0.2.1-rc.5` development peers | `typecheck`, `check:hygiene`, `check:dist`, 1062 Vitest tests, `verify:installed` and `check:pack` | Pass, 2026-11-09 on macOS with Node 24.22.1 / npm 12.2.1; includes the rendered-opacity contrast checks from the hardening batch (1037 tests after the Native contrast fix) |
 | Installed desktop CLI, Host side | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | rebuilt plugin loaded in an isolated headless profile; one loopback inference completed | Partial: headless Host smoke only, recorded before the dashboard migration |
 | Installed Web registration | `0.2.2-rc.1` | workspace 0.3.0 installed and applied; live Config exposes `appearanceTheme=native|classic` with Native default; settings, composer and sidebar Slot occupants are active | Partial: registration only, no visual/computed-style capture |
 | Web/client visual surface (`dsh.client`) | `0.2.2-rc.1` / `4.1.0` / `3.19.0` | Native/Classic × light/dark, desktop/narrow layouts, focus, reduced motion and third-party token overrides | **Not covered / pending** |
@@ -55,7 +55,7 @@ The daily CSV at `https://opencode.ai/console/api/v2/usage/export?range=30d` sup
 | Credential/account/network/date cache isolation, force refresh, proxy path, cancellation, timeout and response limits | Pass: Host service and RPC tests, including independent cancellation and connection-change races |
 | Key/member-field boundary, third-party gateway rejection and explicit upstream failures | Pass: report excludes member fields and keys; explicit permission, credential, gateway and malformed-response failures |
 | Dashboard account/range/refresh, selected-account quotas and responsive light/dark UI | Pass: browser interaction tests plus real-browser 1280×1000 dark / 390×844 light checks, Chinese and English |
-| `npm test` | Pass: 20 files, 1005 tests; zero failures or skipped tests |
+| `npm test` | Pass: 21 files, 1062 tests; zero failures or skipped tests |
 | `npm run typecheck` / `npm run compile` | Pass: Host and browser types and distribution build |
 | `npm run check:dist` | Pass: all 30 shipped artifacts match an independent rebuild |
 | `npm run verify` | Pass: types, build comparison, all tests and installed-package smoke |
@@ -82,6 +82,13 @@ The pre-migration baseline covered:
 - Bounded JSON/gzip responses, safe gateway classification/redaction, actual HTTP CONNECT and SOCKS5 proxy paths, concurrent Google fetch binding and version-guarded SDK patch matching.
 - Free-specific quota/client/access/rate-limit classification, Retry-After seconds and HTTP dates including clock skew, bounded exponential fallback, endpoint/proxy isolation, concurrent completion ordering and zero inference during cooldown. A normal Host request test limits Free and then completes Go streaming with its saved fixture key in the same mount.
 - Settings Save/Reset/Discard and rejected/concurrent writes; AccountsCard additions, quota states, row actions and drag/keyboard sorting; model editor/search/visibility and refresh races; quota pill polling, account switching and retained readings; installed locale resolution and live Chinese/English changes. Dashboard and palette migration checks are listed separately above.
+
+Test-hardening batch (2026-11-09):
+
+- Free saved-key reuse is restricted to the official HTTPS endpoint on its default port. Plain-HTTP, re-ported and look-alike official hosts fall back to `Bearer public` without reading or sending saved keys; the binding matrix covers positive and negative official-host spellings.
+- The loopback SOCKS relay's idle limit is derived from the configured stream idle budget plus a margin and resets while bytes flow, so a relay teardown cannot pre-empt the plugin's own `LLM_STREAM_IDLE_TIMEOUT` classification and Free cooldown semantics. The adapter forwarding of the per-request budget to the transport is itself covered, so the derivation cannot be bypassed by dropping the argument.
+- Chart contrast assertions now also composite the rendered 88% bar opacity on top of the raw-token checks; the Classic light cache-read and cache-write series are checked against their actual blended color on every surface, and the opacity used in the math is published as a style token and cross-checked against the stylesheet.
+- The focused-chart Escape precedence is exercised with a really focused bar (focus-only activation, pinned day and non-chart focus), replacing dispatches to unfocused elements, and the settings page test now asserts dashboard absence without the stale "theme selection is absent" claim.
 
 ## Isolation and limits
 

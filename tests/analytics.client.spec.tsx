@@ -148,15 +148,17 @@ describe('official history dashboard', () => {
     expect(document.querySelector(`.${css.dayDetail}`)?.textContent).toContain('$1.23')
   })
 
-  it('leaves Escape unhandled when the chart has no selection so the Host dialog can close', async () => {
+  it('leaves Escape unhandled when focus is outside the chart so the Host dialog can close', async () => {
     const onClose = vi.fn()
     render(<AnalyticsDialog {...props({ onClose })} />)
     await screen.findAllByText('deepseek-v4.1-flash')
-    const days = Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-day]'))
+    const close = screen.getByRole<HTMLButtonElement>('button', { name: en.analyticsClose })
+    close.focus()
     const atDocument = vi.fn()
     document.addEventListener('keydown', atDocument)
     try {
-      fireEvent.keyDown(days[0], { key: 'Escape' })
+      fireEvent.keyDown(close, { key: 'Escape' })
+      expect(document.activeElement).toBe(close)
       expect(atDocument).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledTimes(1)
     } finally { document.removeEventListener('keydown', atDocument) }
@@ -167,6 +169,9 @@ describe('official history dashboard', () => {
     render(<AnalyticsDialog {...props({ onClose })} />)
     await screen.findAllByText('deepseek-v4.1-flash')
     const days = Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-day]'))
+    // A real key event only reaches a bar that owns focus: pin it the way a
+    // keyboard user would instead of dispatching on an unfocused element.
+    days[1].focus()
     fireEvent.click(days[1])
     expect(days[1].getAttribute('aria-pressed')).toBe('true')
     const atDocument = vi.fn()
@@ -177,6 +182,30 @@ describe('official history dashboard', () => {
       expect(onClose).not.toHaveBeenCalled()
       expect(screen.getByText(en.analyticsSelectDay)).toBeTruthy()
       fireEvent.keyDown(days[1], { key: 'Escape' })
+      expect(atDocument).toHaveBeenCalledTimes(1)
+      expect(onClose).toHaveBeenCalledTimes(1)
+    } finally { document.removeEventListener('keydown', atDocument) }
+  })
+
+  it('consumes Escape for a focused, unpinned day so keyboard users clear the inspector first', async () => {
+    const onClose = vi.fn()
+    render(<AnalyticsDialog {...props({ onClose })} />)
+    await screen.findAllByText('deepseek-v4.1-flash')
+    const days = Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-day]'))
+    const atDocument = vi.fn()
+    document.addEventListener('keydown', atDocument)
+    try {
+      // Focusing a bar activates its day detail even without pinning it. Escape
+      // must clear that state, and only the following Escape may close the Host
+      // dialog, otherwise a focused chart swallows the dialog's close key.
+      act(() => { days[0].focus() })
+      expect(document.activeElement).toBe(days[0])
+      expect(screen.queryByText(en.analyticsSelectDay)).toBeNull()
+      fireEvent.keyDown(days[0], { key: 'Escape' })
+      expect(atDocument).not.toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByText(en.analyticsSelectDay)).toBeTruthy()
+      fireEvent.keyDown(days[0], { key: 'Escape' })
       expect(atDocument).toHaveBeenCalledTimes(1)
       expect(onClose).toHaveBeenCalledTimes(1)
     } finally { document.removeEventListener('keydown', atDocument) }

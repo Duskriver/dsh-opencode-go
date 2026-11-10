@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import { FreeBunTransport, MAX_REQUEST_BODY_BYTES, freeWorkerEnvironment } from '../src/free-transport.ts'
 import { freeRuntimePackage, resolveFreeRuntime } from '../src/free-runtime.ts'
+import { tunnelIdleTimeoutMs } from '../src/free-socks-tunnel.ts'
 import { mockProxy } from './support/proxy.ts'
 
 /**
@@ -37,6 +38,23 @@ vi.mock('node:child_process', async importOriginal => {
   }
 })
 
+/**
+ * Capture the relay options a request actually opens with, then delegate to the
+ * real loopback relay so the request still reaches the fixture gateway.
+ */
+const relayProbe = vi.hoisted(() => ({ idleTimeoutMs: [] as (number | undefined)[] }))
+
+vi.mock('../src/free-socks-tunnel.ts', async importOriginal => {
+  const original = await importOriginal<typeof import('../src/free-socks-tunnel.ts')>()
+  return {
+    ...original,
+    openSocksTunnel(raw: string, signal: AbortSignal, options?: Parameters<typeof original.openSocksTunnel>[2]) {
+      relayProbe.idleTimeoutMs.push(options?.idleTimeoutMs)
+      return original.openSocksTunnel(raw, signal, options)
+    },
+  }
+})
+
 // Test-only localhost certificate; never used by production transports.
 const certPath = new URL('./fixtures/localhost-cert.pem', import.meta.url)
 const tls = { cert: readFileSync(certPath), key: readFileSync(new URL('./fixtures/localhost-key.pem', import.meta.url)) }
@@ -45,6 +63,7 @@ afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close()
   spawnProbe.calls.length = 0
   spawnProbe.workerEnvironment = {}
+  relayProbe.idleTimeoutMs.length = 0
 })
 
 async function server(listener: RequestListener, secure = false) {
@@ -304,6 +323,17 @@ describe('standalone Bun Free transport', () => {
     const response = await transport().forProxy(proxy.url.replace('://', '://user:pass@'))('http://gateway.invalid:4321/path', { method: 'POST', body: 'payload' })
     expect(await response.text()).toBe('payload')
     expect(proxy.destinations).toEqual(['gateway.invalid:4321'])
+  })
+
+  it('derives the SOCKS relay idle limit from the request stream budget', async () => {
+    const gateway = await server((_request, response) => response.end('socks-idle-budget'))
+    const proxy = await mockProxy('socks5', { target: gateway.url })
+    cleanups.push(proxy.close)
+    const owner = transport()
+    expect(await (await owner.forProxy(proxy.url, 45_000)('http://gateway.invalid:4321/path')).text()).toBe('socks-idle-budget')
+    expect(await (await owner.forProxy(proxy.url)('http://gateway.invalid:4321/path')).text()).toBe('socks-idle-budget')
+    expect(relayProbe.idleTimeoutMs).toEqual([tunnelIdleTimeoutMs(45_000), tunnelIdleTimeoutMs()])
+    expect(proxy.destinations).toEqual(['gateway.invalid:4321', 'gateway.invalid:4321'])
   })
 
   it('follows same-origin redirects through the SOCKS relay when the target host is allowed', async () => {

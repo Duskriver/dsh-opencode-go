@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer } from 'node:http'
 import { connect, type Socket } from 'node:net'
-import { openSocksTunnel, type SocksTunnelOptions } from '../src/free-socks-tunnel.ts'
+import { setTimeout as delay } from 'node:timers/promises'
+import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../src/config.ts'
+import { TUNNEL_IDLE_MARGIN_MS, openSocksTunnel, tunnelIdleTimeoutMs, type SocksTunnelOptions } from '../src/free-socks-tunnel.ts'
 import { mockProxy } from './support/proxy.ts'
 
 const cleanups: (() => Promise<unknown>)[] = []
@@ -144,6 +147,52 @@ describe('loopback SOCKS relay target allowlist', () => {
     await waitForText(output.text, '200 Connection Established')
     // No bytes flow afterwards; the relay must tear the idle pair down itself.
     await output.closed
+    expect(proxy.destinations).toEqual(['target.invalid:4321'])
+  })
+})
+
+describe('relay idle budget derivation', () => {
+  it('derives the default relay idle limit from the default stream budget', () => {
+    expect(tunnelIdleTimeoutMs()).toBe(DEFAULT_STREAM_IDLE_TIMEOUT_MS + TUNNEL_IDLE_MARGIN_MS)
+    // Regression for the old hardcoded two-minute limit: the relay must outlive
+    // the request stream budget so a silent request fails as a stream idle
+    // timeout instead of a network error.
+    expect(tunnelIdleTimeoutMs()).toBeGreaterThan(DEFAULT_STREAM_IDLE_TIMEOUT_MS)
+  })
+
+  it.each([1, 45_000, 600_000])('adds the margin to a %i ms stream budget', budget => {
+    expect(tunnelIdleTimeoutMs(budget)).toBe(budget + TUNNEL_IDLE_MARGIN_MS)
+    expect(tunnelIdleTimeoutMs(budget)).toBeGreaterThan(budget)
+  })
+
+  it('clamps the derived limit to the Node timer range instead of overflowing to 1 ms', () => {
+    // streamIdleTimeoutMs accepts MAX_TIMER_DELAY_MS; an unclamped margin would
+    // exceed it and setTimeout would clamp the relay timer to 1 ms.
+    expect(tunnelIdleTimeoutMs(MAX_TIMER_DELAY_MS)).toBe(MAX_TIMER_DELAY_MS)
+    expect(tunnelIdleTimeoutMs(MAX_TIMER_DELAY_MS - 1_000)).toBe(MAX_TIMER_DELAY_MS)
+    expect(tunnelIdleTimeoutMs(MAX_TIMER_DELAY_MS - TUNNEL_IDLE_MARGIN_MS)).toBe(MAX_TIMER_DELAY_MS)
+  })
+
+  it('keeps an established tunnel alive while bytes flow and closes it after traffic stops', async () => {
+    const target = await targetServer()
+    const proxy = await mockProxy('socks5', { target })
+    cleanups.push(proxy.close)
+    const relay = await openRelay(proxy.url, { allowedHost: 'target.invalid', idleTimeoutMs: 400 })
+    const { socket, authorization } = await connectRelay(relay.url)
+    const output = collect(socket)
+    socket.write(`CONNECT target.invalid:4321 HTTP/1.1\r\nHost: target.invalid:4321\r\nProxy-Authorization: ${authorization}\r\n\r\n`)
+    await waitForText(output.text, '200 Connection Established')
+    // Keep both directions busy for well past the idle limit: every write
+    // re-arms the relay's idle timer, so the tunnel must survive 400 ms of it.
+    for (let sent = 0; sent < 10; sent += 1) {
+      socket.write('GET /ping HTTP/1.1\r\nHost: target.invalid:4321\r\n\r\n')
+      await delay(100)
+    }
+    expect(socket.destroyed).toBe(false)
+    await waitForText(output.text, 'relayed-ok')
+    // Traffic stops; the relay must tear the pair down after the idle limit.
+    await output.closed
+    expect(socket.destroyed).toBe(true)
     expect(proxy.destinations).toEqual(['target.invalid:4321'])
   })
 })

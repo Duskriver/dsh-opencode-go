@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 import { assertProxyURL } from './contracts.ts'
 import { waitWithSignal } from './transport.ts'
 import { freeWorkerPath, resolveFreeRuntime } from './free-runtime.ts'
-import { openSocksTunnel } from './free-socks-tunnel.ts'
+import { openSocksTunnel, tunnelIdleTimeoutMs } from './free-socks-tunnel.ts'
 import type { FreeHttpRequest, FreeHttpResponse } from './free-protocol.ts'
 
 export const OPENCODE_FREE_USER_AGENT = 'opencode/latest/2.2.5/cli'
@@ -81,14 +81,20 @@ export class FreeBunTransport {
     }
   }
 
-  forProxy(raw?: string): typeof globalThis.fetch {
+  /**
+   * Build a fetch bound to one proxy URL.
+   * @param raw - proxy URL; omitted or empty selects a direct connection.
+   * @param streamIdleTimeoutMs - request stream idle budget the SOCKS relay must
+   * outlive; omitted uses the default request stream budget.
+   */
+  forProxy(raw?: string, streamIdleTimeoutMs?: number): typeof globalThis.fetch {
     const proxy = assertProxyURL(raw)
     // Resolve before entering the SDK so missing-runtime errors keep their
     // actionable LlmError code instead of becoming generic connection errors.
     const executable = (this.options.executable ?? resolveFreeRuntime)()
     const worker = (this.options.workerPath ?? freeWorkerPath)()
     return (input, init) => {
-      const pending = this.fetchRequest(input, init, proxy, executable, worker)
+      const pending = this.fetchRequest(input, init, proxy, executable, worker, streamIdleTimeoutMs)
       this.requests.add(pending)
       void pending.then(() => this.requests.delete(pending), () => this.requests.delete(pending))
       return pending
@@ -117,7 +123,7 @@ export class FreeBunTransport {
     }
   }
 
-  private async fetchRequest(input: Parameters<typeof fetch>[0], init: RequestInit | undefined, proxy: string, executable: string, worker: string): Promise<Response> {
+  private async fetchRequest(input: Parameters<typeof fetch>[0], init: RequestInit | undefined, proxy: string, executable: string, worker: string, streamIdleTimeoutMs?: number): Promise<Response> {
     const request = new Request(input, init)
     const signal = AbortSignal.any([request.signal, this.shutdown.signal])
     signal.throwIfAborted()
@@ -145,7 +151,11 @@ export class FreeBunTransport {
       // that learns the loopback port and password must not get an open proxy.
       // Bun therefore cannot follow a cross-host redirect over SOCKS; the
       // frozen target is also why redirects stay inside the request's origin.
-      if (proxy.startsWith('socks5:')) relay = await openSocksTunnel(proxy, signal, { allowedHost: url.hostname })
+      if (proxy.startsWith('socks5:')) {
+        relay = await openSocksTunnel(proxy, signal, {
+          allowedHost: url.hostname, idleTimeoutMs: tunnelIdleTimeoutMs(streamIdleTimeoutMs),
+        })
+      }
       signal.throwIfAborted()
       const packet: FreeHttpRequest = {
         url: request.url, method: request.method, headers: [...request.headers], body,

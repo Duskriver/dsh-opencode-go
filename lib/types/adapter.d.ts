@@ -10,10 +10,13 @@ import { FreeBunTransport } from './free-transport.ts';
 import { FreeChannelState } from './free-channel.ts';
 /**
  * Whether the Free route may reuse saved Go credentials. A saved key is bound
- * to the endpoint it was configured for: the official platform gateway, or a
- * free base sharing the Go gateway's origin (one self-hosted or reverse-proxy
- * deployment serving both routes). Any other `freeBaseURL` gets public access
- * only, so pointing it at a third party cannot forward a stored paid key.
+ * to the endpoint it was configured for: the official platform gateway over
+ * HTTPS on its default port, or a free base sharing the Go gateway's origin
+ * (one self-hosted or reverse-proxy deployment serving both routes). Any other
+ * `freeBaseURL` gets public access only, so pointing it at a third party cannot
+ * forward a stored paid key. The official hostname alone is not enough: a
+ * plain-text or re-ported `opencode.ai` URL could be intercepted or served by
+ * an unknown listener, so it must not receive saved credentials either.
  * This is a local decision: no network probe is made and no credential is read.
  * @param config - the mount configuration captured for this request.
  * @returns true when Free may send saved account credentials.

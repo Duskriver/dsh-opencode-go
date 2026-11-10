@@ -3,6 +3,7 @@ import LlmRuntime, { LlmError, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter, OpencodeGoRequestExecutor, freeReusesSavedKeys } from '../src/adapter.ts'
 import { apply } from '../src/index.ts'
 import { Config, type LiveConfig, type OpencodeGoConfig } from '../src/config.ts'
+import { FreeBunTransport } from '../src/free-transport.ts'
 import { parseGoModelCatalog } from '../src/contracts.ts'
 import { context, configOf, requestOf, drain, mountRemotes, invokeRemote } from './support/host.ts'
 import { mockGateway, listingBody, textEvents } from './support/gateway.ts'
@@ -63,10 +64,32 @@ describe('dual route registration', () => {
   })
 })
 
+describe('Free transport stream budget', () => {
+  it('passes the request stream idle budget to the Free transport so the SOCKS relay outlives it', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', undefined)
+    const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
+    const ctx = context(); await ctx.plugin(LlmRuntime)
+    apply(ctx, configOf(gateway.url, { freeEnabled: true, freeBaseURL: gateway.url, streamIdleTimeoutMs: 5000 }))
+    const forProxy = vi.spyOn(FreeBunTransport.prototype, 'forProxy')
+    try {
+      gateway.pushCompletions({ events: textEvents })
+      await drain(ctx.llm.stream(freeRequest()))
+      // The relay derives its idle limit from this per-request budget; losing
+      // the second argument would silently restore a budget-independent relay.
+      expect(forProxy).toHaveBeenCalledWith('', 5000)
+    } finally { forProxy.mockRestore() }
+  })
+})
+
 describe('Free endpoint credential binding', () => {
   it.each([
     ['the official platform', 'https://opencode.ai/inference/v1', 'https://opencode.ai/inference/go/v1', true],
     ['an official Free endpoint with a custom Go gateway', 'https://opencode.ai/inference/v1', 'https://go.example/v1', true],
+    ['the official platform with an upper-case host', 'https://OPENCODE.AI/inference/v1', 'https://go.example/v1', true],
+    ['the official platform on its explicit default port', 'https://opencode.ai:443/inference/v1', 'https://go.example/v1', true],
+    ['the official host over plain HTTP', 'http://opencode.ai/inference/v1', 'https://opencode.ai/inference/go/v1', false],
+    ['the official host on a non-default port', 'https://opencode.ai:8443/inference/v1', 'https://opencode.ai/inference/go/v1', false],
+    ['a hostname that merely contains the official host', 'https://opencode.ai.example.com/inference/v1', 'https://gateway.example/v1', false],
     ['a Free endpoint sharing the Go origin', 'https://gateway.example/v1', 'https://gateway.example/v1', true],
     ['a Free endpoint on another host', 'https://free.example/v1', 'https://gateway.example/v1', false],
     ['a Free endpoint on another port', 'https://gateway.example:8443/v1', 'https://gateway.example/v1', false],

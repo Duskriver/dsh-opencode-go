@@ -9,6 +9,7 @@
 
 - 新增 `appearanceTheme` 界面主题设置（`native` / `classic`），默认 `native`；未设置该字段的旧配置缺省使用 Native。
 - 新增 `npm run check:install:pnpm`：用 pnpm 11.28.5 在隔离 consumer 中安装实际 tarball，禁用已有构建批准并启用严格构建失败策略，同时验证匹配平台的 Bun 二进制可以执行；CI 以非 advisory job 运行该安装检查。
+- 测试加固：新增 25 个回归用例（官方 HTTPS 端点凭据绑定正反用例、SOCKS 中继空闲预算派生/流量续期与 adapter 预算透传、图表柱体实绘 88% 不透明度合成对比度、聚焦柱图的 Escape 优先级），并修正设置页“主题选择不在设置页”的过时断言；`npm test` 现为 21 个文件 / 1062 个用例。
 
 ### Changed
 
@@ -19,6 +20,9 @@
 
 - 修复 Native 主题的对比度回退：强控件边界（`borderStrong`）与图表状态系列（`accent2` / `cacheRead` / `cacheWrite`）不再映射 Host 的 `border-l2` 发丝线与 `state-*` 状态点色（它们不保证控件边界与图表所需的非文本对比度），改为使用插件受控静态值，恢复 WCAG 1.4.11 3:1；`theme.client.spec.ts` 新增对 Host 实际表面范围（浅色白、深色 `#151517` / `#232324` / `#2c2c2e`）的断言，防止默认主题再次静默回退。
 - Free 运行时改为直接声明版本锁定的官方 `@oven/bun-*` 可选平台包，移除带 `postinstall` 的 `bun` 包装依赖，修复 pnpm 11 在未批准构建脚本时安装或升级失败并回滚的问题（#87）。平台运行时仍会下载；Go 与现有 `MISSING_BUN_RUNTIME` 降级语义不变。
+- 修复 Free 凭据绑定：官方 host 分支现在同时要求 `https:` 与默认端口，`http://opencode.ai` 与 `https://opencode.ai:8443` 不再复用已保存的付费 Key，改为匿名 `Bearer public`，避免明文或非官方监听路径收到账号凭据（其它自定义 host 原本就不复用）。
+- 修复 SOCKS 中继空闲上限短于流空闲预算的问题：中继上限改由请求的 `streamIdleTimeoutMs` 派生并保留 30 秒余量（默认 330 秒，原为固定 120 秒），`FreeBunTransport.forProxy` 透传该预算，使排队或大上下文 prefill 期间的静默先由插件自身判定为 `LLM_STREAM_IDLE_TIMEOUT`，而不是被中继拆连后归为 `NETWORK` 并触发 Free 冷却。
+- 修复 Classic 浅色图表的实绘对比度：`cacheWrite` 在三个浅色表面上、`cacheRead` 在 `surface2` 上按柱体 88% 不透明度合成后低于 WCAG 1.4.11 3:1，分别调整为 `#787c6b` / `#8a7766`；柱体不透明度发布为 `--go-chart-bar-opacity` token，主题测试在原有原始 token 断言之外增加按合成后实际颜色的断言。
 
 ## [0.3.2-pre] - 2026-11-10
 

@@ -317,6 +317,12 @@ export interface GoThemeTokens {
 }
 /** Host color scheme followed by both visual themes. */
 export type GoThemeScheme = 'dark' | 'light';
+/**
+ * Opacity of an unselected chart bar. CSS paints the `--go-chart-*` series as
+ * a translucent layer over the page surface, so contrast checks must composite
+ * the rendered color with this value instead of measuring the raw token.
+ */
+export declare const CHART_BAR_OPACITY = 0.88;
 /** Classic is deliberately independent from Host and third-party theme overrides. */
 export declare const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
 /**

@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  CHART_BAR_OPACITY,
   GO_THEME_FALLBACKS,
   GO_THEME_TOKENS,
   NATIVE_THEME_FALLBACKS,
@@ -26,6 +28,18 @@ function expectContrastAtLeast3(foreground: string, background: string, label: s
   expect(contrast(foreground, background), `${label}: ${foreground} on ${background}`).toBeGreaterThanOrEqual(3)
 }
 
+/**
+ * Composite an opaque hex color at `alpha` over a hex background, as the
+ * browser paints a CSS `opacity` layer before the rendered color is measured.
+ */
+function blend(foreground: string, background: string, alpha: number): string {
+  const channel = (offset: number): string => {
+    const value = alpha * parseInt(foreground.slice(offset, offset + 2), 16) + (1 - alpha) * parseInt(background.slice(offset, offset + 2), 16)
+    return Math.round(value).toString(16).padStart(2, '0')
+  }
+  return `#${channel(1)}${channel(3)}${channel(5)}`
+}
+
 const SCHEMES: readonly GoThemeScheme[] = ['light', 'dark']
 const SURFACES: readonly (keyof GoThemeTokens)[] = ['bg', 'surface', 'surface2']
 const CHART_COLORS = ['accent', 'accent2', 'cacheRead', 'cacheWrite'] as const
@@ -36,6 +50,16 @@ for (const [theme, fallbacks] of [['native', NATIVE_THEME_FALLBACKS], ['classic'
       const tokens = fallbacks[scheme]
       for (const color of CHART_COLORS) {
         for (const surface of SURFACES) expectContrastAtLeast3(tokens[color], tokens[surface], `${scheme} ${color}/${surface}`)
+      }
+    })
+
+    it.each(SCHEMES)('keeps every rendered chart bar legible on every surface in %s', scheme => {
+      const tokens = fallbacks[scheme]
+      for (const color of CHART_COLORS) {
+        for (const surface of SURFACES) {
+          const rendered = blend(tokens[color], tokens[surface], CHART_BAR_OPACITY)
+          expectContrastAtLeast3(rendered, tokens[surface], `${scheme} rendered ${color}/${surface}`)
+        }
       }
     })
 
@@ -63,6 +87,9 @@ const HOST_SURFACE_ANCHORS: Record<GoThemeScheme, readonly string[]> = {
  */
 const HOST_INDEPENDENT_TOKENS = ['borderStrong', 'accent2', 'cacheRead', 'cacheWrite'] as const
 
+/** The state-derived chart series are painted as bars, so they composite with the bar opacity. */
+const HOST_STATE_CHART_SERIES = ['accent2', 'cacheRead', 'cacheWrite'] as const
+
 describe('Native contrast-checked tokens ignore the Host palette', () => {
   it.each(SCHEMES)('resolves the strong control boundary and state chart series to static values in %s', scheme => {
     const tokens = GO_THEME_TOKENS.native[scheme]
@@ -76,6 +103,16 @@ describe('Native contrast-checked tokens ignore the Host palette', () => {
     for (const token of HOST_INDEPENDENT_TOKENS) {
       for (const surface of HOST_SURFACE_ANCHORS[scheme]) {
         expectContrastAtLeast3(tokens[token], surface, `${scheme} ${token}/host ${surface}`)
+      }
+    }
+  })
+
+  it.each(SCHEMES)('keeps the rendered state chart series at 3:1 across the Host surface range in %s', scheme => {
+    const tokens = GO_THEME_TOKENS.native[scheme]
+    for (const token of HOST_STATE_CHART_SERIES) {
+      for (const surface of HOST_SURFACE_ANCHORS[scheme]) {
+        const rendered = blend(tokens[token], surface, CHART_BAR_OPACITY)
+        expectContrastAtLeast3(rendered, surface, `${scheme} rendered ${token}/host ${surface}`)
       }
     }
   })
@@ -152,12 +189,34 @@ describe('themeStyle', () => {
       '--go-cache-read', '--go-cache-write', '--go-shadow', '--go-success', '--go-warning', '--go-danger',
       '--go-font', '--go-display-font', '--go-number-font', '--go-radius-small', '--go-radius-control',
       '--go-radius-pill', '--go-radius-option', '--go-radius-card', '--go-radius-popover', '--go-radius-modal', '--go-focus-width',
-      '--go-display-weight', '--go-display-tracking',
+      '--go-display-weight', '--go-display-tracking', '--go-chart-bar-opacity',
     ]
     for (const property of expected) expect(style[property], property).toBeTruthy()
     for (const property of ['--go-font', '--go-display-font', '--go-number-font']) {
       expect(style[property]).not.toContain('url(')
       expect(style[property]).not.toContain('@import')
     }
+  })
+
+  it.each([
+    ['native', 'light'], ['native', 'dark'], ['classic', 'light'], ['classic', 'dark'],
+  ] as const)('publishes the rendered chart-bar opacity for %s %s', (theme, scheme) => {
+    const style = themeStyle(GO_THEME_TOKENS[theme][scheme]) as Record<string, string>
+    expect(style['--go-chart-bar-opacity']).toBe(String(CHART_BAR_OPACITY))
+  })
+})
+
+/** The contrast math above must use exactly the opacity the stylesheet paints, or it can drift. */
+describe('AnalyticsDialog chart-bar rendering', () => {
+  it('paints unselected bars with the opacity the contrast tests composite', () => {
+    const css = readFileSync(new URL('../src/client/AnalyticsDialog.module.css', import.meta.url), 'utf8')
+    const rule = css.match(/(?:^|\n)\.barStack\s*\{([^}]*)\}/)
+    expect(rule, '.barStack rule must exist').not.toBeNull()
+    const declaration = rule![1].match(/opacity:\s*([^;]+)/)
+    expect(declaration, '.barStack must declare its rendered opacity').not.toBeNull()
+    const painted = declaration![1].trim()
+    const customProperty = painted.match(/^var\(--go-chart-bar-opacity,\s*(\d*\.?\d+)\)$/)
+    expect(customProperty, `.barStack opacity must read var(--go-chart-bar-opacity, <fallback>), got ${painted}`).not.toBeNull()
+    expect(Number(customProperty![1])).toBe(CHART_BAR_OPACITY)
   })
 })

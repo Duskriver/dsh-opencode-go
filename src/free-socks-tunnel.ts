@@ -2,11 +2,29 @@
 import { createServer, Agent, request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders } from 'node:http'
 import { connect, isIP, type Socket } from 'node:net'
 import { randomBytes } from 'node:crypto'
+import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from './config.ts'
 
 function hostname(url: URL): string { return url.hostname.replace(/^\[|\]$/g, '') }
 
-/** Idle limit for a relayed connection: no bytes in either direction means teardown. */
-const DEFAULT_IDLE_TIMEOUT_MS = 120_000
+/** Extra time a relayed connection may stay quiet beyond the request stream budget. */
+export const TUNNEL_IDLE_MARGIN_MS = 30_000
+
+/**
+ * Idle limit for a relayed connection: no bytes in either direction means
+ * teardown. The limit is derived from the request stream idle budget, which is
+ * user-configurable, so the relay outlives a silent prefill or queued Free
+ * request and the request-level watchdog classifies the stall as a stream idle
+ * timeout instead of a network failure; the margin only keeps the relay from
+ * deciding first. The sum is clamped to Node's timer range: an unclamped
+ * overflow of the schema maximum would be clamped to 1 ms by `setTimeout` and
+ * tear every relayed request down immediately.
+ * @param streamIdleTimeoutMs - request stream idle budget in milliseconds.
+ * @returns the idle limit for an established relayed connection.
+ */
+export function tunnelIdleTimeoutMs(streamIdleTimeoutMs: number = DEFAULT_STREAM_IDLE_TIMEOUT_MS): number {
+  return Math.min(streamIdleTimeoutMs + TUNNEL_IDLE_MARGIN_MS, MAX_TIMER_DELAY_MS)
+}
 
 /** Restrictions for one loopback relay instance. */
 export interface SocksTunnelOptions {
@@ -17,7 +35,10 @@ export interface SocksTunnelOptions {
    * proxy to arbitrary destinations.
    */
   allowedHost?: string
-  /** Overridable idle limit for tests; defaults to two minutes. */
+  /**
+   * Overridable idle limit for tests; production derives it from the request
+   * stream budget via {@link tunnelIdleTimeoutMs}. Tests may pin short values.
+   */
   idleTimeoutMs?: number
 }
 
@@ -118,7 +139,7 @@ export async function openSocksTunnel(
   const authorized = (request: IncomingMessage) => request.headers['proxy-authorization'] === authorization
   const allowedHost = options.allowedHost === undefined ? undefined : normalizeHost(options.allowedHost)
   const permitted = (target: URL): boolean => allowedHost === undefined || normalizeHost(hostname(target)) === allowedHost
-  const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+  const idleTimeoutMs = options.idleTimeoutMs ?? tunnelIdleTimeoutMs()
   const idleTimers = new Set<ReturnType<typeof setTimeout>>()
   /** Tear a relayed pair down after `idleTimeoutMs` without bytes in either direction. */
   const idle = (first: Socket, second: Socket): void => {

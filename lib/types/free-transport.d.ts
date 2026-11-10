@@ -33,7 +33,13 @@ export declare class FreeBunTransport {
         maxConcurrent?: number;
         maxRequestBodyBytes?: number;
     });
-    forProxy(raw?: string): typeof globalThis.fetch;
+    /**
+     * Build a fetch bound to one proxy URL.
+     * @param raw - proxy URL; omitted or empty selects a direct connection.
+     * @param streamIdleTimeoutMs - request stream idle budget the SOCKS relay must
+     * outlive; omitted uses the default request stream budget.
+     */
+    forProxy(raw?: string, streamIdleTimeoutMs?: number): typeof globalThis.fetch;
     private acquire;
     private fetchRequest;
     private response;

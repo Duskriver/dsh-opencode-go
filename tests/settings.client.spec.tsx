@@ -1161,12 +1161,10 @@ describe("settings page and typed capacity editing", () => {
     })
   })
 
-  it('keeps usage history and theme selection out of the settings page', () => {
+  it('keeps the usage history dashboard out of the settings page', () => {
     renderSection(stateOf())
     expect(screen.queryByRole('heading', { name: en.analyticsTitle })).toBeNull()
     expect(screen.queryByRole('button', { name: /Open dashboard|打开看板/ })).toBeNull()
-    expect(screen.queryByRole('group', { name: /^(Theme|主题)$/ })).toBeNull()
-    expect(document.querySelector('[data-theme]')).toBeNull()
   })
 })
 

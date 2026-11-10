@@ -28,20 +28,22 @@ Vitest tests are organized by domain. Results for the history-dashboard migratio
 | --- | --- |
 | `plugin.spec.ts` | Cordis mounting/unloading, native SettingsForms/profile writes, hot configuration, RPC and public exports |
 | `accounts.spec.ts` | Account CRUD, 20-account cap, serial writes, failed-write cleanup, fallback/promotion, stale calls and five-minute cooldown |
-| `free.spec.ts` | Dual route lifecycle, public Bearer fallback, saved keys, account retry and credential deadlines |
-| `free-channel.spec.ts`, `free-transport.spec.ts` | Free failure classification, Retry-After/backoff, cancellation, transport isolation and coexistence with Go |
+| `free.spec.ts` | Dual route lifecycle, public Bearer fallback, official-HTTPS-only saved-key binding, account retry and credential deadlines |
+| `free-channel.spec.ts`, `free-transport.spec.ts` | Free failure classification, Retry-After/backoff, cancellation, transport isolation, stream-budget-derived SOCKS relay idle limits and coexistence with Go |
 | `pricing.spec.ts` | Catalog tariff validation and Free-model eligibility; historical amounts come from official CSV |
 | `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `config-validation.spec.ts` | Base-URL credential rejection with redacted diagnostics, proxy userinfo acceptance and thinking-budget schema bounds |
-| `socks-tunnel.spec.ts` | Loopback SOCKS relay: allowed-target enforcement, authentication, idle teardown and IPv4/IPv6 normalisation |
-| `theme.client.spec.ts` | Native/Classic token resolution, neutral Host-token fallbacks, host font inheritance, Host-independent contrast-checked chart series and strong control boundaries (WCAG 1.4.11 3:1) |
+| `socks-tunnel.spec.ts` | Loopback SOCKS relay: allowed-target enforcement, authentication, stream-budget-derived idle budget, idle teardown/reset and IPv4/IPv6 normalisation |
+| `theme.client.spec.ts` | Native/Classic token resolution, neutral Host-token fallbacks, host font inheritance, Host-independent chart series and strong control boundaries at WCAG 1.4.11 3:1, including the composited rendered bar opacity |
 | `adapter.spec.ts` | Requests, capacity limits, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |
 | `usage.spec.ts` | Official quota reads, current-account selection, native gateway access and safe error responses |
 | `analytics.spec.ts` | Official daily CSV parsing/aggregation, UTC ranges, provider/model grouping, account isolation, short cache and cancellation |
+| `analytics.client.spec.tsx` | Dashboard totals/locale/theme rendering, dated bar keyboard and pointer selection, focused-Escape precedence, exports and permission failures |
 | `transport.spec.ts` | Bounded JSON/gzip, classified/redacted HTTP errors, real CONNECT/SOCKS5 proxies and SDK bridge matching |
 | `settings.client.spec.tsx` | Page configuration, typed Save/Reset/refused writes, locale changes, registration and subscription/cancellation lifecycle |
+| `appearance-theme.spec.ts` | `appearanceTheme` controller defaults (Native, invalid drafts), staged Classic draft vs applied theme and inherited-reset preview |
 | `accounts-models.client.spec.tsx` | AccountsCard forms/status/quota, drag/keyboard ordering, model visibility, metadata failures and refresh races |
 | `usage.client.spec.tsx` | Conversation pill, dashboard account/range controls, official amount presentation, quota refresh/visibility and accessibility |
 

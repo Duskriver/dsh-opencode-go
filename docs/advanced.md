@@ -46,7 +46,7 @@ socks5://127.0.0.1:1080
 
 `dsh-opencode-go`（DSH OpenCode Go）从 `baseURL` 的 `/models` 动态发现全部聊天模型，需要至少一个可用 API Key 才激活。`dsh-opencode-free`（DSH OpenCode Free）从 `freeBaseURL` 的 `/models` 筛选已声明合法价格、且文本输入、输出、缓存及所有上下文阶梯均为零的聊天模型；缺失或非法价格不会被视为免费。Free 是**默认关闭的显式 opt-in**：需在 **设置 → OpenCode Go → 高级设置 → 免费通道** 打开（或配置 `freeEnabled: true`）后，插件才会注册 Free 路由、拉取 Free 目录并在设置与模型发现中显示 Free 模型；默认配置下不会访问 `freeBaseURL`。关闭该开关并保存后 Free 路由立即撤回，进行中的请求允许完成；Go 通道行为不变。
 
-Free 共用账号列表，但**已存 Key 与端点绑定**：只有 `freeBaseURL` 的 hostname 为 `opencode.ai`（官方平台地址），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才复用已存账号 Key 并遵循多账号自动切换设置；其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并产生不含密钥的 info/debug 诊断。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
+Free 共用账号列表，但**已存 Key 与端点绑定**：只有 `freeBaseURL` 是官方 HTTPS 端点（hostname 为 `opencode.ai`、协议为 `https:` 且使用默认端口），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才复用已存账号 Key 并遵循多账号自动切换设置；`http://opencode.ai`、自定义端口的 `opencode.ai` 以及其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并产生不含密钥的 info/debug 诊断。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
 
 Free 推理通过插件附带的独立 Bun 1.4.4 HTTP worker 直接发送 API 请求；不依赖本机 OpenCode。模型发现、消息和工具转换、响应解析仍由现有 Node SDK 负责，Go 沿用原传输。Free 使用实测的 `opencode/latest/2.2.5/cli` UA（即官方 OpenCode CLI 身份，而非 DSH 自身的归属 UA），并沿用宿主会话 ID 的原有规范化：常见可打印 ASCII 会话 ID 原样透传，仅非可打印 ASCII 或占用插件内部保留前缀的 ID 才做 sha256 + base64url 单向散列（两种形式都不含对话正文）；不注入占位工具或抓包中的账号、项目和会话值。这些兼容行为不保证上游开放免费服务。
 
@@ -58,7 +58,7 @@ Free 请求自动处理限流：`FreeUsageLimitError` 返回 `FREE_QUOTA`，普�
 
 Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包安装。平台包直接携带原生二进制，不使用 `bun` 包装包，也没有安装脚本，因此 pnpm 不会要求批准 Bun 的 `postinstall`。包管理器根据系统、CPU 和 libc 选择对应包；若运行时不可用（例如可选依赖被 `--omit=optional` 省略或安装失败），Free 会报告 `MISSING_BUN_RUNTIME`，可重新安装插件并启用 optional dependencies；Go 通道不受影响。Free 默认关闭不会自动省略可选运行时下载。当前支持的系统和 CPU 以这些 Bun 官方平台包为准。
 
-每个 Free HTTP 请求使用一个 worker，默认最多并发 4 个，其余请求可排队或取消。请求通过标准输入传递，响应头和原始 SSE 字节通过标准输出返回；Key 不进入命令行参数或临时文件。消费者停止、超时、取消或卸载插件都会终止相关请求并回收 worker。单个请求体上限为 64 MiB，base64 编码后的 worker IPC 包上限为 256 MiB；worker 自身在读取 stdin 时也会累计校验该包上限。HTTP/HTTPS 代理由 Bun 连接；SOCKS5 使用该请求专属、带随机认证凭据的本机字节隧道，中继只允许连接本次请求的目标 host（大小写不敏感、IP 规范化比较），对无数据往来的连接设 120 秒空闲超时，目标 TLS 握手仍由 Bun 完成。代理失败不会回退到直连。
+每个 Free HTTP 请求使用一个 worker，默认最多并发 4 个，其余请求可排队或取消。请求通过标准输入传递，响应头和原始 SSE 字节通过标准输出返回；Key 不进入命令行参数或临时文件。消费者停止、超时、取消或卸载插件都会终止相关请求并回收 worker。单个请求体上限为 64 MiB，base64 编码后的 worker IPC 包上限为 256 MiB；worker 自身在读取 stdin 时也会累计校验该包上限。HTTP/HTTPS 代理由 Bun 连接；SOCKS5 使用该请求专属、带随机认证凭据的本机字节隧道，中继只允许连接本次请求的目标 host（大小写不敏感、IP 规范化比较），对无数据往来的连接按本次请求的流空闲预算加 30 秒余量设空闲超时（默认 330 秒），使排队或大上下文 prefill 的静默先由插件自身判定为流空闲超时；目标 TLS 握手仍由 Bun 完成。代理失败不会回退到直连。
 
 协议、能力、思考控制与价格直接来自各自的 `/models` 条目。官方网关优先使用条目声明的协议地址；自定义网关保留配置的前缀。两个模型源分别缓存到 `~/.dsh/cache/dsh-opencode-go/go.models.json` 与 `free.models.json`，支持 ETag 与离线保留；缓存带有网关来源标记，不会用于其他地址。
 

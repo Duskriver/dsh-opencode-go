@@ -80,10 +80,13 @@ function endpointOrigin(raw: string): string {
 
 /**
  * Whether the Free route may reuse saved Go credentials. A saved key is bound
- * to the endpoint it was configured for: the official platform gateway, or a
- * free base sharing the Go gateway's origin (one self-hosted or reverse-proxy
- * deployment serving both routes). Any other `freeBaseURL` gets public access
- * only, so pointing it at a third party cannot forward a stored paid key.
+ * to the endpoint it was configured for: the official platform gateway over
+ * HTTPS on its default port, or a free base sharing the Go gateway's origin
+ * (one self-hosted or reverse-proxy deployment serving both routes). Any other
+ * `freeBaseURL` gets public access only, so pointing it at a third party cannot
+ * forward a stored paid key. The official hostname alone is not enough: a
+ * plain-text or re-ported `opencode.ai` URL could be intercepted or served by
+ * an unknown listener, so it must not receive saved credentials either.
  * This is a local decision: no network probe is made and no credential is read.
  * @param config - the mount configuration captured for this request.
  * @returns true when Free may send saved account credentials.
@@ -91,7 +94,9 @@ function endpointOrigin(raw: string): string {
 export function freeReusesSavedKeys(config: Pick<OpencodeGoConfig, 'baseURL' | 'freeBaseURL'>): boolean {
   let free: URL
   try { free = new URL(config.freeBaseURL) } catch { return false }
-  if (free.hostname.toLowerCase() === 'opencode.ai') return true
+  // WHATWG URL removes the default port, so an empty `port` is the only
+  // spelling of the official HTTPS endpoint.
+  if (free.hostname.toLowerCase() === 'opencode.ai') return free.protocol === 'https:' && free.port === ''
   try { return free.origin === new URL(config.baseURL).origin } catch { return false }
 }
 
@@ -293,7 +298,12 @@ export class OpencodeGoRequestExecutor {
       const diagnostics = new GatewayDiagnostics({
         provider: String(options.provider), model: model.id, apiKey, proxyURL: config.proxyURL,
         free: model.source === 'free',
-        fetch: model.source === 'free' ? this.freeTransport.forProxy(config.proxyURL) : this.transport.forProxy(config.proxyURL),
+        // Free's SOCKS relay must outlive this request's own stream idle budget:
+        // the budget is user-configurable and the relay must not classify the
+        // stall as a network error before the stream watchdog fires.
+        fetch: model.source === 'free'
+          ? this.freeTransport.forProxy(config.proxyURL, config.streamIdleTimeoutMs)
+          : this.transport.forProxy(config.proxyURL),
         contextWindow: model.contextWindow, maxTokens: maxTokens ?? model.maxTokens,
         estimatedContextTokens: estimateContextTokens(transcript).tokens,
       })
