@@ -1,4 +1,4 @@
-import LlmRuntime, { createUserMessage, ReasoningEffortId, type GenerateOptions, type StreamChunk, BlockAssembler, userAgent } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createAssistantMessage, createUserMessage, createToolResultMessage, ReasoningEffortId, ToolCallId, type GenerateOptions, type StreamChunk, BlockAssembler, userAgent } from '@deepseek-ai/dsh-llm'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getSupportedThinkingLevels, normalizeContext } from 'opencode-go-pi-ai'
@@ -564,6 +564,57 @@ describe("Google transport and replay", () => {
   const unsigned = { text: 'unsigned text' }
 
   const emptySigned = { text: '', thoughtSignature: signatureB }
+
+  it('bypasses signature validation for an unsigned historical Gemini function call', async () => {
+    const { adapter, gateway, options } = await setup()
+    const callId = ToolCallId('web-fetch-1')
+    const assistant = createAssistantMessage({
+      content: [{ type: 'tool-call', id: callId, name: 'default_api:web_fetch', arguments: '{"url":"https://example.com"}' }],
+      source: { provider: options.provider as never, model: id },
+    })
+    gateway.pushCompletions({ events: googleTextEvents })
+    const resumed = await Array.fromAsync(adapter.stream({ ...options, messages: [
+      ...options.messages, assistant,
+      createToolResultMessage({ callId, content: [{ type: 'text', text: 'page contents' }], isError: false }),
+    ] }))
+    expect(resumed.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+    const replayed = gateway.bodies[0]?.contents.find((message: { role: string }) => message.role === 'model')
+    expect(replayed?.parts).toEqual([{
+      functionCall: { id: callId, name: 'default_api:web_fetch', args: { url: 'https://example.com' } },
+      thoughtSignature: 'skip_thought_signature_validator',
+    }])
+  })
+
+  it('replays a Gemini function call with its required thought signature after the tool result', async () => {
+    const { adapter, gateway, options } = await setup()
+    const callId = ToolCallId('web-fetch-1')
+    gateway.pushCompletions({ events: [JSON.stringify({
+      candidates: [{ content: { role: 'model', parts: [{
+        functionCall: { id: callId, name: 'default_api:web_fetch', args: { url: 'https://example.com' } },
+        thoughtSignature: signatureA,
+      }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 },
+    })] })
+    const assembler = new BlockAssembler()
+    for await (const chunk of adapter.stream(options)) assembler.push(chunk)
+    expect(assembler.finish.kind).toBe('tool-calls')
+    const assistant = JSON.parse(JSON.stringify(assembler.message({
+      kind: 'model', provider: options.provider as never, model: id,
+      replayState: assembler.replayState,
+    })))
+
+    gateway.pushCompletions({ events: googleTextEvents })
+    const resumed = await Array.fromAsync(adapter.stream({ ...options, messages: [
+      ...options.messages, assistant,
+      createToolResultMessage({ callId, content: [{ type: 'text', text: 'page contents' }], isError: false }),
+    ] }))
+    expect(resumed.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
+    const replayed = gateway.bodies[1]?.contents.find((message: { role: string }) => message.role === 'model')
+    expect(replayed?.parts).toEqual([{
+      functionCall: { id: callId, name: 'default_api:web_fetch', args: { url: 'https://example.com' } },
+      thoughtSignature: signatureA,
+    }])
+  })
 
   it.each([
     { label: 'two signed text parts in one chunk', chunks: [[signedA, signedB]], expected: [signedA, signedB] },
