@@ -307,3 +307,34 @@ describe('quota bar tracks', () => {
     }
   })
 })
+
+/**
+ * The settings page must stay usable in hosts that forward no definite height.
+ * `container-type: size` contains the block axis as well, so such a host sized
+ * the page from containment alone (its padding box) while every tab panel
+ * collapsed to zero; inline-size containment keeps the width queries and lets
+ * the block size follow the content (#94). The scroll body then needs an
+ * automatic basis to take that content height instead of a zero basis.
+ */
+describe('settings page host-height contract', () => {
+  function ruleBody(css: string, selector: string): string | null {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = css.match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`))
+    return match ? match[1]! : null
+  }
+
+  const css = readFileSync(new URL('../src/client/Section.module.css', import.meta.url), 'utf8')
+
+  it('contains the page inline only, so block size follows the content', () => {
+    const body = ruleBody(css, '.page')
+    expect(body, '.page rule must exist').not.toBeNull()
+    expect(body, '.page must not contain its block size').not.toContain('container-type: size')
+    expect(body, '.page must query the inline axis only').toMatch(/container-type:\s*inline-size/)
+  })
+
+  it('keeps an automatic flex basis on the scroll body', () => {
+    const body = ruleBody(css, '.pageBody')
+    expect(body, '.pageBody rule must exist').not.toBeNull()
+    expect(body, '.pageBody must size from its content when the page is content-sized').toMatch(/flex:\s*1 1 auto/)
+  })
+})

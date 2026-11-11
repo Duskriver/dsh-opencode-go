@@ -98,17 +98,24 @@
   font-family: var(--go-font);
   font-size: 13px;
   line-height: 1.6;
-  container-type: size;
+  /* The tab layout only queries width, so containment stays inline: a size
+     container ignores its contents, and a shell that gives this page no
+     definite height would then freeze it at the padding box while the tab
+     panels collapse to zero (#94). Block size follows the content instead. */
+  container-type: inline-size;
 }
 
 .page button, .page input, .page select { font-family: var(--go-font); }
 
 /* A column, so the model card can take whatever height is left once the
-   connection card and the advanced card have claimed theirs. */
+   connection card and the advanced card have claimed theirs. The automatic
+   basis keeps the body content-sized when the page itself is content-sized
+   (a shell that forwards no definite height); inside a definite-height page it
+   still fills the remaining space and shrinks to scroll. */
 .pageBody {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
