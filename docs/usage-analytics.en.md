@@ -6,7 +6,7 @@ The dashboard shows official history for the workspace belonging to the selected
 
 ## Entry points and accounts
 
-Open it from the conversation's expanded usage pill or the sidebar dashboard button. Settings no longer include a usage analytics card; the interface theme picker is under **Settings → OpenCode Go → Advanced settings → Usage settings → Appearance**.
+Open it from the conversation's expanded usage pill, the sidebar dashboard button, or the **OpenCode Go** console entry added to the sidebar (its **Usage** tab). The settings section keeps the full surface and offers an **Open full page** button; the interface theme picker lives on the console's **Appearance** tab and remains available under **Settings → OpenCode Go → Advanced settings → Usage settings → Appearance**.
 
 The dashboard has an independent viewing-account selector, defaulting to the account currently used for inference. Changing it only changes the dashboard scope; it does not switch the account for subsequent conversations or combine all saved accounts. The dashboard's five-hour, weekly and monthly quota windows follow the selected account and use official quota percentages.
 

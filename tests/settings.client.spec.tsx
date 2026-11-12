@@ -1776,6 +1776,7 @@ describe('client registration and remote lifecycle', () => {
       const nested = [...new Set(harness.serviceRequests.map(services => [...services].sort().join(',')))].sort()
       expect(nested).toEqual([
         'configForms,remote.opencodeGoModels',
+        'layout',
         'modelDirectories',
         'remote.opencodeGoAccounts',
         'remote.opencodeGoAnalytics',
@@ -1815,7 +1816,9 @@ describe('client registration and remote lifecycle', () => {
       return new Promise(resolve => signal?.addEventListener('abort', () => resolve({ ok: false,
         error: Object.assign(new Error('cancelled'), { code: 'gateway/cancelled' }) }), { once: true }))
     })
-    const view = render(<UsagePill {...harness.props} />)
+    // The dialog fallback is what a host without a page entry still gets; the
+    // production registration passes openUsagePage and navigates instead.
+    const view = render(<UsagePill {...harness.props} openUsagePage={undefined} />)
     try {
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: new RegExp(en.usageTitle) })) })
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })

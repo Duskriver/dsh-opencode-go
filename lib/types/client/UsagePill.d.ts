@@ -15,6 +15,12 @@ export interface UsagePillProps {
     getLocale?: () => string;
     credentialChanges?: SnapshotStore<number>;
     selectAccount?: (ref: string) => Promise<boolean>;
+    /**
+     * Open the console page instead of the in-place dialog. Set by the client
+     * registration once the host declares a sidebar panel; omitted hosts (and
+     * tests) keep the self-contained dialog.
+     */
+    openUsagePage?: () => void;
 }
 /** A root sidebar entry receives its width mode from the host slot owner. */
 export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {

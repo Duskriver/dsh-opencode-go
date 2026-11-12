@@ -64,8 +64,11 @@ Implementation modules are grouped by domain, with browser CSS and its ambient d
 | Free backoff, error classification and transport | `free-channel.ts`, `free-policy.ts`, `free-transport.ts` |
 | Browser-safe configuration and RPC contracts | `contracts.ts` |
 | HTTP, proxy transport and redacted errors | `transport.ts` |
-| Browser registration and state | `client/index.ts`, `client/controller.ts` |
+| Browser registration and state | `client/index.ts`, `client/controller.ts`, `client/host-slots.ts`, `client/pages/nav.ts` |
+| Sidebar console page | `client/pages/Page.tsx`, `client/pages/OverviewPage.tsx`, `client/pages/UsagePage.tsx`, `client/pages/AccountsPage.tsx`, `client/pages/ModelsPage.tsx`, `client/pages/AppearancePage.tsx`, `client/pages/AboutPage.tsx`, `client/pages/types.ts`, `client/GoMark.tsx`, `client/build-info.ts` |
 | UI and presentation | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
+
+The console page is registered as a pair of host slots: `sidebar.panellist` publishes the global row (id `opencode-go`, order 2) and `main` publishes the keyed panel with the same id, so the host owns the click, the active state, the label and the column geometry. `client/host-slots.ts` declares both slot contracts locally because the two host UI packages are not devDependencies; `ctx.slots.inject('sidebar.panellist', ...)` is the support probe, so hosts without the slot keep the settings section and simply never register the page. The page's tab lives in a module-level store because the host unmounts the panel on every return to the conversation. One controller and one reader set are created in `apply()` and shared by the settings section, the composer pill, the sidebar quota card and the page, so no surface owns a second draft or a second definition of the remote calls. Cards on the page use the `surface='page'` variant of the reusable settings components (`AccountsCard`, `ModelsSettings`, `AppearanceSettings`, `AdvancedSettings`), which swaps the settings page's hairline rows for real card surfaces without changing their behaviour.
 
 The host uses `settings.configure()` and volatile configuration fields; the browser binds the official `configForms` contract. The page keeps text drafts until Save, model capacities stay typed objects throughout editing, and immediate switches retain their existing behavior. The accounts card owns all credential entry and replacement.
 

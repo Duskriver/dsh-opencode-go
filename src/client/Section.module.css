@@ -489,6 +489,32 @@
   flex: none;
 }
 
+/* The console page stacks real cards; the settings dialog keeps its hairline
+   rows so its tabbed page stays one continuous surface. Both variants consume
+   the same --go-* tokens, so Native follows the Host either way. */
+.cardPage {
+  flex: none;
+  padding: 16px 18px;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-card);
+  background: var(--go-surface);
+}
+
+.cardModelsPage {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  padding: 16px 18px;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-card);
+  background: var(--go-surface);
+}
+
+.cardPage > .cardBody,
+.cardModelsPage > .cardBody {
+  padding-top: 0;
+}
+
 
 .card + .card,
 .card + .cardModels,
