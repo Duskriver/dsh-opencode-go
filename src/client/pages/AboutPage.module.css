@@ -13,6 +13,7 @@
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
   background: var(--go-surface);
+  box-shadow: var(--go-card-shadow);
 }
 
 .cardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -34,7 +35,7 @@
 }
 .rowValueMono { font-family: var(--go-number-font); font-size: 12px; }
 
-.divider { height: 1px; background: var(--go-border); margin: 12px 0; }
+.divider { height: 1px; background: var(--go-border-subtle); margin: 12px 0; }
 
 .links { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
 .link {

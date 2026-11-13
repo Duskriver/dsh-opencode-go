@@ -311,31 +311,6 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
         </section>
         <section className={css.card}>
           <div className={css.cardHead}>
-            <div>
-              <h2 className={css.cardTitle}>{t('overviewRecent')}</h2>
-              <p className={css.cardSub}>{t('overviewRecentSub')}</p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => { go('usage') }}>
-              {t('overviewDetails')}
-            </Button>
-          </div>
-          {recent.length === 0 ? <p className={css.note}>{reportNote}</p> : <>
-            <div className={css.spark} role="img" aria-label={t('overviewRecent') + ' · ' + t('overviewRecentSub')}>
-              {recent.map(day => {
-                const tokens = BigInt(day.tokens)
-                return <div key={day.day} className={css.sparkBar}
-                  data-hi={tokens === maximum && maximum > 0n ? 'true' : undefined}
-                  style={{ height: (maximum === 0n ? 0 : percentOf(tokens, maximum)) + '%' }}
-                  title={dayText(day.day, locale) + ' · ' + historyNumber(day.tokens, locale) + ' ' + t('analyticsTokens')} />
-              })}
-            </div>
-            <div className={css.sparkAxis} aria-hidden="true">
-              {axis.map(day => <span key={day}>{dayText(day, locale)}</span>)}
-            </div>
-          </>}
-        </section>
-        <section className={css.card}>
-          <div className={css.cardHead}>
             <h2 className={css.cardTitle}>{t('overviewAccountSummary')}</h2>
             <Tag className={css.headTag} tone="neutral">
               {accounts.length === 0 ? t('accountsSummaryEmpty') : t('accountsSummary', { count: accounts.length, name: currentName })}
@@ -356,6 +331,31 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
         </section>
       </div>
     </div>
+    <section className={css.card + ' ' + css.recentCard}>
+      <div className={css.cardHead}>
+        <div>
+          <h2 className={css.cardTitle}>{t('overviewRecent')}</h2>
+          <p className={css.cardSub}>{t('overviewRecentSub')}</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => { go('usage') }}>
+          {t('overviewDetails')}
+        </Button>
+      </div>
+      {recent.length === 0 ? <p className={css.note}>{reportNote}</p> : <>
+        <div className={css.spark} role="img" aria-label={t('overviewRecent') + ' · ' + t('overviewRecentSub')}>
+          {recent.map(day => {
+            const tokens = BigInt(day.tokens)
+            return <div key={day.day} className={css.sparkBar}
+              data-hi={tokens === maximum && maximum > 0n ? 'true' : undefined}
+              style={{ height: (maximum === 0n ? 0 : percentOf(tokens, maximum)) + '%' }}
+              title={dayText(day.day, locale) + ' · ' + historyNumber(day.tokens, locale) + ' ' + t('analyticsTokens')} />
+          })}
+        </div>
+        <div className={css.sparkAxis} aria-hidden="true">
+          {axis.map(day => <span key={day}>{dayText(day, locale)}</span>)}
+        </div>
+      </>}
+    </section>
     <section className={css.quick} aria-label={t('overviewQuickLinks')}>
       <QuickLink label={t('tabUsage')} detail={t('overviewQuickUsageSub')} onClick={() => { go('usage') }}>
         <ChartGlyph />

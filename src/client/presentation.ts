@@ -42,6 +42,10 @@ export const en = {
   accountsAvailabilityFailed: '{ready}/{total} configured · {failed} unreadable',
   accountsDetails: 'Details for {name}',
   accountsDetailsHide: 'Hide details for {name}',
+  accountRankCurrent: '#{rank} Current',
+  accountRankBackup: '#{rank} Backup',
+  accountManagePrimary: 'Account · Current #{rank}',
+  accountManageBackup: 'Account · Fallback #{rank}',
   accountDragHandle: 'Reorder {name}',
   accountConfigureHint: 'Add a key to read usage',
   usageResetMinutes: 'resets in {minutes} min',
@@ -49,7 +53,13 @@ export const en = {
   usageResetDays: 'resets in {days} d',
   usageResetDue: 'resets now',
   usageResetUnknown: 'reset time unknown',
+  usageResetCompactMinutes: '{minutes}m',
+  usageResetCompactHours: '{hours}h',
+  usageResetCompactDays: '{days}d',
+  usageResetCompactDue: 'now',
+  usageResetCompactUnknown: '--',
   usageTitle: 'OpenCode Go quota',
+  usageRollingCompact: '5h',
   usageRollingShort: '5h',
   usageWeekShort: 'week',
   usage_rolling: '5 hours',
@@ -291,6 +301,7 @@ export const en = {
   tabAccounts: 'Accounts',
   tabModels: 'Models',
   tabAppearance: 'Appearance',
+  tabAdvanced: 'Advanced',
   tabAbout: 'About',
   pageLoading: 'Reading OpenCode Go…',
   pageUnavailable: 'The OpenCode Go page is not served in this deployment.',
@@ -386,6 +397,10 @@ export const zh: typeof en = {
   accountsAvailabilityFailed: '{ready}/{total} 已配置 · {failed} 个读取失败',
   accountsDetails: '{name} 的详情',
   accountsDetailsHide: '收起 {name} 的详情',
+  accountRankCurrent: '#{rank} 当前',
+  accountRankBackup: '#{rank} 备用',
+  accountManagePrimary: '账户操作 · 当前顺位 {rank}',
+  accountManageBackup: '账户操作 · 回退顺位 {rank}',
   accountDragHandle: '拖动 {name} 调整顺序',
   accountConfigureHint: '配置 Key 后显示额度',
   usageResetMinutes: '{minutes} 分钟后重置',
@@ -393,7 +408,13 @@ export const zh: typeof en = {
   usageResetDays: '{days} 天后重置',
   usageResetDue: '即将重置',
   usageResetUnknown: '重置时间未知',
+  usageResetCompactMinutes: '{minutes}m',
+  usageResetCompactHours: '{hours}h',
+  usageResetCompactDays: '{days}d',
+  usageResetCompactDue: '即将',
+  usageResetCompactUnknown: '--',
   usageTitle: 'OpenCode Go 额度',
+  usageRollingCompact: '5h',
   usageRollingShort: '5小时',
   usageWeekShort: '周',
   usage_rolling: '5 小时',
@@ -635,6 +656,7 @@ export const zh: typeof en = {
   tabAccounts: '账号',
   tabModels: '模型',
   tabAppearance: '外观',
+  tabAdvanced: '高级设置',
   tabAbout: '关于',
   pageLoading: '正在读取 OpenCode Go…',
   pageUnavailable: '此部署未提供 OpenCode Go 页面。',
@@ -788,7 +810,7 @@ export const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
  */
 export const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens> = {
   dark: {
-    bg: '#0f0f0f', surface: '#212123', surface2: '#292929', border: '#3c3c3d', borderStrong: '#a2a4a6',
+    bg: '#0f0f0f', surface: '#212123', surface2: '#292929', border: '#3c3c3d', borderStrong: '#808288',
     text: '#f5f5f5', muted: '#a2a4a6', accent: '#7aaaff', accent2: '#4ed17e',
     accentSoft: '#1c2b45', onAccent: '#0f0f0f', cacheRead: '#a2a4a6', cacheWrite: '#f7ad31',
     shadow: '0 18px 48px #00000066', success: '#4ed17e', warning: '#f7ad31', danger: '#f87171',
@@ -908,20 +930,59 @@ export function formatDateTime(
   return fmt.format(date)
 }
 
+const tokenSchemes = new WeakMap<GoThemeTokens, GoThemeScheme>([
+  [GO_THEME_FALLBACKS.dark, 'dark'],
+  [GO_THEME_FALLBACKS.light, 'light'],
+  [NATIVE_THEME_FALLBACKS.dark, 'dark'],
+  [NATIVE_THEME_FALLBACKS.light, 'light'],
+  [GO_THEME_TOKENS.native.dark, 'dark'],
+  [GO_THEME_TOKENS.native.light, 'light'],
+])
+
 const themeStyleCache = new WeakMap<GoThemeTokens, CSSProperties>()
 
 /** Internal derived custom properties; third-party themes customize the Host tokens instead. */
 export function themeStyle(tokens: GoThemeTokens): CSSProperties {
   let style = themeStyleCache.get(tokens)
   if (style) return style
+  const scheme = tokenSchemes.get(tokens) ?? (tokens.bg.trim().toLowerCase().startsWith('#f') ? 'light' : 'dark')
+  const dark = scheme === 'dark'
   style = {
     '--go-bg': tokens.bg,
     '--go-surface': tokens.surface,
     '--go-surface-2': tokens.surface2,
+    '--go-surface-sunken': dark
+      ? `color-mix(in srgb, ${tokens.bg} 55%, ${tokens.surface})`
+      : `color-mix(in srgb, ${tokens.surface2} 95%, #000000)`,
+    '--go-surface-panel': dark
+      ? `color-mix(in srgb, ${tokens.bg} 40%, ${tokens.surface})`
+      : `color-mix(in srgb, ${tokens.bg} 65%, ${tokens.surface2})`,
+    '--go-surface-drawer': dark
+      ? `color-mix(in srgb, ${tokens.surface} 80%, ${tokens.bg})`
+      : tokens.surface2,
+    '--go-surface-elevated': dark
+      ? `color-mix(in srgb, ${tokens.surface} 45%, ${tokens.surface2})`
+      : tokens.surface,
+    '--go-surface-3': dark
+      ? `color-mix(in srgb, ${tokens.surface2} 95%, #ffffff)`
+      : tokens.surface,
     '--go-border': tokens.border,
+    '--go-border-subtle': `color-mix(in srgb, ${tokens.border} 60%, transparent)`,
     '--go-border-strong': tokens.borderStrong,
+    '--go-border-elevated': dark
+      ? `color-mix(in srgb, ${tokens.borderStrong} 52%, ${tokens.border})`
+      : `color-mix(in srgb, ${tokens.borderStrong} 40%, ${tokens.border})`,
+    '--go-highlight': dark
+      ? 'color-mix(in srgb, #ffffff 7%, transparent)'
+      : 'color-mix(in srgb, #ffffff 80%, transparent)',
+    '--go-highlight-soft': dark
+      ? 'color-mix(in srgb, #ffffff 4%, transparent)'
+      : 'color-mix(in srgb, #ffffff 60%, transparent)',
+    '--go-card-shadow': dark ? 'inset 0 1px 0 var(--go-highlight-soft)' : '0 1px 2px #0000000b',
+    '--go-tile-shadow': dark ? 'inset 0 1px 0 var(--go-highlight), 0 1px 3px #00000033' : '0 1px 3px #00000012',
     '--go-text': tokens.text,
     '--go-muted': tokens.muted,
+    '--go-muted-soft': `color-mix(in srgb, ${tokens.muted} 86%, ${tokens.surface})`,
     '--go-accent': tokens.accent,
     '--go-accent-2': tokens.accent2,
     '--go-accent-soft': tokens.accentSoft,

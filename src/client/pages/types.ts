@@ -15,7 +15,7 @@ import type { en } from '../presentation.ts'
 import type { OpencodeGoSectionInjected } from '../Section.tsx'
 
 /** Tabs of the OpenCode Go console page, in reading order. */
-export const PAGE_TABS = ['overview', 'usage', 'accounts', 'models', 'appearance', 'about'] as const
+export const PAGE_TABS = ['overview', 'usage', 'accounts', 'models', 'appearance', 'advanced', 'about'] as const
 
 export type PageTab = typeof PAGE_TABS[number]
 
@@ -26,6 +26,7 @@ export const TAB_COPY: Readonly<Record<PageTab, keyof typeof en>> = {
   accounts: 'tabAccounts',
   models: 'tabModels',
   appearance: 'tabAppearance',
+  advanced: 'tabAdvanced',
   about: 'tabAbout',
 }
 

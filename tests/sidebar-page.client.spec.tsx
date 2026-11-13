@@ -9,6 +9,7 @@ import { OverviewPage } from '../src/client/pages/OverviewPage.tsx'
 import { AccountsPage } from '../src/client/pages/AccountsPage.tsx'
 import { ModelsPage } from '../src/client/pages/ModelsPage.tsx'
 import { AppearancePage } from '../src/client/pages/AppearancePage.tsx'
+import { AdvancedPage } from '../src/client/pages/AdvancedPage.tsx'
 import { AboutPage } from '../src/client/pages/AboutPage.tsx'
 import { pageTabStore, resetPageTab, setPageTab } from '../src/client/pages/nav.ts'
 import { PAGE_TABS, TAB_COPY } from '../src/client/pages/types.ts'
@@ -88,7 +89,7 @@ describe('console page shell', () => {
     return { shell, view }
   }
 
-  it('renders the brand header and the six tabs with Overview selected', () => {
+  it('renders the brand header and the seven tabs with Overview selected', () => {
     renderShell()
     expect(screen.getByRole('heading', { level: 1, name: en.pageTitle })).toBeTruthy()
     expect(screen.getByText(en.pageSubtitle)).toBeTruthy()
@@ -97,8 +98,16 @@ describe('console page shell', () => {
     const tabs = within(tablist).getAllByRole('tab') as HTMLButtonElement[]
     expect(tabs).toHaveLength(PAGE_TABS.length)
     expect(tabs.map(tab => tab.textContent)).toEqual(PAGE_TABS.map(tab => en[TAB_COPY[tab]]))
-    expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false'])
-    expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1])
+    expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual([
+      'true',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+    ])
+    expect(tabs.map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1])
     const panel = screen.getByRole('tabpanel')
     expect(panel.id).toBe(tabs[0].getAttribute('aria-controls'))
     expect(panel.getAttribute('aria-labelledby')).toBe(tabs[0].id)
@@ -127,6 +136,11 @@ describe('console page shell', () => {
     fireEvent.click(screen.getByRole('tab', { name: en.tabAppearance }))
     expect(pageTabStore.getSnapshot()).toBe('appearance')
     expect(screen.getByText(en.appearanceThemeLabel)).toBeTruthy()
+    expect(screen.queryByText(en.groupConnection)).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: en.tabAdvanced }))
+    expect(pageTabStore.getSnapshot()).toBe('advanced')
+    expect(screen.getByText(en.groupConnection)).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: en.tabUsage }))
     expect(pageTabStore.getSnapshot()).toBe('usage')
@@ -242,6 +256,8 @@ describe('console page shell', () => {
     })
     expect(screen.queryByRole('button', { name: en.save })).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: en.tabAppearance }))
+    expect(screen.queryByText(en.advancedSaveHint)).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: en.tabAdvanced }))
     expect(screen.getByText(en.advancedSaveHint)).toBeTruthy()
     expect(screen.queryByRole('button', { name: en.save })).toBeNull()
     // A staged advanced draft is what summons the one Save gesture.
@@ -415,11 +431,10 @@ describe('console sub-pages', () => {
     expect(props.actions.setModelEnabled).toHaveBeenCalledWith(GO_MODEL.id, false)
   })
 
-  it('renders the appearance and advanced controls with their live actions', () => {
+  it('renders only the appearance controls with their live actions', () => {
     const props = pagePropsOf({
       state: {
         appearanceTheme: field('native', { overridden: true }),
-        baseURL: field('https://opencode.ai/zen/go/v1', { overridden: true }),
       },
     })
     render(<AppearancePage {...props} />)
@@ -428,9 +443,9 @@ describe('console sub-pages', () => {
     expect(screen.getByText(en.showSidebarQuotaLabel)).toBeTruthy()
     expect(screen.getByText(en.usagePillStyleLabel)).toBeTruthy()
     expect(screen.getByText(en.usageDisplayLabel)).toBeTruthy()
-    expect(screen.getByText(en.groupConnection)).toBeTruthy()
-    expect(screen.getByText(en.groupCacheTimeouts)).toBeTruthy()
-    expect(screen.getByText(en.groupImages)).toBeTruthy()
+    expect(screen.queryByText(en.groupConnection)).toBeNull()
+    expect(screen.queryByLabelText(en.baseURLLabel)).toBeNull()
+    expect(screen.queryByText(en.advancedSaveHint)).toBeNull()
     fireEvent.click(screen.getByRole('radio', { name: en.appearanceTheme_classic }))
     expect(props.actions.edit).toHaveBeenCalledWith('appearanceTheme', 'classic')
     const usageModes = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
@@ -440,6 +455,23 @@ describe('console sub-pages', () => {
     expect(props.actions.edit).toHaveBeenCalledWith('usagePillStyle', 'plain')
     fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
     expect(props.actions.resetField).toHaveBeenCalledWith('appearanceTheme')
+    // The shell owns the staged save bar; this page never renders one.
+    expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+    expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
+  })
+
+  it('renders the advanced settings controls on their dedicated sub-page', () => {
+    const props = pagePropsOf({
+      state: {
+        baseURL: field('https://opencode.ai/zen/go/v1', { overridden: true }),
+      },
+    })
+    render(<AdvancedPage {...props} />)
+    expect(screen.getByText(en.advancedSaveHint)).toBeTruthy()
+    expect(screen.getByText(en.groupConnection)).toBeTruthy()
+    expect(screen.getByText(en.groupCacheTimeouts)).toBeTruthy()
+    expect(screen.getByText(en.groupImages)).toBeTruthy()
+    expect(screen.queryByText(en.appearanceThemeLabel)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
     expect(props.actions.resetField).toHaveBeenCalledWith('baseURL')
     // The shell owns the staged save bar; this page never renders one.
@@ -447,8 +479,11 @@ describe('console sub-pages', () => {
     expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
   })
 
-  it('locks the page fields when the settings document is read-only', () => {
-    render(<AppearancePage {...pagePropsOf({ state: { writable: false } })} />)
+  it('locks the appearance and advanced page fields when the settings document is read-only', () => {
+    render(<>
+      <AppearancePage {...pagePropsOf({ state: { writable: false } })} />
+      <AdvancedPage {...pagePropsOf({ state: { writable: false } })} />
+    </>)
     expect((screen.getByRole('radio', { name: en.appearanceTheme_native }) as HTMLInputElement).disabled).toBe(true)
     expect((screen.getByLabelText(en.baseURLLabel) as HTMLInputElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: en.usageAppearanceReset }) as HTMLButtonElement).disabled).toBe(true)
