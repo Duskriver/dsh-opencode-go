@@ -1,0 +1,55 @@
+/* About tab: the build facts card beside the diagnostics card. */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.card {
+  min-width: 0;
+  padding: 16px 17px;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-card);
+  background: var(--go-surface);
+}
+
+.cardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.cardTitle { margin: 0; font-size: 13.5px; line-height: 20px; font-weight: 600; color: var(--go-text); }
+
+.rows { display: flex; flex-direction: column; margin: 0; }
+.row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 5px 0; }
+.rowLabel { flex: none; color: var(--go-muted); font-size: 12.5px; line-height: 1.5; }
+.rowValue {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--go-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.rowValueMono { font-family: var(--go-number-font); font-size: 12px; }
+
+.divider { height: 1px; background: var(--go-border); margin: 12px 0; }
+
+.links { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--go-radius-small);
+  color: var(--go-accent);
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+}
+.link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.link:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+
+@media (max-width: 1080px) {
+  .grid { grid-template-columns: 1fr; }
+}

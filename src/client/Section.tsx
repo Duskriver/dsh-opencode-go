@@ -17,7 +17,7 @@ import {
   useHostScheme,
   themeStyle,
 } from './presentation.ts'
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   GoAccountsActions,
   GoAccountsState,
@@ -137,14 +137,24 @@ function slotAt(container: HTMLElement, clientY: number): number {
  * the preferred account. Every row is read in the same pass, so the one refresh
  * stamp belongs to the card and sits in its header.
  */
-export function AccountsCard({ state, actions, writable, t, locale }: {
+export function AccountsCard({ state, actions, writable, t, locale, addRequest = 0, defaultOpen = false, surface = 'settings' }: {
   state: GoAccountsState
   actions: GoAccountsActions
   writable: boolean
   t: AccountTranslate
   locale?: string
+  /**
+   * Rising counter from a page-level "Add account" action. The page owns the
+   * button, the card owns the editor: asking through a counter keeps one add
+   * form (and its draft state) instead of a second copy on the page.
+   */
+  addRequest?: number
+  /** The console page shows the rows by default; the settings section keeps its fold. */
+  defaultOpen?: boolean
+  /** Settings keeps the hairline card; the console page draws a real card. */
+  surface?: 'settings' | 'page'
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const [details, setDetails] = useState<string | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
@@ -189,6 +199,16 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
     if (editor?.kind === 'add') actions.resetAddition?.()
     setEditor(null); setName(''); setKey('')
   }
+  // A page-level toolbar can carry the add action while the editor below stays
+  // the one in the card. Comparing against the previous request keeps a re-render
+  // of the page from reopening a form the reader just cancelled.
+  const requestedAdd = useRef(addRequest)
+  useEffect(() => {
+    if (addRequest === requestedAdd.current) return
+    requestedAdd.current = addRequest
+    setOpen(true)
+    start({ kind: 'add' })
+  }, [addRequest])
   // A row editor renders inside its row; when the row leaves the list — a
   // remove whose entry went but whose key cleanup did not — the editor would
   // strand itself with no visible Cancel and no Add button. Drop it instead.
@@ -257,7 +277,8 @@ export function AccountsCard({ state, actions, writable, t, locale }: {
       <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
     </div>
   </div>
-  return <section className={open ? css.card : css.card + ' ' + css.cardFolded}>
+  const cardClass = surface === 'page' ? css.cardPage : open ? css.card : css.card + ' ' + css.cardFolded
+  return <section className={cardClass}>
     <div className={css.cardHead}>
       <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
         onClick={() => { setOpen(!open) }}>
@@ -420,7 +441,8 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
   return limit?.contextWindow != null || limit?.maxTokens != null || (limit?.thinkingBudgets?.length ?? 0) > 0
 }
 
-/** Per-model switches apply immediately; capacity edits stay in the staged form. */
+/** Every control here applies immediately; the editor only stages what the
+ *  reader is still typing (Capacity commits a settled value). */
 export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
   source?: ModelSource
   models: OpencodeGoModels
@@ -573,6 +595,15 @@ function Modalities({ model, t }: { model: GoModel; t: ModelTranslate }) {
   </span>
 }
 
+/** How long typing must pause before a capacity field commits itself. */
+const CAPACITY_COMMIT_DELAY_MS = 700
+
+/**
+ * One numeric capacity, written as soon as the value settles: on blur, on Enter,
+ * or after a short pause in typing. The input keeps its own text so a write
+ * round-trip never rewrites the digits under the reader, and text the schema
+ * refuses stays in the field, marked invalid, without being committed.
+ */
 function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   model: GoModel
   field: 'contextWindow' | 'maxTokens'
@@ -586,18 +617,52 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   const catalogValue = model[field]
   const defaultValue = field === 'maxTokens' && catalogValue !== undefined ? Math.min(catalogValue, 65_536) : catalogValue
   const cappedOutput = field === 'maxTokens' && catalogValue !== undefined && catalogValue > 65_536
+  const saved = limit?.[field]
+  const savedText = saved == null ? '' : String(saved)
+  const [text, setText] = useState(savedText)
+  const [editing, setEditing] = useState(false)
+  // Adopt the saved value (or the newly shown model's value) unless the reader
+  // is mid-edit: a stale buffer on a focused field would eat their next keystroke.
+  const syncKey = `${model.id}:${field}:${savedText}`
+  const synced = useRef(syncKey)
+  useEffect(() => {
+    if (editing || synced.current === syncKey) return
+    synced.current = syncKey
+    setText(savedText)
+  }, [editing, syncKey, savedText])
+  const invalid = text.trim() !== '' && !(Number.isSafeInteger(Number(text)) && Number(text) > 0)
+  /** Write what the field holds, if it is writable; never throws the text away. */
+  const commit = (): void => {
+    setEditing(false)
+    const raw = text.trim()
+    if (raw === '') {
+      // Empty means "inherit the catalog value": it only writes when an override
+      // is saved, so clearing an already empty field changes nothing.
+      if (saved != null) onChange(modelSettingsKey(model), field, undefined)
+      return
+    }
+    const value = Number(raw)
+    if (!Number.isSafeInteger(value) || value <= 0) return
+    if (value === saved) { setText(String(value)); return }
+    onChange(modelSettingsKey(model), field, value)
+  }
+  // A pause in typing is a commit too: nothing else on this card blurs the field
+  // for the reader, and the value must land without a Save gesture.
+  useEffect(() => {
+    if (!editing) return
+    const timer = setTimeout(commit, CAPACITY_COMMIT_DELAY_MS)
+    return () => { clearTimeout(timer) }
+  }, [editing, text])
   return <div className={css.stat}>
     <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
     <input id={id} className={css.input} type="number" min={1} max={field === 'maxTokens' ? model.maxTokens : undefined} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
-      aria-describedby={`${id}-default`} value={limit?.[field] ?? ''}
+      aria-describedby={`${id}-default`} value={text}
       placeholder={defaultValue === undefined ? t('capacityMissing') : String(defaultValue)} disabled={disabled}
-      onChange={event => {
-        const text = event.target.value.trim()
-        const value = Number(text)
-        if (text === '') onChange(modelSettingsKey(model), field, undefined)
-        else if (Number.isSafeInteger(value) && value > 0) onChange(modelSettingsKey(model), field, value)
-      }} />
+      aria-invalid={invalid || undefined}
+      onChange={event => { setEditing(true); setText(event.target.value) }}
+      onBlur={commit}
+      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit() } }} />
     <span id={`${id}-default`} className={css.hint}>
       {cappedOutput
         ? t('capacityDefaultCapped', { value: defaultValue!.toLocaleString(locale), max: catalogValue.toLocaleString(locale) })
@@ -688,6 +753,11 @@ export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
   t: SectionTranslate
   /** Read at render time because the Host caches injected values across locale changes. */
   getLocale?: () => string
+  /**
+   * Opens the full sidebar page from the settings section. Optional: hosts that
+   * never register the page simply leave the secondary button out.
+   */
+  openPage?: () => void
 }
 
 /** Props delivered by the slot outlet: the inject face spread flat. */
@@ -935,15 +1005,297 @@ function ModelsBody({ models, t, source, showProgress = true }: {
 }
 
 /**
+ * The Appearance tab's card. Extracted from `Loaded` so the sidebar page and the
+ * settings section render one implementation; the classes and children are the
+ * ones the settings tests already read.
+ */
+export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface = 'settings' }: {
+  state: OpencodeGoSectionState
+  t: SectionTranslate
+  disabled: boolean
+  saving: boolean
+  onEdit: (field: TextField, text: string) => void
+  resetField: (field: EditableField) => void
+  surface?: 'settings' | 'page'
+}) {
+  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
+  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  // Appearance writes as each control changes; a refused write names this card.
+  const writeFailed = state.writeFailed !== undefined
+    && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
+  return <section className={surface === 'page' ? css.cardPage : css.card}>
+    <div className={css.cardBody}>
+      <div className={css.rows}>
+        <ValueField
+          id="opencode-go-usage-display"
+          label={t('usageDisplayLabel')}
+          hint={t('usageDisplayHint')}
+          field={state.usageDisplay}
+          options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
+          invalidLabel={t('invalidValue')}
+          disabled={disabled}
+          onEdit={text => { onEdit('usageDisplay', text) }}
+        />
+        <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={onEdit} />
+      </div>
+      {writeFailed ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
+      {/* The reset action closes the card: a title row above the fields only
+          repeated the tab label and pushed the first setting down. */}
+      <div className={css.cardActions}>
+        <button type="button" className={css.reset}
+          disabled={disabled || saving || !canReset}
+          onClick={() => {
+            for (const field of APPEARANCE_TAB_FIELDS) {
+              if (state[field].overridden || state[field].invalid) resetField(field)
+            }
+          }}>
+          {t('usageAppearanceReset')}
+        </button>
+      </div>
+    </div>
+  </section>
+}
+
+/**
+ * The Advanced tab's card: connection overrides, cache/timeout tuning and the
+ * image budget, closed by the reset-all row. Extracted from `Loaded` unchanged
+ * so the full page can carry the same fields.
+ */
+export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edit, resetField, surface = 'settings' }: {
+  state: OpencodeGoSectionState
+  t: SectionTranslate
+  disabled: boolean
+  saving: boolean
+  invalidLabel: string
+  edit: (field: TextField, text: string) => void
+  resetField: (field: EditableField) => void
+  surface?: 'settings' | 'page'
+}) {
+  const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
+  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
+  const canReset = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  return <section className={surface === 'page' ? css.cardPage : css.card}>
+    <div className={css.cardBody}>
+      {/* The one card with a Save gesture says so up front: every other surface
+          applies on change, so a reader must not look for Save on them. */}
+      <p className={css.hint}>{t('advancedSaveHint')}</p>
+      <div className={css.rows}>
+        <div className={css.groupHead}>{t('groupConnection')}</div>
+        <ValueField
+          id="opencode-go-base-url"
+          label={t('baseURLLabel')}
+          hint={t('baseURLHint')}
+          field={state.baseURL}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('baseURL', text) }}
+        />
+        <ValueField
+          id="opencode-go-free-base-url"
+          label={t('freeBaseURLLabel')}
+          hint={t('freeBaseURLHint')}
+          field={state.freeBaseURL}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={text => { edit('freeBaseURL', text) }}
+        />
+        <ValueField
+          id="opencode-go-proxy-url"
+          label={t('proxyURLLabel')}
+          hint={t('proxyURLHint')}
+          placeholder="http://127.0.0.1:7890"
+          field={state.proxyURL}
+          invalidLabel={t('proxyURLInvalid')}
+          disabled={disabled}
+          onEdit={(text) => { edit('proxyURL', text) }}
+        />
+        <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
+        <ValueField
+          id="opencode-go-refresh-minutes"
+          label={t('refreshMinutesLabel')}
+          hint={t('refreshMinutesHint')}
+          field={state.refreshMinutes}
+          {...numericBounds('refreshMinutes')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('refreshMinutes', text) }}
+        />
+        <ValueField
+          id="opencode-go-stream-idle"
+          label={t('streamIdleTimeoutMsLabel')}
+          hint={t('streamIdleTimeoutMsHint')}
+          field={state.streamIdleTimeoutMs}
+          {...numericBounds('streamIdleTimeoutMs')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('streamIdleTimeoutMs', text) }}
+        />
+        <ValueField
+          id="opencode-go-request-preparation-timeout"
+          label={t('requestPreparationTimeoutMsLabel')}
+          hint={t('requestPreparationTimeoutMsHint')}
+          field={state.requestPreparationTimeoutMs}
+          {...numericBounds('requestPreparationTimeoutMs')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('requestPreparationTimeoutMs', text) }}
+        />
+        <ValueField
+          id="opencode-go-request-timeout"
+          label={t('requestTimeoutMsLabel')}
+          hint={t('requestTimeoutMsHint')}
+          field={state.requestTimeoutMs}
+          {...numericBounds('requestTimeoutMs')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('requestTimeoutMs', text) }}
+        />
+        <div className={css.groupHead}>{t('groupImages')}</div>
+        <ValueField
+          id="opencode-go-max-images"
+          label={t('maxImagesLabel')}
+          hint={t('maxImagesHint')}
+          field={state.maxImages}
+          {...numericBounds('maxImages')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('maxImages', text) }}
+        />
+        <ValueField
+          id="opencode-go-max-request-image-bytes"
+          label={t('maxRequestImageBytesLabel')}
+          hint={t('maxRequestImageBytesHint')}
+          field={state.maxRequestImageBytes}
+          {...numericBounds('maxRequestImageBytes')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('maxRequestImageBytes', text) }}
+        />
+        <ValueField
+          id="opencode-go-image-pixel-budget"
+          label={t('requestImagePixelBudgetLabel')}
+          hint={t('requestImagePixelBudgetHint')}
+          field={state.requestImagePixelBudget}
+          {...numericBounds('requestImagePixelBudget')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('requestImagePixelBudget', text) }}
+        />
+        <ValueField
+          id="opencode-go-image-max-bytes"
+          label={t('requestImageMaxBytesLabel')}
+          hint={t('requestImageMaxBytesHint')}
+          field={state.requestImageMaxBytes}
+          {...numericBounds('requestImageMaxBytes')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('requestImageMaxBytes', text) }}
+        />
+      </div>
+      {/* The reset action closes the card, so the tab strip is followed by the
+          first setting instead of a title row that repeated the tab label. */}
+      <div className={css.cardActions}>
+        {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
+        <button type="button" className={css.reset}
+          disabled={disabled || saving || !canReset}
+          onClick={() => {
+            for (const field of ADVANCED_FIELDS) {
+              if (state[field].overridden || state[field].invalid) resetField(field)
+            }
+          }}>
+          {t('advancedResetAll')}
+        </button>
+      </div>
+    </div>
+  </section>
+}
+
+/**
+ * The Models tab's card: the Go/Free source tabs, the listing status and the
+ * capacity editor. The selected source is local (as it was in `Loaded`), so the
+ * page and the section behave the same on remount.
+ */
+export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, surface = 'settings' }: {
+  state: OpencodeGoSectionState
+  t: SectionTranslate
+  locale?: string
+  disabled: boolean
+  onEdit: (value: OpencodeGoModelLimits) => void
+  setModelEnabled: (id: string, next: boolean) => void
+  loadModels: () => void
+  surface?: 'settings' | 'page'
+}) {
+  const [modelSource, setModelSource] = useState<ModelSource>('go')
+  const goModels = useMemo(() => modelsForSource(state.models, 'go'), [state.models])
+  const freeModels = useMemo(() => modelsForSource(state.models, 'free'), [state.models])
+  const models = modelSource === 'go' ? goModels : freeModels
+  // The model tab carries the listing's own diagnostics and a refused switch write.
+  const modelNotices = (
+    <>
+      <ModelsBody models={models} source={modelSource} t={t} />
+      {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
+    </>
+  )
+  return <section className={surface === 'page' ? css.cardModelsPage : css.cardModels}>
+    <div id="opencode-go-models" className={css.cardBody}>
+      <div className={css.modelToolbar}>
+        <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
+          {(['go', 'free'] as const).map(source => {
+            const catalog = source === 'go' ? goModels : freeModels
+            const status = catalog.status === 'ready' || catalog.status === 'failed' ? catalog.sources?.[source] : undefined
+            const label = t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')
+            return <button key={source} type="button" role="tab" aria-label={label}
+              title={status?.error ?? status?.warning}
+              id={`opencode-model-tab-${source}`} aria-selected={modelSource === source}
+              tabIndex={modelSource === source ? 0 : -1}
+              aria-controls="opencode-model-panel" className={css.modelTab}
+              onKeyDown={event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+                event.preventDefault()
+                const next = event.key === 'Home' ? 'go' : event.key === 'End' ? 'free' : source === 'go' ? 'free' : 'go'
+                setModelSource(next)
+                document.getElementById(`opencode-model-tab-${next}`)?.focus()
+              }}
+              onClick={() => { setModelSource(source) }}>{label}
+              {catalog.status === 'ready' ? <span className={css.modelTabCount} aria-hidden="true">{catalog.count}</span> : null}
+              {status?.error || status?.warning ? <span className={css.modelTabWarning} aria-hidden="true" /> : null}
+            </button>
+          })}
+        </div>
+        <div className={css.modelTools}>
+          <ModelSourceStatus models={models} source={modelSource} t={t} locale={locale} />
+          <Button variant="outline" size="sm"
+            disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
+            onClick={loadModels}>{t('modelsRefresh')}</Button>
+        </div>
+      </div>
+      <div role="tabpanel" id="opencode-model-panel" className={css.modelPanel} aria-labelledby={`opencode-model-tab-${modelSource}`}>
+        {state.writeFailed === 'modelLimits'
+          ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
+        {modelNotices}
+        {/* Capacity edits write immediately, so an in-flight write must not
+            disable the field being typed in: only the document's writability
+            locks the editor. Visibility switches keep the pending-write lock. */}
+        <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
+          modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+          onModelEnabled={setModelEnabled}
+          onEdit={onEdit} />
+      </div>
+    </div>
+  </section>
+}
+
+/**
  * Render the OpenCode Go settings page.
  * @param props - locale copy, the page snapshot, and its form actions.
  * @returns the section.
  */
 export function OpencodeGoSection(props: OpencodeGoSectionProps) {
-  const { useOpencodeGo, edit, resetField, save, discard, loadModels, setEnabled, setModelEnabled, t } = props
+  const { useOpencodeGo, edit, resetField, save, discard, loadModels, setEnabled, setSidebarEntry, setModelEnabled, t } = props
   if (useOpencodeGo === undefined || edit === undefined || resetField === undefined
     || save === undefined || discard === undefined || loadModels === undefined
-    || setEnabled === undefined || setModelEnabled === undefined || props.editModelLimits === undefined || t === undefined
+    || setEnabled === undefined || setSidebarEntry === undefined || setModelEnabled === undefined
+    || props.editModelLimits === undefined || t === undefined
     || !props.loadAccounts || !props.addAccount || !props.renameAccount || !props.removeAccount
     || !props.selectAccount || !props.setAutoSwitch || !props.replaceAccountKey || !props.moveAccount) return null
   return (
@@ -958,7 +1310,9 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       discard={discard}
       loadModels={loadModels}
       setEnabled={setEnabled}
+      setSidebarEntry={setSidebarEntry}
       setModelEnabled={setModelEnabled}
+      openPage={props.openPage}
       accountActions={{
         loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
         resetAddition: props.resetAddition, removeAccount: props.removeAccount, selectAccount: props.selectAccount,
@@ -980,7 +1334,11 @@ function Loaded(props: {
   discard: () => void
   loadModels: () => void
   setEnabled: (next: boolean) => void
+  /** Opt the sidebar row and its console page in or out; applied immediately. */
+  setSidebarEntry: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
+  /** Opens the full sidebar page; absent on hosts that have not registered it. */
+  openPage?: () => void
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
@@ -988,17 +1346,6 @@ function Loaded(props: {
   // Tabs keep one class of settings on screen at a time: the overview is the
   // landing state, and the other tabs carry the former cards' contents.
   const [tab, setTab] = useState<SettingsTab>('overview')
-  const [modelSource, setModelSource] = useState<ModelSource>('go')
-  const goModels = useMemo(() => modelsForSource(state.models, 'go'), [state.models])
-  const freeModels = useMemo(() => modelsForSource(state.models, 'free'), [state.models])
-  const models = modelSource === 'go' ? goModels : freeModels
-  // The model tab carries the listing's own diagnostics and a refused switch write.
-  const modelNotices = (
-    <>
-      <ModelsBody models={models} source={modelSource} t={t} />
-      {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
-    </>
-  )
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
@@ -1018,26 +1365,29 @@ function Loaded(props: {
   const accountCard = <AccountsCard
     state={state.accounts} actions={props.accountActions} writable={state.writable}
     t={t} locale={props.locale} />
-  const fieldProps = {
-    invalidLabel: t('invalidValue'),
-    disabled,
-  }
+  // Only Advanced keeps a draft: appearance writes as soon as it changes, so
+  // its tab must not claim pending edits (the models mark reports its listing).
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
-  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
-  const canResetAdvanced = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
-  const appearanceOverridden = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden)
-  const canResetAppearance = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden || state[field].invalid)
   const tabs: { id: SettingsTab; label: string; marked?: boolean }[] = [
     { id: 'overview', label: t('settingsTabOverview') },
     { id: 'models', label: t('settingsTabModels'), marked: state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale },
-    { id: 'appearance', label: t('settingsTabAppearance'), marked: appearanceOverridden },
+    { id: 'appearance', label: t('settingsTabAppearance') },
     { id: 'advanced', label: t('settingsTabAdvanced'), marked: advancedOverridden },
   ]
   return (
     <div className={css.page} style={themeStyle(tokens)}>
       <div className={css.pageBody}>
       <div className={css.pageTop}>
-        <h2 className={css.title}>{t('titleLabel')}</h2>
+        {/* The sidebar row is the primary way into the page; the settings section
+            keeps a secondary way there once the host wires `openPage`. The
+            plain title stays when it is absent, so hosts without the page (and
+            the existing tests) render exactly the old DOM. */}
+        {props.openPage
+          ? <div className={css.head}>
+            <h2 className={css.title}>{t('titleLabel')}</h2>
+            <Button variant="outline" size="sm" onClick={props.openPage}>{t('openFullPage')}</Button>
+          </div>
+          : <h2 className={css.title}>{t('titleLabel')}</h2>}
       </div>
       <div className={css.pageTabs} role="tablist" aria-label={t('settingsTabsLabel')}>
         {tabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`opencode-go-tab-${item.id}`}
@@ -1089,217 +1439,59 @@ function Loaded(props: {
             onChange={next => { props.edit('freeEnabled', String(next)) }}
           />
         </div>
+        {state.writeFailed === 'freeEnabled'
+          ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
+      </section>
+      {/* The opt-in row lives here because the console page it opens does not
+          exist while the switch is off: this card is the only way back in. */}
+      <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('sidebarEntryLabel')}<HintMark hint={t('sidebarEntryHint')} /></h3>
+          <Switch
+            checked={state.sidebarEntry}
+            label={t('sidebarEntryLabel')}
+            // The Switch primitive forwards only title as its description; the
+            // mark opens the same sentence in a bubble.
+            title={t('sidebarEntryHint')}
+            disabled={disabled || state.saving || state.pickerSaving}
+            onChange={props.setSidebarEntry}
+          />
+        </div>
+        <div className={css.cardBody}>
+          <p className={css.hint}>{t('sidebarEntrySummary')}</p>
+          {state.sidebarEntryFailed
+            ? <p className={css.failedNote} role="alert">{t('sidebarEntryFailed')}</p> : null}
+        </div>
       </section>
       {accountCard}
       </div>
       </div> : null}
       {tab === 'models' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-models" aria-labelledby="opencode-go-tab-models">
-      <section className={css.cardModels}>
-        <div id="opencode-go-models" className={css.cardBody}>
-              <div className={css.modelToolbar}>
-              <div className={css.modelTabs} role="tablist" aria-label={t('modelSourcesLabel')}>
-                {(['go', 'free'] as const).map(source => {
-                  const catalog = source === 'go' ? goModels : freeModels
-                  const status = catalog.status === 'ready' || catalog.status === 'failed' ? catalog.sources?.[source] : undefined
-                  const label = t(source === 'go' ? 'modelsGoTab' : 'modelsFreeTab')
-                  return <button key={source} type="button" role="tab" aria-label={label}
-                  title={status?.error ?? status?.warning}
-                  id={`opencode-model-tab-${source}`} aria-selected={modelSource === source}
-                  tabIndex={modelSource === source ? 0 : -1}
-                  aria-controls="opencode-model-panel" className={css.modelTab}
-                  onKeyDown={event => {
-                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-                    event.preventDefault()
-                    const next = event.key === 'Home' ? 'go' : event.key === 'End' ? 'free' : source === 'go' ? 'free' : 'go'
-                    setModelSource(next)
-                    document.getElementById(`opencode-model-tab-${next}`)?.focus()
-                  }}
-                  onClick={() => { setModelSource(source) }}>{label}
-                    {catalog.status === 'ready' ? <span className={css.modelTabCount} aria-hidden="true">{catalog.count}</span> : null}
-                    {status?.error || status?.warning ? <span className={css.modelTabWarning} aria-hidden="true" /> : null}
-                  </button>
-                })}
-              </div>
-              <div className={css.modelTools}>
-                <ModelSourceStatus models={models} source={modelSource} t={t} locale={props.locale} />
-                <Button variant="outline" size="sm"
-                  disabled={state.models.status === 'loading' || state.models.status === 'ready' && state.models.refreshing}
-                  onClick={loadModels}>{t('modelsRefresh')}</Button>
-              </div>
-              </div>
-              <div role="tabpanel" id="opencode-model-panel" className={css.modelPanel} aria-labelledby={`opencode-model-tab-${modelSource}`}>
-              {modelNotices}
-              <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={props.locale} disabled={disabled || state.saving}
-                modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-                onModelEnabled={props.setModelEnabled}
-                onEdit={props.editModelLimits} />
-              </div>
-        </div>
-      </section>
+      <ModelsSettings state={state} t={t} locale={props.locale} disabled={disabled}
+        onEdit={props.editModelLimits} setModelEnabled={props.setModelEnabled} loadModels={loadModels} />
       </div> : null}
       {tab === 'appearance' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-appearance" aria-labelledby="opencode-go-tab-appearance">
-      <section className={css.card}>
-        <div className={css.cardBody}>
-          <div className={css.rows}>
-            <ValueField
-              id="opencode-go-usage-display"
-              label={t('usageDisplayLabel')}
-              hint={t('usageDisplayHint')}
-              field={state.usageDisplay}
-              options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
-              {...fieldProps}
-              onEdit={text => { props.edit('usageDisplay', text) }}
-            />
-            <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={props.edit} />
-          </div>
-          {/* The reset action closes the card: a title row above the fields only
-              repeated the tab label and pushed the first setting down. */}
-          <div className={css.cardActions}>
-            <button type="button" className={css.reset}
-              disabled={disabled || state.saving || !canResetAppearance}
-              onClick={() => {
-                for (const field of APPEARANCE_TAB_FIELDS) {
-                  if (state[field].overridden || state[field].invalid) props.resetField(field)
-                }
-              }}>
-              {t('usageAppearanceReset')}
-            </button>
-          </div>
-        </div>
-      </section>
+      <AppearanceSettings state={state} t={t} disabled={disabled} saving={state.saving}
+        onEdit={props.edit} resetField={props.resetField} />
       </div> : null}
       {tab === 'advanced' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-advanced" aria-labelledby="opencode-go-tab-advanced">
-      <section className={css.card}>
-        <div className={css.cardBody}>
-          <div className={css.rows}>
-                <div className={css.groupHead}>{t('groupConnection')}</div>
-                <ValueField
-                  id="opencode-go-base-url"
-                  label={t('baseURLLabel')}
-                  hint={t('baseURLHint')}
-                  field={state.baseURL}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('baseURL', text) }}
-                />
-                <ValueField
-                  id="opencode-go-free-base-url"
-                  label={t('freeBaseURLLabel')}
-                  hint={t('freeBaseURLHint')}
-                  field={state.freeBaseURL}
-                  {...fieldProps}
-                  onEdit={text => { props.edit('freeBaseURL', text) }}
-                />
-                <ValueField
-                  id="opencode-go-proxy-url"
-                  label={t('proxyURLLabel')}
-                  hint={t('proxyURLHint')}
-                  placeholder="http://127.0.0.1:7890"
-                  field={state.proxyURL}
-                  {...fieldProps}
-                  invalidLabel={t('proxyURLInvalid')}
-                  onEdit={(text) => { props.edit('proxyURL', text) }}
-                />
-                <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
-                <ValueField
-                  id="opencode-go-refresh-minutes"
-                  label={t('refreshMinutesLabel')}
-                  hint={t('refreshMinutesHint')}
-                  field={state.refreshMinutes}
-                  {...numericBounds('refreshMinutes')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('refreshMinutes', text) }}
-                />
-                <ValueField
-                  id="opencode-go-stream-idle"
-                  label={t('streamIdleTimeoutMsLabel')}
-                  hint={t('streamIdleTimeoutMsHint')}
-                  field={state.streamIdleTimeoutMs}
-                  {...numericBounds('streamIdleTimeoutMs')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('streamIdleTimeoutMs', text) }}
-                />
-                <ValueField
-                  id="opencode-go-request-preparation-timeout"
-                  label={t('requestPreparationTimeoutMsLabel')}
-                  hint={t('requestPreparationTimeoutMsHint')}
-                  field={state.requestPreparationTimeoutMs}
-                  {...numericBounds('requestPreparationTimeoutMs')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('requestPreparationTimeoutMs', text) }}
-                />
-                <ValueField
-                  id="opencode-go-request-timeout"
-                  label={t('requestTimeoutMsLabel')}
-                  hint={t('requestTimeoutMsHint')}
-                  field={state.requestTimeoutMs}
-                  {...numericBounds('requestTimeoutMs')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('requestTimeoutMs', text) }}
-                />
-                <div className={css.groupHead}>{t('groupImages')}</div>
-                <ValueField
-                  id="opencode-go-max-images"
-                  label={t('maxImagesLabel')}
-                  hint={t('maxImagesHint')}
-                  field={state.maxImages}
-                  {...numericBounds('maxImages')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('maxImages', text) }}
-                />
-                <ValueField
-                  id="opencode-go-max-request-image-bytes"
-                  label={t('maxRequestImageBytesLabel')}
-                  hint={t('maxRequestImageBytesHint')}
-                  field={state.maxRequestImageBytes}
-                  {...numericBounds('maxRequestImageBytes')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('maxRequestImageBytes', text) }}
-                />
-                <ValueField
-                  id="opencode-go-image-pixel-budget"
-                  label={t('requestImagePixelBudgetLabel')}
-                  hint={t('requestImagePixelBudgetHint')}
-                  field={state.requestImagePixelBudget}
-                  {...numericBounds('requestImagePixelBudget')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('requestImagePixelBudget', text) }}
-                />
-                <ValueField
-                  id="opencode-go-image-max-bytes"
-                  label={t('requestImageMaxBytesLabel')}
-                  hint={t('requestImageMaxBytesHint')}
-                  field={state.requestImageMaxBytes}
-                  {...numericBounds('requestImageMaxBytes')}
-                  {...fieldProps}
-                  onEdit={(text) => { props.edit('requestImageMaxBytes', text) }}
-                />
-          </div>
-          {/* The reset action closes the card, so the tab strip is followed by the
-              first setting instead of a title row that repeated the tab label. */}
-          <div className={css.cardActions}>
-            {advancedOverridden ? <Tag tone="neutral">{t('overridden')}</Tag> : null}
-            <button type="button" className={css.reset}
-              disabled={disabled || state.saving || !canResetAdvanced}
-              onClick={() => {
-                for (const field of ADVANCED_FIELDS) {
-                  if (state[field].overridden || state[field].invalid) props.resetField(field)
-                }
-              }}>
-              {t('advancedResetAll')}
-            </button>
-          </div>
-        </div>
-      </section>
+      <AdvancedSettings state={state} t={t} disabled={disabled} saving={state.saving} invalidLabel={t('invalidValue')}
+        edit={props.edit} resetField={props.resetField} />
       </div> : null}
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>
       <div className={css.actions}>
-        <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving || state.pickerSaving} onClick={props.save}>
-          {state.saving ? t('saving') : t('save')}
-        </Button>
-        <Button variant="outline" size="md" disabled={disabled || !state.dirty || state.saving} onClick={props.discard}>
-          {t('discard')}
-        </Button>
+        {/* Only the Advanced card keeps a draft, so Save and Discard appear
+            there and nowhere else: every other tab writes as it changes. The
+            star link is not a form action and stays visible everywhere. */}
+        {tab === 'advanced' ? <>
+          <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving || state.pickerSaving} onClick={props.save}>
+            {state.saving ? t('saving') : t('save')}
+          </Button>
+          <Button variant="outline" size="md" disabled={disabled || !state.dirty || state.saving} onClick={props.discard}>
+            {t('discard')}
+          </Button>
+        </> : null}
         <a className={css.starLink} href="https://github.com/Duskriver/dsh-opencode-go"
           target="_blank" rel="noopener noreferrer" title={t('starProjectTitle')}>
           {/* GitHub mark from Simple Icons (CC0). Inline so all supported Hosts share the same icon. */}
@@ -1308,7 +1500,7 @@ function Loaded(props: {
           </svg>
           <span>{t('starProject')}</span>
         </a>
-        {state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
+        {tab === 'advanced' && state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
       </div>
     </div>
   )

@@ -36,11 +36,27 @@ export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } 
 
 export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
 
-export const TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled', 'baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
+/**
+ * Fields that apply the moment they change. Every non-advanced surface is
+ * immediate, so the form has exactly one save gesture: the Advanced tab.
+ */
+export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled'] as const
+
+export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number]
+
+/** Fields the Advanced tab keeps behind Save/Discard. */
+export const STAGED_TEXT_FIELDS = ['baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
   'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget',
   'requestImageMaxBytes'] as const
 
+export type StagedTextField = typeof STAGED_TEXT_FIELDS[number]
+
+export const TEXT_FIELDS = [...IMMEDIATE_TEXT_FIELDS, ...STAGED_TEXT_FIELDS] as const
+
 export type TextField = typeof TEXT_FIELDS[number]
+
+/** An immediate field also covers the per-model capacity map. */
+export type ImmediateField = ImmediateTextField | 'modelLimits'
 
 export const editableKeys = [...TEXT_FIELDS, 'modelLimits'] as const
 
@@ -126,6 +142,11 @@ function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (!Number.isFinite(value) || limit.integer && !Number.isSafeInteger(value)
     || value < limit.min || limit.max !== undefined && value > limit.max) return undefined
   return { kind: 'set', value }
+}
+
+/** Immediate fields write on change; staged fields wait for the Advanced save. */
+function isImmediateTextField(field: TextField): field is ImmediateTextField {
+  return (IMMEDIATE_TEXT_FIELDS as readonly string[]).includes(field)
 }
 
 /** Structural comparison keeps model capacities as objects throughout editing and saving. */
@@ -214,6 +235,12 @@ export interface GoAccountsActions {
 export interface OpencodeGoSectionState extends FormShell {
   accounts: GoAccountsState
   enabled: boolean
+  /** Whether the opt-in sidebar row and its console page are registered. */
+  sidebarEntry: boolean
+  /** The sidebar-entry switch write failed; the switch itself is elsewhere. */
+  sidebarEntryFailed: boolean
+  /** The last immediate settings write that did not land, named for its surface. */
+  writeFailed?: ImmediateField
   usageDisplay: FieldState
   showSidebarQuota: FieldState
   freeEnabled: FieldState
@@ -246,6 +273,8 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   hooks: { opencodeGo: SnapshotStore<OpencodeGoSectionState> }
   loadModels(): void
   setEnabled(next: boolean): void
+  /** Opt the sidebar row and the console page in or out; applied immediately. */
+  setSidebarEntry(next: boolean): void
   setModelEnabled(id: string, next: boolean): void
 }
 
@@ -259,6 +288,9 @@ export class OpencodeGoSectionController {
   private pickerSaving = false
   private pickerFailed = false
   private enabledFailed = false
+  private sidebarEntryFailed = false
+  private writeFailed: ImmediateField | undefined
+  private immediateSaving = 0
   private models: OpencodeGoModels = { status: 'idle' }
   private modelsRequest = 0
   private face: OpencodeGoSectionFace | undefined
@@ -349,8 +381,11 @@ export class OpencodeGoSectionController {
     const plan = this.plan()
     return {
       status: snapshot.status, writable: snapshot.writable,
-      dirty: plan.length > 0, invalid: plan.some(item => !item.write), saving: this.saving || this.accountBusy, failed: this.failed,
+      dirty: plan.length > 0, invalid: plan.some(item => !item.write),
+      saving: this.saving || this.accountBusy || this.immediateSaving > 0, failed: this.failed,
       accounts: this.accountState(), enabled: snapshot.value?.enabled ?? true,
+      sidebarEntry: snapshot.value?.sidebarEntry === true, sidebarEntryFailed: this.sidebarEntryFailed,
+      ...this.writeFailed === undefined ? {} : { writeFailed: this.writeFailed },
       ...Object.fromEntries(TEXT_FIELDS.map(field => [field, this.field(field)])) as Record<TextField, FieldState>,
       appliedAppearanceTheme: snapshot.value?.appearanceTheme ?? DEFAULT_OPENCODE_GO_THEME,
       modelVisibility: snapshot.value?.modelVisibility ?? {}, pickerSaving: this.pickerSaving, pickerFailed: this.pickerFailed,
@@ -361,10 +396,79 @@ export class OpencodeGoSectionController {
     }
   }
 
-  private edit(field: EditableField, draft: Draft): void {
+  /**
+   * Edit one field. Immediate fields (everything outside the Advanced tab) are
+   * written straight away; only staged fields keep a draft behind Save.
+   * @param field - the field being edited.
+   * @param text - the control's text form.
+   */
+  private edit(field: TextField, text: string): void {
+    if (isImmediateTextField(field)) {
+      const write = parseField(field, text)
+      if (write === undefined) {
+        this.writeFailed = field
+        this.publish()
+        return
+      }
+      void this.writeImmediate(field, write)
+      return
+    }
+    this.editStaged(field, { kind: 'text', text })
+  }
+
+  /** Keep a draft the Advanced tab saves on its own gesture. */
+  private editStaged(field: EditableField, draft: Draft): void {
     this.drafts.set(field, draft)
     this.failed = false
     this.publish()
+  }
+
+  /**
+   * Write one immediate value straight through the Host form. A refused or
+   * failed write names its field so the surface that owns it can say so; only a
+   * later write of that same field clears the notice. A staged-save failure
+   * belongs to the Advanced draft and is never cleared from here.
+   * @param field - immediate field being written.
+   * @param write - the value, or the clear that restores the base layer.
+   */
+  private async writeImmediate(field: ImmediateField, write: FieldWrite): Promise<void> {
+    if (!this.scope.getSnapshot().writable) return
+    this.immediateSaving++
+    if (this.writeFailed === field) this.writeFailed = undefined
+    this.publish()
+    try {
+      const accepted = write.kind === 'clear'
+        ? await this.scope.unset(field)
+        : await this.scope.set(field, write.value)
+      if (!accepted) this.writeFailed = field
+    } catch {
+      this.writeFailed = field
+    } finally {
+      this.immediateSaving--
+      this.publish()
+    }
+  }
+
+  /**
+   * Change one per-model capacity override, applied as soon as the editor
+   * settles a value.
+   * @param value - the complete override map.
+   */
+  editModelLimits(value: OpencodeGoModelLimits): void {
+    void this.writeImmediate('modelLimits', { kind: 'set', value: structuredClone(value) })
+  }
+
+  /**
+   * Restore one field to its inherited value. Outside the Advanced tab the
+   * clear is written immediately; Advanced keeps it as a draft for Save.
+   * @param field - the field to clear.
+   */
+  private resetField(field: EditableField): void {
+    if (field === 'modelLimits' || isImmediateTextField(field)) {
+      void this.writeImmediate(field, { kind: 'clear' })
+      return
+    }
+    this.editStaged(field, { kind: 'clear' })
   }
 
   async save(): Promise<void> {
@@ -386,25 +490,29 @@ export class OpencodeGoSectionController {
   }
 
   async setEnabled(next: boolean): Promise<void> { await this.writePickerSetting('enabled', next) }
+  async setSidebarEntry(next: boolean): Promise<void> { await this.writePickerSetting('sidebarEntry', next) }
   async setModelEnabled(id: string, next: boolean): Promise<void> {
     if (this.models.status === 'ready' && this.models.entries.some(model => modelSettingsKey(model) === id && model.configurationMissing)) return
     await this.writePickerSetting('modelVisibility', { ...this.scope.getSnapshot().value?.modelVisibility, [id]: next })
   }
 
-  private async writePickerSetting(field: 'enabled' | 'modelVisibility', value: boolean | Record<string, boolean>): Promise<void> {
+  private async writePickerSetting(field: 'enabled' | 'sidebarEntry' | 'modelVisibility', value: boolean | Record<string, boolean>): Promise<void> {
     if (this.blocked() || this.accountBusy || !this.scope.getSnapshot().writable) return
     this.pickerSaving = true
-    // The provider switch and a model-visibility toggle fail into separate slots:
-    // one alert must never claim the other control is what did not update.
+    // Each immediate switch fails into its own slot: one alert must never claim
+    // another control is what did not update.
     if (field === 'enabled') this.enabledFailed = false
+    else if (field === 'sidebarEntry') this.sidebarEntryFailed = false
     else this.pickerFailed = false
     this.publish()
     try {
       const accepted = await this.scope.set(field, value)
       if (field === 'enabled') this.enabledFailed = !accepted
+      else if (field === 'sidebarEntry') this.sidebarEntryFailed = !accepted
       else this.pickerFailed = !accepted
     } catch {
       if (field === 'enabled') this.enabledFailed = true
+      else if (field === 'sidebarEntry') this.sidebarEntryFailed = true
       else this.pickerFailed = true
     } finally { this.pickerSaving = false; this.publish() }
   }
@@ -413,10 +521,12 @@ export class OpencodeGoSectionController {
     this.face ??= {
       hooks: { opencodeGo: this.store },
       loadModels: () => this.loadModels(),
-      setEnabled: next => { void this.setEnabled(next) }, setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
-      edit: (field, text) => this.edit(field, { kind: 'text', text }),
-      editModelLimits: value => this.edit('modelLimits', { kind: 'limits', value: structuredClone(value) }),
-      resetField: field => this.edit(field, { kind: 'clear' }), save: () => { void this.save() },
+      setEnabled: next => { void this.setEnabled(next) },
+      setSidebarEntry: next => { void this.setSidebarEntry(next) },
+      setModelEnabled: (id, next) => { void this.setModelEnabled(id, next) },
+      edit: (field, text) => this.edit(field, text),
+      editModelLimits: value => this.editModelLimits(value),
+      resetField: field => this.resetField(field), save: () => { void this.save() },
       discard: () => { this.drafts.clear(); this.failed = false; this.publish() },
       ...this.accountActions(),
     }

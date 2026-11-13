@@ -84,20 +84,45 @@ function errorText(error: unknown, t: AnalyticsTranslate): string {
 function Icon({ name }: { name: 'close' | 'refresh' | 'download' | 'chart' }) {
   return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{name === 'close' ? <path d="m5 5 10 10M15 5 5 15" /> : name === 'refresh' ? <><path d="M16.5 9A6.5 6.5 0 1 1 14 4.8" /><path d="M16.5 3v4h-4" /></> : name === 'download' ? <><path d="M10 3v9m-3-3 3 3 3-3M4 13v4h12v-4" /></> : <><path d="M3 3v14h14M6 13V9m4 4V5m4 8V7" /></>}</svg>
 }
-export interface AnalyticsDialogProps {
-  open: boolean; onClose: () => void
+/** Data and copy the dashboard reads on every surface it is mounted on. */
+interface AnalyticsDashboardDataProps {
   readAnalytics: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>
   readQuota?: (ref: string) => Promise<GoUsage>
-  accounts: readonly GoAccount[]; activeRef: string; contextKey?: string | number
+  accounts: readonly GoAccount[]; activeRef: string
   t: AnalyticsTranslate; getLocale?: () => string
   /** Defaults to Native for embedded callers and older tests. */
   theme?: OpencodeGoTheme
 }
-export function AnalyticsDialog(props: AnalyticsDialogProps) {
-  return <Modal open={props.open} onClose={props.onClose} title={props.t('analyticsTitle')} headless className={css.shell}>{props.open ? <Dashboard key={props.contextKey} {...props} /> : null}</Modal>
+
+/**
+ * Props of the reusable dashboard. `variant` picks the surface chrome: the
+ * dialog keeps its brand row with the close control, while the sidebar page
+ * already has its own title, padding and scroll container.
+ */
+export interface AnalyticsDashboardProps extends AnalyticsDashboardDataProps {
+  variant?: 'dialog' | 'page'
+  /** Only the dialog surface owns a close action; the page is left via the host. */
+  onClose?: () => void
 }
-function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQuota, onClose, t, getLocale, theme = DEFAULT_OPENCODE_GO_THEME }: AnalyticsDialogProps) {
+
+export interface AnalyticsDialogProps extends AnalyticsDashboardDataProps {
+  open: boolean; onClose: () => void; contextKey?: string | number
+}
+
+/** Modal shell kept for every entry point that still opens history as a dialog. */
+export function AnalyticsDialog(props: AnalyticsDialogProps) {
+  const { open, onClose, contextKey, ...dashboard } = props
+  return <Modal open={open} onClose={onClose} title={props.t('analyticsTitle')} headless className={css.shell}>{open ? <AnalyticsDashboard key={contextKey} {...dashboard} variant="dialog" onClose={onClose} /> : null}</Modal>
+}
+
+/**
+ * The official workspace history dashboard. State, data reads, CSV export and
+ * keyboard handling are shared by both surfaces; only the outer box and the
+ * dialog-only chrome come from `variant`.
+ */
+export function AnalyticsDashboard(props: AnalyticsDashboardProps) {
+  const { activeRef, accounts, readAnalytics, exportAnalytics, readQuota, onClose, t, getLocale, theme = DEFAULT_OPENCODE_GO_THEME, variant = 'dialog' } = props
   const [selected, setSelected] = useState(activeRef)
   const accountRef = accounts.some(a => a.apiKeyEnv === selected) ? selected : accounts.find(a => a.apiKeyEnv === activeRef)?.apiKeyEnv ?? accounts[0]?.apiKeyEnv ?? ''
   const [range, setRange] = useState<AnalyticsRange>('30d'), [revision, setRevision] = useState(0)
@@ -148,8 +173,9 @@ function Dashboard({ activeRef, accounts, readAnalytics, exportAnalytics, readQu
     } catch { if (!controller.signal.aborted) setExportFailed(true) }
     finally { if (!controller.signal.aborted) setExporting(false) }
   }
-  return <div className={css.dashboard} style={themeStyle(tokens)} aria-busy={loading}>
-    <header className={css.header}><div className={css.brand}><span className={css.brandIcon}><Icon name="chart" /></span><span>{t('titleLabel')}</span></div><button type="button" className={css.iconButton} onClick={onClose} aria-label={t('analyticsClose')}><Icon name="close" /></button></header>
+  return <div className={css.dashboard} style={themeStyle(tokens)} aria-busy={loading} data-variant={variant}>
+    {/* The page shell titles this surface and owns its padding, so the dialog's brand row (and its close control) is dialog-only chrome; it stays in the tree for layout parity but the page variant hides it. */}
+    <header className={css.header}><div className={css.brand}><span className={css.brandIcon}><Icon name="chart" /></span><span>{t('titleLabel')}</span></div>{onClose ? <button type="button" className={css.iconButton} onClick={onClose} aria-label={t('analyticsClose')}><Icon name="close" /></button> : null}</header>
     <div className={css.heading}><div><h1>{t('analyticsTitle')}</h1><p>{t('analyticsSubtitle')}</p></div><span className={css.source}><i />{t('analyticsKicker')}</span></div>
     <div className={css.toolbar}>
       <label className={css.accountSelect}><span>{t('analyticsAccount')}</span><select aria-label={t('analyticsAccount')} value={accountRef} onChange={event => { setSelected(event.target.value) }} disabled={!accounts.length}>{accounts.map(a => <option key={a.apiKeyEnv} value={a.apiKeyEnv}>{a.name || t('accountDefault')}</option>)}</select></label>

@@ -943,6 +943,36 @@ describe("conversation usage", () => {
     expect(analytics).toHaveBeenCalledTimes(2)
   })
 
+  it('opens the console page from the expanded panel when the host offers it', async () => {
+    const host = usageSettings({ usageDisplay: 'always' })
+    const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
+    const openUsagePage = vi.fn(() => true)
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
+        readAnalytics={analytics} openUsagePage={openUsagePage} t={t} />)
+    })
+    showDetails()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+    expect(openUsagePage).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog', { name: en.analyticsTitle })).toBeNull()
+    expect(analytics).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the in-place dialog when the console page reports it is unavailable', async () => {
+    const host = usageSettings({ usageDisplay: 'always' })
+    const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
+    const openUsagePage = vi.fn(() => false)
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
+        readAnalytics={analytics} openUsagePage={openUsagePage} t={t} />)
+    })
+    showDetails()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+    expect(openUsagePage).toHaveBeenCalledOnce()
+    expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+    expect(analytics).toHaveBeenCalledTimes(1)
+  })
+
   it('names the active account in full no matter how many accounts follow it', async () => {
     const host = usageSettings({ usageDisplay: 'always', accounts: threeAccounts, apiKeyEnv: 'ACCOUNT_B' })
     await act(async () => {

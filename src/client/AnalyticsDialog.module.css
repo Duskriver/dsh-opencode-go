@@ -6,6 +6,15 @@
 .dashboard button { cursor: pointer; color: inherit; }
 .dashboard button:disabled { cursor: default; opacity: .45; }
 .dashboard button:focus-visible, .dashboard select:focus-visible, .tableScroll:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 3px; }
+/*
+ * Page variant: the sidebar page shell owns the page title, outer padding and
+ * scrolling, so the dashboard drops the dialog-only brand row and its box
+ * instead of nesting a second padded, height-constrained surface. The selector
+ * is more specific than the base `.dashboard` rules below (including the
+ * responsive overrides), so those never re-introduce dialog padding or height.
+ */
+.dashboard[data-variant=page] { height: auto; max-height: none; min-height: 0; padding: 0; }
+.dashboard[data-variant=page] .header { display: none; }
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 30px; }
 .brand { display: flex; align-items: center; gap: 11px; font-family: var(--go-display-font); font-size: 23px; font-weight: var(--go-display-weight); letter-spacing: var(--go-display-tracking); }
 .brandIcon { flex: none; width: 33px; height: 33px; display: grid; place-items: center; background: var(--go-accent-soft); border-radius: var(--go-radius-control); color: var(--go-accent); }

@@ -116,6 +116,13 @@ export interface OpencodeGoConfig {
      * registered, its catalog is not fetched and its models are not discovered.
      */
     freeEnabled: boolean;
+    /**
+     * Draw the OpenCode Go row in the sidebar and expose its console page. Off by
+     * default: installing the plugin must not add a permanent sidebar row, so a
+     * reader opts in from the settings Overview tab. While off, the page is not
+     * registered at all and every "open the console" entry point is hidden.
+     */
+    sidebarEntry: boolean;
     /** Usage pill visibility; auto follows only the selected Go route. */
     usageDisplay: UsageDisplayMode;
     /** Show quota in the sidebar independently of the selected conversation model. */

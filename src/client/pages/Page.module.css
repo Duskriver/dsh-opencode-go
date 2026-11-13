@@ -1,0 +1,226 @@
+/* Page shell: a host-framed scroll column, the page head, the tab strip and the
+   sticky save bar. Colours, radii and fonts come from the --go-* variables that
+   themeStyle() writes on the root, so Native follows the Host while Classic keeps
+   the plugin palette. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--go-bg);
+  color: var(--go-text);
+  font-family: var(--go-font);
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The host hands the page a bare flex column, so this element is the scrollport:
+   the page scrolls inside the panel without the sidebar moving with it. */
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: calc(26px + var(--dsh-frame-top-clearance, 0px)) 0 56px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--go-border) transparent;
+}
+
+.scroller::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroller::-webkit-scrollbar-track { background: transparent; }
+.scroller::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--go-border);
+  background-clip: content-box;
+}
+
+/* 980px is the Host's own settings-page measure. The percentage padding keeps the
+   gutters at 24px on narrow panels and centres the text column on wide ones. */
+.page {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 max(24px, calc((100% - 980px) / 2));
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.headMain { min-width: 0; display: flex; flex-direction: column; }
+
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--go-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.kickerText { min-width: 0; }
+
+.title {
+  margin: 0;
+  font-family: var(--go-display-font);
+  font-size: 21px;
+  line-height: 30px;
+  font-weight: var(--go-display-weight);
+  letter-spacing: var(--go-display-tracking);
+  color: var(--go-text);
+}
+
+.sub { margin: 3px 0 0; color: var(--go-muted); font-size: 12.5px; line-height: 1.5; }
+
+.headActions { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 4px; }
+
+/* The chip names the switch's state; the sentence behind it stays in the title so
+   a long disabled reason cannot push the header apart. */
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(46ch, 42vw);
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-pill);
+  background: var(--go-surface);
+  color: var(--go-muted);
+  font-size: 12px;
+  line-height: 1;
+  overflow: hidden;
+}
+
+.statusChip[data-on='true'] {
+  color: var(--go-success);
+  border-color: color-mix(in srgb, var(--go-success) 34%, var(--go-border));
+}
+
+.statusDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.statusText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 18px 0 20px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--go-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  position: relative;
+  height: 38px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--go-radius-small) var(--go-radius-small) 0 0;
+  background: none;
+  color: var(--go-muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab:hover { color: var(--go-text); background: color-mix(in srgb, var(--go-text) 6%, transparent); }
+
+.tab[aria-selected='true'] { color: var(--go-text); font-weight: 600; }
+
+/* The 2px rule is the selected marker: it sits on the strip's own hairline so the
+   strip does not grow a second border under the chosen tab. */
+.tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--go-text);
+}
+
+.tab:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+
+.statusNote { margin: 24px 0 0; color: var(--go-muted); font-size: 12.5px; line-height: 1.6; }
+
+.body { min-height: 260px; animation: pageIn 160ms ease; }
+
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .body { animation: none; }
+}
+
+.crash {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-card);
+  background: var(--go-surface);
+}
+
+.crashTitle { margin: 0; font-size: 14px; line-height: 1.5; font-weight: 600; color: var(--go-text); }
+.crashHint { margin: 0 0 4px; color: var(--go-muted); font-size: 12px; line-height: 1.6; }
+
+/* The staged draft belongs to the whole page, not to the tab that made it, so the
+   bar stays pinned to the scrollport while any tab's edits are unsaved. */
+.saveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding: 11px 14px;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-control);
+  background: var(--go-surface);
+  box-shadow: var(--go-shadow);
+}
+
+.saveNote { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.saveFailed { margin: 0; color: var(--go-danger); font-size: 12px; line-height: 1.5; }
+.saveReadOnly { margin: 0; color: var(--go-muted); font-size: 11.5px; line-height: 1.5; }
+.saveActions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+@media (max-width: 720px) {
+  .head { flex-wrap: wrap; gap: 10px; }
+  .headActions { padding-top: 0; }
+  .statusChip { max-width: 100%; }
+}

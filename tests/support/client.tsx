@@ -29,8 +29,13 @@ export function bindSnapshotSelector<T>(source: HostObservable<T>): SnapshotSele
   }
 }
 
-/** Client fixture baseline: Free access is opt-in, so fixtures start with it disabled. */
-export const defaultClientSettings: OpencodeGoSettings = { freeEnabled: false }
+/**
+ * Client fixture baseline: Free access is opt-in, so fixtures start with it
+ * disabled. Most fixtures exercise the console page and the sidebar surfaces,
+ * which only exist while the opt-in sidebar entry is on; a test that reads the
+ * off posture spreads `sidebarEntry: false` over this baseline.
+ */
+export const defaultClientSettings: OpencodeGoSettings = { freeEnabled: false, sidebarEntry: true }
 
 /** The current ConfigForm contract: writes acknowledge acceptance with a boolean. */
 class TestForm<T> implements ConfigForm<T> {

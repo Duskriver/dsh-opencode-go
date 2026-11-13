@@ -1,0 +1,19 @@
+/* Shared frame for the console's settings sub-pages. The page shell owns the
+   header, the tab strip and the save bar, so a sub-page only stacks its cards
+   and adds the page-level tool row and closing note the cards do not carry. */
+
+/* The card rhythm matches Section.module.css: 12px between cards and no outer
+   margin, because the shell already pads the content column. */
+.page { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* The page title and its actions share one line; wrapping keeps the actions
+   reachable when the panel narrows instead of clipping them. */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; min-width: 0; }
+
+.toolbarTitle { margin: 0; font-family: var(--go-font); font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--go-text); }
+
+.toolbarActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* The closing note applies to the whole page, so it sits below the cards at the
+   same muted scale a card hint uses, and never competes with the card content. */
+.footnote { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--go-muted); }

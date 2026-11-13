@@ -38,6 +38,13 @@ export interface UsagePillProps {
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>
   selectAccount?: (ref: string) => Promise<boolean>
+  /**
+   * Open the console page instead of the in-place dialog. Set by the client
+   * registration once the host declares a sidebar panel; omitted hosts (and
+   * tests) keep the self-contained dialog. Returns whether navigation happened,
+   * so a page withdrawn since the face was built still opens the dialog.
+   */
+  openUsagePage?: () => boolean
 }
 
 /** A root sidebar entry receives its width mode from the host slot owner. */
@@ -142,7 +149,7 @@ export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
 }
 
 /** The sidebar's viewed account is independent of the profile's request order. */
-function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, ...props }:
+function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, openUsagePage, ...props }:
   Omit<UsagePillProps, 'directory'> & {
     variant: UsageVariant; provider?: string
   }) {
@@ -159,6 +166,11 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   // endpoint or roster change remounts the polling subtree, and that must not close
   // an open dashboard or drop its in-flight report.
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  /** Open the console page when the host offers one; otherwise the local dialog. */
+  const openAnalytics = useCallback((next: boolean): void => {
+    if (next && openUsagePage?.() === true) return
+    setAnalyticsOpen(next)
+  }, [openUsagePage])
   const [viewedAccountId, setViewedAccountId] = useState<string | null>(() => {
     if (variant === 'pill') return null
     try { return globalThis.localStorage?.getItem(sidebarAccountStorageKey) ?? null } catch { return null }
@@ -199,9 +211,12 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
       accounts={accounts} activeRef={activeRef} writable={config.writable}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
-      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
+      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
-        its own theme tokens, so leaving the pill's themed span costs no styling. */}
+        its own theme tokens, so leaving the pill's themed span costs no styling.
+        It must stay mounted even when the console page offers itself: a page
+        withdrawn after this face was built reports the miss from openUsagePage()
+        and falls back to this dialog, which could not appear if it were absent. */}
     {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
       readAnalytics={props.readAnalytics} exportAnalytics={props.exportAnalytics} readQuota={readDialogQuota}
       accounts={accounts} activeRef={callingRef}
