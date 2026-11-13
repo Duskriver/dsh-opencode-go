@@ -10,6 +10,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject as clientInject, PAGE_PANEL_ID, PAGE_SIDEBAR_ORDER } from '../src/client/index.ts'
 import { pageTabStore, resetPageTab } from '../src/client/pages/nav.ts'
+import { GoPage } from '../src/client/pages/Page.tsx'
+import { GoRowIcon } from '../src/client/GoMark.tsx'
 import { createConfigForm, defaultClientSettings } from './support/client.tsx'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
@@ -174,9 +176,11 @@ describe('console page slot contract', () => {
       expect(typeof row?.options.label).toBe('function')
       expect((row!.options.label as () => string)()).toBe(en.navLabel)
       expect(typeof row?.options.locale).toBe('string')
-      // Both halves receive a component, and the main half carries the readers.
-      expect(main?.component).toBeTruthy()
-      expect(row?.component).toBeTruthy()
+      // Both halves receive their own component: the page shell and the
+      // hand-drawn sidebar mark. The mark is the sidebar icon, not the wave
+      // brand mark the page tile keeps.
+      expect(main?.component).toBe(GoPage)
+      expect(row?.component).toBe(GoRowIcon)
       const injected = (main!.options.inject as () => Record<string, unknown>)()
       expect(typeof (injected.readers as { readAnalytics?: unknown }).readAnalytics).toBe('function')
       expect(typeof injected.openPage).toBe('function')

@@ -1,6 +1,6 @@
 /** Sidebar row icon and page brand mark for OpenCode Go. */
 import type { ReactElement } from 'react';
-/** Monochrome wave mark rendered in the host sidebar; inherits currentColor. */
+/** Monochrome wave mark inside the colored page logo. */
 export declare function GoMark(props: {
     size?: number;
     className?: string;
