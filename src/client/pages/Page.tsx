@@ -30,7 +30,7 @@ import { UsagePage } from './UsagePage.tsx'
 type PageSeats = PageShellProps & Required<Pick<PageShellProps,
   | 'useOpencodeGo' | 't'
   | 'edit' | 'editModelLimits' | 'resetField' | 'save' | 'discard'
-  | 'loadModels' | 'setEnabled' | 'setModelEnabled'
+  | 'loadModels' | 'setEnabled' | 'setSidebarEntry' | 'setModelEnabled'
   | 'loadAccounts' | 'addAccount' | 'renameAccount' | 'removeAccount'
   | 'selectAccount' | 'setAutoSwitch' | 'replaceAccountKey' | 'moveAccount'>>
 
@@ -44,7 +44,8 @@ function hasEverySeat(props: PageShellProps): props is PageSeats {
   return props.useOpencodeGo !== undefined && props.t !== undefined
     && props.edit !== undefined && props.editModelLimits !== undefined && props.resetField !== undefined
     && props.save !== undefined && props.discard !== undefined
-    && props.loadModels !== undefined && props.setEnabled !== undefined && props.setModelEnabled !== undefined
+    && props.loadModels !== undefined && props.setEnabled !== undefined && props.setSidebarEntry !== undefined
+    && props.setModelEnabled !== undefined
     && props.loadAccounts !== undefined && props.addAccount !== undefined && props.renameAccount !== undefined
     && props.removeAccount !== undefined && props.selectAccount !== undefined && props.setAutoSwitch !== undefined
     && props.replaceAccountKey !== undefined && props.moveAccount !== undefined
@@ -78,6 +79,7 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     discard: seats.discard,
     loadModels: seats.loadModels,
     setEnabled: seats.setEnabled,
+    setSidebarEntry: seats.setSidebarEntry,
     setModelEnabled: seats.setModelEnabled,
     loadAccounts: seats.loadAccounts,
     addAccount: seats.addAccount,
@@ -142,6 +144,8 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
             <PageBody tab={tab} view={view} />
           </PageBoundary>
         </div> : null}
+        {/* Only Advanced settings stage a draft, so this bar is the console page's
+            single save gesture: every other tab writes as the change is made. */}
         {state.dirty || state.failed ? <div className={css.saveBar}>
           <div className={css.saveNote}>
             {state.failed ? <p className={css.saveFailed} role="alert">{seats.t('savedFailed')}</p> : null}

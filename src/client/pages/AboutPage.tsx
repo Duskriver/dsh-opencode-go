@@ -54,7 +54,7 @@ export function AboutPage({ state, actions, locale }: PageViewProps): ReactNode 
         <InfoRow label={t('aboutVersion')} value={'v' + CLIENT_BUILD_INFO.version} mono />
         <InfoRow label={t('aboutPackage')} value={CLIENT_BUILD_INFO.packageName} mono />
         <InfoRow label={t('aboutHost')} value={CLIENT_BUILD_INFO.minHost} mono />
-        <InfoRow label={t('aboutEntry')} value={t('aboutEntryValue')} mono />
+        <InfoRow label={t('aboutEntry')} value={state.sidebarEntry ? t('aboutEntryValue') : t('aboutEntryHidden')} mono />
         <InfoRow label={t('aboutBuild')} value={CLIENT_BUILD_INFO.build} />
       </dl>
       <div className={css.divider} />

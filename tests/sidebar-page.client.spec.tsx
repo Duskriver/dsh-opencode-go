@@ -80,6 +80,7 @@ describe('console page foundation', () => {
     )
   })
 })
+
 describe('console page shell', () => {
   const renderShell = (overrides: Parameters<typeof pageShellOf>[0] = {}) => {
     const shell = pageShellOf(overrides)
@@ -226,10 +227,61 @@ describe('console page shell', () => {
     expect(shell.save).not.toHaveBeenCalled()
   })
 
+  it('keeps the save bar to the staged advanced draft', () => {
+    const { shell } = renderShell()
+    // Immediate surfaces (overview switches, appearance, models) never stage a
+    // draft, so there is no Save gesture until the Advanced tab edits something.
+    expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+    act(() => {
+      shell.store.set(pageStateOf({
+        usageDisplay: field('off'),
+        appearanceTheme: field('classic'),
+        freeEnabled: field('true'),
+        modelVisibility: { [GO_MODEL.id]: false },
+      }))
+    })
+    expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: en.tabAppearance }))
+    expect(screen.getByText(en.advancedSaveHint)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+    // A staged advanced draft is what summons the one Save gesture.
+    act(() => { shell.store.set(pageStateOf({ dirty: true })) })
+    expect(screen.getByRole('button', { name: en.save })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: en.tabOverview }))
+    expect(screen.getByRole('button', { name: en.save })).toBeTruthy()
+    act(() => { shell.store.set(pageStateOf()) })
+    expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+  })
+
+  it('does not offer the sidebar-entry opt-in from the console page', () => {
+    renderShell()
+    expect(screen.queryByText(en.sidebarEntryLabel)).toBeNull()
+    expect(screen.queryByRole('switch', { name: en.sidebarEntryLabel })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: en.tabAbout }))
+    // About reports the entry state; switching it stays a Settings action.
+    expect(screen.queryByRole('switch', { name: en.sidebarEntryLabel })).toBeNull()
+    expect(screen.getByText(en.aboutEntryHidden)).toBeTruthy()
+  })
+
+  it('names the refused immediate write on the overview, appearance and models surfaces', () => {
+    const shell = pageShellOf({ state: { models: modelsOf([GO_MODEL]), accounts: accountsStateOf([ACCOUNT]) } })
+    render(<GoPage {...shell} />)
+    act(() => {
+      shell.store.set(pageStateOf({ accounts: accountsStateOf([ACCOUNT]), writeFailed: 'freeEnabled' }))
+    })
+    expect(screen.getByRole('alert').textContent).toBe(en.immediateWriteFailed)
+    fireEvent.click(screen.getByRole('tab', { name: en.tabAppearance }))
+    act(() => { shell.store.set(pageStateOf({ writeFailed: 'appearanceTheme' })) })
+    expect(screen.getByRole('alert').textContent).toBe(en.immediateWriteFailed)
+    fireEvent.click(screen.getByRole('tab', { name: en.tabModels }))
+    act(() => { shell.store.set(pageStateOf({ models: modelsOf([GO_MODEL]), writeFailed: 'modelLimits' })) })
+    expect(screen.getByRole('alert').textContent).toBe(en.immediateWriteFailed)
+  })
+
   it('renders nothing when one required inject seat is missing', () => {
     const required = [
       'useOpencodeGo', 't', 'edit', 'editModelLimits', 'resetField', 'save', 'discard',
-      'loadModels', 'setEnabled', 'setModelEnabled', 'loadAccounts', 'addAccount',
+      'loadModels', 'setEnabled', 'setSidebarEntry', 'setModelEnabled', 'loadAccounts', 'addAccount',
       'renameAccount', 'removeAccount', 'selectAccount', 'setAutoSwitch',
       'replaceAccountKey', 'moveAccount',
     ]
@@ -406,7 +458,7 @@ describe('console sub-pages', () => {
 
   it('renders the build facts, project links and diagnostics', () => {
     const props = pagePropsOf({
-      state: { accounts: accountsStateOf([ACCOUNT, RESEARCH]), freeEnabled: field('true') },
+      state: { accounts: accountsStateOf([ACCOUNT, RESEARCH]), freeEnabled: field('true'), sidebarEntry: true },
     })
     render(<AboutPage {...props} />)
     expect(screen.getByRole('heading', { level: 2, name: en.aboutTitle })).toBeTruthy()
@@ -430,6 +482,7 @@ describe('console sub-pages', () => {
 
   it('reports unavailable diagnostics on a bare host', () => {
     render(<AboutPage {...pagePropsOf({ state: { enabled: false }, readers: null })} />)
+    expect(screen.getByText(en.aboutEntryHidden)).toBeTruthy()
     expect(screen.getByText(en.pageStatusOff)).toBeTruthy()
     expect(screen.getAllByText(en.aboutOff)).toHaveLength(2)
     expect(screen.getByText(en.aboutNa)).toBeTruthy()

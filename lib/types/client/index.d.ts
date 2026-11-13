@@ -49,5 +49,7 @@ export declare function accountCommands(ctx: Context): ExecuteAccountCommand;
  * @param selectAccount - switch the profile's preferred account.
  * @param readers - shared usage/analytics readers (page and pill share one set).
  * @param openPage - open the console page, or undefined on hosts without it.
+ * @param canOpenPage - whether the opt-in console page is registered right now;
+ * read at click time so withdrawing the entry restores the in-place dialog.
  */
-export declare function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>, readers?: PageReaders, openPage?: (tab?: PageTab) => void): void;
+export declare function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>, readers?: PageReaders, openPage?: (tab?: PageTab) => void, canOpenPage?: () => boolean): void;

@@ -37,7 +37,8 @@ export declare function AccountsCard({ state, actions, writable, t, locale, addR
 }): import("react").JSX.Element;
 type ModelTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string;
 export declare function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefined): boolean;
-/** Per-model switches apply immediately; capacity edits stay in the staged form. */
+/** Every control here applies immediately; the editor only stages what the
+ *  reader is still typing (Capacity commits a settled value). */
 export declare function ModelEditor({ source, models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
     source?: ModelSource;
     models: OpencodeGoModels;

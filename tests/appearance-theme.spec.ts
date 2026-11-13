@@ -1,68 +1,29 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SettingsPathOpView } from '@deepseek-ai/dsh-api-remotes/client'
-import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   OpencodeGoSectionController,
   editableKeys,
   type OpencodeGoSettings,
 } from '../src/client/controller.ts'
-
-type FormSnapshot = ConfigFormSnapshot<OpencodeGoSettings>
+import { acceptFormWrites, createConfigForm } from './support/client.tsx'
 
 const controllers: OpencodeGoSectionController[] = []
 afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose() })
 
 function setup(initial: { value?: OpencodeGoSettings; base?: OpencodeGoSettings; user?: OpencodeGoSettings } = {}) {
-  let snapshot: FormSnapshot = {
-    status: 'ready',
-    value: initial.value ?? {},
-    base: initial.base ?? {},
-    user: initial.user ?? {},
-    revision: 0,
-    writable: true,
-  }
-  const listeners = new Set<() => void>()
-  const publish = (next: Partial<FormSnapshot>): void => {
-    snapshot = { ...snapshot, ...next }
-    for (const listener of listeners) listener()
-  }
-  const mutate = vi.fn(async (ops: readonly SettingsPathOpView[], revision?: number): Promise<boolean> => {
-    if (!snapshot.writable || revision !== undefined && revision !== snapshot.revision) return false
-    const value = { ...snapshot.value } as Record<string, unknown>
-    const user = { ...snapshot.user } as Record<string, unknown>
-    for (const op of ops) {
-      const field = op.path[0]!
-      if (op.path.length !== 1) throw new Error('This fixture supports top-level field batches')
-      if (op.op === 'set') {
-        value[field] = structuredClone(op.value)
-        user[field] = structuredClone(op.value)
-      } else {
-        delete user[field]
-        value[field] = (snapshot.base as Record<string, unknown> | undefined)?.[field]
-      }
-    }
-    publish({ value, user, revision: (snapshot.revision ?? 0) + 1 })
-    return true
-  })
-  const form: ConfigForm<OpencodeGoSettings> = {
-    getSnapshot: () => snapshot,
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
-    mutate,
-    set: vi.fn<ConfigForm<OpencodeGoSettings>['set']>(),
-    unset: vi.fn<ConfigForm<OpencodeGoSettings>['unset']>(),
-  }
-  const controller = new OpencodeGoSectionController(form, {} as never)
+  const host = createConfigForm<OpencodeGoSettings>()
+  acceptFormWrites(host)
+  host.publish({ status: 'ready', writable: true, value: initial.value ?? {}, base: initial.base ?? {}, user: initial.user ?? {} })
+  const controller = new OpencodeGoSectionController(host.form, {} as never)
   controllers.push(controller)
   const actions = controller.inject()
-  return { controller, actions, form, mutate, snapshot: actions.hooks.opencodeGo.getSnapshot }
+  return { controller, actions, form: host.form, set: host.set, unset: host.unset, mutate: host.mutate,
+    snapshot: actions.hooks.opencodeGo.getSnapshot }
 }
 
-describe('appearance theme drafts and writes', () => {
-  it('defaults to native and applies a classic draft only after it is saved', async () => {
-    const { controller, actions, mutate, snapshot } = setup()
+describe('appearance theme immediate writes', () => {
+  it('defaults to native and applies a classic choice as soon as it changes', async () => {
+    const { controller, actions, set, mutate, snapshot } = setup()
     expect(editableKeys).toContain('appearanceTheme')
     expect(snapshot()).toMatchObject({
       appearanceTheme: { text: 'native', overridden: false, invalid: false },
@@ -71,53 +32,46 @@ describe('appearance theme drafts and writes', () => {
     })
 
     actions.edit('appearanceTheme', 'classic')
+    // Appearance has no draft: the choice goes straight through the Host form.
+    expect(set).toHaveBeenCalledExactlyOnceWith('appearanceTheme', 'classic')
+    await vi.waitFor(() => { expect(snapshot().appliedAppearanceTheme).toBe('classic') })
     expect(snapshot()).toMatchObject({
-      appearanceTheme: { text: 'classic', invalid: false },
-      appliedAppearanceTheme: 'native',
-      dirty: true,
+      appearanceTheme: { text: 'classic', overridden: true, invalid: false },
+      appliedAppearanceTheme: 'classic',
+      dirty: false,
     })
+    expect(mutate).not.toHaveBeenCalled()
+    // The single save gesture belongs to Advanced and has nothing to write here.
     await controller.save()
-    expect(mutate).toHaveBeenCalledExactlyOnceWith([
-      { op: 'set', path: ['appearanceTheme'], value: 'classic' },
-    ], 0)
-    expect(snapshot()).toMatchObject({
-      appearanceTheme: { text: 'classic', invalid: false },
-      appliedAppearanceTheme: 'classic',
-      dirty: false,
-    })
-
-    actions.edit('appearanceTheme', 'native')
-    expect(snapshot().appliedAppearanceTheme).toBe('classic')
-    actions.discard()
-    expect(snapshot()).toMatchObject({
-      appearanceTheme: { text: 'classic', invalid: false },
-      appliedAppearanceTheme: 'classic',
-      dirty: false,
-    })
+    expect(mutate).not.toHaveBeenCalled()
   })
 
-  it('accepts both supported themes and blocks an invalid draft without writing', async () => {
-    const { controller, actions, mutate, snapshot } = setup()
+  it('refuses an unsupported theme without writing or creating a draft', async () => {
+    const { controller, actions, set, mutate, snapshot } = setup()
     actions.edit('appearanceTheme', 'high-contrast')
+    expect(set).not.toHaveBeenCalled()
     expect(snapshot()).toMatchObject({
-      appearanceTheme: { text: 'high-contrast', invalid: true },
+      appearanceTheme: { text: 'native', invalid: false },
       appliedAppearanceTheme: 'native',
-      invalid: true,
+      writeFailed: 'appearanceTheme',
+      dirty: false,
+      invalid: false,
     })
     await controller.save()
     expect(mutate).not.toHaveBeenCalled()
-
-    actions.edit('appearanceTheme', 'classic')
-    await controller.save()
-    expect(snapshot().appliedAppearanceTheme).toBe('classic')
-    actions.edit('appearanceTheme', 'native')
-    await controller.save()
-    expect(snapshot().appliedAppearanceTheme).toBe('native')
-    expect(mutate).toHaveBeenCalledTimes(2)
   })
 
-  it('previews an inherited reset without switching the applied theme until Save', async () => {
-    const { controller, actions, form, mutate, snapshot } = setup({
+  it('applies both supported themes immediately', async () => {
+    const { actions, set, snapshot } = setup()
+    actions.edit('appearanceTheme', 'classic')
+    await vi.waitFor(() => { expect(snapshot().appliedAppearanceTheme).toBe('classic') })
+    actions.edit('appearanceTheme', 'native')
+    await vi.waitFor(() => { expect(snapshot().appliedAppearanceTheme).toBe('native') })
+    expect(set.mock.calls).toEqual([['appearanceTheme', 'classic'], ['appearanceTheme', 'native']])
+  })
+
+  it('resets to the inherited theme immediately, without waiting for Save', async () => {
+    const { actions, form, unset, mutate, snapshot } = setup({
       value: { appearanceTheme: 'native' },
       base: { appearanceTheme: 'classic' },
       user: { appearanceTheme: 'native' },
@@ -128,18 +82,23 @@ describe('appearance theme drafts and writes', () => {
     })
 
     actions.resetField('appearanceTheme')
+    expect(unset).toHaveBeenCalledExactlyOnceWith('appearanceTheme')
+    await vi.waitFor(() => { expect(snapshot().appliedAppearanceTheme).toBe('classic') })
     expect(snapshot()).toMatchObject({
       appearanceTheme: { text: 'classic', overridden: false, invalid: false },
-      appliedAppearanceTheme: 'native',
-      dirty: true,
-    })
-    await controller.save()
-    expect(mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'unset', path: ['appearanceTheme'] }], 0)
-    expect(form.getSnapshot().user).toEqual({})
-    expect(snapshot()).toMatchObject({
-      appearanceTheme: { text: 'classic', overridden: false, invalid: false },
-      appliedAppearanceTheme: 'classic',
       dirty: false,
     })
+    expect(form.getSnapshot().user).toEqual({})
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('cannot be reverted by the advanced discard gesture', async () => {
+    const { actions, form, snapshot } = setup()
+    actions.edit('appearanceTheme', 'classic')
+    await vi.waitFor(() => { expect(snapshot().appliedAppearanceTheme).toBe('classic') })
+    actions.discard()
+    // Discard only drops the advanced draft; an applied theme is already saved.
+    expect(snapshot()).toMatchObject({ appliedAppearanceTheme: 'classic', dirty: false })
+    expect(form.getSnapshot().value?.appearanceTheme).toBe('classic')
   })
 })

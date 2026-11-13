@@ -165,7 +165,7 @@ describe("model availability and picker visibility", () => {
       expect(checked('Same Go')).toBe(false)
     })
 
-    it('stages capacities and resets only the active source while preserving the other route', async () => {
+    it('writes capacities immediately and resets only the active source while preserving the other route', async () => {
       const { host, snapshot } = await mountOpen({ value: { modelLimits: {
         same: { contextWindow: 10000, maxTokens: 1000 }, 'dsh-opencode-free/same': { contextWindow: 20000, maxTokens: 2000 },
       } }, catalog: { stale: false, models: [
@@ -176,12 +176,19 @@ describe("model availability and picker visibility", () => {
       fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
       const input = screen.getByRole('spinbutton', { name: t('limitsContextLabel', { name: 'Same Free' }) })
       fireEvent.change(input, { target: { value: '30000' } })
+      // Typing alone writes nothing: the settled field is the write, with no Save gesture.
+      expect(host.set).not.toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+      fireEvent.blur(input)
+      await act(async () => { await Promise.resolve() })
+      expect(host.set).toHaveBeenLastCalledWith('modelLimits', { same: { contextWindow: 10000, maxTokens: 1000 },
+        'dsh-opencode-free/same': { contextWindow: 30000, maxTokens: 2000 } })
       expect(snapshot().modelLimitDraft).toEqual({ same: { contextWindow: 10000, maxTokens: 1000 },
         'dsh-opencode-free/same': { contextWindow: 30000, maxTokens: 2000 } })
-      expect(host.mutate).not.toHaveBeenCalled()
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.save })) })
       expect(host.form.getSnapshot().value?.modelLimits?.['dsh-opencode-free/same']?.contextWindow).toBe(30000)
+
       fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+      await act(async () => { await Promise.resolve() })
       expect(snapshot().modelLimitDraft).toEqual({ same: { contextWindow: 10000, maxTokens: 1000 }, 'dsh-opencode-free/same': null })
       fireEvent.click(screen.getByRole('tab', { name: en.modelsGoTab }))
       expect(screen.getByRole<HTMLInputElement>('spinbutton', { name: t('limitsContextLabel', { name: 'Same Go' }) }).value).toBe('10000')
@@ -205,10 +212,12 @@ describe("model availability and picker visibility", () => {
       expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { beta: false, old: true })
       expect(checked('Old')).toBe(true)
       expect(snapshot().dirty).toBe(false)
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(true)
+      // The models tab writes immediately, so it carries no Save/Discard gesture.
+      expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+      expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
     })
 
-    it('preserves unrelated drafts and committed switch values when a write fails', async () => {
+    it('preserves unrelated advanced drafts and committed switch values when a write fails', async () => {
       const { host, snapshot } = await mountOpen()
       await openAdvanced()
       fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '30' } })
@@ -222,8 +231,9 @@ describe("model availability and picker visibility", () => {
       // The staged tuning draft survives the trip between tabs and the failed write.
       await openAdvanced()
       expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
-      await openModels()
       fireEvent.click(screen.getByRole('button', { name: en.discard }))
+      expect(snapshot().dirty).toBe(false)
+      await openModels()
       expect(checked('Old')).toBe(true)
     })
 
@@ -243,17 +253,14 @@ describe("model availability and picker visibility", () => {
       const { host } = await mountOpen()
       let finish!: (accepted: boolean) => void
       host.set.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve }))
-      await openAdvanced()
-      fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '30' } })
-      await openModels()
-      fireEvent.click(toggle('Alpha'))
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(true)
+      await act(async () => { fireEvent.click(toggle('Alpha')) })
       expect(toggle('Alpha').disabled).toBe(true)
       expect(toggle('Old').disabled).toBe(true)
-      // The provider switch lives on the overview tab and shares the pending latch.
-      await openAdvanced()
+      // The provider switch lives on the overview tab and shares the pending latch;
+      // the sidebar-entry opt-in is another switch in the same window.
       await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-overview') as HTMLElement) })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.enabledLabel }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.sidebarEntryLabel }).disabled).toBe(true)
       await act(async () => { finish(false) })
       await openModels()
       expect(checked('Alpha')).toBe(true) // unacknowledged write did not change the switch

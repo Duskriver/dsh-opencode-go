@@ -18,9 +18,10 @@ export interface UsagePillProps {
     /**
      * Open the console page instead of the in-place dialog. Set by the client
      * registration once the host declares a sidebar panel; omitted hosts (and
-     * tests) keep the self-contained dialog.
+     * tests) keep the self-contained dialog. Returns whether navigation happened,
+     * so a page withdrawn since the face was built still opens the dialog.
      */
-    openUsagePage?: () => void;
+    openUsagePage?: () => boolean;
 }
 /** A root sidebar entry receives its width mode from the host slot owner. */
 export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {

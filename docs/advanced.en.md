@@ -44,7 +44,7 @@ HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported. 
 
 ### Dual routes and manual configuration
 
-`dsh-opencode-go` (DSH OpenCode Go) discovers all chat models from `baseURL/models` and activates when at least one usable API key is configured. `dsh-opencode-free` (DSH OpenCode Free) discovers only chat models with a valid declared tariff whose text input, output, cache and every context tier are all zero, from `freeBaseURL/models`. Missing or invalid prices never qualify as free. The Free route is an **explicit opt-in and off by default**: only after `freeEnabled` is enabled in **Settings → OpenCode Go → Advanced settings → Free channel** (or `freeEnabled: true` in the profile patch) does the plugin register the route, fetch the Free catalog and advertise Free models. The default configuration never contacts `freeBaseURL`. Turning the switch off withdraws the route on the next settings update; requests already streaming are allowed to finish. Go behavior is unchanged.
+`dsh-opencode-go` (DSH OpenCode Go) discovers all chat models from `baseURL/models` and activates when at least one usable API key is configured. `dsh-opencode-free` (DSH OpenCode Free) discovers only chat models with a valid declared tariff whose text input, output, cache and every context tier are all zero, from `freeBaseURL/models`. Missing or invalid prices never qualify as free. The Free route is an **explicit opt-in and off by default**: only after `freeEnabled` is enabled in **Settings → OpenCode Go → Overview → Free channel** (or `freeEnabled: true` in the profile patch) does the plugin register the route, fetch the Free catalog and advertise Free models. The switch applies immediately, with no Save step. The default configuration never contacts `freeBaseURL`. Turning the switch off withdraws the route immediately; requests already streaming are allowed to finish. Go behavior is unchanged.
 
 Saved-key reuse is endpoint-bound: Free shares the account roster, but only reuses saved keys when `freeBaseURL` is the official HTTPS endpoint (`opencode.ai` over `https:` on its default port) or shares the Go gateway's origin (same scheme, host and port, e.g. one self-hosted reverse proxy serving both routes); it then follows automatic account retry settings. `http://opencode.ai`, an `opencode.ai` URL on a custom port, and any other custom `freeBaseURL` fall back to anonymous public access (`Bearer public`): no saved key is read or sent, and a credential-free info/debug diagnostic is produced. Both routes preserve original model IDs, including overlapping names. Settings provides separate model tabs; Go keeps existing ID keys, while Free uses `dsh-opencode-free/<model ID>` in visibility and capacity settings.
 
@@ -77,7 +77,7 @@ The following patch configures shared accounts and per-model settings:
         apiKeyEnv: OPENCODE_GO_BACKUP_KEY
     autoSwitch: true
     # Free is off by default; opt in to the platform's free models
-    # (same as Settings → Advanced settings → Free channel).
+    # (same as Settings → OpenCode Go → Overview → Free channel).
     freeEnabled: true
     freeBaseURL: https://opencode.ai/inference/v1
     proxyURL: http://127.0.0.1:7890
@@ -101,6 +101,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `baseURL` | OpenCode Go gateway address; defaults to `https://opencode.ai/inference/go/v1`, with official inference endpoints selected by model protocol |
 | `freeBaseURL` | Platform free gateway, default `https://opencode.ai/inference/v1`; editable with URL validation in advanced settings |
 | `freeEnabled` | Explicit opt-in for the Free route, default `false`; only when `true` does the plugin register the Free route, fetch its catalog and discover Free models |
+| `sidebarEntry` | Whether to register the sidebar row and the full console page, default `false`; same as **Settings → OpenCode Go → Overview → Sidebar entry**, applied immediately |
 | `usageDisplay` | Usage display mode: `auto`, `always`, or `off` |
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
@@ -111,7 +112,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
 | `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
 
-Profiles that never set `freeEnabled` keep the default `false`: after upgrading, the Free route stays off until it is enabled in advanced settings. Sessions that selected a `DSH OpenCode Free` model before the upgrade need to select a Go model or enable Free first.
+Profiles that never set `freeEnabled` keep the default `false`: after upgrading, the Free route stays off until it is enabled under **Settings → OpenCode Go → Overview** (applied immediately). Sessions that selected a `DSH OpenCode Free` model before the upgrade need to select a Go model or enable Free first.
 
 The default official gateway lists models at `GET https://opencode.ai/inference/go/v1/models` and reads usage at `GET https://opencode.ai/inference/go/v1/usage`. Inference follows each model's declared protocol and the [official endpoint documentation](https://opencode.ai/v2/docs/console/go/#endpoints). The following paths share the prefix `https://opencode.ai/inference/go`:
 
@@ -140,3 +141,5 @@ Request failures retain HTTP classification, redacted upstream summaries and app
 Account operations run in a host-owned memory queue, with credential writes completed before settings updates. Closing the page does not cancel a storage write already in progress. There is no transaction journal or startup recovery loop; retry an unsuccessful operation from the accounts card.
 
 Reset all to defaults in advanced settings removes overrides at the current layer and restores inherited values; save to apply the reset. It does not remove accounts or keys, or clear model limit overrides.
+
+Every surface outside Advanced writes immediately: provider and sidebar-entry switches, the Free channel, usage display, interface theme, sidebar quota, input quota style, model visibility and capacities, and all account actions need no Save. Advanced settings and its reset share the one Save/Discard gesture.

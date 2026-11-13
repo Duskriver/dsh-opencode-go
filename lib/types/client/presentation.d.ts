@@ -210,6 +210,12 @@ export declare const en: {
     groupFree: string;
     freeEnabledLabel: string;
     freeEnabledHint: string;
+    sidebarEntryLabel: string;
+    sidebarEntryHint: string;
+    sidebarEntrySummary: string;
+    sidebarEntryFailed: string;
+    immediateWriteFailed: string;
+    advancedSaveHint: string;
     settingsTabsLabel: string;
     settingsTabOverview: string;
     settingsTabModels: string;
@@ -336,6 +342,7 @@ export declare const en: {
     aboutHistory: string;
     aboutLastRefresh: string;
     aboutEntryValue: string;
+    aboutEntryHidden: string;
 };
 /** Chinese copy; the key set mirrors {@link en}. */
 export declare const zh: typeof en;

@@ -441,7 +441,8 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
   return limit?.contextWindow != null || limit?.maxTokens != null || (limit?.thinkingBudgets?.length ?? 0) > 0
 }
 
-/** Per-model switches apply immediately; capacity edits stay in the staged form. */
+/** Every control here applies immediately; the editor only stages what the
+ *  reader is still typing (Capacity commits a settled value). */
 export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
   source?: ModelSource
   models: OpencodeGoModels
@@ -594,6 +595,15 @@ function Modalities({ model, t }: { model: GoModel; t: ModelTranslate }) {
   </span>
 }
 
+/** How long typing must pause before a capacity field commits itself. */
+const CAPACITY_COMMIT_DELAY_MS = 700
+
+/**
+ * One numeric capacity, written as soon as the value settles: on blur, on Enter,
+ * or after a short pause in typing. The input keeps its own text so a write
+ * round-trip never rewrites the digits under the reader, and text the schema
+ * refuses stays in the field, marked invalid, without being committed.
+ */
 function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   model: GoModel
   field: 'contextWindow' | 'maxTokens'
@@ -607,18 +617,52 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   const catalogValue = model[field]
   const defaultValue = field === 'maxTokens' && catalogValue !== undefined ? Math.min(catalogValue, 65_536) : catalogValue
   const cappedOutput = field === 'maxTokens' && catalogValue !== undefined && catalogValue > 65_536
+  const saved = limit?.[field]
+  const savedText = saved == null ? '' : String(saved)
+  const [text, setText] = useState(savedText)
+  const [editing, setEditing] = useState(false)
+  // Adopt the saved value (or the newly shown model's value) unless the reader
+  // is mid-edit: a stale buffer on a focused field would eat their next keystroke.
+  const syncKey = `${model.id}:${field}:${savedText}`
+  const synced = useRef(syncKey)
+  useEffect(() => {
+    if (editing || synced.current === syncKey) return
+    synced.current = syncKey
+    setText(savedText)
+  }, [editing, syncKey, savedText])
+  const invalid = text.trim() !== '' && !(Number.isSafeInteger(Number(text)) && Number(text) > 0)
+  /** Write what the field holds, if it is writable; never throws the text away. */
+  const commit = (): void => {
+    setEditing(false)
+    const raw = text.trim()
+    if (raw === '') {
+      // Empty means "inherit the catalog value": it only writes when an override
+      // is saved, so clearing an already empty field changes nothing.
+      if (saved != null) onChange(modelSettingsKey(model), field, undefined)
+      return
+    }
+    const value = Number(raw)
+    if (!Number.isSafeInteger(value) || value <= 0) return
+    if (value === saved) { setText(String(value)); return }
+    onChange(modelSettingsKey(model), field, value)
+  }
+  // A pause in typing is a commit too: nothing else on this card blurs the field
+  // for the reader, and the value must land without a Save gesture.
+  useEffect(() => {
+    if (!editing) return
+    const timer = setTimeout(commit, CAPACITY_COMMIT_DELAY_MS)
+    return () => { clearTimeout(timer) }
+  }, [editing, text])
   return <div className={css.stat}>
     <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
     <input id={id} className={css.input} type="number" min={1} max={field === 'maxTokens' ? model.maxTokens : undefined} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
-      aria-describedby={`${id}-default`} value={limit?.[field] ?? ''}
+      aria-describedby={`${id}-default`} value={text}
       placeholder={defaultValue === undefined ? t('capacityMissing') : String(defaultValue)} disabled={disabled}
-      onChange={event => {
-        const text = event.target.value.trim()
-        const value = Number(text)
-        if (text === '') onChange(modelSettingsKey(model), field, undefined)
-        else if (Number.isSafeInteger(value) && value > 0) onChange(modelSettingsKey(model), field, value)
-      }} />
+      aria-invalid={invalid || undefined}
+      onChange={event => { setEditing(true); setText(event.target.value) }}
+      onBlur={commit}
+      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit() } }} />
     <span id={`${id}-default`} className={css.hint}>
       {cappedOutput
         ? t('capacityDefaultCapped', { value: defaultValue!.toLocaleString(locale), max: catalogValue.toLocaleString(locale) })
@@ -976,6 +1020,9 @@ export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetFi
 }) {
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
   const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  // Appearance writes as each control changes; a refused write names this card.
+  const writeFailed = state.writeFailed !== undefined
+    && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
   return <section className={surface === 'page' ? css.cardPage : css.card}>
     <div className={css.cardBody}>
       <div className={css.rows}>
@@ -991,6 +1038,7 @@ export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetFi
         />
         <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={onEdit} />
       </div>
+      {writeFailed ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
       {/* The reset action closes the card: a title row above the fields only
           repeated the tab label and pushed the first setting down. */}
       <div className={css.cardActions}>
@@ -1028,6 +1076,9 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
   const canReset = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
   return <section className={surface === 'page' ? css.cardPage : css.card}>
     <div className={css.cardBody}>
+      {/* The one card with a Save gesture says so up front: every other surface
+          applies on change, so a reader must not look for Save on them. */}
+      <p className={css.hint}>{t('advancedSaveHint')}</p>
       <div className={css.rows}>
         <div className={css.groupHead}>{t('groupConnection')}</div>
         <ValueField
@@ -1219,8 +1270,13 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
         </div>
       </div>
       <div role="tabpanel" id="opencode-model-panel" className={css.modelPanel} aria-labelledby={`opencode-model-tab-${modelSource}`}>
+        {state.writeFailed === 'modelLimits'
+          ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
         {modelNotices}
-        <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled || state.saving}
+        {/* Capacity edits write immediately, so an in-flight write must not
+            disable the field being typed in: only the document's writability
+            locks the editor. Visibility switches keep the pending-write lock. */}
+        <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
           modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
           onModelEnabled={setModelEnabled}
           onEdit={onEdit} />
@@ -1235,10 +1291,11 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
  * @returns the section.
  */
 export function OpencodeGoSection(props: OpencodeGoSectionProps) {
-  const { useOpencodeGo, edit, resetField, save, discard, loadModels, setEnabled, setModelEnabled, t } = props
+  const { useOpencodeGo, edit, resetField, save, discard, loadModels, setEnabled, setSidebarEntry, setModelEnabled, t } = props
   if (useOpencodeGo === undefined || edit === undefined || resetField === undefined
     || save === undefined || discard === undefined || loadModels === undefined
-    || setEnabled === undefined || setModelEnabled === undefined || props.editModelLimits === undefined || t === undefined
+    || setEnabled === undefined || setSidebarEntry === undefined || setModelEnabled === undefined
+    || props.editModelLimits === undefined || t === undefined
     || !props.loadAccounts || !props.addAccount || !props.renameAccount || !props.removeAccount
     || !props.selectAccount || !props.setAutoSwitch || !props.replaceAccountKey || !props.moveAccount) return null
   return (
@@ -1253,6 +1310,7 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       discard={discard}
       loadModels={loadModels}
       setEnabled={setEnabled}
+      setSidebarEntry={setSidebarEntry}
       setModelEnabled={setModelEnabled}
       openPage={props.openPage}
       accountActions={{
@@ -1276,6 +1334,8 @@ function Loaded(props: {
   discard: () => void
   loadModels: () => void
   setEnabled: (next: boolean) => void
+  /** Opt the sidebar row and its console page in or out; applied immediately. */
+  setSidebarEntry: (next: boolean) => void
   setModelEnabled: (id: string, next: boolean) => void
   /** Opens the full sidebar page; absent on hosts that have not registered it. */
   openPage?: () => void
@@ -1305,13 +1365,13 @@ function Loaded(props: {
   const accountCard = <AccountsCard
     state={state.accounts} actions={props.accountActions} writable={state.writable}
     t={t} locale={props.locale} />
-  // The tab strip marks the two cards whose drafts differ from the saved values.
+  // Only Advanced keeps a draft: appearance writes as soon as it changes, so
+  // its tab must not claim pending edits (the models mark reports its listing).
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
-  const appearanceOverridden = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden)
   const tabs: { id: SettingsTab; label: string; marked?: boolean }[] = [
     { id: 'overview', label: t('settingsTabOverview') },
     { id: 'models', label: t('settingsTabModels'), marked: state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale },
-    { id: 'appearance', label: t('settingsTabAppearance'), marked: appearanceOverridden },
+    { id: 'appearance', label: t('settingsTabAppearance') },
     { id: 'advanced', label: t('settingsTabAdvanced'), marked: advancedOverridden },
   ]
   return (
@@ -1379,6 +1439,29 @@ function Loaded(props: {
             onChange={next => { props.edit('freeEnabled', String(next)) }}
           />
         </div>
+        {state.writeFailed === 'freeEnabled'
+          ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
+      </section>
+      {/* The opt-in row lives here because the console page it opens does not
+          exist while the switch is off: this card is the only way back in. */}
+      <section className={css.card}>
+        <div className={css.cardHead}>
+          <h3 className={css.cardTitle}>{t('sidebarEntryLabel')}<HintMark hint={t('sidebarEntryHint')} /></h3>
+          <Switch
+            checked={state.sidebarEntry}
+            label={t('sidebarEntryLabel')}
+            // The Switch primitive forwards only title as its description; the
+            // mark opens the same sentence in a bubble.
+            title={t('sidebarEntryHint')}
+            disabled={disabled || state.saving || state.pickerSaving}
+            onChange={props.setSidebarEntry}
+          />
+        </div>
+        <div className={css.cardBody}>
+          <p className={css.hint}>{t('sidebarEntrySummary')}</p>
+          {state.sidebarEntryFailed
+            ? <p className={css.failedNote} role="alert">{t('sidebarEntryFailed')}</p> : null}
+        </div>
       </section>
       {accountCard}
       </div>
@@ -1398,12 +1481,17 @@ function Loaded(props: {
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>
       <div className={css.actions}>
-        <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving || state.pickerSaving} onClick={props.save}>
-          {state.saving ? t('saving') : t('save')}
-        </Button>
-        <Button variant="outline" size="md" disabled={disabled || !state.dirty || state.saving} onClick={props.discard}>
-          {t('discard')}
-        </Button>
+        {/* Only the Advanced card keeps a draft, so Save and Discard appear
+            there and nowhere else: every other tab writes as it changes. The
+            star link is not a form action and stays visible everywhere. */}
+        {tab === 'advanced' ? <>
+          <Button variant="primary" size="md" disabled={disabled || !state.dirty || state.invalid || state.saving || state.pickerSaving} onClick={props.save}>
+            {state.saving ? t('saving') : t('save')}
+          </Button>
+          <Button variant="outline" size="md" disabled={disabled || !state.dirty || state.saving} onClick={props.discard}>
+            {t('discard')}
+          </Button>
+        </> : null}
         <a className={css.starLink} href="https://github.com/Duskriver/dsh-opencode-go"
           target="_blank" rel="noopener noreferrer" title={t('starProjectTitle')}>
           {/* GitHub mark from Simple Icons (CC0). Inline so all supported Hosts share the same icon. */}
@@ -1412,7 +1500,7 @@ function Loaded(props: {
           </svg>
           <span>{t('starProject')}</span>
         </a>
-        {state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
+        {tab === 'advanced' && state.failed ? <p className={css.failedNote}>{t('savedFailed')}</p> : null}
       </div>
     </div>
   )

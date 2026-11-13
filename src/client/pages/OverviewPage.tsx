@@ -304,6 +304,10 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
               title={t('freeEnabledHint')} disabled={!state.writable || state.saving}
               onChange={next => { actions.edit('freeEnabled', String(next)) }} />
           </div>
+          {/* The free channel writes immediately, so its refusal is reported here
+              instead of in the shell's staged-draft save bar. */}
+          {state.writeFailed === 'freeEnabled'
+            ? <p className={css.failed} role="alert">{t('immediateWriteFailed')}</p> : null}
         </section>
         <section className={css.card}>
           <div className={css.cardHead}>

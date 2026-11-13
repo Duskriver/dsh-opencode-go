@@ -5,8 +5,19 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
 import { type ModelSource, type OpencodeGoTheme, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
+/**
+ * Fields that apply the moment they change. Every non-advanced surface is
+ * immediate, so the form has exactly one save gesture: the Advanced tab.
+ */
+export declare const IMMEDIATE_TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "appearanceTheme", "showSidebarQuota", "freeEnabled"];
+export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number];
+/** Fields the Advanced tab keeps behind Save/Discard. */
+export declare const STAGED_TEXT_FIELDS: readonly ["baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export type StagedTextField = typeof STAGED_TEXT_FIELDS[number];
 export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "appearanceTheme", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
+/** An immediate field also covers the per-model capacity map. */
+export type ImmediateField = ImmediateTextField | 'modelLimits';
 export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "appearanceTheme", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
@@ -111,6 +122,12 @@ export interface GoAccountsActions {
 export interface OpencodeGoSectionState extends FormShell {
     accounts: GoAccountsState;
     enabled: boolean;
+    /** Whether the opt-in sidebar row and its console page are registered. */
+    sidebarEntry: boolean;
+    /** The sidebar-entry switch write failed; the switch itself is elsewhere. */
+    sidebarEntryFailed: boolean;
+    /** The last immediate settings write that did not land, named for its surface. */
+    writeFailed?: ImmediateField;
     usageDisplay: FieldState;
     showSidebarQuota: FieldState;
     freeEnabled: FieldState;
@@ -144,6 +161,8 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
     };
     loadModels(): void;
     setEnabled(next: boolean): void;
+    /** Opt the sidebar row and the console page in or out; applied immediately. */
+    setSidebarEntry(next: boolean): void;
     setModelEnabled(id: string, next: boolean): void;
 }
 /** One controller owns the page's typed drafts and immediate account operations. */
@@ -161,6 +180,9 @@ export declare class OpencodeGoSectionController {
     private pickerSaving;
     private pickerFailed;
     private enabledFailed;
+    private sidebarEntryFailed;
+    private writeFailed;
+    private immediateSaving;
     private models;
     private modelsRequest;
     private face;
@@ -182,9 +204,39 @@ export declare class OpencodeGoSectionController {
     private field;
     private plan;
     private projection;
+    /**
+     * Edit one field. Immediate fields (everything outside the Advanced tab) are
+     * written straight away; only staged fields keep a draft behind Save.
+     * @param field - the field being edited.
+     * @param text - the control's text form.
+     */
     private edit;
+    /** Keep a draft the Advanced tab saves on its own gesture. */
+    private editStaged;
+    /**
+     * Write one immediate value straight through the Host form. A refused or
+     * failed write names its field so the surface that owns it can say so; only a
+     * later write of that same field clears the notice. A staged-save failure
+     * belongs to the Advanced draft and is never cleared from here.
+     * @param field - immediate field being written.
+     * @param write - the value, or the clear that restores the base layer.
+     */
+    private writeImmediate;
+    /**
+     * Change one per-model capacity override, applied as soon as the editor
+     * settles a value.
+     * @param value - the complete override map.
+     */
+    editModelLimits(value: OpencodeGoModelLimits): void;
+    /**
+     * Restore one field to its inherited value. Outside the Advanced tab the
+     * clear is written immediately; Advanced keeps it as a draft for Save.
+     * @param field - the field to clear.
+     */
+    private resetField;
     save(): Promise<void>;
     setEnabled(next: boolean): Promise<void>;
+    setSidebarEntry(next: boolean): Promise<void>;
     setModelEnabled(id: string, next: boolean): Promise<void>;
     private writePickerSetting;
     inject(): OpencodeGoSectionFace;

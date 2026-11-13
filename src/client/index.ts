@@ -105,7 +105,6 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
   }
   const selectAccount = async (ref: string): Promise<boolean> =>
     (await executeAccountCommand({ kind: 'select', ref })) === 'applied'
-  registerUsagePill(ctx, scope, selectAccount, readers, openPage)
   let readAccount: ((ref: string) => Promise<GoUsage>) | undefined
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     readAccount = async ref => {
@@ -126,12 +125,21 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
   }, executeAccountCommand)
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
+  const localeOf = (): string => ctx.locale.getLocale().active
+  // The page's own slot face always offers navigation: it only mounts while the
+  // host already shows the page.
+  const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage })
   // The settings dialog keeps its full section; the extra openPage seat lets it
   // hand the user to the console page without coupling Section to the layout.
+  // It is only offered while the opt-in sidebar entry is registered, so the
+  // button and every other shortcut disappear together with the entry.
+  let pageRegistered: () => boolean = () => false
   const injected = (): OpencodeGoSectionInjected => ({
-    ...controller.inject(), t, getLocale: () => ctx.locale.getLocale().active, openPage,
+    ...controller.inject(), t, getLocale: localeOf,
+    ...(pageRegistered() ? { openPage } : {}),
   })
-  const pageInjected = (): PageInjected => ({ ...injected(), readers })
+  pageRegistered = registerSidebarPage(ctx, pageInjected, () => layout, scope)
+  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered)
 
   ctx.effect(() => {
     const refresh = (ref: string): void => { controller.refreshCredential(ref) }
@@ -147,8 +155,6 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     label: () => t('nav'),
     inject: injected,
   }, OpencodeGoSection))
-
-  registerSidebarPage(ctx, pageInjected, () => layout)
 }
 
 /**
@@ -189,22 +195,37 @@ function createPageReaders(ctx: ClientContext): PageReaders {
 }
 
 /**
- * Register the sidebar row and its main panel as a pair. The host owns the
- * click, the label, the active state and the column geometry; this function
- * only publishes the two halves under one id and removes them together.
+ * Keep the sidebar row and its main panel registered as one pair, and only
+ * while the opt-in `sidebarEntry` setting asks for them and the host declares
+ * the list slot. The host owns the click, the label, the active state and the
+ * column geometry; this function publishes the two halves under one id and
+ * removes them together.
  * @param ctx - client root context.
  * @param pageInjected - injected face for the page slot (rebuilt per entry render).
  * @param readLayout - current layout service, or undefined before it mounts.
+ * @param readSettings - the profile form that owns the opt-in setting.
+ * @returns whether the pair is registered right now (read at click time).
  */
 function registerSidebarPage(
   ctx: ClientContext,
   pageInjected: () => PageInjected,
   readLayout: () => GoLayoutService | undefined,
-): void {
+  readSettings: ConfigForm<OpencodeGoSettings>,
+): () => boolean {
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
-  // The slot injection owns the pair's lifetime: its returned effect disposes
-  // both registrations when the host withdraws the slot or the fiber unloads.
-  ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => {
+  let slotReady = false
+  let disposePair: (() => void) | undefined
+  const teardown = (): void => {
+    const dispose = disposePair
+    disposePair = undefined
+    if (dispose !== undefined) dispose()
+  }
+  // `slotReady` and the setting are two independent gates: the host may declare
+  // the list slot at any time, and the reader may flip the switch at any time.
+  // Either one going away withdraws the pair.
+  const sync = (): void => {
+    if (readSettings.getSnapshot().value?.sidebarEntry !== true) { teardown(); return }
+    if (!slotReady || disposePair !== undefined) return
     const disposeMain = ctx.slots.register({
       name: 'main',
       key: PAGE_PANEL_ID,
@@ -218,7 +239,7 @@ function registerSidebarPage(
       label: () => t('navLabel'),
       locale: NS,
     }, GoRowIcon)
-    return () => {
+    disposePair = () => {
       // Leave the page before its panel goes: a selection pointing at a key
       // that no longer exists would strand the central column on nothing.
       try {
@@ -230,7 +251,18 @@ function registerSidebarPage(
       if (typeof disposeRow === 'function') disposeRow()
       if (typeof disposeMain === 'function') disposeMain()
     }
-  }), 'llm-opencode-go: sidebar page')
+  }
+  ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => {
+    slotReady = true
+    sync()
+    return () => { slotReady = false; teardown() }
+  }), 'llm-opencode-go: sidebar page slot')
+  ctx.effect(() => {
+    const unsubscribe = readSettings.subscribe(sync)
+    sync()
+    return () => { unsubscribe(); teardown() }
+  }, 'llm-opencode-go: sidebar page opt-in')
+  return () => disposePair !== undefined
 }
 
 export function accountCommands(ctx: Context): ExecuteAccountCommand {
@@ -255,6 +287,8 @@ export function accountCommands(ctx: Context): ExecuteAccountCommand {
  * @param selectAccount - switch the profile's preferred account.
  * @param readers - shared usage/analytics readers (page and pill share one set).
  * @param openPage - open the console page, or undefined on hosts without it.
+ * @param canOpenPage - whether the opt-in console page is registered right now;
+ * read at click time so withdrawing the entry restores the in-place dialog.
  */
 export function registerUsagePill(
   ctx: Context,
@@ -262,6 +296,7 @@ export function registerUsagePill(
   selectAccount?: (ref: string) => Promise<boolean>,
   readers?: PageReaders,
   openPage?: (tab?: PageTab) => void,
+  canOpenPage: () => boolean = () => false,
 ): void {
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     const credentialChanges = createSnapshotStore(0)
@@ -305,7 +340,15 @@ export function registerUsagePill(
       readAccountUsage,
       readAnalytics: readers?.readAnalytics ?? unavailableAnalytics,
       exportAnalytics: readers?.exportAnalytics ?? unavailableExport,
-      ...(openPage ? { openUsagePage: () => openPage('usage') } : {}),
+      // The page may have been withdrawn since this face was built: report the
+      // miss so the pill falls back to its own dialog instead of doing nothing.
+      ...(openPage ? {
+        openUsagePage: (): boolean => {
+          if (!canOpenPage()) return false
+          openPage('usage')
+          return true
+        },
+      } : {}),
       getLocale: () => ready.locale.getLocale().active,
       t: (key: string) => translate(key as OpencodeGoKey),
     })

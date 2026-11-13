@@ -41,9 +41,10 @@ export interface UsagePillProps {
   /**
    * Open the console page instead of the in-place dialog. Set by the client
    * registration once the host declares a sidebar panel; omitted hosts (and
-   * tests) keep the self-contained dialog.
+   * tests) keep the self-contained dialog. Returns whether navigation happened,
+   * so a page withdrawn since the face was built still opens the dialog.
    */
-  openUsagePage?: () => void
+  openUsagePage?: () => boolean
 }
 
 /** A root sidebar entry receives its width mode from the host slot owner. */
@@ -167,7 +168,7 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
   /** Open the console page when the host offers one; otherwise the local dialog. */
   const openAnalytics = useCallback((next: boolean): void => {
-    if (next && openUsagePage) { openUsagePage(); return }
+    if (next && openUsagePage?.() === true) return
     setAnalyticsOpen(next)
   }, [openUsagePage])
   const [viewedAccountId, setViewedAccountId] = useState<string | null>(() => {
@@ -212,8 +213,11 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
       variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
       appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
-        its own theme tokens, so leaving the pill's themed span costs no styling. */}
-    {!openUsagePage && props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
+        its own theme tokens, so leaving the pill's themed span costs no styling.
+        It must stay mounted even when the console page offers itself: a page
+        withdrawn after this face was built reports the miss from openUsagePage()
+        and falls back to this dialog, which could not appear if it were absent. */}
+    {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
       readAnalytics={props.readAnalytics} exportAnalytics={props.exportAnalytics} readQuota={readDialogQuota}
       accounts={accounts} activeRef={callingRef}
       contextKey={JSON.stringify([credentialRevision, config.value?.baseURL, config.value?.proxyURL])}

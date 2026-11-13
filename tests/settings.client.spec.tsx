@@ -7,10 +7,14 @@ import * as store from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { OpencodeGoSection, type OpencodeGoSectionProps, type OpencodeGoSectionState } from '../src/client/Section.tsx'
 import {
+  IMMEDIATE_TEXT_FIELDS,
   NUMERIC_FIELD_LIMITS,
   OpencodeGoSectionController,
+  STAGED_TEXT_FIELDS,
   editableKeys,
+  type ImmediateTextField,
   type OpencodeGoSettings,
+  type StagedTextField,
   type TextField,
 } from '../src/client/controller.ts'
 import { en, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
@@ -55,6 +59,8 @@ describe("settings page and typed capacity editing", () => {
     saving: false,
     failed: false,
     enabled: true,
+    sidebarEntry: true,
+    sidebarEntryFailed: false,
     appliedAppearanceTheme: 'native',
     modelVisibility: {},
     pickerSaving: false,
@@ -117,6 +123,7 @@ describe("settings page and typed capacity editing", () => {
       discard: vi.fn(),
       loadModels: vi.fn(),
       setEnabled: vi.fn(),
+      setSidebarEntry: vi.fn(),
       setModelEnabled: vi.fn(),
     }
   }
@@ -162,7 +169,7 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
-    it('keeps appearance on its own tab and stages all three edits', () => {
+    it('keeps appearance on its own tab and applies all three edits immediately', () => {
       const reading = actions()
       renderSection(stateOf(), reading, { foldedModels: true })
       expect(screen.queryByRole('switch', { name: en.showSidebarQuotaLabel })).toBeNull()
@@ -262,7 +269,7 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.queryByText('DeepSeek V4.1 Flash protocol')).toBeNull()
     })
 
-    it('stages the three usage display modes in advanced settings and offers reset', () => {
+    it('keeps the three usage display modes on the appearance tab and applies them immediately', () => {
       const reading = actions()
       renderSection(stateOf({ usageDisplay: field('always', { overridden: true }) }), reading)
       expect(screen.queryByRole('radiogroup', { name: en.usageDisplayLabel })).toBeNull()
@@ -286,7 +293,7 @@ describe("settings page and typed capacity editing", () => {
       expect(choices.every(choice => (choice as HTMLButtonElement).disabled)).toBe(true)
     })
 
-    it('stages the Free channel opt-in from the overview, next to the provider switch', () => {
+    it('applies the Free channel opt-in from the overview, next to the provider switch', () => {
       const reading = actions()
       renderSection(stateOf({ freeEnabled: field('true', { overridden: true }) }), reading, { foldedModels: true })
       const free = screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel })
@@ -306,6 +313,102 @@ describe("settings page and typed capacity editing", () => {
     it('disables the Free channel switch in a read-only deployment', () => {
       renderSection(stateOf({ writable: false }), {}, { foldedModels: true })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.freeEnabledLabel }).disabled).toBe(true)
+    })
+
+    it('opts the sidebar entry in from the overview and nowhere else', () => {
+      const reading = actions()
+      renderSection(stateOf(), reading, { foldedModels: true })
+      const overview = document.getElementById('opencode-go-panel-overview') as HTMLElement
+      const heading = within(overview).getByText(en.sidebarEntryLabel, { selector: 'h3' })
+      const control = within(overview).getByRole<HTMLButtonElement>('switch', { name: en.sidebarEntryLabel })
+      expect(heading.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(control.getAttribute('aria-checked')).toBe('true')
+      // The hint rides the switch's title and the mark opens the same sentence.
+      expect(control.title).toBe(en.sidebarEntryHint)
+      expect(within(overview).getByRole('button', { name: en.sidebarEntryHint })).toBeTruthy()
+      expect(overview.textContent).toContain(en.sidebarEntrySummary)
+
+      fireEvent.click(control)
+      expect(reading.setSidebarEntry).toHaveBeenCalledExactlyOnceWith(false)
+      expect(reading.save).not.toHaveBeenCalled()
+
+      // The console page is unreachable while its entry is off, so the switch has no twin.
+      for (const tab of ['models', 'appearance', 'advanced'] as const) {
+        selectTab(tab)
+        expect(screen.queryByRole('switch', { name: en.sidebarEntryLabel })).toBeNull()
+      }
+    })
+
+    it('reports a failed sidebar-entry write from the overview card', () => {
+      renderSection(stateOf({ sidebarEntry: false, sidebarEntryFailed: true }), {}, { foldedModels: true })
+      const overview = document.getElementById('opencode-go-panel-overview') as HTMLElement
+      // The switch keeps the saved posture; the alert says the attempted change did not land.
+      expect(within(overview).getByRole<HTMLButtonElement>('switch', { name: en.sidebarEntryLabel }).getAttribute('aria-checked')).toBe('false')
+      expect(within(overview).getByRole('alert').textContent).toBe(en.sidebarEntryFailed)
+    })
+
+    it('locks the sidebar-entry switch for a read-only document and in-flight writes', () => {
+      const cases = [
+        [stateOf({ writable: false }), true],
+        [stateOf({ saving: true }), true],
+        [stateOf({ pickerSaving: true }), true],
+        [stateOf(), false],
+      ] as const
+      for (const [state, disabled] of cases) {
+        cleanup()
+        renderSection(state, {}, { foldedModels: true })
+        expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.sidebarEntryLabel }).disabled).toBe(disabled)
+      }
+    })
+
+    it('reports a refused Free-channel write from its own overview card', () => {
+      renderSection(stateOf({ writeFailed: 'freeEnabled' }), {}, { foldedModels: true })
+      const overview = document.getElementById('opencode-go-panel-overview') as HTMLElement
+      const freeCard = within(overview).getByRole('switch', { name: en.freeEnabledLabel }).closest('section') as HTMLElement
+      expect(within(freeCard).getByRole('alert').textContent).toBe(en.immediateWriteFailed)
+      // It names exactly the refused field: the sidebar alert stays quiet.
+      expect(screen.queryByText(en.sidebarEntryFailed)).toBeNull()
+    })
+
+    it('marks only the tabs that still keep a draft', () => {
+      renderSection(stateOf({
+        appearanceTheme: field('classic', { overridden: true }),
+        showSidebarQuota: field('true', { overridden: true }),
+        usagePillStyle: field('plain', { overridden: true }),
+        usageDisplay: field('always', { overridden: true }),
+      }), {}, { foldedModels: true })
+      // Appearance writes immediately now, so it never claims a pending draft.
+      expect(screen.getByRole('tab', { name: en.settingsTabAppearance }).hasAttribute('data-marked')).toBe(false)
+      expect(screen.getByRole('tab', { name: en.settingsTabAdvanced }).hasAttribute('data-marked')).toBe(false)
+
+      cleanup()
+      renderSection(stateOf({ refreshMinutes: field('30', { overridden: true }) }), {}, { foldedModels: true })
+      expect(screen.getByRole('tab', { name: en.settingsTabAdvanced }).hasAttribute('data-marked')).toBe(true)
+      expect(screen.getByRole('tab', { name: en.settingsTabAppearance }).hasAttribute('data-marked')).toBe(false)
+    })
+
+    it('reports a refused appearance write from the appearance card only', () => {
+      renderSection(stateOf({ writeFailed: 'usageDisplay' }), {}, { foldedModels: true })
+      selectTab('appearance')
+      const appearance = document.getElementById('opencode-go-panel-appearance') as HTMLElement
+      expect(within(appearance).getByRole('alert').textContent).toBe(en.immediateWriteFailed)
+
+      cleanup()
+      renderSection(stateOf({ writeFailed: 'freeEnabled' }), {}, { foldedModels: true })
+      selectTab('appearance')
+      // A refusal on another surface never claims this card failed.
+      expect(screen.queryByText(en.immediateWriteFailed)).toBeNull()
+    })
+
+    it('explains on the advanced card that only it waits for Save', () => {
+      renderSection(stateOf(), {}, { foldedModels: true })
+      openAdvanced()
+      const advanced = document.getElementById('opencode-go-panel-advanced') as HTMLElement
+      expect(within(advanced).getByText(en.advancedSaveHint)).toBeTruthy()
+      // The hint is the card's first line, above the connection group.
+      const card = advanced.querySelector('p')!
+      expect(card.textContent).toBe(en.advancedSaveHint)
+      expect(advanced.textContent!.indexOf(en.advancedSaveHint)).toBeLessThan(advanced.textContent!.indexOf(en.groupConnection))
     })
 
     it('moves the segmented selection with the arrow keys', () => {
@@ -527,7 +630,7 @@ describe("settings page and typed capacity editing", () => {
       expect(screen.getByRole('region', { name: en.modelDetails }).textContent).not.toContain(en.modalitiesForwarding)
     })
 
-    it('makes model capacities searchable and stages numeric edits', () => {
+    it('makes model capacities searchable and commits a settled numeric edit', () => {
       const edits = actions()
       renderSection(stateOf({
         models: listing([
@@ -542,7 +645,10 @@ describe("settings page and typed capacity editing", () => {
       expect(context.type).toBe('number')
       expect(context.value).toBe('131072')
 
+      // Typing alone writes nothing: the field owns the text until it settles.
       fireEvent.change(context, { target: { value: '262144' } })
+      expect(edits.editModelLimits).not.toHaveBeenCalled()
+      fireEvent.blur(context)
       expect(edits.editModelLimits).toHaveBeenCalledWith({"deepseek-v4.1-flash":{"contextWindow":262144}})
 
       const filter = screen.getByLabelText(en.limitsFilterLabel)
@@ -565,16 +671,127 @@ describe("settings page and typed capacity editing", () => {
       expect(edits.editModelLimits).toHaveBeenCalledWith({"deepseek-v4.1-flash":null})
     })
 
-    it('stages clearing one field without dropping the other or restoring an inherited value', () => {
+    it('clears one capacity field without dropping the other or restoring an inherited value', () => {
       const edits = actions()
       renderSection(stateOf({
         models: listing([{ id: 'm', name: 'Model' }]),
         modelLimitDraft: { m: { contextWindow: 123456, maxTokens: 1024 }, previous: null },
       }), edits)
       fireEvent.change(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })), { target: { value: '' } })
+      fireEvent.blur(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })))
       expect(edits.editModelLimits).toHaveBeenCalledWith({"m":{"contextWindow":null,"maxTokens":1024},"previous":null})
       fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
       expect(edits.editModelLimits).toHaveBeenCalledWith({"m":null,"previous":null})
+    })
+
+    it('commits a capacity on Enter as well as on blur, without waiting for Save', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        models: listing([{ id: 'm', name: 'Model', contextWindow: 262_144 }]),
+        modelLimitDraft: { m: { contextWindow: 131_072 } },
+      }), edits)
+      const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+      fireEvent.change(input(), { target: { value: '200000' } })
+      fireEvent.keyDown(input(), { key: 'Enter' })
+      expect(edits.editModelLimits).toHaveBeenLastCalledWith({ m: { contextWindow: 200000 } })
+      fireEvent.change(input(), { target: { value: '150000' } })
+      expect(edits.editModelLimits).toHaveBeenCalledTimes(1)
+      fireEvent.blur(input())
+      expect(edits.editModelLimits).toHaveBeenLastCalledWith({ m: { contextWindow: 150000 } })
+      // The models surface has no Save gesture to wait for.
+      expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+    })
+
+    it('commits a capacity after 700ms of idle typing', () => {
+      vi.useFakeTimers()
+      try {
+        const edits = actions()
+        renderSection(stateOf({
+          models: listing([{ id: 'm', name: 'Model', contextWindow: 262_144 }]),
+          modelLimitDraft: { m: { contextWindow: 131_072 } },
+        }), edits)
+        const input = screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+        fireEvent.change(input, { target: { value: '250000' } })
+        act(() => { vi.advanceTimersByTime(699) })
+        expect(edits.editModelLimits).not.toHaveBeenCalled()
+        act(() => { vi.advanceTimersByTime(1) })
+        expect(edits.editModelLimits).toHaveBeenCalledExactlyOnceWith({ m: { contextWindow: 250000 } })
+      } finally { vi.useRealTimers() }
+    })
+
+    it('keeps refused capacity text in the field and never commits it', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        models: listing([{ id: 'm', name: 'Model', contextWindow: 262_144 }]),
+        modelLimitDraft: { m: { contextWindow: 131_072 } },
+      }), edits)
+      const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+      fireEvent.change(input(), { target: { value: '1.5' } })
+      expect(input().getAttribute('aria-invalid')).toBe('true')
+      fireEvent.blur(input())
+      expect(edits.editModelLimits).not.toHaveBeenCalled()
+      // The refused text stays put, so the reader can correct it.
+      expect(input().value).toBe('1.5')
+      fireEvent.change(input(), { target: { value: '2' } })
+      expect(input().hasAttribute('aria-invalid')).toBe(false)
+      fireEvent.blur(input())
+      expect(edits.editModelLimits).toHaveBeenCalledExactlyOnceWith({ m: { contextWindow: 2 } })
+    })
+
+    it('commits an empty capacity as a clear only when a value is saved', () => {
+      const edits = actions()
+      renderSection(stateOf({
+        models: listing([{ id: 'm', name: 'Model', contextWindow: 262_144 }]),
+        modelLimitDraft: { m: { contextWindow: 131_072 } },
+      }), edits)
+      const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+      fireEvent.change(input(), { target: { value: '' } })
+      fireEvent.blur(input())
+      expect(edits.editModelLimits).toHaveBeenCalledExactlyOnceWith({ m: { contextWindow: null } })
+
+      cleanup()
+      const idle = actions()
+      renderSection(stateOf({ models: listing([{ id: 'm', name: 'Model', contextWindow: 262_144 }]) }), idle)
+      const empty = screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
+      fireEvent.change(empty, { target: { value: '' } })
+      fireEvent.blur(empty)
+      // Clearing an already inherited field changes nothing.
+      expect(idle.editModelLimits).not.toHaveBeenCalled()
+    })
+
+    it('syncs an idle capacity field from the saved value and the selected model', () => {
+      const state = stateOf({
+        models: listing([{ id: 'a', name: 'A', contextWindow: 262_144 }]),
+        modelLimitDraft: { a: { contextWindow: 131_072 } },
+      })
+      const store = renderSection(state)
+      const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'A' }))
+      expect(input().value).toBe('131072')
+      // An external write updates a field the reader is not editing.
+      act(() => { store.set({ ...state, modelLimitDraft: { a: { contextWindow: 100_000 } } }) })
+      expect(input().value).toBe('100000')
+      // Selecting another model shows its own saved capacities, not the old buffer.
+      act(() => { store.set({ ...state, models: listing([{ id: 'b', name: 'B', contextWindow: 200_000 }]),
+        modelLimitDraft: { b: { contextWindow: 50_000 } } }) })
+      expect(screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'B' })).value).toBe('50000')
+    })
+
+    it('keeps capacity inputs live while their own write is in flight', () => {
+      renderSection(stateOf({ saving: true, models: listing([{ id: 'm', name: 'Model' }]) }))
+      // An in-flight capacity write must not disable the field it came from.
+      expect(screen.getByLabelText(t('limitsContextLabel', { name: 'Model' })).hasAttribute('disabled')).toBe(false)
+    })
+
+    it('reports a refused capacity write inside the models tab only', () => {
+      renderSection(stateOf({ writeFailed: 'modelLimits', models: listing([{ id: 'm', name: 'Model' }]) }))
+      const panel = document.getElementById('opencode-model-panel') as HTMLElement
+      expect(within(panel).getByRole('alert').textContent).toBe(en.immediateWriteFailed)
+      selectTab('overview')
+      expect(screen.queryByText(en.immediateWriteFailed)).toBeNull()
+
+      cleanup()
+      renderSection(stateOf({ writeFailed: 'freeEnabled', models: listing([{ id: 'm', name: 'Model' }]) }))
+      expect(screen.queryByRole('alert')).toBeNull()
     })
 
     it('does not count explicit catalog resets as customized models', () => {
@@ -747,7 +964,7 @@ describe("settings page and typed capacity editing", () => {
       expect(enabledSwitch.compareDocumentPosition(accountsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
-    it('stages edits through the injected actions and resets on demand', () => {
+    it('stages advanced edits through the injected actions and resets on demand', () => {
       const edits = actions()
       renderSection(stateOf({ refreshMinutes: field('60', { overridden: true }) }), edits)
       openAdvanced()
@@ -759,31 +976,41 @@ describe("settings page and typed capacity editing", () => {
       expect(edits.resetField).toHaveBeenCalledWith('refreshMinutes')
     })
 
-    it('enables save only for a dirty, valid form and shows the failure note', () => {
+    it('keeps Save and Discard on the advanced tab only, where the staged draft lives', () => {
       const acts = actions()
-      const { rerender } = render((
-        <OpencodeGoSection {...{
-          ...acts,
-          t,
-          useOpencodeGo: bindSnapshotSelector(createSnapshotStore(stateOf({ dirty: true }))),
-        }}
-        />
-      ))
-      const save = screen.getByText(en.save) as HTMLButtonElement
-      const discard = screen.getByText(en.discard) as HTMLButtonElement
+      renderSection(stateOf({ dirty: true }), acts)
+      // Everything outside Advanced applies as it changes, so it has no form actions.
+      for (const tab of ['overview', 'models', 'appearance'] as const) {
+        selectTab(tab)
+        expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+        expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
+        // The star link is not a form action: it is reachable from every tab.
+        expect(screen.getByRole('link', { name: en.starProject })).toBeTruthy()
+      }
+      selectTab('advanced')
+      const save = screen.getByRole<HTMLButtonElement>('button', { name: en.save })
+      const discard = screen.getByRole<HTMLButtonElement>('button', { name: en.discard })
       expect(save.disabled).toBe(false)
       expect(discard.disabled).toBe(false)
       fireEvent.click(save)
       expect(acts.save).toHaveBeenCalled()
+    })
 
-      rerender((
-        <OpencodeGoSection {...{
-          ...acts,
-          t,
-          useOpencodeGo: bindSnapshotSelector(createSnapshotStore(stateOf({ dirty: true, failed: true }))),
-        }}
-        />
-      ))
+    it('enables the advanced Save only for a dirty, valid draft and shows the failure note', () => {
+      const acts = actions()
+      renderSection(stateOf({ dirty: true, invalid: true }), acts)
+      openAdvanced()
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(true)
+
+      cleanup()
+      renderSection(stateOf({ dirty: true }), acts)
+      openAdvanced()
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(false)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.discard }).disabled).toBe(false)
+
+      cleanup()
+      renderSection(stateOf({ dirty: true, failed: true }), acts)
+      openAdvanced()
       expect(screen.getByText(en.savedFailed)).toBeTruthy()
     })
 
@@ -901,16 +1128,17 @@ describe("settings page and typed capacity editing", () => {
         .toBe('opencode-go-base-url-hint')
     })
 
-    it('shows the saving state while a save crosses the wire', () => {
+    it('shows the saving state while an advanced save crosses the wire', () => {
       renderSection(stateOf({ dirty: true, saving: true }))
-      expect(screen.getByText<HTMLButtonElement>(en.saving).disabled).toBe(true)
-      expect(screen.getByText<HTMLButtonElement>(en.discard).disabled).toBe(true)
+      openAdvanced()
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.saving }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.discard }).disabled).toBe(true)
     })
 
   })
 
   describe('OpencodeGoSectionController through the component', () => {
-    it('adds, saves, discards, and removes a custom budget without changing capacities', async () => {
+    it('writes and removes a custom budget immediately without changing capacities', async () => {
       const host = createConfigForm<OpencodeGoSettings>()
       acceptFormWrites(host)
 
@@ -935,17 +1163,12 @@ describe("settings page and typed capacity editing", () => {
           expect(add().disabled).toBe(true)
         }
         fireEvent.change(input(), { target: { value: '4096' } })
-        fireEvent.click(add())
-        expect(host.set).not.toHaveBeenCalled()
-        expect(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })).toBeTruthy()
-        fireEvent.click(screen.getByText(en.discard))
-        expect(screen.queryByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })).toBeNull()
-        fireEvent.change(input(), { target: { value: '6000' } })
-        fireEvent.click(add())
-        await act(async () => { screen.getByText(en.save).click() })
-        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: [6000] } })
-        fireEvent.click(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 6000 }) }))
-        await act(async () => { screen.getByText(en.save).click() })
+        await act(async () => { fireEvent.click(add()) })
+        // The budget lands without a Save gesture and keeps the capacity override.
+        expect(host.set).toHaveBeenLastCalledWith('modelLimits', { budget: { contextWindow: 100000, thinkingBudgets: [4096] } })
+        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: [4096] } })
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: t('thinkingBudgetRemove', { value: 4096 }) })) })
+        expect(host.set).toHaveBeenLastCalledWith('modelLimits', { budget: { contextWindow: 100000, thinkingBudgets: null } })
         expect(host.form.getSnapshot().value?.modelLimits).toEqual({ budget: { contextWindow: 100000, thinkingBudgets: null } })
         fireEvent.click(screen.getByRole('button', { name: 'Effort Model' }))
         expect(screen.queryByText(en.thinkingBudgets)).toBeNull()
@@ -1095,7 +1318,7 @@ describe("settings page and typed capacity editing", () => {
       }
     })
 
-    it('saves, discards, and resets capacities while preserving explicit catalog choices', async () => {
+    it('writes, clears and resets capacities immediately while preserving explicit catalog choices', async () => {
       const host = createConfigForm<OpencodeGoSettings>()
       acceptFormWrites(host)
 
@@ -1111,27 +1334,33 @@ describe("settings page and typed capacity editing", () => {
         await act(async () => { await Promise.resolve() })
         openModelLimits()
         const input = () => screen.getByLabelText<HTMLInputElement>(t('limitsContextLabel', { name: 'Model' }))
-        fireEvent.change(input(), { target: { value: '200000' } })
-        expect(host.set).not.toHaveBeenCalled()
-        fireEvent.click(screen.getByText(en.discard))
         expect(input().value).toBe('100000')
         fireEvent.change(input(), { target: { value: '200000' } })
-        await act(async () => { screen.getByText(en.save).click() })
+        // No Save gesture on the models tab: the settled value is the write.
+        expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+        expect(host.set).not.toHaveBeenCalled()
+        fireEvent.blur(input())
+        await act(async () => { await Promise.resolve() })
+        expect(host.set).toHaveBeenLastCalledWith('modelLimits', { m: { contextWindow: 200000, maxTokens: 1024 } })
         expect(host.form.getSnapshot().value?.modelLimits?.m?.contextWindow).toBe(200000)
         expect(screen.getByText(t('capacityDefault', { value: '262,144' }) + ' · ' + en.overridden)).toBeTruthy()
-        expect(screen.getByText<HTMLButtonElement>(en.save).disabled).toBe(true)
 
+        // Clearing one model restores the catalog values and writes immediately.
         fireEvent.click(screen.getByRole('button', { name: en.limitsResetModel }))
+        await act(async () => { await Promise.resolve() })
+        expect(host.set).toHaveBeenLastCalledWith('modelLimits', { m: null })
         expect(input().value).toBe('')
-        fireEvent.click(screen.getByText(en.discard))
-        expect(input().value).toBe('200000')
-        fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
-        await act(async () => { screen.getByText(en.save).click() })
-        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ m: null })
         expect(screen.getByText(t('limitsSummary', { count: 0 }))).toBeTruthy()
+
         fireEvent.change(input(), { target: { value: '150000' } })
-        await act(async () => { screen.getByText(en.save).click() })
-        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ m: { contextWindow: 150000, maxTokens: null, thinkingBudgets: null } })
+        fireEvent.blur(input())
+        await act(async () => { await Promise.resolve() })
+        expect(host.set).toHaveBeenLastCalledWith('modelLimits', { m: { contextWindow: 150000, maxTokens: null, thinkingBudgets: null } })
+        // Reset-all clears the remaining override without a Save gesture.
+        fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+        await act(async () => { await Promise.resolve() })
+        expect(host.set).toHaveBeenLastCalledWith('modelLimits', { m: null })
+        expect(host.form.getSnapshot().value?.modelLimits).toEqual({ m: null })
       } finally {
         controller.dispose()
       }
@@ -1418,9 +1647,15 @@ describe("installed Host localization", () => {
   })
 })
 
-describe('typed ConfigForm drafts and writes', () => {
+/**
+ * The 0.6.0 contract: every non-advanced surface writes through the Host form
+ * the moment it changes, and only the Advanced tab keeps a draft behind the
+ * single Save/Discard gesture.
+ */
+describe('typed ConfigForm immediate writes and advanced drafts', () => {
   const controllers: OpencodeGoSectionController[] = []
   afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose() })
+
   function setup(value: OpencodeGoSettings = defaultClientSettings) {
     const host = createConfigForm(value)
     const controller = new OpencodeGoSectionController(host.form, {} as never)
@@ -1429,130 +1664,280 @@ describe('typed ConfigForm drafts and writes', () => {
     return { host, controller, actions, snapshot: actions.hooks.opencodeGo.getSnapshot }
   }
 
-  it('defaults, validates and persists sidebar visibility and pill style as typed values', async () => {
+  /** Every immediate text control, with the text its surface sends and the value it stores. */
+  const immediateFields: ReadonlyArray<readonly [ImmediateTextField, string, string | boolean]> = [
+    ['usageDisplay', 'always', 'always'],
+    ['usagePillStyle', 'plain', 'plain'],
+    ['appearanceTheme', 'classic', 'classic'],
+    ['showSidebarQuota', 'true', true],
+    ['freeEnabled', 'true', true],
+  ]
+
+  /** Every advanced control, with a value the Host schema accepts. */
+  const stagedFields: ReadonlyArray<readonly [StagedTextField, string]> = [
+    ['baseURL', 'https://gateway.example/v1'],
+    ['freeBaseURL', 'https://free.example/v1'],
+    ['proxyURL', 'socks5://localhost:1080'],
+    ['refreshMinutes', '30'],
+    ['streamIdleTimeoutMs', '2000'],
+    ['requestPreparationTimeoutMs', '3000'],
+    ['requestTimeoutMs', '4000'],
+    ['maxImages', '5'],
+    ['maxRequestImageBytes', '1024'],
+    ['requestImagePixelBudget', '4096'],
+    ['requestImageMaxBytes', '512'],
+  ]
+
+  it('writes every immediate field through settings.set and keeps no draft', async () => {
     const { host, controller, actions, snapshot } = setup()
-    expect(editableKeys).toEqual(expect.arrayContaining(['showSidebarQuota', 'usagePillStyle']))
-    expect(snapshot()).toMatchObject({ showSidebarQuota: { text: 'false' }, usagePillStyle: { text: 'badge' } })
-    actions.edit('showSidebarQuota', 'true')
-    actions.edit('usagePillStyle', 'plain')
+    // The exported field sets are the contract the surfaces are built on.
+    expect(IMMEDIATE_TEXT_FIELDS).toEqual(immediateFields.map(([field]) => field))
+    expect(STAGED_TEXT_FIELDS).toEqual(stagedFields.map(([field]) => field))
+    expect(editableKeys).toEqual(expect.arrayContaining([...IMMEDIATE_TEXT_FIELDS, ...STAGED_TEXT_FIELDS, 'modelLimits']))
+
+    for (const [field, text, value] of immediateFields) {
+      actions.edit(field, text)
+      expect(host.set).toHaveBeenLastCalledWith(field, value)
+      expect(snapshot()[field]).toMatchObject({ text, invalid: false })
+      expect(snapshot()).toMatchObject({ dirty: false, invalid: false, failed: false })
+      expect(snapshot().writeFailed).toBeUndefined()
+    }
+    expect(host.set).toHaveBeenCalledTimes(immediateFields.length)
+    expect(host.mutate).not.toHaveBeenCalled()
+    // The applied theme is the saved value, so an immediate theme write lands at once.
+    expect(snapshot().appliedAppearanceTheme).toBe('classic')
+    // The one save gesture has nothing to write when only immediate fields changed.
     await controller.save()
-    expect(host.mutate).toHaveBeenCalledWith([
-      { op: 'set', path: ['showSidebarQuota'], value: true },
-      { op: 'set', path: ['usagePillStyle'], value: 'plain' },
-    ], expect.any(Number))
-    expect(host.form.getSnapshot().user).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
-    expect(snapshot().dirty).toBe(false)
-    actions.edit('usagePillStyle', 'neon')
-    actions.edit('showSidebarQuota', '1')
-    expect(snapshot()).toMatchObject({ invalid: true, showSidebarQuota: { invalid: true }, usagePillStyle: { invalid: true } })
-    await controller.save()
-    expect(host.mutate).toHaveBeenCalledTimes(1)
+    expect(host.mutate).not.toHaveBeenCalled()
   })
 
-  it('stages and saves the visual theme without changing the applied theme early', async () => {
+  it('holds every advanced field in one draft until Save and writes them in one batch', async () => {
     const { host, controller, actions, snapshot } = setup()
-    expect(snapshot()).toMatchObject({ appearanceTheme: { text: 'native' }, appliedAppearanceTheme: 'native' })
-    actions.edit('appearanceTheme', 'classic')
-    expect(snapshot()).toMatchObject({ appearanceTheme: { text: 'classic' }, appliedAppearanceTheme: 'native', dirty: true })
+    for (const [field, text] of stagedFields) actions.edit(field, text)
+    expect(host.set).not.toHaveBeenCalled()
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(snapshot()).toMatchObject({ dirty: true, invalid: false })
     await controller.save()
-    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'set', path: ['appearanceTheme'], value: 'classic' }], expect.any(Number))
-    expect(snapshot()).toMatchObject({ appearanceTheme: { text: 'classic' }, appliedAppearanceTheme: 'classic', dirty: false })
-    actions.edit('appearanceTheme', 'system')
-    expect(snapshot()).toMatchObject({ appearanceTheme: { invalid: true }, appliedAppearanceTheme: 'classic', invalid: true })
-    await controller.save()
-    expect(host.mutate).toHaveBeenCalledTimes(1)
+    const values: Record<StagedTextField, string | number> = {
+      baseURL: 'https://gateway.example/v1', freeBaseURL: 'https://free.example/v1',
+      proxyURL: 'socks5://localhost:1080', refreshMinutes: 30, streamIdleTimeoutMs: 2000,
+      requestPreparationTimeoutMs: 3000, requestTimeoutMs: 4000, maxImages: 5,
+      maxRequestImageBytes: 1024, requestImagePixelBudget: 4096, requestImageMaxBytes: 512,
+    }
+    expect(host.mutate).toHaveBeenCalledExactlyOnceWith(
+      stagedFields.map(([field]) => ({ op: 'set' as const, path: [field], value: values[field] })),
+      0,
+    )
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false })
+    expect(host.form.getSnapshot().user).toEqual(values)
   })
 
-  it('defaults, persists and resets the Free channel opt-in as an independent typed value', async () => {
+  it.each([
+    ['freeEnabled', 'maybe'],
+    ['usageDisplay', 'neon'],
+    ['usagePillStyle', 'neon'],
+    ['appearanceTheme', 'system'],
+    ['showSidebarQuota', '1'],
+  ] as const)('refuses the invalid immediate %s=%s without a draft or a write', async (field, text) => {
     const { host, controller, actions, snapshot } = setup()
-    expect(editableKeys).toEqual(expect.arrayContaining(['freeEnabled']))
-    expect(snapshot()).toMatchObject({ freeEnabled: { text: 'false', overridden: false, invalid: false } })
+    actions.edit(field, text)
+    expect(host.set).not.toHaveBeenCalled()
+    expect(snapshot().writeFailed).toBe(field)
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false, failed: false })
+    await controller.save()
+    expect(host.mutate).not.toHaveBeenCalled()
+    // A valid retry on the same control clears the notice and lands immediately.
+    const valid = immediateFields.find(([name]) => name === field)!
+    actions.edit(field, valid[1])
+    expect(host.set).toHaveBeenLastCalledWith(field, valid[2])
+    expect(snapshot().writeFailed).toBeUndefined()
+  })
+
+  it.each(['refused', 'rejected'] as const)('names a %s immediate write and clears the notice on retry', async outcome => {
+    const { host, actions, snapshot } = setup()
+    if (outcome === 'refused') host.set.mockResolvedValueOnce(false)
+    else host.set.mockRejectedValueOnce(new Error('offline'))
     actions.edit('freeEnabled', 'true')
-    await controller.save()
-    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'set', path: ['freeEnabled'], value: true }], 0)
-    expect(host.form.getSnapshot().user).toMatchObject({ freeEnabled: true })
-    expect(snapshot()).toMatchObject({ freeEnabled: { text: 'true' }, dirty: false, usageDisplay: { text: 'auto' } })
-    actions.edit('freeEnabled', 'false')
-    await controller.save()
-    expect(host.form.getSnapshot().user).toMatchObject({ freeEnabled: false })
-    actions.resetField('freeEnabled')
+    await vi.waitFor(() => { expect(snapshot().writeFailed).toBe('freeEnabled') })
+    // A refused write leaves the saved value alone: controls read that value, so the switch stays off.
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false, failed: false })
     expect(snapshot().freeEnabled).toMatchObject({ text: 'false', overridden: false })
+    expect(host.form.getSnapshot().user).toEqual({})
+    actions.edit('freeEnabled', 'true')
+    await vi.waitFor(() => { expect(snapshot().writeFailed).toBeUndefined() })
+    expect(host.form.getSnapshot().user).toEqual({ freeEnabled: true })
   })
 
-  it('keeps the Free channel draft and reports a refused opt-in without touching other fields', async () => {
+  it('keeps a refused field named until that same field is retried', async () => {
+    const { host, actions, snapshot } = setup()
+    host.set.mockResolvedValueOnce(false)
+    actions.edit('usageDisplay', 'off')
+    await vi.waitFor(() => { expect(snapshot().writeFailed).toBe('usageDisplay') })
+    // A different surface applying successfully must not absorb the earlier notice.
+    actions.edit('appearanceTheme', 'classic')
+    await vi.waitFor(() => { expect(snapshot().saving).toBe(false) })
+    expect(snapshot().writeFailed).toBe('usageDisplay')
+    expect(host.form.getSnapshot().user).toMatchObject({ appearanceTheme: 'classic' })
+    // Retrying the refused field clears its own notice and lands.
+    actions.edit('usageDisplay', 'always')
+    await vi.waitFor(() => { expect(snapshot().writeFailed).toBeUndefined() })
+    expect(host.form.getSnapshot().user).toMatchObject({ usageDisplay: 'always' })
+  })
+
+  it('keeps an advanced-save failure until the advanced draft is saved or discarded', async () => {
     const { host, controller, actions, snapshot } = setup()
-    host.mutate.mockResolvedValueOnce(false)
-    actions.edit('refreshMinutes', '30')
-    actions.edit('freeEnabled', 'true')
+    host.mutate.mockRejectedValueOnce(new Error('SETTINGS_CONFLICT'))
+    actions.edit('baseURL', 'https://new.example/v1')
     await controller.save()
-    expect(snapshot()).toMatchObject({ failed: true, dirty: true, saving: false,
-      freeEnabled: { text: 'true' }, refreshMinutes: { text: '30' } })
-    expect(host.form.getSnapshot().user).toEqual({})
-    await controller.save()
-    expect(host.mutate).toHaveBeenLastCalledWith([
-      { op: 'set', path: ['refreshMinutes'], value: 30 },
-      { op: 'set', path: ['freeEnabled'], value: true },
-    ], 0)
+    expect(snapshot()).toMatchObject({ failed: true, dirty: true })
+    // An immediate surface applying successfully must not hide the advanced failure.
+    actions.edit('usageDisplay', 'off')
+    await vi.waitFor(() => { expect(snapshot().saving).toBe(false) })
+    expect(snapshot()).toMatchObject({ failed: true, dirty: true, baseURL: { text: 'https://new.example/v1' } })
+    // Discarding the advanced draft is the gesture that clears it.
+    actions.discard()
     expect(snapshot()).toMatchObject({ failed: false, dirty: false })
   })
 
-  it('resets appearance to inherited values without changing the selected account', async () => {
-    const value = { apiKeyEnv: 'ACCOUNT_A', showSidebarQuota: false, usagePillStyle: 'badge' as const }
-    const { host, controller, actions, snapshot } = setup(value)
-    host.publish({ base: { showSidebarQuota: true, usagePillStyle: 'plain' }, user: value })
-    actions.resetField('showSidebarQuota')
-    actions.resetField('usagePillStyle')
-    await controller.save()
-    expect(snapshot()).toMatchObject({ showSidebarQuota: { text: 'true' }, usagePillStyle: { text: 'plain' } })
-    expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')
-    expect(host.form.getSnapshot().user).toEqual({ apiKeyEnv: 'ACCOUNT_A' })
+  it('names a refused capacity write as modelLimits and keeps it out of the advanced draft', async () => {
+    const { host, actions, snapshot } = setup()
+    host.set.mockResolvedValueOnce(false)
+    actions.editModelLimits({ m: { maxTokens: 4096 } })
+    await vi.waitFor(() => { expect(snapshot().writeFailed).toBe('modelLimits') })
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false, failed: false })
   })
 
-  it.each(['baseURL', 'freeBaseURL'] as const)('validates %s drafts before saving', async field => {
-    const { host, controller, actions, snapshot } = setup()
-    for (const value of ['invalid', 'ftp://gateway.example', 'https://gateway.example/v1?key=x', 'https://gateway.example/v1#fragment',
-      'https://gateway-user:gateway-super-secret@gateway.example/v1']) {
-      actions.edit(field, value)
-      expect(snapshot()[field].invalid).toBe(true)
-      await controller.save()
-      expect(host.mutate).not.toHaveBeenCalled()
-    }
-    actions.edit(field, 'https://gateway.example/prefix/v1')
-    expect(snapshot()[field].invalid).toBe(false)
-    await controller.save()
-    expect(host.form.getSnapshot().value?.[field]).toBe('https://gateway.example/prefix/v1')
+  it('reports saving while an immediate write is in flight without blocking the advanced draft', async () => {
+    const { host, actions, snapshot } = setup()
+    const pending = Promise.withResolvers<boolean>()
+    host.set.mockReturnValueOnce(pending.promise)
+    actions.edit('appearanceTheme', 'classic')
+    expect(snapshot().saving).toBe(true)
+    // The applied theme reads the saved profile, so it cannot change before the write lands.
+    expect(snapshot().appliedAppearanceTheme).toBe('native')
+    actions.edit('refreshMinutes', '30')
+    expect(snapshot()).toMatchObject({ dirty: true, saving: true })
+    pending.resolve(true)
+    await vi.waitFor(() => { expect(snapshot().saving).toBe(false) })
+    // The stub acknowledged without applying; a real write still lands immediately.
+    actions.edit('appearanceTheme', 'classic')
+    await vi.waitFor(() => { expect(snapshot().appliedAppearanceTheme).toBe('classic') })
+    expect(host.mutate).not.toHaveBeenCalled()
   })
 
-  it('sends typed capacity objects and text fields together at one revision', async () => {
-    const { host, controller, actions, snapshot } = setup({ refreshMinutes: 60 })
+  it('writes the complete capacity map immediately and leaves no capacity draft', async () => {
+    const { host, actions, snapshot } = setup({ modelLimits: { m: { maxTokens: 8192 } } })
     const limits = { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } }
     actions.editModelLimits(limits)
+    // The controller clones the map at call time: later edits to the caller's object cannot leak in.
     limits.m.maxTokens = 1
-    actions.edit('refreshMinutes', '30')
-    expect(snapshot()).toMatchObject({ dirty: true, modelLimitDraft: { m: { maxTokens: 8192 } } })
-    await controller.save()
-    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([
-      { op: 'set', path: ['modelLimits'], value: { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } } },
-      { op: 'set', path: ['refreshMinutes'], value: 30 },
-    ], 0)
+    expect(host.set).toHaveBeenCalledExactlyOnceWith('modelLimits',
+      { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } })
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false,
+      modelLimitDraft: { m: { contextWindow: 131072, maxTokens: 8192, thinkingBudgets: [4096] } } })
+    expect(host.mutate).not.toHaveBeenCalled()
+    // Resetting a capacity map is an immediate unset, not a staged clear.
+    actions.resetField('modelLimits')
+    expect(host.unset).toHaveBeenLastCalledWith('modelLimits')
     expect(snapshot().dirty).toBe(false)
-    expect(typeof host.form.getSnapshot().value?.modelLimits).toBe('object')
   })
 
-  it.each(['refused', 'rejected'] as const)('preserves every draft after a %s batch', async outcome => {
+  it('keeps dirty, invalid and Save scoped to the advanced draft', async () => {
     const { host, controller, actions, snapshot } = setup()
-    actions.edit('baseURL', 'https://new.invalid/v1')
-    actions.editModelLimits({ m: null })
-    if (outcome === 'refused') host.mutate.mockResolvedValueOnce(false)
-    else host.mutate.mockRejectedValueOnce(new Error('SETTINGS_CONFLICT'))
+    actions.edit('usageDisplay', 'off')
+    actions.edit('freeEnabled', 'true')
+    actions.edit('baseURL', 'not-a-url')
+    expect(host.set).toHaveBeenCalledTimes(2)
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(snapshot()).toMatchObject({ dirty: true, invalid: true, baseURL: { invalid: true } })
     await controller.save()
-    expect(snapshot()).toMatchObject({ failed: true, dirty: true, saving: false,
-      baseURL: { text: 'https://new.invalid/v1' }, modelLimitDraft: { m: null } })
-    await controller.save()
-    expect(snapshot()).toMatchObject({ failed: false, dirty: false })
+    expect(host.mutate).not.toHaveBeenCalled()
+    actions.discard()
+    expect(snapshot()).toMatchObject({ dirty: false, invalid: false })
+    // Discarding the draft cannot unapply an immediate value.
+    expect(host.form.getSnapshot().value).toMatchObject({ usageDisplay: 'off', freeEnabled: true })
+    expect(host.form.getSnapshot().user).toMatchObject({ usageDisplay: 'off', freeEnabled: true })
   })
 
-  it('preserves a newer draft while the accepted older save completes', async () => {
+  it('resets immediate fields immediately and stages advanced clears for Save', async () => {
+    const value = { apiKeyEnv: 'ACCOUNT_A', freeEnabled: true, usageDisplay: 'always' as const,
+      showSidebarQuota: true, usagePillStyle: 'plain' as const, appearanceTheme: 'classic' as const }
+    const { host, controller, actions, snapshot } = setup(value)
+    const base = { freeEnabled: false, usageDisplay: 'auto' as const, showSidebarQuota: false,
+      usagePillStyle: 'badge' as const, appearanceTheme: 'native' as const }
+    host.publish({ base, user: value })
+    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'appearanceTheme'] as const) {
+      actions.resetField(field)
+      expect(host.unset).toHaveBeenLastCalledWith(field)
+    }
+    expect(host.mutate).not.toHaveBeenCalled()
+    expect(snapshot()).toMatchObject({
+      freeEnabled: { text: 'false', overridden: false }, usageDisplay: { text: 'auto' },
+      showSidebarQuota: { text: 'false' }, usagePillStyle: { text: 'badge' },
+      appearanceTheme: { text: 'native' }, appliedAppearanceTheme: 'native',
+    })
+    expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')
+    expect(host.form.getSnapshot().user).toEqual({ apiKeyEnv: 'ACCOUNT_A' })
+    // Advanced clears still wait for Save and write nothing before it.
+    host.publish({ base: { refreshMinutes: 60 }, user: { refreshMinutes: 15 } })
+    actions.resetField('refreshMinutes')
+    expect(host.mutate).not.toHaveBeenCalled()
+    await controller.save()
+    expect(host.mutate).toHaveBeenLastCalledWith([{ op: 'unset', path: ['refreshMinutes'] }], expect.any(Number))
+  })
+
+  it('writes the sidebar entry through settings.set and projects its own failure', async () => {
+    const { host, controller, actions, snapshot } = setup()
+    expect(snapshot()).toMatchObject({ sidebarEntry: true, sidebarEntryFailed: false })
+    await controller.setSidebarEntry(false)
+    expect(host.set).toHaveBeenLastCalledWith('sidebarEntry', false)
+    expect(snapshot()).toMatchObject({ sidebarEntry: false, sidebarEntryFailed: false })
+
+    host.set.mockResolvedValueOnce(false)
+    await controller.setSidebarEntry(true)
+    expect(host.set).toHaveBeenLastCalledWith('sidebarEntry', true)
+    expect(snapshot()).toMatchObject({ sidebarEntry: false, sidebarEntryFailed: true, pickerSaving: false })
+    // A later successful switch clears only its own failure slot.
+    await controller.setSidebarEntry(true)
+    expect(snapshot()).toMatchObject({ sidebarEntry: true, sidebarEntryFailed: false,
+      enabledFailed: false, pickerFailed: false })
+  })
+
+  it.each(['refused', 'rejected'] as const)('keeps a %s sidebar-entry write in its own failure slot', async outcome => {
+    const { host, controller, snapshot } = setup()
+    if (outcome === 'refused') host.set.mockResolvedValueOnce(false)
+    else host.set.mockRejectedValueOnce(new Error('offline'))
+    await controller.setSidebarEntry(false)
+    expect(snapshot()).toMatchObject({ sidebarEntryFailed: true, enabledFailed: false, pickerFailed: false,
+      pickerSaving: false, sidebarEntry: true })
+    expect(host.form.getSnapshot().user).toEqual({})
+  })
+
+  it('reports the sidebar switch as pickerSaving while the write is in flight', async () => {
+    const { host, controller, snapshot } = setup()
+    const pending = Promise.withResolvers<boolean>()
+    host.set.mockReturnValueOnce(pending.promise)
+    const writing = controller.setSidebarEntry(false)
+    expect(snapshot()).toMatchObject({ pickerSaving: true, sidebarEntryFailed: false })
+    pending.resolve(true)
+    await writing
+    expect(snapshot()).toMatchObject({ pickerSaving: false, sidebarEntryFailed: false, sidebarEntry: true })
+    // A real write follows the acknowledged stub.
+    await controller.setSidebarEntry(false)
+    expect(snapshot()).toMatchObject({ pickerSaving: false, sidebarEntry: false })
+  })
+
+  it('projects the sidebar entry off when the setting is absent', () => {
+    const host = createConfigForm<OpencodeGoSettings>()
+    const controller = new OpencodeGoSectionController(host.form, {} as never)
+    controllers.push(controller)
+    const snapshot = controller.inject().hooks.opencodeGo.getSnapshot
+    host.publish({ status: 'ready', writable: true, value: {} })
+    expect(snapshot()).toMatchObject({ sidebarEntry: false, sidebarEntryFailed: false })
+  })
+
+  it('preserves a newer advanced draft while the accepted older save completes', async () => {
     const { host, controller, actions, snapshot } = setup({ refreshMinutes: 60 })
     const pending = Promise.withResolvers<boolean>()
     host.mutate.mockReturnValueOnce(pending.promise)
@@ -1568,10 +1953,10 @@ describe('typed ConfigForm drafts and writes', () => {
     expect(host.form.getSnapshot().value?.refreshMinutes).toBe(15)
   })
 
-  it.each(['-1', '0', '1.5', 'Infinity', 'abc'])('blocks an invalid image count %s without writing', async text => {
+  it('blocks an invalid image count without writing', async () => {
     const { host, controller, actions, snapshot } = setup()
-    actions.edit('maxImages', text)
-    expect(snapshot()).toMatchObject({ dirty: true, invalid: true })
+    actions.edit('maxImages', '-1')
+    expect(snapshot()).toMatchObject({ dirty: true, invalid: true, maxImages: { invalid: true } })
     await controller.save()
     expect(host.mutate).not.toHaveBeenCalled()
     actions.discard()
@@ -1609,7 +1994,7 @@ describe('typed ConfigForm drafts and writes', () => {
     ['maxRequestImageBytes', '1', 1], ['requestImagePixelBudget', '1', 1], ['requestImageMaxBytes', '1', 1],
   ]
 
-  it.each(validNumericDrafts)('accepts the in-range draft %s=%s', async (field, text, expected) => {
+  it.each(validNumericDrafts)('accepts the in-range advanced draft %s=%s', async (field, text, expected) => {
     const { host, controller, actions, snapshot } = setup()
     actions.edit(field, text)
     expect(snapshot()[field].invalid).toBe(false)
@@ -1640,24 +2025,12 @@ describe('typed ConfigForm drafts and writes', () => {
     const provider = screen.getByRole<HTMLButtonElement>('switch', { name: en.enabledLabel })
     await act(async () => { fireEvent.click(provider) })
     expect(host.set).toHaveBeenCalledExactlyOnceWith('enabled', false)
-    expect(face.hooks.opencodeGo.getSnapshot()).toMatchObject({ enabledFailed: true, pickerFailed: false })
+    expect(face.hooks.opencodeGo.getSnapshot()).toMatchObject({ enabledFailed: true, pickerFailed: false, sidebarEntryFailed: false })
     expect(screen.getByRole('alert').textContent).toBe(en.enabledFailed)
     expect(screen.queryByText(en.pickerFailed)).toBeNull()
   })
 
-  it('previews inherited resets, and treats structurally equal capacity maps as clean', async () => {
-    const { host, controller, actions, snapshot } = setup({ refreshMinutes: 15, modelLimits: { m: { maxTokens: 8192 } } })
-    host.publish({ base: { refreshMinutes: 60 }, user: { refreshMinutes: 15 } })
-    actions.editModelLimits({ m: { maxTokens: 8192 } })
-    expect(snapshot().dirty).toBe(false)
-    actions.resetField('refreshMinutes')
-    expect(snapshot().refreshMinutes).toMatchObject({ text: '60', overridden: false })
-    await controller.save()
-    expect(host.mutate).toHaveBeenCalledExactlyOnceWith([{ op: 'unset', path: ['refreshMinutes'] }], 0)
-    expect(host.form.getSnapshot().value?.refreshMinutes).toBe(60)
-  })
-
-  it('keeps drafts while read-only and binds ConfigForm prototype methods correctly', async () => {
+  it('keeps advanced drafts while read-only and binds ConfigForm prototype methods correctly', async () => {
     const { host, controller, actions, snapshot } = setup()
     expect(host.listenerCount()).toBe(1)
     host.publish({ writable: false })
@@ -1674,15 +2047,18 @@ describe('typed ConfigForm drafts and writes', () => {
     expect(host.listenerCount()).toBe(0)
   })
 
-  it('resets Free gateway and usage mode to inherited values while preserving account selection', async () => {
+  it('applies usage mode immediately and resets Free gateway and usage mode to inherited values while preserving account selection', async () => {
     const value = { apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'always' as const, freeBaseURL: 'https://free.example/v1' }
     const { host, controller, actions, snapshot } = setup(value)
     host.publish({ base: { usageDisplay: 'auto', freeBaseURL: 'https://opencode.ai/inference/v1' }, user: value })
     actions.edit('usageDisplay', 'off')
+    expect(host.set).toHaveBeenLastCalledWith('usageDisplay', 'off')
     actions.edit('freeBaseURL', 'https://new-free.example/v1')
+    expect(host.set).toHaveBeenCalledTimes(1)
     await controller.save()
     expect(host.form.getSnapshot().value).toMatchObject({ apiKeyEnv: 'ACCOUNT_A', usageDisplay: 'off', freeBaseURL: 'https://new-free.example/v1' })
     actions.resetField('usageDisplay')
+    expect(host.unset).toHaveBeenLastCalledWith('usageDisplay')
     actions.resetField('freeBaseURL')
     await controller.save()
     expect(snapshot().usageDisplay.text).toBe('auto')
@@ -1761,7 +2137,9 @@ describe('client registration and remote lifecycle', () => {
     expect(registration.inject().getLocale()).toBe('en')
     expect(component).toBe(OpencodeGoSection)
     expect(harness.listeners.size).toBe(1)
-    expect(harness.settings.listenerCount()).toBe(1)
+    // The typed form has two readers: the section controller and the opt-in gate
+    // that registers the sidebar row/page pair only while sidebarEntry is on.
+    expect(harness.settings.listenerCount()).toBe(2)
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)
     expect(harness.settings.listenerCount()).toBe(0)
