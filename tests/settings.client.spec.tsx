@@ -1648,7 +1648,7 @@ describe("installed Host localization", () => {
 })
 
 /**
- * The 0.6.0 contract: every non-advanced surface writes through the Host form
+ * The immediate-write contract: every non-advanced surface writes through the Host form
  * the moment it changes, and only the Advanced tab keeps a draft behind the
  * single Save/Discard gesture.
  */

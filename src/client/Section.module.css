@@ -729,6 +729,11 @@
   gap: 8px;
   padding: 16px 0;
   border-top: 1px solid var(--go-border);
+  /* Save and Discard only exist on the Advanced tab. Reserving their 36px
+     control height on every tab keeps this footer row — and therefore the
+     panel's scroll area and total height — identical whichever tab is open,
+     instead of the dialog growing and shrinking by the buttons' height. */
+  min-height: 36px;
 }
 
 .starLink {
