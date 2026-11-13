@@ -9,7 +9,7 @@ import type { OpencodeGoSectionFace, OpencodeGoSectionState } from '../controlle
 import type { en } from '../presentation.ts';
 import type { OpencodeGoSectionInjected } from '../Section.tsx';
 /** Tabs of the OpenCode Go console page, in reading order. */
-export declare const PAGE_TABS: readonly ["overview", "usage", "accounts", "models", "appearance", "about"];
+export declare const PAGE_TABS: readonly ["overview", "usage", "accounts", "models", "appearance", "advanced", "about"];
 export type PageTab = typeof PAGE_TABS[number];
 /** Copy key of each tab's label. */
 export declare const TAB_COPY: Readonly<Record<PageTab, keyof typeof en>>;

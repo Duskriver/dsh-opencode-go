@@ -674,32 +674,35 @@ describe("account cards, quota rows and ordering", () => {
     fixture.controller.dispose()
   })
 
-  it('lays a row out as two lines, so a longer name cannot move the bar', async () => {
+  it('separates identity header from the bottom edge bar when folded and splits management above Bento quotas when open', async () => {
     const fixture = setup()
     await fixture.controller.refreshAccounts()
     const state = fixture.controller.accountState()
-    const main = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
-      .closest('[data-account-row]')!.querySelector('[data-account-main]') as HTMLElement
-    const body = () => main().children[1] as HTMLElement
-    const top = () => body().children[0] as HTMLElement
-    const meta = () => body().children[1] as HTMLElement
+    const row = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
+      .closest('[data-account-row]') as HTMLElement
+    const main = () => row().querySelector('[data-account-main]') as HTMLElement
     const { unmount } = render(<AccountsCard state={state} actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    // Handle + summary column; inside it the identity line and the quota line.
-    expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'DIV'])
-    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'SPAN', 'BUTTON'])
-    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN', 'SPAN'])
-    expect(meta().children[0]!.getAttribute('role')).toBe('progressbar')
-    // The name may ellipsise, so the full value stays reachable.
-    expect(top().children[0]!.getAttribute('title')).toBe('Primary')
+    // Folded card keeps the primary rank marker, reachable full name, single rolling edge bar, and summary stat.
+    expect(row().getAttribute('data-active')).toBe('true')
+    expect(within(main()).getByText('#1 Current')).toBeTruthy()
+    expect(within(main()).getByText('Primary').getAttribute('title')).toBe('Primary')
+    expect(within(row()).getByRole('progressbar', { name: `Primary ${en.usage_rolling}` })).toBeTruthy()
+    // Expanding hides the folded rolling summary/edge bar and splits management actions above the 3 Bento quota tiles.
+    fireEvent.click(within(main()).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+    const detail = row().querySelector('[data-account-detail]') as HTMLElement
+    const manage = detail.querySelector('[data-account-manage]') as HTMLElement
+    const quotas = detail.querySelector('[data-account-quotas]') as HTMLElement
+    expect(Boolean(manage.compareDocumentPosition(quotas) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(within(quotas).getAllByRole('progressbar')).toHaveLength(3)
+    expect(within(row()).getAllByRole('progressbar')).toHaveLength(3)
     unmount()
-    // A row with nothing to read yet keeps the two lines: the message takes the
-    // quota line, so the identity line and the disclosure stay put.
+    // Rows without loaded usage still preserve identity markers and render the loading state cleanly.
     render(<AccountsCard state={{ ...state, entries: state.entries.map(entry => ({ ...entry, usage: undefined, loading: true })) }}
       actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'BUTTON'])
-    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN'])
+    expect(within(main()).getByText('#1 Current')).toBeTruthy()
+    expect(within(main()).getByText('Primary')).toBeTruthy()
     expect(screen.getAllByText(en.usageLoading)).toHaveLength(2)
     fixture.controller.dispose()
   })

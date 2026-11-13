@@ -86,6 +86,22 @@ function resetText(resetsAt: string, t: AccountTranslate): string {
   return t('usageResetDays', { days: Math.round(hours / 24) })
 }
 
+function shortResetText(resetsAt: string, t: AccountTranslate): string {
+  const remaining = Date.parse(resetsAt) - Date.now()
+  if (!Number.isFinite(remaining)) return t('usageResetCompactUnknown')
+  if (remaining <= 0) return t('usageResetCompactDue')
+  const minutes = Math.max(1, Math.round(remaining / 60_000))
+  if (minutes < 60) return t('usageResetCompactMinutes', { minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return t('usageResetCompactHours', { hours })
+  return t('usageResetCompactDays', { days: Math.round(hours / 24) })
+}
+
+function compactDateTime(value: string, locale: string | undefined, t: AccountTranslate): string {
+  if (!Number.isFinite(Date.parse(value))) return t('usageResetUnknown')
+  return formatDateTime(value, locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 /** The bar's reading, on the scale the composer pill already uses: amber from
  * 80%, red once the window is spent. */
 function barLevel(window: { percent: number; status: string }): 'ok' | 'high' | 'limited' {
@@ -261,33 +277,53 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
       <Button variant="outline" size="sm" type="button" disabled={state.busy} onClick={cancel}>{t('accountCancel')}</Button>
     </div>
   </form> : null
-  const detail = (account: GoAccountView, label: string) => <div className={css.accountDetail}>
-    {account.usage ? <div className={css.accountUsage}>
-      {WINDOWS.map(window => <div key={window}>
-        <span>{t(`usage_${window}`)} · {account.usage![window].percent}%</span>
-        <progress data-level={barLevel(account.usage![window])} max={100}
-          value={Math.min(100, account.usage![window].percent)}
-          aria-label={`${label} ${t(`usage_${window}`)}`} />
-        <span className={css.hint}>{t('usageResets')} {formatDateTime(account.usage![window].resetsAt, locale)}</span>
-      </div>)}
-    </div> : <p className={css.hint}>{t(account.loading ? 'usageLoading' : 'usageUnavailable')}</p>}
-    <div className={css.accountActions}>
-      <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
-      <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false} onClick={() => { start({ kind: 'key', ref: account.apiKeyEnv }, label) }}>{t('accountReplaceKey')}</Button>
-      <Button variant="outline" size="sm" disabled={disabled} onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
+  const detail = (account: GoAccountView, label: string, index: number, isActive: boolean, panelId: string) =>
+    <div id={panelId} className={css.accountDetail} data-account-detail="">
+      <div className={css.accountManageStrip} data-account-manage="">
+        <span className={css.accountManageMeta}>
+          {t(isActive ? 'accountManagePrimary' : 'accountManageBackup', { rank: index + 1 })}
+        </span>
+        <div className={css.accountActions}>
+          <Button variant="outline" size="sm" disabled={disabled}
+            onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
+          <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false}
+            onClick={() => { start({ kind: 'key', ref: account.apiKeyEnv }, label) }}>{t('accountReplaceKey')}</Button>
+          <Button className={css.accountRemoveBtn} variant="outline" size="sm" disabled={disabled}
+            onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
+        </div>
+      </div>
+      {account.usage ? <div className={css.accountUsage} data-account-quotas="">
+        {WINDOWS.map(window => <div key={window} className={css.accountBentoTile}>
+          <div className={css.accountBentoTop}>
+            <span className={css.accountBentoLabel}>{t(`usage_${window}`)}</span>
+            <strong className={css.accountBentoPct}>{account.usage![window].percent}%</strong>
+          </div>
+          <progress data-level={barLevel(account.usage![window])} max={100}
+            value={Math.min(100, account.usage![window].percent)}
+            aria-label={`${label} ${t(`usage_${window}`)}`} />
+          <span className={css.accountBentoReset} title={`${t('usageResets')} ${formatDateTime(account.usage![window].resetsAt, locale)}`}>
+            {t('usageResets')} {compactDateTime(account.usage![window].resetsAt, locale, t)}
+          </span>
+        </div>)}
+      </div> : <p className={css.hint}>{t(account.loading ? 'usageLoading' : 'usageUnavailable')}</p>}
     </div>
-  </div>
-  const cardClass = surface === 'page' ? css.cardPage : open ? css.card : css.card + ' ' + css.cardFolded
+  const cardClass = surface === 'page' ? css.cardPage + ' ' + css.accountsCard : open ? css.card : css.card + ' ' + css.cardFolded
+  const foldTone = total === 0 ? 'neutral' : unreadable > 0 || ready < total ? 'warning' : 'success'
   return <section className={cardClass}>
-    <div className={css.cardHead}>
+    <div className={css.cardHead + ' ' + css.accountsHead}>
       <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
         onClick={() => { setOpen(!open) }}>
-        <span className={css.cardTitle}>{t('accountsTitle')}</span>
+        <span className={css.cardTriggerRow}>
+          <span className={css.cardTitle}>{t('accountsTitle')}</span>
+          <span className={css.foldBadge} data-tone={foldTone}>
+            {total > 0 ? <span className={css.foldDot} aria-hidden="true" /> : null}
+            {total > 0 ? <span className={css.foldText}>
+              {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
+            </span> : null}
+            <ChevronDown className={open ? css.chevronOpen : css.chevron} />
+          </span>
+        </span>
         <span className={css.cardSub}>{summary}</span>
-        {total > 0 ? <Tag tone={unreadable > 0 || ready < total ? 'warning' : 'success'}>
-          {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
-        </Tag> : null}
-        <ChevronDown className={open ? css.chevronOpen : css.chevron} />
       </button>
       <span className={css.trailing}>
         {updatedAt > 0 ? <span className={css.cardStamp} title={formatDateTime(updatedAt, locale)}>
@@ -344,8 +380,11 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
           const rolling = account.usage?.rolling
           const expanded = details === account.apiKeyEnv
           const panelId = `opencode-go-account-${index}`
+          const isActive = state.activeRef ? account.apiKeyEnv === state.activeRef : index === 0
           return <Fragment key={account.id}>
             <div className={css.accountRow} data-account-row={account.apiKeyEnv}
+              data-active={isActive ? 'true' : undefined}
+              data-open={expanded ? 'true' : undefined}
               data-dragging={dragging === account.apiKeyEnv ? 'true' : undefined}
               data-drop={markAt(index)}
               onDragStart={event => {
@@ -365,48 +404,50 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
                 setDragging(account.apiKeyEnv)
               }}>
               <div className={css.accountMain} data-account-main="">
-                <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
-                  disabled={!reorderable} title={t('accountDragHandle', { name: label })}
-                  aria-label={t('accountDragHandle', { name: label })}
-                  onKeyDown={event => {
-                    if (event.key === 'ArrowUp' && index > 0) { event.preventDefault(); move(account.apiKeyEnv, index - 1) }
-                    if (event.key === 'ArrowDown' && index < total - 1) { event.preventDefault(); move(account.apiKeyEnv, index + 1) }
-                  }}>
-                  <GripIcon />
-                </button>
-                <div className={css.accountBody}>
-                  <div className={css.accountTop}>
+                <div className={css.accountLead}>
+                  <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
+                    disabled={!reorderable} title={t('accountDragHandle', { name: label })}
+                    aria-label={t('accountDragHandle', { name: label })}
+                    onKeyDown={event => {
+                      if (event.key === 'ArrowUp' && index > 0) { event.preventDefault(); move(account.apiKeyEnv, index - 1) }
+                      if (event.key === 'ArrowDown' && index < total - 1) { event.preventDefault(); move(account.apiKeyEnv, index + 1) }
+                    }}>
+                    <GripIcon />
+                  </button>
+                  <div className={css.accountIdentity}>
+                    <span className={css.accountRank} data-primary={isActive ? 'true' : undefined}>
+                      {t(isActive ? 'accountRankCurrent' : 'accountRankBackup', { rank: index + 1 })}
+                    </span>
                     <strong className={css.accountName} title={label}>{label}</strong>
                     <span className={css.accountState}>
                       <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
                       {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
                     </span>
-                    {rolling ? <span className={css.accountPercent}>{rolling.percent}%</span> : null}
-                    <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
-                      aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}
-                      onClick={() => { setDetails(expanded ? null : account.apiKeyEnv) }}>
-                      <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
-                    </button>
-                  </div>
-                  <div className={css.accountMeta}>
-                    {rolling ? <>
-                      <span className={css.accountBar} role="progressbar" data-level={barLevel(rolling)}
-                        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
-                        aria-label={`${label} ${t('usage_rolling')}`}>
-                        <span className={css.accountBarFill} style={{ width: `${Math.min(100, rolling.percent)}%` }} />
-                      </span>
-                      <span className={css.accountReset}>{resetText(rolling.resetsAt, t)}</span>
-                    </> : <span className={css.accountIdle}>{account.configured === false
-                      ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>}
                   </div>
                 </div>
+                <div className={css.accountTail}>
+                  {!expanded ? (rolling ? <span className={css.accountCompactStat} title={resetText(rolling.resetsAt, t)}>
+                    {t('usageRollingCompact')} <strong>{rolling.percent}%</strong> · {shortResetText(rolling.resetsAt, t)}
+                  </span> : <span className={css.accountIdle}>{account.configured === false
+                    ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>) : null}
+                  <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
+                    aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}
+                    onClick={() => { setDetails(expanded ? null : account.apiKeyEnv) }}>
+                    <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
+                  </button>
+                </div>
               </div>
+              {!expanded && rolling ? <span className={css.accountBar} role="progressbar" data-level={barLevel(rolling)}
+                aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, rolling.percent)}
+                aria-label={`${label} ${t('usage_rolling')}`}>
+                <span className={css.accountBarFill} style={{ width: `${Math.min(100, rolling.percent)}%` }} />
+              </span> : null}
               {account.failed ? <div className={css.accountProblems} role="alert">
                 <p className={css.failedNote}>{account.problem ?? t(account.stale ? 'usageStaleHint' : 'usageRefreshFailed')}</p>
                 <button type="button" className={css.accountRetry} disabled={state.refreshing}
                   onClick={actions.loadAccounts}>{t('usageRetry')}</button>
               </div> : null}
-              {expanded ? detail(account, label) : null}
+              {expanded ? detail(account, label, index, isActive, panelId) : null}
               {editor?.ref === account.apiKeyEnv ? editorForm(label) : null}
             </div>
           </Fragment>

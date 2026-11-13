@@ -40,6 +40,10 @@ export declare const en: {
     accountsAvailabilityFailed: string;
     accountsDetails: string;
     accountsDetailsHide: string;
+    accountRankCurrent: string;
+    accountRankBackup: string;
+    accountManagePrimary: string;
+    accountManageBackup: string;
     accountDragHandle: string;
     accountConfigureHint: string;
     usageResetMinutes: string;
@@ -47,7 +51,13 @@ export declare const en: {
     usageResetDays: string;
     usageResetDue: string;
     usageResetUnknown: string;
+    usageResetCompactMinutes: string;
+    usageResetCompactHours: string;
+    usageResetCompactDays: string;
+    usageResetCompactDue: string;
+    usageResetCompactUnknown: string;
     usageTitle: string;
+    usageRollingCompact: string;
     usageRollingShort: string;
     usageWeekShort: string;
     usage_rolling: string;
@@ -289,6 +299,7 @@ export declare const en: {
     tabAccounts: string;
     tabModels: string;
     tabAppearance: string;
+    tabAdvanced: string;
     tabAbout: string;
     pageLoading: string;
     pageUnavailable: string;

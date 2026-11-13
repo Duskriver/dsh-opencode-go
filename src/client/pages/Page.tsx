@@ -2,7 +2,6 @@
 import css from './Page.module.css'
 import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import { GoLogo } from '../GoMark.tsx'
 import { themeStyle, useGoThemeTokens } from '../presentation.ts'
 import { setPageTab, usePageTab } from './nav.ts'
 import {
@@ -16,6 +15,7 @@ import {
 } from './types.ts'
 import { AboutPage } from './AboutPage.tsx'
 import { AccountsPage } from './AccountsPage.tsx'
+import { AdvancedPage } from './AdvancedPage.tsx'
 import { AppearancePage } from './AppearancePage.tsx'
 import { ModelsPage } from './ModelsPage.tsx'
 import { OverviewPage } from './OverviewPage.tsx'
@@ -105,10 +105,6 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
       <div className={css.page}>
         <header className={css.head}>
           <div className={css.headMain}>
-            <p className={css.kicker}>
-              <GoLogo size={16} />
-              <span className={css.kickerText}>{KICKER}</span>
-            </p>
             <h1 className={css.title}>{seats.t('pageTitle')}</h1>
             <p className={css.sub}>{seats.t('pageSubtitle')}</p>
           </div>
@@ -173,15 +169,10 @@ function PageBody({ tab, view }: { tab: PageTab; view: PageViewProps }): ReactNo
     case 'accounts': return <AccountsPage {...view} />
     case 'models': return <ModelsPage {...view} />
     case 'appearance': return <AppearancePage {...view} />
+    case 'advanced': return <AdvancedPage {...view} />
     case 'about': return <AboutPage {...view} />
   }
 }
-
-/**
- * Brand line above the title. Deliberately a product marker rather than a second
- * copy of the page name below it, so it stays out of the dictionary.
- */
-const KICKER = 'OpenCode Go · DSH plugin'
 
 const tabId = (tab: PageTab): string => `opencode-go-page-tab-${tab}`
 const panelId = (tab: PageTab): string => `opencode-go-page-panel-${tab}`

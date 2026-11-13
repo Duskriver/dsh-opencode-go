@@ -59,31 +59,17 @@
 
 .headMain { min-width: 0; display: flex; flex-direction: column; }
 
-.kicker {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 6px;
-  color: var(--go-muted);
-  font-size: 11px;
-  line-height: 1.5;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-
-.kickerText { min-width: 0; }
-
 .title {
   margin: 0;
   font-family: var(--go-display-font);
-  font-size: 21px;
-  line-height: 30px;
+  font-size: 28px;
+  line-height: 1.25;
   font-weight: var(--go-display-weight);
   letter-spacing: var(--go-display-tracking);
   color: var(--go-text);
 }
 
-.sub { margin: 3px 0 0; color: var(--go-muted); font-size: 12.5px; line-height: 1.5; }
+.sub { margin: 4px 0 0; color: var(--go-muted-soft); font-size: 12.5px; line-height: 1.5; }
 
 .headActions { display: flex; align-items: center; gap: 8px; flex: none; padding-top: 4px; }
 
@@ -98,7 +84,7 @@
   padding: 0 10px;
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-pill);
-  background: var(--go-surface);
+  background: var(--go-surface-panel);
   color: var(--go-muted);
   font-size: 12px;
   line-height: 1;
@@ -106,8 +92,9 @@
 }
 
 .statusChip[data-on='true'] {
+  background: color-mix(in srgb, var(--go-success) 10%, var(--go-surface));
   color: var(--go-success);
-  border-color: color-mix(in srgb, var(--go-success) 34%, var(--go-border));
+  border-color: color-mix(in srgb, var(--go-success) 38%, var(--go-border));
 }
 
 .statusDot {
@@ -127,7 +114,7 @@
   gap: 2px;
   margin: 18px 0 20px;
   padding: 0 2px;
-  border-bottom: 1px solid var(--go-border);
+  border-bottom: 1px solid var(--go-border-subtle);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -149,7 +136,7 @@
   cursor: pointer;
 }
 
-.tab:hover { color: var(--go-text); background: color-mix(in srgb, var(--go-text) 6%, transparent); }
+.tab:hover { color: var(--go-text); background: var(--go-surface-panel); }
 
 .tab[aria-selected='true'] { color: var(--go-text); font-weight: 600; }
 
@@ -208,9 +195,9 @@
   flex-wrap: wrap;
   margin-top: 18px;
   padding: 11px 14px;
-  border: 1px solid var(--go-border);
+  border: 1px solid var(--go-border-elevated);
   border-radius: var(--go-radius-control);
-  background: var(--go-surface);
+  background: var(--go-surface-elevated);
   box-shadow: var(--go-shadow);
 }
 
@@ -221,6 +208,7 @@
 
 @media (max-width: 720px) {
   .head { flex-wrap: wrap; gap: 10px; }
+  .title { font-size: 24px; }
   .headActions { padding-top: 0; }
   .statusChip { max-width: 100%; }
 }

@@ -1,86 +1,178 @@
 /* Plugin-scoped Native/Classic settings; all colors and geometry come from the selected theme. */
 
-/* The 12px band above the first row and below the last one is the drop surface
-   too: a slot-0 or end-of-list mark is painted in it, so a release there has to
-   land on this element rather than on the card behind it. Padding keeps the rows
-   exactly where the margins put them. */
-.accounts { display: flex; flex-direction: column; gap: 0; margin: 10px 0 2px; padding: 0; }
-/* One row per account: the summary line stays readable, and the detail opens under
-   it. The row hosts the drag handle, so nothing inside it may swallow the pointer;
-   the drop handlers live on the list, which leaves a row only needing to be
-   positioned for its own insertion mark. The summary line is a grid of fixed
-   columns — handle, name, key state, bar, reading, reset, disclosure — so two
-   accounts whose names differ in length still line up
-   their key state, their bar and their countdown. Only the bar's track takes
-   slack, which is why the name and state columns may clip a long value instead of
-   pushing their neighbours. */
-.accountRow { position: relative; border: 0; border-radius: 0; background: none; }
-.accountRow + .accountRow { border-top: 1px solid var(--go-border); }
+/* The band above the first card and below the last one keeps the slot-0 and
+   end-of-list drop marks inside the list bounds while rows stay spaced cards. */
+.accounts { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 2px; padding: 4px 0; }
+/* One card per account: row-1 holds identity and priority; the bottom edge bar
+   (folded) and top-stripped management + Bento tiles (open) isolate quota data. */
+.accountRow {
+  position: relative;
+  border: 1px solid var(--go-border);
+  border-radius: var(--go-radius-card);
+  background: var(--go-surface);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.accountRow[data-open='true'] {
+  border-color: var(--go-border-elevated);
+  box-shadow: var(--go-card-shadow);
+}
+.accountRow[data-active='true'] {
+  background: var(--go-surface-elevated);
+  border-color: color-mix(in srgb, var(--go-accent) 42%, var(--go-border-elevated));
+  box-shadow: var(--go-card-shadow);
+}
 .accountRow[data-dragging='true'] { opacity: .55; }
-/* Two lines per row: identity and reading on the first, the bar and its reset
-   countdown on the second. The handle spans both lines as the drag source. */
-.accountMain { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 10px; padding: 10px 2px 9px; }
-.accountBody { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.accountTop { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 18px; }
-.accountMeta { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 15px; line-height: 15px; }
-.accountHandle { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: grab; opacity: .4; transition: opacity 120ms ease; -webkit-user-drag: element; }
+.accountMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.accountLead { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.accountIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.accountTail { display: flex; align-items: center; gap: 8px; flex: none; }
+.accountHandle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--go-radius-small);
+  background: none;
+  color: var(--go-muted);
+  cursor: grab;
+  opacity: .45;
+  transition: opacity 120ms ease;
+  -webkit-user-drag: element;
+}
 .accountRow:hover .accountHandle, .accountHandle:focus-visible { opacity: 1; }
-.accountHandle:disabled { cursor: default; opacity: .5; }
+.accountHandle:disabled { cursor: default; opacity: .4; }
 .accountHandle:focus-visible, .accountToggle:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; border-radius: var(--go-radius-small); }
-.accountName { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12.5px; font-weight: 600; color: var(--go-text); }
-.accountState { flex: 0 1 auto; min-width: 0; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--go-muted); }
+.accountRank {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--go-border-subtle);
+  border-radius: 999px;
+  background: var(--go-surface-sunken);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--go-muted-soft);
+  white-space: nowrap;
+}
+.accountRank[data-primary='true'] {
+  border-color: transparent;
+  background: var(--go-accent);
+  color: var(--go-on-accent);
+}
+.accountName { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; font-weight: 600; color: var(--go-text); }
+.accountState { flex: 0 1 auto; min-width: 0; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--go-muted); white-space: nowrap; }
 .accountDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--go-success); }
 .accountDot[data-off='true'] { background: var(--go-warning); }
-/* The reading follows the bar: a bar wide enough to answer "how close to the
-   limit" at a glance, with the number right after it. */
-.accountPercent { flex: none; margin-left: auto; text-align: right; font-family: var(--go-number-font); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--go-text); }
-.accountBar { position: relative; flex: 1; min-width: 0; height: 5px; border-radius: 99px; background: var(--go-track); overflow: hidden; }
-.accountBarFill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--go-accent); }
+.accountCompactStat { font-family: var(--go-number-font); font-size: 11.5px; font-variant-numeric: tabular-nums; line-height: 1.3; white-space: nowrap; color: var(--go-muted); }
+.accountCompactStat strong { font-weight: 600; color: var(--go-text); }
+.accountIdle { font-size: 11px; line-height: 1.4; color: var(--go-muted); white-space: nowrap; }
+.accountBar {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 0 0 var(--go-radius-card) var(--go-radius-card);
+  background: var(--go-track);
+  overflow: hidden;
+}
+.accountBarFill {
+  display: block;
+  height: 100%;
+  border-radius: 0 99px 99px 0;
+  background: var(--go-accent);
+}
 .accountBar[data-level='high'] .accountBarFill { background: var(--go-warning); }
 .accountBar[data-level='limited'] .accountBarFill { background: var(--go-danger); }
-.accountReset { flex: none; text-align: right; white-space: nowrap; font-size: 10.5px; color: var(--go-muted); }
-.accountIdle { font-size: 11px; line-height: 1.5; color: var(--go-muted); }
-.accountToggle { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
+.accountToggle { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
 .accountToggle:hover { background: var(--go-surface-2); color: var(--go-text); }
-.accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 9px 28px; }
+.accountProblems { display: flex; align-items: baseline; gap: 8px; padding: 0 12px 10px 38px; }
 .accountRetry { flex: none; border: none; background: none; padding: 0; font: inherit; font-size: 11.5px; line-height: 1.5; color: var(--go-accent); cursor: pointer; }
 .accountRetry:disabled { color: var(--go-muted); cursor: default; }
 .accountHandle:active { cursor: grabbing; }
-.accountDetail { display: flex; flex-direction: column; gap: 10px; padding: 12px 2px 14px 28px; border-top: 1px solid var(--go-border); }
+.accountDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--go-border-subtle);
+  border-radius: 0 0 var(--go-radius-card) var(--go-radius-card);
+  background: var(--go-surface-drawer);
+}
 /* The insertion mark: the edge bar the dragged row would land on, centred in the
-   grid gap and drawn inside the row it belongs to. It must never take part in the
-   layout — a mark that pushed the rows down would move the pointer's own target
-   out from under it, and the browser answers a drag whose target moved under the
-   pointer by dispatching no drop at all. */
+   grid gap and drawn inside the row it belongs to. */
 .accountRow::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; border-radius: 2px;
   background: var(--go-accent); opacity: 0; pointer-events: none; }
 .accountRow[data-drop='before']::after { top: -6px; opacity: 1; }
 .accountRow[data-drop='after']::after { bottom: -6px; opacity: 1; }
-.accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px; }
-.accountUsage progress { display: block; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; overflow: hidden; background: var(--go-track); --go-progress: var(--go-accent); accent-color: var(--go-progress); margin: 8px 0; }
+.accountManageStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border: 1px solid var(--go-border-subtle);
+  border-radius: var(--go-radius-control);
+  background: var(--go-surface-sunken);
+}
+.accountManageMeta { font-size: 11.5px; line-height: 1.4; color: var(--go-muted-soft); }
+.accountActions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.accountActions .accountRemoveBtn {
+  color: var(--go-danger);
+  border-color: color-mix(in srgb, var(--go-danger) 35%, var(--go-border));
+}
+.accountActions .accountRemoveBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--go-danger) 12%, transparent);
+  border-color: var(--go-danger);
+}
+.accountUsage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.accountBentoTile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--go-border-elevated);
+  border-radius: var(--go-radius-control);
+  background: var(--go-surface-3);
+  box-shadow: var(--go-tile-shadow);
+}
+.accountBentoTop { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
+.accountBentoLabel { font-size: 11px; line-height: 1.4; color: var(--go-muted); white-space: nowrap; }
+.accountBentoPct { font-family: var(--go-number-font); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; color: var(--go-text); }
+.accountUsage progress { display: block; width: 100%; height: 5px; appearance: none; border: 0; border-radius: 99px; overflow: hidden; background: var(--go-track); --go-progress: var(--go-accent); accent-color: var(--go-progress); margin: 0; }
 .accountUsage progress::-webkit-progress-bar { background: transparent; }
 .accountUsage progress::-webkit-progress-value { background: var(--go-progress); border-radius: 99px; }
 .accountUsage progress::-moz-progress-bar { background: var(--go-progress); border-radius: 99px; }
 .accountUsage progress[data-level='high'] { --go-progress: var(--go-warning); }
 .accountUsage progress[data-level='limited'] { --go-progress: var(--go-danger); }
-.accountUsage .hint { display: block; overflow-wrap: anywhere; }
-.accountActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-/* Add-account and the fallback switch share the closing row of the card. */
-.accountsFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.accountBentoReset { font-size: 10.5px; line-height: 1.4; color: var(--go-muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Add-account and the fallback switch share the closing bar below the cards. */
+.accountsFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--go-border); }
 .addAccount { align-self: center; min-height: 30px; }
 .accountsFoot .field { flex: 0 1 auto; align-items: flex-end; padding: 0; }
 .accountsFoot .head { gap: 8px; }
-/* The row's editor sits inside the row it edits: same inset as the detail, one
-   step quieter than the card, and every control on the page's own type scale. */
-.accountEditor { display: flex; flex-direction: column; gap: 8px; margin: 0 2px 10px 28px; padding: 10px 12px;
-  border: 0.5px solid var(--go-border); border-radius: var(--go-radius-card);
-  background: var(--go-surface-2); }
+/* The row's editor sits inside the card it edits. */
+.accountEditor { display: flex; flex-direction: column; gap: 8px; margin: 0 12px 12px; padding: 10px 12px;
+  border: 1px solid var(--go-border-elevated); border-radius: var(--go-radius-control);
+  background: var(--go-surface-elevated); }
 .accountEditorHead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .accountEditorTitle { flex: none; font-size: 12.5px; font-weight: 600; line-height: 1.5; color: var(--go-text); }
 .accountEditorFor { min-width: 0; font-size: 11.5px; line-height: 1.5; color: var(--go-muted); overflow-wrap: anywhere; }
 .accountField { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; line-height: 1.5; color: var(--go-muted); }
 .accountEditorActions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-@media (max-width: 480px) { .accountUsage { grid-template-columns: 1fr; } }
 
 .page {
   /* Native resolves these variables through Host tokens; Classic keeps its own
@@ -230,7 +322,7 @@
      1.4.11 3:1, so inputs use the plugin's contrast-checked strong border. */
   border: 1px solid var(--go-border-strong);
   border-radius: var(--go-radius-control);
-  background: var(--go-surface-2);
+  background: var(--go-surface-sunken);
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -312,14 +404,14 @@
 .appearanceStyles { min-width: 0; margin: 0; padding: 0 0 4px; border: 0; }
 .appearanceLegend { display: flex; align-items: center; gap: 7px; padding: 0; }
 .appearanceChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
-.appearanceChoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--go-border); border-radius: var(--go-radius-option); cursor: pointer; }
-.appearanceChoice:hover:not([data-disabled='true']) { border-color: var(--go-border); background: color-mix(in srgb, var(--go-surface-2) 40%, transparent); }
-.appearanceChoice[data-selected='true'] { border-color: var(--go-accent); background: var(--go-accent-soft); }
+.appearanceChoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--go-border); border-radius: var(--go-radius-option); background: var(--go-surface-sunken); cursor: pointer; }
+.appearanceChoice:hover:not([data-disabled='true']) { border-color: var(--go-border-elevated); background: var(--go-surface-elevated); }
+.appearanceChoice[data-selected='true'] { border-color: var(--go-accent); background: color-mix(in srgb, var(--go-accent) 10%, var(--go-surface-2)); box-shadow: var(--go-card-shadow); }
 .appearanceChoice:has(:focus-visible) { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .appearanceChoice[data-disabled='true'] { opacity: .5; cursor: default; }
 .appearanceChoiceHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--go-text); }
 .appearanceRadio { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--go-accent); cursor: inherit; }
-.appearancePreview { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 42px; border-radius: var(--go-radius-small); background: var(--go-bg); color: var(--go-text); }
+.appearancePreview { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 42px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small); background: var(--go-bg); color: var(--go-text); }
 .appearanceSample { max-width: 100%; box-sizing: border-box; overflow: hidden; pointer-events: none; }
 
 /* The hint mark a label carries: the Host's own question glyph, its own bubble. */
@@ -333,14 +425,14 @@
 /* A segmented control for the two small enums: every option is visible at once and
    one thumb slides between equal-width segments. The switch animates transform and
    colour only, so choosing an option never lays the row out again. */
-.seg { position: relative; display: flex; flex: 1; min-width: 0; box-sizing: border-box; padding: 3px; border: 1px solid var(--go-border); border-radius: var(--go-radius-control); background: var(--go-surface); }
-.segThumb { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 2); border-radius: var(--go-radius-option); background: var(--go-surface-2); transition: transform 160ms cubic-bezier(.2, 0, 0, 1); }
+.seg { position: relative; display: flex; flex: 1; min-width: 0; box-sizing: border-box; padding: 3px; border: 1px solid var(--go-border); border-radius: var(--go-radius-control); background: var(--go-surface-sunken); }
+.segThumb { position: absolute; top: 3px; bottom: 3px; left: 3px; box-sizing: border-box; width: calc((100% - 6px) / 2); border: 1px solid var(--go-border-elevated); border-radius: var(--go-radius-option); background: var(--go-surface-3); box-shadow: var(--go-tile-shadow); transition: transform 160ms cubic-bezier(.2, 0, 0, 1); }
 .seg[data-count='3'] .segThumb { width: calc((100% - 6px) / 3); }
 .seg[data-index='1'] .segThumb { transform: translateX(100%); }
 .seg[data-index='2'] .segThumb { transform: translateX(200%); }
 .segOption { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; padding: 4px 8px; border: 0; border-radius: var(--go-radius-option); background: none; font: inherit; font-size: 12.5px; line-height: 1.5; color: var(--go-muted); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: color 160ms; }
 .segOption:hover:not(:disabled) { color: var(--go-text); }
-.segOption[aria-checked='true'] { color: var(--go-text); font-weight: 500; }
+.segOption[aria-checked='true'] { color: var(--go-text); font-weight: 600; }
 .segOption:disabled { opacity: .55; cursor: default; }
 .segOption:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 1px; }
 
@@ -382,7 +474,7 @@
   padding: 3px;
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-control);
-  background: var(--go-surface-2);
+  background: var(--go-surface-sunken);
 }
 
 .pageTab {
@@ -393,7 +485,7 @@
   gap: 6px;
   min-width: 0;
   padding: 7px 10px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: calc(var(--go-radius-control) - 3px);
   background: none;
   color: var(--go-muted);
@@ -405,10 +497,11 @@
 }
 
 .pageTab[aria-selected='true'] {
-  background: var(--go-surface);
+  background: var(--go-surface-3);
+  border-color: var(--go-border-elevated);
   color: var(--go-text);
   font-weight: 600;
-  box-shadow: 0 1px 2px #0000000f;
+  box-shadow: var(--go-tile-shadow);
 }
 
 .pageTab:hover:not([aria-selected='true']) { color: var(--go-text); }
@@ -498,6 +591,11 @@
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
   background: var(--go-surface);
+  box-shadow: var(--go-card-shadow);
+}
+
+.accountsCard {
+  background: var(--go-surface-panel);
 }
 
 .cardModelsPage {
@@ -508,6 +606,7 @@
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
   background: var(--go-surface);
+  box-shadow: var(--go-card-shadow);
 }
 
 .cardPage > .cardBody,
@@ -549,6 +648,17 @@
   padding: 0;
 }
 
+/* Accounts card keeps row-1 actions aligned with the title row rather than
+   vertically centering against a multi-line trigger block. */
+.accountsHead {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.accountsHead > .trailing {
+  min-height: 28px;
+}
+
 .cardTitle {
   flex: 1;
   min-width: 0;
@@ -563,14 +673,12 @@
 /* The one-line inventory of a collapsed card, so the fold still says what it
    is hiding. */
 .cardSub {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-size: 11.5px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--go-muted);
 }
 
@@ -581,7 +689,7 @@
   font-size: 11.5px;
   line-height: 1.5;
   white-space: nowrap;
-  color: var(--go-muted);
+  color: var(--go-muted-soft);
 }
 
 .cardBody {
@@ -623,10 +731,12 @@
 /* A card header that is also the disclosure for the region below it. */
 .cardTrigger {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 24px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 28px;
   margin: 0;
   padding: 0;
   border: none;
@@ -637,8 +747,86 @@
   cursor: pointer;
 }
 
+.cardTrigger:focus-visible {
+  outline: 2px solid var(--go-accent);
+  outline-offset: 2px;
+  border-radius: var(--go-radius-control);
+}
+
+.cardTriggerRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cardTriggerRow > .cardTitle {
+  flex: 0 1 auto;
+  line-height: 1.3;
+}
+
+/* Interactive disclosure capsule hugging the title on row 1, replacing a
+   detached green Tag + orphan chevron. */
+.foldBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--go-border);
+  border-radius: 999px;
+  background: var(--go-surface-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--go-muted);
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.foldDot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--go-muted);
+}
+
+.foldBadge[data-tone='success'] .foldDot {
+  background: var(--go-success);
+}
+
+.foldBadge[data-tone='warning'] .foldDot {
+  background: var(--go-warning);
+}
+
+.foldBadge[data-tone='warning'] {
+  border-color: color-mix(in srgb, var(--go-warning) 35%, var(--go-border));
+  color: var(--go-text);
+}
+
+.foldText {
+  line-height: 1;
+}
+
+.foldBadge > svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
 .cardTrigger:hover .cardTitle {
   color: var(--go-accent);
+}
+
+.cardTrigger:hover .foldBadge,
+.cardTrigger[aria-expanded='true'] .foldBadge {
+  border-color: var(--go-border-strong);
+  color: var(--go-text);
 }
 
 /* A header that carries its own trailing control keeps the trigger flush: the row
@@ -812,16 +1000,17 @@
      together; the ceiling keeps the whole frame at roughly four fifths of its
      former height. */
   max-height: 448px;
-  border: 0.5px solid var(--go-border);
+  border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
+  background: var(--go-surface-sunken);
   overflow: hidden;
 }
 
-.modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 0.5px solid var(--go-border); }
+.modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 1px solid var(--go-border); background: var(--go-surface-sunken); }
 .modelPanel { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
 .modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-right: 6px; }
 .modelRow + .modelRow { border-top: 0.5px solid var(--go-border); }
-.modelRowSelected { background: var(--go-accent-soft); border-radius: var(--go-radius-option); border-top-color: transparent; }
+.modelRowSelected { background: color-mix(in srgb, var(--go-accent) 14%, var(--go-surface-2)); border-radius: var(--go-radius-option); border-top-color: transparent; box-shadow: inset 2px 0 0 var(--go-accent); }
 .modelRow > [role="switch"] { width: 36px; min-width: 36px; flex: 0 0 36px; }
 .modelChoice { display: flex; align-items: baseline; width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); cursor: pointer; }
 /* Hover and selection cover the same whole row — name, badges, override mark and
@@ -829,13 +1018,13 @@
    selected row keeps its own surface; hover stays one step lighter than it, so
    the two states remain tellable apart. */
 .modelRow:hover:not(.modelRowSelected) {
-  background: color-mix(in srgb, var(--go-surface-2) 92%, var(--go-text));
+  background: color-mix(in srgb, var(--go-surface-2) 65%, transparent);
   border-top-color: transparent;
   border-radius: var(--go-radius-option);
 }
 .modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: normal; word-break: normal; overflow: hidden; flex: 0 1 auto; min-width: 0; }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--go-accent); }
-.modelDetails { overflow-y: auto; min-height: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface); }
+.modelDetails { overflow-y: auto; min-height: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface-elevated); }
 .modelDetails h3 { font-family: var(--go-display-font); font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
 .modelHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .stats { display: flex; flex-direction: column; gap: 10px; }
@@ -849,7 +1038,7 @@
 .modalities { display: flex; flex-wrap: wrap; gap: 4px; }
 .modality,
 .modalityOff { padding: 2px 7px; border-radius: var(--go-radius-small); font-size: 11px; line-height: 1.5; }
-.modality { background: var(--go-surface-2); color: var(--go-muted); }
+.modality { background: var(--go-surface-3); border: 1px solid var(--go-border-subtle); color: var(--go-text); }
 .modalityOff { border: 0.5px dashed var(--go-border); color: var(--go-muted); }
 .modelDetails .reset { align-self: flex-start; }
 .paneFoot { margin: auto 0 0; font-size: 11px; line-height: 1.5; color: var(--go-muted); }
@@ -857,21 +1046,9 @@
 .modelChoice:focus-visible, .filter:focus-visible, .cardTrigger:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 
 @container (max-width: 620px) {
-  .accountMain { grid-template-columns: 16px minmax(0, 1fr) auto 16px; gap: 8px; }
-  .accountHandle { grid-column: 1; grid-row: 1 / span 3; align-self: start; margin-top: 3px; }
-  .accountName { grid-column: 2 / span 2; grid-row: 1; }
-  .accountState { grid-column: 2; grid-row: 2; }
-  .accountReset { grid-column: 3; grid-row: 2; font-size: 11px; }
-  .accountBar { grid-column: 2; grid-row: 3; }
-  .accountPercent { grid-column: 3; grid-row: 3; }
-  .accountToggle { grid-column: 4; grid-row: 1 / span 3; align-self: start; margin-top: 3px; }
-  .accountIdle { grid-column: 2 / span 2; grid-row: 3; text-align: left; }
-  .accountDetail { padding-left: 12px; }
-  .accountEditor { margin-left: 12px; }
+  .accountProblems { padding-left: 12px; }
   .cardHead { flex-wrap: wrap; }
   .cardHead > .cardTrigger { flex: 1 1 180px; min-width: 0; }
-  .cardTrigger { flex-wrap: wrap; }
-  .cardSub { flex: 1 1 100%; order: 2; max-width: none; white-space: normal; overflow-wrap: anywhere; }
   .cardHead > .trailing { margin-left: auto; }
 }
 
@@ -887,10 +1064,11 @@
   .modelSearchRow > .input { flex-basis: 100%; }
   .modelToolbar .modelTools { width: 100%; margin-left: 0; justify-content: space-between; }
   .cardStamp { display: none; }
+  .accountMain { flex-wrap: wrap; padding: 10px; }
+  .accountTail { margin-left: auto; }
+  .accountManageStrip { padding: 8px; }
+  .accountActions { margin-left: 0; }
   .accountUsage { grid-template-columns: minmax(0, 1fr); }
-  .accountUsage > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 2px 10px; align-items: center; }
-  .accountUsage progress { margin: 0; }
-  .accountUsage .hint { grid-column: 1 / -1; }
 }
 
 @media (max-width: 520px) {

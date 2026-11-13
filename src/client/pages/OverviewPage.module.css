@@ -11,9 +11,10 @@
   flex-direction: column;
   min-width: 0;
   padding: 14px 15px;
-  border: 1px solid var(--go-border);
+  border: 1px solid var(--go-border-elevated);
   border-radius: var(--go-radius-card);
-  background: var(--go-surface);
+  background: var(--go-surface-elevated);
+  box-shadow: var(--go-tile-shadow);
 }
 
 .kpiLabel { color: var(--go-muted); font-size: 11.5px; line-height: 1.5; }
@@ -36,7 +37,7 @@
 
 .kpiFoot {
   margin-top: 5px;
-  color: var(--go-muted);
+  color: var(--go-muted-soft);
   font-size: 11px;
   line-height: 1.5;
   white-space: nowrap;
@@ -46,16 +47,17 @@
 
 .note { margin: 12px 0 0; color: var(--go-muted); font-size: 12px; line-height: 1.6; }
 
-/* 1.45fr keeps the quota bars readable while the stack of small cards fits the rest. */
+/* 1.45fr keeps the quota bars readable while the two-card status/account stack matches height. */
 .mainGrid {
   display: grid;
   grid-template-columns: 1.45fr 1fr;
   gap: 12px;
   margin-top: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
-.stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; height: 100%; }
+.stack > .card:last-child { flex: 1; }
 
 .card {
   display: flex;
@@ -65,11 +67,12 @@
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
   background: var(--go-surface);
+  box-shadow: var(--go-card-shadow);
 }
 
 .cardHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .cardTitle { margin: 0; font-size: 13.5px; line-height: 20px; font-weight: 600; color: var(--go-text); }
-.cardSub { margin: 2px 0 0; color: var(--go-muted); font-size: 11.5px; line-height: 1.5; }
+.cardSub { margin: 2px 0 0; color: var(--go-muted-soft); font-size: 11.5px; line-height: 1.5; }
 
 .accountHead { display: flex; align-items: center; gap: 10px; }
 
@@ -80,8 +83,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--go-accent) 28%, var(--go-border));
   border-radius: var(--go-radius-control);
-  background: var(--go-accent-soft);
+  background: color-mix(in srgb, var(--go-accent) 14%, var(--go-surface-2));
   color: var(--go-accent);
   font-size: 13px;
   font-weight: 700;
@@ -107,7 +111,7 @@
 .quotaReset {
   flex: 1;
   min-width: 0;
-  color: var(--go-muted);
+  color: var(--go-muted-soft);
   font-size: 11px;
   line-height: 1.5;
   overflow: hidden;
@@ -133,30 +137,36 @@
 .bar[data-level='high'] .barFill { background: var(--go-warning); }
 .bar[data-level='limited'] .barFill { background: var(--go-danger); }
 
-.divider { height: 1px; background: var(--go-border); margin: 14px 0; }
+.divider { height: 1px; background: var(--go-border-subtle); margin: 14px 0; }
 
 .switchRow { display: flex; align-items: flex-start; gap: 12px; }
 .switchText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .switchTitle { font-size: 12.5px; font-weight: 550; line-height: 1.5; color: var(--go-text); }
-.switchHint { color: var(--go-muted); font-size: 11.5px; line-height: 1.5; }
-.switchRow + .switchRow { margin-top: 9px; padding-top: 9px; border-top: 0.5px solid var(--go-border); }
+.switchHint { color: var(--go-muted-soft); font-size: 11.5px; line-height: 1.5; }
+.switchRow + .switchRow { margin-top: 9px; padding-top: 9px; border-top: 0.5px solid var(--go-border-subtle); }
 
 .failed { margin: 8px 0 0; color: var(--go-danger); font-size: 12px; line-height: 1.5; }
 
 .cardActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.stamp { flex: 1 1 auto; min-width: 0; color: var(--go-muted); font-size: 11px; line-height: 1.5; }
+.mainGrid > .card .cardActions { margin-top: auto; padding-top: 12px; }
+.stamp { flex: 1 1 auto; min-width: 0; color: var(--go-muted-soft); font-size: 11px; line-height: 1.5; }
 
-/* The sparkline is a row of divs, one per UTC day, scaled to the busiest day. */
+/* The sparkline spans the full overview width below mainGrid, scaling each UTC day bar cleanly. */
+.recentCard { margin-top: 12px; }
 .spark { display: flex; align-items: flex-end; gap: 3px; height: 56px; margin-top: 10px; }
+.recentCard .spark { height: 76px; gap: 8px; }
 .sparkBar {
   flex: 1;
   min-width: 2px;
   min-height: 2px;
   border-radius: 2px 2px 0 0;
-  background: color-mix(in srgb, var(--go-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--go-accent) 42%, var(--go-surface-2));
+  transition: background 120ms ease;
 }
-.sparkBar[data-hi='true'] { background: var(--go-accent); }
-.sparkAxis { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; color: var(--go-muted); font-size: 10px; }
+.recentCard .sparkBar { border-radius: 4px 4px 0 0; }
+.sparkBar:hover,
+.sparkBar[data-hi='true'] { background: color-mix(in srgb, var(--go-accent) 88%, var(--go-surface)); }
+.sparkAxis { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; color: var(--go-muted-soft); font-size: 10px; }
 
 .statRow {
   display: flex;
@@ -186,13 +196,17 @@
   padding: 13px 14px;
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
-  background: var(--go-surface);
+  background: var(--go-surface-panel);
   color: var(--go-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
 }
-.quickButton:hover { border-color: var(--go-border-strong); }
+.quickButton:hover {
+  background: var(--go-surface-elevated);
+  border-color: var(--go-border-elevated);
+}
 .quickButton:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 
 .quickIcon {
@@ -202,14 +216,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid var(--go-border);
   border-radius: var(--go-radius-control);
-  background: var(--go-accent-soft);
+  background: var(--go-surface-2);
   color: var(--go-accent);
 }
 .quickText { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .quickTitle { font-size: 12.5px; font-weight: 600; line-height: 1.5; }
 .quickSub {
-  color: var(--go-muted);
+  color: var(--go-muted-soft);
   font-size: 11px;
   line-height: 1.5;
   overflow: hidden;
@@ -217,7 +232,7 @@
   white-space: nowrap;
 }
 
-.footnote { margin: 16px 0 0; color: var(--go-muted); font-size: 11px; line-height: 1.6; }
+.footnote { margin: 16px 0 0; color: var(--go-muted-soft); font-size: 11px; line-height: 1.6; }
 
 @media (max-width: 1080px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
