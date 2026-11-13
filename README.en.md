@@ -163,7 +163,7 @@ Update to the latest npm release:
 dsh plugin --profile web update dsh-opencode-go --latest
 ```
 
-Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reopen the application. Headless users should replace `web` with `headless`. The repository's default branch may contain changes not yet released to npm. The current release line is `0.4.2`: it replaces the sidebar entry icon with the hand-drawn `go` mark (16 px expanded / 18 px collapsed), adds the sidebar console page with an opt-in entry (off by default), and only Advanced settings keep Save/Discard.
+Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reopen the application. Headless users should replace `web` with `headless`. The repository's default branch may contain changes not yet released to npm. The current release line is `0.4.3`: it puts the hand-drawn `go` mark in the settings-dialog navigation row too (host `settings.section.icon` seat, with a DOM fallback on older hosts), on top of the 0.4.2 sidebar-entry icon (16 px expanded / 18 px collapsed), the sidebar console page with an opt-in entry (off by default), and Advanced-only Save/Discard.
 
 **Why is usage hidden?** Auto mode shows it only for **DSH OpenCode Go** models. Check that the plugin is enabled, a key is configured, and the display mode is appropriate. The display mode lives under **Settings → OpenCode Go → Appearance → Usage display** and applies immediately; choose Always to show usage with other providers.
 

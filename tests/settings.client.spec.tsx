@@ -2129,12 +2129,17 @@ describe('client registration and remote lifecycle', () => {
     expect(harness.configForms.get).toHaveBeenCalledExactlyOnceWith('opencode-go')
     expect(harness.localeRegister).toHaveBeenCalledWith('settings.opencode-go', { en, zh })
     expect(harness.slotsInject).toHaveBeenCalledWith('settings.section', expect.any(Function))
-    const [registration, component] = harness.slotsRegister.mock.calls[0] as unknown as [
-      { id: string; label: () => string; inject: () => { getLocale: () => string } }, unknown,
-    ]
+    const registrations = harness.slotsRegister.mock.calls as unknown as Array<[
+      { name: string; id: string; label?: () => string; inject?: () => { getLocale: () => string } }, unknown,
+    ]>
+    // The settings nav glyph claims the host icon seat before the section itself
+    // registers, so find each contribution by slot name rather than by index.
+    const iconSeat = registrations.find(([entry]) => entry.name === 'settings.section.icon')
+    expect(iconSeat?.[0].id).toBe('opencode-go')
+    const [registration, component] = registrations.find(([entry]) => entry.name === 'settings.section')!
     expect(registration.id).toBe('opencode-go')
-    expect(registration.label()).toBe(en.nav)
-    expect(registration.inject().getLocale()).toBe('en')
+    expect(registration.label!()).toBe(en.nav)
+    expect(registration.inject!().getLocale()).toBe('en')
     expect(component).toBe(OpencodeGoSection)
     expect(harness.listeners.size).toBe(1)
     // The typed form has two readers: the section controller and the opt-in gate

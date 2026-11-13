@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-13
+
+### Changed
+
+- 设置对话框左侧导航的「OpenCode Go」行图标改为手绘 go 标记：优先通过宿主 DSH 0.2.2+ 新增的 `settings.section.icon` 图标 seat 注册（普通/选中态跟随宿主文字颜色）；对未声明该 seat 的旧宿主退回 DOM 兜底——按本地化 label 认行、隐藏兜底齿轮、用 CSS mask 画同款图标，宿主 DOM 变化时保留齿轮且不报错。
+- 图标几何抽成 `GO_ROW_GEOMETRY` 单一来源：侧栏入口组件与设置导航 mask 共用同一份路径，避免两处图形漂移；新增 `tests/settings-nav-icon.client.spec.tsx`（图标 seat、旧宿主兜底、locale 切换、卸载清理、无 `MutationObserver` 降级）。
+
 ## [0.4.2] - 2026-11-13
 
 ### Changed

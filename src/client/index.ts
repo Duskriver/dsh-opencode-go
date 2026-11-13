@@ -20,7 +20,8 @@ import { GoRowIcon } from './GoMark.tsx'
 import { GoPage } from './pages/Page.tsx'
 import { setPageTab } from './pages/nav.ts'
 import type { PageInjected, PageReaders, PageTab } from './pages/types.ts'
-import { PAGE_PANEL_ID, PAGE_SIDEBAR_ORDER, type GoLayoutService } from './host-slots.ts'
+import { PAGE_PANEL_ID, PAGE_SIDEBAR_ORDER, SETTINGS_SECTION_ID, type GoLayoutService } from './host-slots.ts'
+import { installSettingsNavIcon } from './settings-nav-icon.tsx'
 import {
   OpencodeGoSectionController,
   type OpencodeGoSettings,
@@ -126,6 +127,9 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
   ctx.effect(() => () => controller.dispose())
   const t = ctx.locale.bind(NS) as OpencodeGoSectionInjected['t']
   const localeOf = (): string => ctx.locale.getLocale().active
+  // The settings dialog's nav row: the host icon seat when this host has one
+  // (DSH 0.2.2+), the DOM stand-in for older shells. Both read the same label.
+  installSettingsNavIcon(ctx, () => t('nav'))
   // The page's own slot face always offers navigation: it only mounts while the
   // host already shows the page.
   const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage })
@@ -150,7 +154,7 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
-    id: 'opencode-go',
+    id: SETTINGS_SECTION_ID,
     order: 20,
     label: () => t('nav'),
     inject: injected,

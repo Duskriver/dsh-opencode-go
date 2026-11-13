@@ -31,11 +31,28 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'root'
       owner: { size: number; active: boolean }
     }
+    /**
+     * The glyph shown beside one settings section in the settings dialog's
+     * navigation. DSH 0.2.2 grew this seat; the row's section id addresses it.
+     * Older hosts do not declare it, which is exactly what the capability probe
+     * in `settings-nav-icon.tsx` watches for.
+     */
+    'settings.section.icon': {
+      kind: 'list'
+      scope: 'root'
+      owner: { size?: number }
+    }
   }
 }
 
 /** Identity shared by the sidebar row and the \`main\` panel it opens. */
 export const PAGE_PANEL_ID = 'opencode-go'
+
+/** Settings-section key: the nav row, the settings page and its icon all share it. */
+export const SETTINGS_SECTION_ID = 'opencode-go'
+
+/** Host slot that supplies a settings-section nav glyph (DSH 0.2.2+). */
+export const SETTINGS_SECTION_ICON_SLOT = 'settings.section.icon'
 
 /**
  * Directly below the plugin market (order 1) and above Scheduled tasks

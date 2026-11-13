@@ -84,6 +84,11 @@ function harness(options: { installSidebar?: boolean; sidebarEntry?: boolean; us
     return record.dispose
   })
   const slotsInject = vi.fn((slot: string, install: () => unknown) => {
+    // This harness models a pre-0.2.2 host: no settings nav icon seat. The seat
+    // path and the older-host stand-in have their own spec
+    // (tests/settings-nav-icon.client.spec.tsx), so the pair lifecycle here stays
+    // focused on the sidebar slots.
+    if (slot === 'settings.section.icon') return () => {}
     if (slot === 'sidebar.panellist' && !installSidebar) return () => {}
     return install()
   })

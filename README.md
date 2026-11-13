@@ -144,6 +144,7 @@ src/
     ├── index.ts + controller.ts  configForms 接入、即时写入与高级草稿、账号操作
     ├── host-slots.ts             sidebar.panellist / main 槽位契约与导航类型
     ├── GoMark.tsx + build-info.ts 图标（侧栏手绘 go / 页面品牌标）与构建信息
+    ├── settings-nav-icon.tsx      设置导航行图标（宿主 icon seat + 旧宿主 DOM 兜底）
     ├── pages/                    控制台页壳与六个子页（概览 / 用量 / 账号 / 模型 / 外观 / 关于）
     ├── Section.tsx              宿主设置页、账号卡片与模型编辑器
     ├── UsagePill.tsx            会话额度胶囊

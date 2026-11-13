@@ -9,7 +9,7 @@
  */
 export declare const CLIENT_BUILD_INFO: {
     readonly packageName: "dsh-opencode-go";
-    readonly version: "0.4.2";
+    readonly version: "0.4.3";
     readonly minHost: "0.2.1-rc.5";
     readonly build: "esbuild + lightningcss";
 };
