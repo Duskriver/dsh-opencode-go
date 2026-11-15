@@ -5,9 +5,16 @@
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-15
+
+### Fixed
+
+- 修复对话输入框额度胶囊（`UsagePill`）在部分字体（如衬线体）下末尾百分号 `%` 右侧被轻微裁切的问题（#98）。
+
 ### Changed
 
-- 仓库发布规则更新：根目录同步追踪唯一一个与当前版本一致的预打包归档 `dsh-opencode-go-<version>.tgz`（当前为 `dsh-opencode-go-0.4.3.tgz`），供无法等待 npm 发版的用户（如 DS Bot / DSH 桌面端 / 离线环境）直接手动安装或升级；更新 `.gitignore`（`*.tgz` 保留忽略、仅放行 `/dsh-opencode-go-*.tgz`）与 `.gitattributes`（`*.tgz binary`）。
+- 微调面板、看板与弹窗文字字号及亚像素抗锯齿渲染。
+- 仓库发布规则更新：根目录同步追踪唯一一个与当前版本一致的预打包归档 `dsh-opencode-go-<version>.tgz`（当前为 `dsh-opencode-go-0.4.4.tgz`），供无法等待 npm 发版的用户（如 DS Bot / DSH 桌面端 / 离线环境）直接手动安装或升级；更新 `.gitignore`（`*.tgz` 保留忽略、仅放行 `/dsh-opencode-go-*.tgz`）与 `.gitattributes`（`*.tgz binary`）。
 - 新增 `npm run pack:release`（清理旧版根目录 `.tgz` 并重新打包校验），并将“唯一版本 `.tgz` + 包内文件与工作区逐字节一致”校验接入 `npm run check:pack` 与 CI。
 - 更新 `README.md`、`README.en.md`、`docs/advanced.md`、`docs/advanced.en.md`、`docs/development.md` 与 `docs/independent-package.md`，补充 `.tgz` 手动安装、升级、排查与仓库发版说明。
 

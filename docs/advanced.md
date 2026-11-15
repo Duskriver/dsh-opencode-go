@@ -4,12 +4,12 @@
 
 ## 手动安装与离线升级（.tgz）
 
-仓库根目录会随每次发版同步追踪**唯一一个**预打包归档文件（例如 `dsh-opencode-go-0.4.3.tgz`），内含完整的编译产物 `lib/`、清单、`cordis.patch.yml` 与许可说明，不需要本机安装 `git` 或执行构建脚本。当 npm 源尚未发布最新版本（例如 npm 仍停留在 `0.4.0`）、或在 DS Bot / 桌面端 / 离线环境中需要获取最新修复（如 #94 自动高度外壳塌陷修复）时，请按以下步骤手动安装或升级。
+仓库根目录会随每次发版同步追踪**唯一一个**预打包归档文件（例如 `dsh-opencode-go-0.4.4.tgz`），内含完整的编译产物 `lib/`、清单、`cordis.patch.yml` 与许可说明，不需要本机安装 `git` 或执行构建脚本。当 npm 源尚未发布最新版本（例如 npm 仍停留在 `0.4.0`）、或在 DS Bot / 桌面端 / 离线环境中需要获取最新修复（如 #94 自动高度外壳塌陷修复）时，请按以下步骤手动安装或升级。
 
 ### 1. 下载到本地并检查路径
 
-- 在 GitHub 仓库根目录打开 [`dsh-opencode-go-0.4.3.tgz`](../dsh-opencode-go-0.4.3.tgz)，点击 **Download raw file**（或下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.3.tgz)）。
-- 建议保存到**不含空格与特殊字符**的本地目录（例如 Windows：`C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.3.tgz`；macOS / Linux：`~/Downloads/dsh-opencode-go-0.4.3.tgz`）。
+- 在 GitHub 仓库根目录打开 [`dsh-opencode-go-0.4.4.tgz`](../dsh-opencode-go-0.4.4.tgz)，点击 **Download raw file**（或下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.4.tgz)）。
+- 建议保存到**不含空格与特殊字符**的本地目录（例如 Windows：`C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.4.tgz`；macOS / Linux：`~/Downloads/dsh-opencode-go-0.4.4.tgz`）。
 
 ### 2. 从图形界面安装或升级（DSH Web / DSH Desktop / DS Bot）
 
@@ -18,7 +18,7 @@
 3. 在输入框填入本地 `.tgz` 文件的**完整绝对路径**（若路径中包含空格，建议先移至无空格路径，或按 `file:` URL 格式填写）。
 4. 点击 **安装**，完成后点击 **立即启用**。
 5. **彻底退出并重启**：DS Bot / DSH Desktop 请退出全部托盘与后台进程后重开；Web 端请重启 `dsh web` 并强制刷新浏览器页面。
-6. 重启后打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认当前版本为 `0.4.3`。
+6. 重启后打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认当前版本为 `0.4.4`。
 
 ### 3. 从命令行安装或升级（按 profile 独立生效）
 
@@ -26,15 +26,15 @@ Web 与 Headless 使用不同的 DSH profile，需要分别安装和更新：
 
 ```sh
 # 首次安装到 web profile（将路径替换为本地 .tgz 实际路径）
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.3.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.4.tgz
 
 # 从旧版（如 npm 0.4.0）升级到新版 .tgz：先移除旧包再安装本地 .tgz 最稳妥
 dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.3.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.4.tgz
 
 # Headless profile 同理
 dsh plugin --profile headless remove dsh-opencode-go
-dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.3.tgz
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.4.tgz
 ```
 
 > 💡 **为什么建议先下载到本地再传本地路径，而不是直接填写远程 `.tgz` URL？**
@@ -55,7 +55,7 @@ dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.3.tgz
 
 ```sh
 # 从本地 .tgz 安装（推荐用于获取最新版本）
-dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.3.tgz
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.4.tgz
 
 # 或当 npm 已发布最新版时在线安装
 dsh plugin --profile headless add dsh-opencode-go
