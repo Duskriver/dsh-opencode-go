@@ -1,6 +1,7 @@
 /* Native Host tokens or Classic editorial colors, shared with every other surface. */
 .shell { width: min(1100px, 100%); max-height: 100%; padding: 0; gap: 0; border-radius: var(--go-radius-modal); overflow: auto; scrollbar-width: thin; }
-.dashboard { flex-shrink: 0; color: var(--go-text); background: var(--go-bg); font-family: var(--go-font); font-size: 13px; line-height: 1.6; padding: 26px 32px 24px; }
+/* Subpixel antialiasing, as on .page: the Host body is grayscale-only, which softens small text on 1x displays. */
+.dashboard { flex-shrink: 0; color: var(--go-text); background: var(--go-bg); font-family: var(--go-font); font-size: 13px; line-height: 1.6; padding: 26px 32px 24px; -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto; }
 .dashboard, .dashboard * { box-sizing: border-box; }
 .dashboard button, .dashboard select { font: inherit; }
 .dashboard button { cursor: pointer; color: inherit; }

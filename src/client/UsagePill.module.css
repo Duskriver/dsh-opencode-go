@@ -2,14 +2,14 @@
 .root { position: relative; display: inline-flex; min-width: 0; font-family: var(--go-font); color: var(--go-text); }
 .trigger { box-sizing: border-box; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%;
   padding: 6px 10px; border: 1px solid var(--go-border); border-radius: var(--go-radius-pill); background: var(--go-surface);
-  color: var(--go-text); font: inherit; font-size: 11.5px; line-height: 1.5; white-space: nowrap; cursor: pointer; }
+  color: var(--go-text); font: inherit; font-size: 12px; line-height: 1.5; white-space: nowrap; cursor: pointer; }
 .trigger:hover, .trigger:focus-visible { border-color: color-mix(in srgb, var(--go-accent) 65%, var(--go-border)); background: var(--go-surface-2); }
 .trigger.plain { padding: 4px 6px; border-color: transparent; background: transparent; color: inherit; }
 .trigger.plain:hover, .trigger.plain:focus-visible { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
 .trigger:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .pillStatus { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
 .pillStatus[data-warning] { background: var(--go-warning); }
-.reading { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+.reading { flex: none; min-width: 0; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
 .unit { color: var(--go-muted); }
 .stale, .fallback { color: var(--go-warning); font-size: 11px; }
 .account { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--go-muted); }
@@ -27,6 +27,8 @@
 .panel { position: absolute; bottom: calc(100% + 9px); right: 0; z-index: 100; box-sizing: border-box;
   display: flex; flex-direction: column; width: 352px; max-width: calc(100vw - 48px); max-height: 72vh;
   border: 1px solid var(--go-border); border-radius: var(--go-radius-popover); color: var(--go-text); font-size: 12px;
+  /* Subpixel antialiasing, as on .page: the Host body is grayscale-only, which softens small text on 1x displays. */
+  -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto;
   line-height: 1.45; box-shadow: var(--go-shadow); isolation: isolate; }
 /* The panel takes focus only when no action inside can: keep the ring for that fallback. */
 .panel:focus { outline: none; }
@@ -51,7 +53,7 @@ button.accChip:hover:not(:disabled) { background: var(--go-surface-2); }
 button.accChip:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 button.accChip:disabled { opacity: .5; cursor: default; }
 .dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
-.tag { flex: none; padding: 1px 5px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 10.5px; line-height: 16px; }
+.tag { flex: none; padding: 1px 5px; border-radius: var(--go-radius-small); background: var(--go-accent-soft); color: var(--go-accent); font-size: 11px; line-height: 16px; }
 .accChipName { min-width: 0; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); font-weight: 500; }
 .accChip .icon { width: 11px; height: 11px; }
 
@@ -59,10 +61,10 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .windows { flex: none; display: flex; flex-direction: column; margin-top: 4px; }
 .win { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; }
 .meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; line-height: 17px; }
-.winLabel { flex: none; font-size: 11.5px; color: var(--go-muted); }
+.winLabel { flex: none; font-size: 12px; color: var(--go-muted); }
 .winReset { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
-  font-size: 10.5px; line-height: 15px; color: var(--go-muted); }
-.winPercent { flex: none; width: 36px; text-align: right; font-family: var(--go-number-font); font-size: 12.5px;
+  font-size: 11px; line-height: 15px; color: var(--go-muted); }
+.winPercent { flex: none; width: 36px; text-align: right; font-family: var(--go-number-font); font-size: 13px;
   font-weight: 600; font-variant-numeric: tabular-nums; }
 .win progress { display: block; width: 100%; min-width: 0; height: 6px; appearance: none; border: 0;
   border-radius: 99px; background: var(--go-track); }
@@ -78,7 +80,7 @@ button.accChip:disabled { opacity: .5; cursor: default; }
   font-size: 11px; line-height: 17px; color: var(--go-muted); }
 .actions .hist { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: -4px; padding: 2px 4px;
   border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-text);
-  font-family: var(--go-font); font-size: 11.5px; line-height: 17px; cursor: pointer; }
+  font-family: var(--go-font); font-size: 12px; line-height: 17px; cursor: pointer; }
 .actions .hist .icon { width: 14px; height: 14px; color: var(--go-accent); }
 .actions .hist:hover, .actions .hist:active { background: var(--go-surface-2); }
 .actions .hist:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
@@ -104,12 +106,12 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .option:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 .optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .option[data-selected] .optionName { font-weight: 500; }
-.hint { margin: 10px 0 4px; color: var(--go-muted); font-size: 11.5px; line-height: 18px; }
+.hint { margin: 10px 0 4px; color: var(--go-muted); font-size: 12px; line-height: 18px; }
 .warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 var(--go-radius-small) var(--go-radius-small) 0;
-  background: color-mix(in srgb, var(--go-warning) 7%, transparent); color: var(--go-text); font-size: 11.5px; line-height: 1.6; overflow-wrap: anywhere; }
+  background: color-mix(in srgb, var(--go-warning) 7%, transparent); color: var(--go-text); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .warning p { margin: 4px 0 0; }
 .retry { align-self: flex-start; padding: 4px 8px; margin-bottom: 8px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small);
-  background: transparent; color: var(--go-accent); font: inherit; font-size: 11.5px; cursor: pointer; }
+  background: transparent; color: var(--go-accent); font: inherit; font-size: 12px; cursor: pointer; }
 .retry:disabled { opacity: .5; cursor: default; }
 .retry:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 
@@ -136,7 +138,7 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .sidebarWindow progress.limited { --go-progress: var(--go-danger); }
 .sidebarStatus { color: var(--go-warning); font-size: 11px; }
 .sidebarHistory { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 33px; margin-top: 2px; padding: 0;
-  border: 0; border-top: 1px solid var(--go-border); background: transparent; color: var(--go-muted); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+  border: 0; border-top: 1px solid var(--go-border); background: transparent; color: var(--go-muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .sidebarHistory span { flex: 1; }
 .sidebarHistory > .icon:first-child { color: var(--go-accent); }
 .sidebarHistory:hover { color: var(--go-text); }
