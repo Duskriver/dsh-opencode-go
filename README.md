@@ -38,24 +38,47 @@ DSH 原生支持接入 OpenCode Go，但原生模式无法满足复杂的生产�
 
 ### 1. 安装插件
 
-#### 方式 A：在 DSH 界面中一键安装（推荐）
+> 💡 **版本提示**：当前仓库最新版本为 **`0.4.3`**（已包含 #94 修复 DS Bot 等自动高度外壳下的设置看板高度塌陷、侧边栏控制台页与单一保存手势等更新）。若 npm 源尚未同步发布最新版本（例如 npm 仍停留在 `0.4.0`），直接按包名 `dsh-opencode-go` 安装会拿到旧版本；此时请优先使用下方 **方式 A** 下载仓库根目录附带的 [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz) 手动安装。
+
+#### 方式 A：通过 `.tgz` 离线包手动安装（获取最新版本 / DS Bot 与桌面端推荐）
+1. **获取 `.tgz` 安装包**：
+   - 在 GitHub 仓库根目录点击 [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz)，点击 **Download raw file**（或直接下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.3.tgz)），保存到本地固定路径（建议放在**无空格、无特殊字符**的目录，例如 `C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.3.tgz` 或 `~/Downloads/dsh-opencode-go-0.4.3.tgz`）。
+   - *如果你已将本仓库 `git clone` 到本地，仓库根目录已直接自带该 `.tgz` 文件，无需额外打包。*
+2. **在 DSH / DS Bot 界面中安装**：
+   1. 打开 DSH（Web / Desktop）或 **DS Bot**，进入 **插件 → 添加插件**。
+   2. 若之前已安装过旧版（如 npm `0.4.0`），建议先在插件列表移除旧版 `dsh-opencode-go`（不会清空已保存的 API Key 与插件配置）。
+   3. 在 **添加插件** 输入框中填入本地 `.tgz` 文件的**完整绝对路径**（例如 Windows 下 `C:\Users\alice\Downloads\dsh-opencode-go-0.4.3.tgz`，macOS/Linux 下 `/Users/alice/Downloads/dsh-opencode-go-0.4.3.tgz`；路径含空格时建议移至无空格目录或使用 `file:` 前缀）。
+   4. 点击 **安装**，完成后点击 **立即启用**。
+   5. **彻底重启客户端或服务**：DS Bot / 桌面客户端请完全退出后台进程后重新打开；Web 端请重启 `dsh web` 并强制刷新浏览器页面。
+3. **或通过命令行安装本地 `.tgz`**：
+   ```sh
+   # Web profile（请替换为实际的本地 .tgz 路径）
+   dsh plugin --profile web add ./dsh-opencode-go-0.4.3.tgz
+
+   # Headless profile
+   dsh plugin --profile headless add ./dsh-opencode-go-0.4.3.tgz
+   ```
+   *命令行安装后请重启 `dsh web`（Headless 用户请使用 `--profile headless`）。推荐先下载到本地再传本地路径安装，可避免部分网络环境下直连超时以及部分内置 pnpm 版本在重复解析远程 `.tgz` URL 时触发 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 报错。更多安装与排查细节见[高级使用指南](docs/advanced.md#手动安装与离线升级tgz)。*
+
+#### 方式 B：从 npm 在线安装（仅当 npm 已同步最新版时）
 1. 打开 DSH，进入 **插件 → 添加插件**。
-2. 输入 `dsh-opencode-go`（或填入仓库地址 `https://github.com/Duskriver/dsh-opencode-go`），点击 **安装**。
+2. 输入 `dsh-opencode-go`，点击 **安装**。
 3. 安装完成后点击 **立即启用**。
 
 ![在 DSH 中安装插件](docs/assets/install-via-dsh.gif)
 
-#### 方式 B：命令行安装
+命令行在线安装：
 ```sh
 dsh plugin --profile web add dsh-opencode-go
 ```
-*命令行安装后请重启 `dsh web`。Headless 用户请使用 `--profile headless`。*
+*若发现通过包名安装到的仍是旧版本（如 `0.4.0`），请改用上方的 **方式 A（`.tgz` 手动安装）**。如果本机已安装 `git` 且网络可直连 GitHub，也可在命令行尝试 `dsh plugin --profile web add github:Duskriver/dsh-opencode-go#main`（或在界面填写 `https://github.com/Duskriver/dsh-opencode-go`），但该方式依赖本机 `git` 且不支持常规自动更新。*
 
 ### 2. 配置与使用
-1. 打开 **设置 → OpenCode Go → 账号**，点击添加，填写账号名称与 OpenCode Go API Key 后确认。
-2. （可选）打开 **设置 → OpenCode Go → 概览 → 侧边栏入口**，启用后侧边栏出现「OpenCode Go」入口并打开完整控制台页面；入口默认关闭，不开启时设置页与输入栏用量弹窗照常可用。
-3. 在任意会话的模型选择器中，选择 **DSH OpenCode Go** 目录下的模型。
-4. 开始对话，输入区右下角即可看到实时的用量胶囊。
+1. 安装启用并重启后，建议先打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认插件版本已显示为 `0.4.3`。
+2. 打开 **设置 → OpenCode Go → 账号**，点击添加，填写账号名称与 OpenCode Go API Key 后确认。
+3. （可选）打开 **设置 → OpenCode Go → 概览 → 侧边栏入口**，启用后侧边栏出现「OpenCode Go」入口并打开完整控制台页面；入口默认关闭，不开启时设置页与输入栏用量弹窗照常可用。
+4. 在任意会话的模型选择器中，选择 **DSH OpenCode Go** 目录下的模型。
+5. 开始对话，输入区右下角即可看到实时的用量胶囊。
 
 > 设置只有一个保存手势：只有 **高级设置**（网关地址、代理、超时、图片上限等）需要点击保存，其余开关与选项（含免费通道、侧边栏入口、界面主题与额度显示）修改后立即生效。
 
@@ -188,6 +211,14 @@ OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插�
 ## ❓ 常见问题 (FAQ)
 
 <details>
+<summary><strong>Q: 为什么按包名安装后版本仍是 0.4.0，或在 DS Bot 中设置看板依然高度塌陷？</strong></summary>
+
+由于 npm 仓库上的发布版本可能暂未同步最新源码（`#94` 对 DS Bot 等自动高度外壳下设置看板高度塌陷的修复已在 `0.4.1` 合入，当前仓库版本为 `0.4.3`），直接按包名 `dsh-opencode-go` 安装或执行 `dsh plugin update` 仍可能拉取到 `0.4.0`。
+
+解决方法：请改用上文 **方式 A** 下载仓库根目录的 [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz) 到本地，先在插件管理中移除旧版（不会丢失已有账号 Key 与设置），再通过本地 `.tgz` 文件路径重新安装并启用，最后**彻底退出 DS Bot / DSH 桌面端后重新启动**（Web 端请重启 `dsh web` 并强制刷新浏览器）。详见[手动安装与离线升级说明](docs/advanced.md#手动安装与离线升级tgz)。
+</details>
+
+<details>
 <summary><strong>Q: 为什么聊天输入区没有出现用量胶囊？</strong></summary>
 
 1. 检查当前会话选中的模型是否为 **DSH OpenCode Go** 分组下的模型。默认“自动”模式仅在选择本插件模型时展示；若希望在使用其他模型时也看到配额，可在 **设置 → OpenCode Go → 外观 → 额度显示** 中切为“常驻”（立即生效）。
@@ -240,10 +271,22 @@ Free 推理直接使用 `optionalDependencies` 中版本锁定为 1.4.4 的官�
 ## 📦 更新与卸载
 
 ### 更新插件
+
+#### 通过 `.tgz` 手动升级（当 npm 尚未发布新版时推荐）
+1. 从仓库根目录下载最新版本的 `.tgz`（当前为 [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz)）。
+2. 为避免旧版缓存或远程 URL 触发 pnpm 的 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 报错，建议先移除旧插件包再安装本地 `.tgz`（DSH 凭据服务中的 API Key 与 profile 配置会保留，操作前仍建议自行核对备份）：
+   ```sh
+   dsh plugin --profile web remove dsh-opencode-go
+   dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.3.tgz
+   ```
+   *若在 DSH / DS Bot 图形界面操作：在 **插件** 页移除旧版 `dsh-opencode-go`，再到 **添加插件** 填入新版 `.tgz` 的本地绝对路径安装并启用。*
+3. 更新后重启 `dsh web` 并刷新浏览器页面（DS Bot / 桌面客户端请彻底退出后台进程后重新打开）。
+
+#### 通过 npm 在线更新（仅当 npm 已同步最新版时）
 ```sh
 dsh plugin --profile web update dsh-opencode-go --latest
 ```
-更新后重启 `dsh web` 并刷新浏览器页面（桌面客户端请完全退出后重新打开）。
+更新后重启 `dsh web` 并刷新浏览器页面（桌面客户端请完全退出后重新打开）。Headless 用户请将 `--profile web` 替换为 `--profile headless`；不同 profile 相互独立，需分别更新。
 
 ### 卸载插件
 ```sh
@@ -261,11 +304,12 @@ npm ci
 npm test
 npm run typecheck
 npm run check:dist
+npm run pack:release
 npm run check:pack
 npm run verify
 ```
 
-测试按领域覆盖宿主、协议转换、账号、统计、传输、免费通道退避、前端。修改源码后先运行 `npm run compile` 更新 `lib/`；`verify` 包含类型检查、产物一致性、全量测试与包加载冒烟。独立安装和 Headless 验证见[开发说明](docs/development.md)。
+测试按领域覆盖宿主、协议转换、账号、统计、传输、免费通道退避、前端。仓库遵循**单包追踪规则**：每次版本更新或改动会被打包进 npm 包的文件后，先运行 `npm run compile` 更新 `lib/`，再运行 `npm run pack:release` 在仓库根目录同步生成唯一对应的 `dsh-opencode-go-<version>.tgz`（脚本会自动清理旧版本 `.tgz`）；`check:pack` 会在 CI 中校验根目录有且仅有当前版本的 `.tgz` 且内容与工作区逐字节一致。`verify` 包含类型检查、源码规范检查、产物一致性、全量测试与包加载冒烟。独立安装和 Headless 验证见[开发说明](docs/development.md)。
 
 ---
 

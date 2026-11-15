@@ -2,13 +2,62 @@
 
 [返回 README](../README.md) · [English](advanced.en.md)
 
+## 手动安装与离线升级（.tgz）
+
+仓库根目录会随每次发版同步追踪**唯一一个**预打包归档文件（例如 `dsh-opencode-go-0.4.3.tgz`），内含完整的编译产物 `lib/`、清单、`cordis.patch.yml` 与许可说明，不需要本机安装 `git` 或执行构建脚本。当 npm 源尚未发布最新版本（例如 npm 仍停留在 `0.4.0`）、或在 DS Bot / 桌面端 / 离线环境中需要获取最新修复（如 #94 自动高度外壳塌陷修复）时，请按以下步骤手动安装或升级。
+
+### 1. 下载到本地并检查路径
+
+- 在 GitHub 仓库根目录打开 [`dsh-opencode-go-0.4.3.tgz`](../dsh-opencode-go-0.4.3.tgz)，点击 **Download raw file**（或下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.3.tgz)）。
+- 建议保存到**不含空格与特殊字符**的本地目录（例如 Windows：`C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.3.tgz`；macOS / Linux：`~/Downloads/dsh-opencode-go-0.4.3.tgz`）。
+
+### 2. 从图形界面安装或升级（DSH Web / DSH Desktop / DS Bot）
+
+1. 打开 **插件 → 添加插件**（Plugins → Add plugin）。
+2. 如果当前已安装旧版（如 `0.4.0`），建议先在插件列表移除旧版 `dsh-opencode-go`（DSH 会保留凭据库中的 API Key 与 profile 配置，不会丢失账号）。
+3. 在输入框填入本地 `.tgz` 文件的**完整绝对路径**（若路径中包含空格，建议先移至无空格路径，或按 `file:` URL 格式填写）。
+4. 点击 **安装**，完成后点击 **立即启用**。
+5. **彻底退出并重启**：DS Bot / DSH Desktop 请退出全部托盘与后台进程后重开；Web 端请重启 `dsh web` 并强制刷新浏览器页面。
+6. 重启后打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认当前版本为 `0.4.3`。
+
+### 3. 从命令行安装或升级（按 profile 独立生效）
+
+Web 与 Headless 使用不同的 DSH profile，需要分别安装和更新：
+
+```sh
+# 首次安装到 web profile（将路径替换为本地 .tgz 实际路径）
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.3.tgz
+
+# 从旧版（如 npm 0.4.0）升级到新版 .tgz：先移除旧包再安装本地 .tgz 最稳妥
+dsh plugin --profile web remove dsh-opencode-go
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.3.tgz
+
+# Headless profile 同理
+dsh plugin --profile headless remove dsh-opencode-go
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.3.tgz
+```
+
+> 💡 **为什么建议先下载到本地再传本地路径，而不是直接填写远程 `.tgz` URL？**
+> 一方面可以避免直连 GitHub 时的网络超时；另一方面，DSH 部分内置 `pnpm` 版本在重复解析远程 HTTP(S) `.tgz` URL 时可能触发 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 报错。下载到本地文件后按本地路径安装最稳定。
+
+### 4. 常见安装问题排查
+
+- **提示 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`**：请勿继续复用远程 tarball URL；先执行 `dsh plugin --profile <profile> remove dsh-opencode-go`，再改用已下载到本地磁盘的 `.tgz` 路径安装。
+- **安装后功能或界面仍停留在旧版（如 DS Bot 设置看板依旧塌陷）**：多半是旧版进程未完全退出或安装到了另一个 profile。请确认彻底关闭 DS Bot / DSH 进程后重启，并检查对应 profile 下 `node_modules/dsh-opencode-go/package.json` 中的 `version` 字段。
+- **Free 通道提示 `MISSING_BUN_RUNTIME`**：确认安装时未使用 `--omit=optional`。本插件直接声明 `@oven/bun-*` 平台可选包（无 `postinstall` 脚本），正常安装无需额外批准构建脚本；Go 通道不受影响。
+- **网络受限无法拉取可选依赖**：离线安装 `.tgz` 仍可能需要从 npm 源解析少量声明的依赖（如 `openai`、`@anthropic-ai/sdk`、`undici` 或 `@oven/bun-*`）；若身处受限网络，可在命令行配置环境变量代理或 npm/pnpm 镜像源后再执行 `dsh plugin add`。
+
 ## 高级用法
 
 ### Headless 模式
 
-安装插件：
+安装插件（若 npm 尚未同步最新版，请使用本地 `.tgz` 路径）：
 
 ```sh
+# 从本地 .tgz 安装（推荐用于获取最新版本）
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.3.tgz
+
+# 或当 npm 已发布最新版时在线安装
 dsh plugin --profile headless add dsh-opencode-go
 ```
 

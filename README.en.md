@@ -92,7 +92,30 @@ Once enabled:
 
 Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for the current validation workflow.
 
-### Install from DSH
+> **Release note**: The current repository release is **`0.4.3`** (including `#94` fixing the collapsed settings panel in auto-height shells such as DS Bot, the sidebar console page, and the single Save gesture). If the npm registry has not synced the latest version yet (for example, npm is still on `0.4.0`), installing by package name `dsh-opencode-go` will install the older build; use **Option A (`.tgz` manual install)** below with [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz) tracked at the repository root.
+
+### Option A: Manual install from the tracked `.tgz` tarball (recommended for the latest release / DS Bot & Desktop)
+
+1. **Download the `.tgz` package**:
+   - Open [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz) at the repository root on GitHub and click **Download raw file** (or download the [raw file directly](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.3.tgz)) to a local folder without spaces or special characters (for example `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.3.tgz` or `~/Downloads/dsh-opencode-go-0.4.3.tgz`).
+   - *If you already cloned this repository, `dsh-opencode-go-0.4.3.tgz` is already present at the repository root.*
+2. **Install from DSH / DS Bot UI**:
+   1. Open DSH (Web / Desktop) or **DS Bot** and go to **Plugins → Add plugin**.
+   2. If an older version (such as npm `0.4.0`) is already installed, remove the old `dsh-opencode-go` entry first (your saved API keys and settings remain in DSH credentials/profile).
+   3. Enter the **full local path** to the downloaded `.tgz` file (for example `C:\Users\alice\Downloads\dsh-opencode-go-0.4.3.tgz` or `/Users/alice/Downloads/dsh-opencode-go-0.4.3.tgz`; if the path has spaces, move it to a space-free folder or use a `file:` URL).
+   4. Click **Install**, then click **Enable now**.
+   5. **Restart the host completely**: quit DS Bot / Desktop DSH (including background/tray processes) and reopen it, or restart `dsh web` and hard-refresh the browser page.
+3. **Or install the local `.tgz` via CLI**:
+   ```sh
+   # Web profile (replace with your local .tgz path)
+   dsh plugin --profile web add ./dsh-opencode-go-0.4.3.tgz
+
+   # Headless profile
+   dsh plugin --profile headless add ./dsh-opencode-go-0.4.3.tgz
+   ```
+   *Restart `dsh web` after CLI installation (Web and Headless use separate profiles). Downloading the `.tgz` locally and installing from a local path avoids GitHub network timeouts and prevents `ERR_PNPM_MISSING_TARBALL_INTEGRITY` errors that some bundled pnpm versions can hit on repeated remote tarball URL resolutions. See the [advanced guide](docs/advanced.en.md#manual-installation-and-offline-updates-tgz) for troubleshooting.*
+
+### Option B: Install from npm (when npm has synced the latest release)
 
 1. Open **Plugins → Add plugin**.
 2. Enter `dsh-opencode-go` and click **Install**.
@@ -100,26 +123,23 @@ Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for t
 
 ![Install the plugin in DSH](docs/assets/install-via-dsh.gif)
 
-You can also enter the repository URL:
-
-```text
-https://github.com/Duskriver/dsh-opencode-go
-```
-
 Command-line installation:
 
 ```sh
 dsh plugin --profile web add dsh-opencode-go
 ```
 
+*If installing by package name still gives an older release (such as `0.4.0`), switch to **Option A** above. If you have `git` installed locally and want to pull directly from GitHub source, `dsh plugin --profile web add github:Duskriver/dsh-opencode-go#main` (or `https://github.com/Duskriver/dsh-opencode-go` in the UI) is also supported by DSH, though it requires `git` and does not participate in regular `dsh plugin update` checks.*
+
 Start or restart `dsh web` after command-line installation. Web and Headless use separate profiles; install and update each individually.
 
 ### Get started
 
-1. Open **Settings → OpenCode Go → Accounts**, click **Add account**, enter a name and your OpenCode Go subscription API key, and confirm.
-2. (Optional) Open **Settings → OpenCode Go → Overview** and enable **Sidebar entry**. A row appears in the DSH sidebar and opens the full console; the entry is off by default, and the Settings section and in-place usage dialog keep working without it.
-3. Select a model under **DSH OpenCode Go** in the conversation model picker.
-4. Start chatting and check usage beside the input. With multiple accounts, open the panel to switch.
+1. After restarting, open **Settings → OpenCode Go** (or the **About** tab in the sidebar console once enabled) to verify the installed version reads `0.4.3`.
+2. Open **Settings → OpenCode Go → Accounts**, click **Add account**, enter a name and your OpenCode Go subscription API key, and confirm.
+3. (Optional) Open **Settings → OpenCode Go → Overview** and enable **Sidebar entry**. A row appears in the DSH sidebar and opens the full console; the entry is off by default, and the Settings section and in-place usage dialog keep working without it.
+4. Select a model under **DSH OpenCode Go** in the conversation model picker.
+5. Start chatting and check usage beside the input. With multiple accounts, open the panel to switch.
 
 > Only **Advanced settings** keep Save/Discard; every other switch and option in this plugin applies immediately.
 
@@ -157,13 +177,26 @@ Screenshots illustrate the interface. Actual models, quotas, and timestamps depe
 
 ## Updates and common questions
 
-Update to the latest npm release:
+### Manual update from `.tgz` (recommended when npm is behind the repository)
+
+Download the latest [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz) from the repository root, remove the older package first (to avoid stale cache or `ERR_PNPM_MISSING_TARBALL_INTEGRITY` issues; saved keys and profile configuration remain in DSH), and install the local `.tgz` file:
+
+```sh
+dsh plugin --profile web remove dsh-opencode-go
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.3.tgz
+```
+
+For DS Bot / DSH Desktop, you can also uninstall the old `dsh-opencode-go` entry in **Plugins**, add the local `.tgz` path under **Plugins → Add plugin**, enable it, and fully quit and reopen the application.
+
+### Update from npm (when npm has synced the latest release)
 
 ```sh
 dsh plugin --profile web update dsh-opencode-go --latest
 ```
 
 Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reopen the application. Headless users should replace `web` with `headless`. The repository's default branch may contain changes not yet released to npm. The current release line is `0.4.3`: it puts the hand-drawn `go` mark in the settings-dialog navigation row too (host `settings.section.icon` seat, with a DOM fallback on older hosts), on top of the 0.4.2 sidebar-entry icon (16 px expanded / 18 px collapsed), the sidebar console page with an opt-in entry (off by default), and Advanced-only Save/Discard.
+
+**Why does DS Bot still show a collapsed settings page or version `0.4.0` after installing by package name?** The npm registry may still be serving `0.4.0`, while `#94` (auto-height shell fix for DS Bot) and the console redesign landed in `0.4.1`–`0.4.3`. Download [`dsh-opencode-go-0.4.3.tgz`](dsh-opencode-go-0.4.3.tgz) locally, remove the old plugin package, install from the local `.tgz` path, and fully restart DS Bot / DSH. See [manual installation and offline updates](docs/advanced.en.md#manual-installation-and-offline-updates-tgz).
 
 **Why is usage hidden?** Auto mode shows it only for **DSH OpenCode Go** models. Check that the plugin is enabled, a key is configured, and the display mode is appropriate. The display mode lives under **Settings → OpenCode Go → Appearance → Usage display** and applies immediately; choose Always to show usage with other providers.
 
@@ -209,11 +242,12 @@ npm ci
 npm test
 npm run typecheck
 npm run check:dist
+npm run pack:release
 npm run check:pack
 npm run verify
 ```
 
-Tests cover host services, accounts, catalog, protocols, analytics, transport, Free backoff, and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
+Tests cover host services, accounts, catalog, protocols, analytics, transport, Free backoff, and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. Per repository policy, every release or packed-file update also tracks a single root tarball (`dsh-opencode-go-<version>.tgz`) generated with `npm run pack:release` (which removes older root `.tgz` files); `check:pack` asserts both tarball contents and byte-for-byte parity with the workspace. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
 
 ## More documentation
 
