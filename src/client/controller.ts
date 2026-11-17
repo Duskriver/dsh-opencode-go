@@ -284,7 +284,7 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
   setEnabled(next: boolean): void
   /** Opt the sidebar row and the console page in or out; applied immediately. */
   setSidebarEntry(next: boolean): void
-  setModelEnabled(id: string, next: boolean): void
+  setModelEnabled(id: string | readonly string[], next: boolean): void
 }
 
 /** One controller owns the page's typed drafts and immediate account operations. */
@@ -504,9 +504,18 @@ export class OpencodeGoSectionController {
 
   async setEnabled(next: boolean): Promise<void> { await this.writePickerSetting('enabled', next) }
   async setSidebarEntry(next: boolean): Promise<void> { await this.writePickerSetting('sidebarEntry', next) }
-  async setModelEnabled(id: string, next: boolean): Promise<void> {
-    if (this.models.status === 'ready' && this.models.entries.some(model => modelSettingsKey(model) === id && model.configurationMissing)) return
-    await this.writePickerSetting('modelVisibility', { ...this.scope.getSnapshot().value?.modelVisibility, [id]: next })
+  async setModelEnabled(id: string | readonly string[], next: boolean): Promise<void> {
+    const ids = typeof id === 'string' ? [id] : id
+    const missing = new Set(
+      this.models.status === 'ready'
+        ? this.models.entries.filter(model => model.configurationMissing).map(modelSettingsKey)
+        : [],
+    )
+    const validIds = ids.filter(key => key.length > 0 && !missing.has(key))
+    if (validIds.length === 0) return
+    const updates: Record<string, boolean> = { ...this.scope.getSnapshot().value?.modelVisibility }
+    for (const key of validIds) updates[key] = next
+    await this.writePickerSetting('modelVisibility', updates)
   }
 
   private async writePickerSetting(field: 'enabled' | 'sidebarEntry' | 'modelVisibility', value: boolean | Record<string, boolean>): Promise<void> {

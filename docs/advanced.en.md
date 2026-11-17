@@ -154,7 +154,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `usageDisplay` | Usage display mode: `auto`, `always`, or `off` |
 | `proxyURL` | Network proxy; an empty string uses the default network settings |
 | `refreshMinutes` | Model catalog cache lifetime; defaults to 60 minutes, with manual refresh available in Settings |
-| `modelVisibility` | Control model picker visibility by model ID |
+| `modelVisibility` | Control model picker visibility by model ID (`dsh-opencode-free/<id>` for Free); omitted non-deprecated models default to `true` (`deprecated` defaults to `false`) |
 | `modelLimits` | Per-model `contextWindow` and `maxTokens` overrides, plus additional `thinkingBudgets` options; null uses defaults |
 | `maxImages` | Maximum images in one request's history; unset by default, with oldest images offloaded when exceeded |
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |

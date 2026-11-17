@@ -354,6 +354,103 @@ describe("model availability and picker visibility", () => {
       expect(screen.getByText('request timed out')).toBeTruthy()
     })
 
+    it('enables and disables all configurable models in the current view (including deprecated) in one write', async () => {
+      const missing = { id: 'missing-model', name: 'Missing', configurationMissing: true }
+      const { host } = await mountOpen({ catalog: { models: [missing, ...models], stale: false } })
+      const enableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll })
+      const disableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll })
+
+      // Initially Alpha & Beta are on, Old (deprecated) is off, Missing is unconfigurable.
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(false)
+
+      await act(async () => { fireEvent.click(enableAll) })
+      expect(host.set).toHaveBeenCalledTimes(1)
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: true, beta: true, old: true })
+      expect(checked('Alpha')).toBe(true)
+      expect(checked('Beta')).toBe(true)
+      expect(checked('Old')).toBe(true)
+      expect(checked('Missing')).toBe(false)
+      expect(enableAll.disabled).toBe(true)
+      expect(disableAll.disabled).toBe(false)
+
+      await act(async () => { fireEvent.click(disableAll) })
+      expect(host.set).toHaveBeenCalledTimes(2)
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: false, beta: false, old: false })
+      expect(checked('Alpha')).toBe(false)
+      expect(checked('Beta')).toBe(false)
+      expect(checked('Old')).toBe(false)
+      expect(checked('Missing')).toBe(false)
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(true)
+    })
+
+    it('scopes batch enable/disable to the active search query, filter tab, and source tab', async () => {
+      const { host } = await mountOpen({
+        value: { modelVisibility: { alpha: true, beta: false, old: false } },
+        catalog: {
+          stale: false,
+          models: [...models, { id: 'free-one', name: 'Free One', source: 'free' }],
+        },
+      })
+      const enableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll })
+      const disableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll })
+
+      // Narrow by search query: only Beta matches; Alpha, Old and Free One stay untouched.
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'beta' } })
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(true)
+      await act(async () => { fireEvent.click(enableAll) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: true, beta: true, old: false })
+
+      // Narrow to Deprecated filter: only Old matches.
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: '' } })
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterDeprecated + ' 1') }))
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(true)
+      await act(async () => { fireEvent.click(enableAll) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: true, beta: true, old: true })
+
+      // Empty search view disables both batch buttons.
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'does-not-exist' } })
+      expect(enableAll.disabled).toBe(true)
+      expect(disableAll.disabled).toBe(true)
+
+      // Free tab scopes strictly to Free models without touching Go visibility.
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsDisableAll })) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', {
+        alpha: true, beta: true, old: true, 'dsh-opencode-free/free-one': false,
+      })
+    })
+
+    it('disables batch buttons while a write is pending, when read-only, or when only configurationMissing models exist', async () => {
+      await mountOpen({ catalog: { models: [{ id: 'm', name: 'Missing', configurationMissing: true }], stale: false } })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+
+      cleanup()
+      const next = await mountOpen()
+      const applySet = next.host.set.getMockImplementation()!
+      let finish!: (accepted: boolean) => void
+      next.host.set.mockImplementationOnce((field, value) => new Promise<boolean>(resolve => {
+        finish = accepted => {
+          if (accepted) void applySet(field, value).then(resolve)
+          else resolve(false)
+        }
+      }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsDisableAll })) })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+      await act(async () => { finish(true) })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(false)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+
+      await act(async () => { next.host.publish({ writable: false }) })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+    })
+
   })
 })
 

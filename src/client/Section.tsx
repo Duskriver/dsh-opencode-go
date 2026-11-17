@@ -497,7 +497,7 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   disabled: boolean
   visibilitySaving: boolean
   onEdit: (next: OpencodeGoModelLimits) => void
-  onModelEnabled: (id: string, enabled: boolean) => void
+  onModelEnabled: (id: string | readonly string[], enabled: boolean) => void
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
@@ -530,6 +530,9 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const entries = useMemo(() => all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
     && (filter === 'all' || filter === 'new' && isNewModel(model, now)
       || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)]) || filter === 'deprecated' && model.deprecated)), [all, normalized, filter, now, draft])
+  const toggleable = useMemo(() => entries.filter(entry => !entry.configurationMissing), [entries])
+  const canEnableAll = toggleable.some(entry => !isModelEnabled(entry, modelVisibility))
+  const canDisableAll = toggleable.some(entry => isModelEnabled(entry, modelVisibility))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
   const visibilityDisabled = disabled || visibilitySaving
   const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | number[] | undefined): void => {
@@ -552,7 +555,15 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
             aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
         </div>
       </div>
-      <p className={css.modelHelp}>{t('visibilityHint')}</p>
+      <div className={css.modelSubbar}>
+        <p className={css.modelHelp}>{t('visibilityHint')}</p>
+        <div className={css.modelBatchActions}>
+          <Button variant="outline" size="sm" disabled={visibilityDisabled || !canEnableAll}
+            onClick={() => { onModelEnabled(toggleable.map(modelSettingsKey), true) }}>{t('modelsEnableAll')}</Button>
+          <Button variant="outline" size="sm" disabled={visibilityDisabled || !canDisableAll}
+            onClick={() => { onModelEnabled(toggleable.map(modelSettingsKey), false) }}>{t('modelsDisableAll')}</Button>
+        </div>
+      </div>
       {model ? (
         <div className={css.modelLayout}>
           {/* A group, not a <nav>: the model picker is not navigation, and any
@@ -1281,7 +1292,7 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
   locale?: string
   disabled: boolean
   onEdit: (value: OpencodeGoModelLimits) => void
-  setModelEnabled: (id: string, next: boolean) => void
+  setModelEnabled: (id: string | readonly string[], next: boolean) => void
   loadModels: () => void
   surface?: 'settings' | 'page'
 }) {
@@ -1396,7 +1407,7 @@ function Loaded(props: {
   setEnabled: (next: boolean) => void
   /** Opt the sidebar row and its console page in or out; applied immediately. */
   setSidebarEntry: (next: boolean) => void
-  setModelEnabled: (id: string, next: boolean) => void
+  setModelEnabled: (id: string | readonly string[], next: boolean) => void
   /** Opens the full sidebar page; absent on hosts that have not registered it. */
   openPage?: () => void
   accountActions: GoAccountsActions

@@ -156,6 +156,8 @@ export declare const en: {
     modelsGoSource: string;
     modelsFreeSource: string;
     modelsRefresh: string;
+    modelsEnableAll: string;
+    modelsDisableAll: string;
     modelsLoading: string;
     modelsFailed: string;
     modelsStale: string;
