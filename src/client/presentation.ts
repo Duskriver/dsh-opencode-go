@@ -193,6 +193,17 @@ export const en = {
   modalityUnknown: 'Not declared',
   modalitiesSource: 'Input modalities come from the online /models configuration.',
   modalitiesForwarding: 'This plugin converts and forwards image attachments only.',
+  priceLabel: 'Price per 1M tokens',
+  priceInput: 'Input',
+  priceOutput: 'Output',
+  priceCacheRead: 'Cache read',
+  priceCacheWrite: 'Cache write',
+  priceRow: 'Input {input} · Output {output} / 1M',
+  priceTier: 'Above {context} tokens: {rates}',
+  priceFree: 'Free',
+  priceMultiplier: 'Some periods carry a price multiplier; the rates above are the base.',
+  priceUnpublished: 'The gateway publishes no price for this model.',
+  priceSource: 'Prices come from the /models declaration, in US dollars per million tokens.',
   visibilityHint: 'Model switches and capacity changes apply immediately.',
   modelVisibleLabel: 'Show {name} in conversations',
   configurationMissing: 'Configuration missing',
@@ -554,6 +565,17 @@ export const zh: typeof en = {
   modalityUnknown: '未声明',
   modalitiesSource: '输入模态来自 /models 的在线配置。',
   modalitiesForwarding: '本插件目前仅转换并转发图像附件。',
+  priceLabel: '价格（每 100 万 Token）',
+  priceInput: '输入',
+  priceOutput: '输出',
+  priceCacheRead: '缓存读取',
+  priceCacheWrite: '缓存写入',
+  priceRow: '输入 {input} · 输出 {output} / 1M',
+  priceTier: '上下文超过 {context}：{rates}',
+  priceFree: '免费',
+  priceMultiplier: '部分时段按倍率计价，以上为基础价。',
+  priceUnpublished: '网关未公布该模型的价格。',
+  priceSource: '价格来自 /models 声明，单位为美元 / 百万 Token。',
   visibilityHint: '模型开关与容量调整都会立即生效。',
   modelVisibleLabel: '在会话中显示 {name}',
   configurationMissing: '配置缺失',
@@ -919,6 +941,29 @@ export function useGoThemeTokens(theme: OpencodeGoTheme = DEFAULT_OPENCODE_GO_TH
 }
 
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+const priceFormatters = new Map<string, Intl.NumberFormat>()
+const tokenFormatters = new Map<string, Intl.NumberFormat>()
+
+/** A published rate in USD per million tokens, with only the digits the rate needs. */
+export function formatTokenPrice(rate: number, locale?: string): string {
+  let formatter = priceFormatters.get(locale ?? '')
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2, maximumFractionDigits: 4 })
+    priceFormatters.set(locale ?? '', formatter)
+  }
+  return formatter.format(rate)
+}
+
+/** Group a token count, as used by context-tier thresholds. */
+export function formatTokenCount(value: number, locale?: string): string {
+  let formatter = tokenFormatters.get(locale ?? '')
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale)
+    tokenFormatters.set(locale ?? '', formatter)
+  }
+  return formatter.format(value)
+}
 
 const DEFAULT_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   year: 'numeric', month: 'numeric', day: 'numeric',

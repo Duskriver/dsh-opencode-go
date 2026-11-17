@@ -1615,8 +1615,29 @@ interface GoModel {
     releaseDate?: string;
     /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
     inputModalities?: readonly InputModality[];
+    /** The text tariff the gateway publishes; absent when it declares none. */
+    price?: GoModelPrice;
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
+}
+/** A published text tariff in US dollars per million tokens. */
+interface GoModelPrice {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    /** Rates that replace the base ones above a context threshold, in ascending order. */
+    tiers?: readonly GoModelPriceTier[];
+    /** The gateway prices some periods by a multiplier; the rates here are the base ones. */
+    multipliers?: boolean;
+}
+/** One context-tier tariff; `inputTokensAbove` is the last context still on the previous tier. */
+interface GoModelPriceTier {
+    inputTokensAbove: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
 }
 interface ThinkingBudgetRange {
     min: number;

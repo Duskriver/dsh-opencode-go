@@ -191,6 +191,17 @@ export declare const en: {
     modalityUnknown: string;
     modalitiesSource: string;
     modalitiesForwarding: string;
+    priceLabel: string;
+    priceInput: string;
+    priceOutput: string;
+    priceCacheRead: string;
+    priceCacheWrite: string;
+    priceRow: string;
+    priceTier: string;
+    priceFree: string;
+    priceMultiplier: string;
+    priceUnpublished: string;
+    priceSource: string;
     visibilityHint: string;
     modelVisibleLabel: string;
     configurationMissing: string;
@@ -434,6 +445,10 @@ export declare const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeSche
 export declare function useHostScheme(): GoThemeScheme;
 /** Resolve one visual theme in the Host's current color scheme. */
 export declare function useGoThemeTokens(theme?: OpencodeGoTheme): GoThemeTokens;
+/** A published rate in USD per million tokens, with only the digits the rate needs. */
+export declare function formatTokenPrice(rate: number, locale?: string): string;
+/** Group a token count, as used by context-tier thresholds. */
+export declare function formatTokenCount(value: number, locale?: string): string;
 /** Format a date/time stamp using a module-level cached Intl.DateTimeFormat instance. */
 export declare function formatDateTime(value: number | string | Date, locale?: string, options?: Intl.DateTimeFormatOptions): string;
 /** Internal derived custom properties; third-party themes customize the Host tokens instead. */

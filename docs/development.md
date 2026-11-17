@@ -32,7 +32,7 @@ Vitest tests are organized by domain. Results for the history-dashboard migratio
 | `free.spec.ts` | Dual route lifecycle, public Bearer fallback, official-HTTPS-only saved-key binding, account retry and credential deadlines |
 | `free-channel.spec.ts`, `free-transport.spec.ts` | Free failure classification, Retry-After/backoff, cancellation, transport isolation, stream-budget-derived SOCKS relay idle limits and coexistence with Go |
 | `pricing.spec.ts` | Catalog tariff validation and Free-model eligibility; historical amounts come from official CSV |
-| `catalog.spec.ts` | Discovery, model limits/visibility, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
+| `catalog.spec.ts` | Discovery, model limits/visibility, gateway price projection, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `config-validation.spec.ts` | Base-URL credential rejection with redacted diagnostics, proxy userinfo acceptance and thinking-budget schema bounds |
 | `socks-tunnel.spec.ts` | Loopback SOCKS relay: allowed-target enforcement, authentication, stream-budget-derived idle budget, idle teardown/reset and IPv4/IPv6 normalisation |
 | `theme.client.spec.ts` | Native/Classic token resolution, neutral Host-token fallbacks, host font inheritance, Host-independent chart series and strong control boundaries at WCAG 1.4.11 3:1, including the composited rendered bar opacity, plus the derived quota track's visibility against every surface and the stylesheet rules that must paint it |
@@ -47,7 +47,7 @@ Vitest tests are organized by domain. Results for the history-dashboard migratio
 | `transport.spec.ts` | Bounded JSON/gzip, classified/redacted HTTP errors, real CONNECT/SOCKS5 proxies and SDK bridge matching |
 | `settings.client.spec.tsx` | Page configuration, typed Save/Reset/refused writes, locale changes, registration and subscription/cancellation lifecycle |
 | `appearance-theme.spec.ts` | `appearanceTheme` controller defaults (Native, invalid drafts), staged Classic draft vs applied theme and inherited-reset preview |
-| `accounts-models.client.spec.tsx` | AccountsCard forms/status/quota, drag/keyboard ordering, model visibility, metadata failures and refresh races |
+| `accounts-models.client.spec.tsx` | AccountsCard forms/status/quota, drag/keyboard ordering, model visibility and prices, metadata failures and refresh races |
 | `usage.client.spec.tsx` | Conversation pill, dashboard account/range controls, official amount presentation, quota refresh/visibility and accessibility |
 
 All test imports target current modules directly. `vitest.config.ts` has no aliases or compatibility resolver. Its Google SDK loader is the same version-guarded transport patch used by the production build. The UI tests load the published DSH primitives and the installed locale bundle.

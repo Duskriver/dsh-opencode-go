@@ -291,13 +291,72 @@ export interface GoModel {
   releaseDate?: string
   /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
   inputModalities?: readonly InputModality[]
+  /** The text tariff the gateway publishes; absent when it declares none. */
+  price?: GoModelPrice
   /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
   configurationMissing?: boolean
+}
+
+/** A published text tariff in US dollars per million tokens. */
+export interface GoModelPrice {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  /** Rates that replace the base ones above a context threshold, in ascending order. */
+  tiers?: readonly GoModelPriceTier[]
+  /** The gateway prices some periods by a multiplier; the rates here are the base ones. */
+  multipliers?: boolean
+}
+
+/** One context-tier tariff; `inputTokensAbove` is the last context still on the previous tier. */
+export interface GoModelPriceTier {
+  inputTokensAbove: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
 }
 
 export interface ThinkingBudgetRange {
   min: number
   max: number
+}
+
+const PRICE_RATES = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
+
+function priceRate(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * A price is display-only: a malformed declaration drops the price, never the
+ * model, so one drifted field cannot make the whole listing unusable.
+ * @param value - the `price` field of a Host model row.
+ * @returns the validated tariff, or undefined when the field is unusable.
+ */
+function parseGoModelPrice(value: unknown): GoModelPrice | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const row = value as Record<string, unknown>
+  const rates = PRICE_RATES.map(key => priceRate(row[key]))
+  if (rates.some(rate => rate === undefined)) return undefined
+  const price: GoModelPrice = { input: rates[0]!, output: rates[1]!, cacheRead: rates[2]!, cacheWrite: rates[3]! }
+  if (row.multipliers === true) price.multipliers = true
+  if (Array.isArray(row.tiers) && row.tiers.length > 0) {
+    const tiers: GoModelPriceTier[] = []
+    for (const entry of row.tiers) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return price
+      const tier = entry as Record<string, unknown>
+      const tierRates = PRICE_RATES.map(key => priceRate(tier[key]))
+      const threshold = tier.inputTokensAbove
+      if (tierRates.some(rate => rate === undefined)
+        || typeof threshold !== 'number' || !Number.isSafeInteger(threshold) || threshold <= 0) return price
+      tiers.push({ inputTokensAbove: threshold, input: tierRates[0]!, output: tierRates[1]!,
+        cacheRead: tierRates[2]!, cacheWrite: tierRates[3]! })
+    }
+    price.tiers = tiers
+  }
+  return price
 }
 
 /**
@@ -395,6 +454,8 @@ export function parseGoModels(value: unknown): GoModel[] {
     if (validReleaseDate(row.releaseDate)) model.releaseDate = row.releaseDate
     const modalities = normalizeInputModalities(row.inputModalities)
     if (modalities !== undefined) model.inputModalities = modalities
+    const price = parseGoModelPrice(row.price)
+    if (price !== undefined) model.price = price
     return model
   })
 }

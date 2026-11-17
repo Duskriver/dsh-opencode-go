@@ -18,6 +18,7 @@ import {
   normalizeInputModalities,
   validReleaseDate,
   type GoModel,
+  type GoModelPrice,
   DEFAULT_BASE_URL,
   type OpencodeGoConfig,
   DEFAULT_FREE_BASE_URL,
@@ -605,10 +606,30 @@ function listingError(snapshot: CatalogSnapshot): LlmError {
 
 function describeCatalog(snapshot: CatalogSnapshot): GoModel[] {
   return sortModels([
-    ...[...snapshot.models.values()].map(model => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
-      ...reasoningBudgetRange(model) === undefined ? {} : { reasoningBudget: reasoningBudgetRange(model) } })),
+    ...[...snapshot.models.values()].map(model => {
+      const budget = reasoningBudgetRange(model), price = publishedPrice(model, snapshot.details.get(model.id))
+      return { id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
+        ...budget === undefined ? {} : { reasoningBudget: budget },
+        ...price === undefined ? {} : { price } }
+    }),
     ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
   ].map(model => ({ ...model, source: snapshot.source, ...snapshot.details.get(model.id) })))
+}
+
+/**
+ * Hand the client the tariff the gateway declared, as the capacity editor's
+ * price reference. Models without a usable declaration stay unpriced.
+ * @param model - the parsed directory entry.
+ * @param details - the listing details carrying the tariff verdict.
+ * @returns the display tariff, or undefined when none was published.
+ */
+function publishedPrice(model: Model<Api>, details: ModelDetails | undefined): GoModelPrice | undefined {
+  if (details?.costKnown === false) return undefined
+  const { input, output, cacheRead, cacheWrite, tiers } = model.cost
+  return { input, output, cacheRead, cacheWrite,
+    ...tiers === undefined || tiers.length === 0 ? {} : { tiers: tiers.map(tier => ({ inputTokensAbove: tier.inputTokensAbove,
+      input: tier.input, output: tier.output, cacheRead: tier.cacheRead, cacheWrite: tier.cacheWrite })) },
+    ...model.multipliers === undefined ? {} : { multipliers: true } }
 }
 
 /**

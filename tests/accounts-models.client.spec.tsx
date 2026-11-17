@@ -217,6 +217,36 @@ describe("model availability and picker visibility", () => {
       expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
     })
 
+    it('shows each model\'s gateway tariff in the list and the parameter card', async () => {
+      const money = (rate: number): string => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD',
+        currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(rate)
+      const tier = { inputTokensAbove: 200000, input: 2, output: 8, cacheRead: 0.2, cacheWrite: 0 }
+      const priced: GoModel = { id: 'priced', name: 'Priced', price: {
+        input: 1, output: 4, cacheRead: 0.1, cacheWrite: 0, multipliers: true, tiers: [tier] } }
+      const free: GoModel = { id: 'free-model', name: 'Free Model', source: 'free',
+        price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }
+      await mountOpen({ catalog: { models: [priced, free, { id: 'bare', name: 'Bare' }], stale: false } })
+
+      const list = screen.getByRole('group', { name: en.modelsLabel })
+      // A priced row carries its base rates; tiers stay in the card, and the
+      // line says Free for a zero tariff instead of $0.00.
+      expect(within(list).getByText(t('priceRow', { input: money(1), output: money(4) }))).toBeTruthy()
+      expect(within(list).getByRole('button', { name: /^Bare$/ }).textContent).not.toContain('$')
+      const card = within(screen.getByRole('region', { name: en.modelDetails }))
+      expect(card.getByText(`${t('priceInput')} ${money(1)} · ${t('priceOutput')} ${money(4)} · ${t('priceCacheRead')} ${money(0.1)}`)).toBeTruthy()
+      expect(card.getByText(t('priceTier', { context: new Intl.NumberFormat(undefined).format(tier.inputTokensAbove),
+        rates: `${t('priceInput')} ${money(2)} · ${t('priceOutput')} ${money(8)} · ${t('priceCacheRead')} ${money(0.2)}` }))).toBeTruthy()
+      expect(card.getByText(en.priceMultiplier)).toBeTruthy()
+
+      // A model the gateway does not price says so instead of claiming a rate.
+      await act(async () => { fireEvent.click(within(list).getByRole('button', { name: /^Bare$/ })) })
+      expect(card.getByText(en.priceUnpublished)).toBeTruthy()
+
+      await act(async () => { fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab })) })
+      const freeList = screen.getByRole('group', { name: en.modelsLabel })
+      expect(within(freeList).getByText(en.priceFree)).toBeTruthy()
+    })
+
     it('preserves unrelated advanced drafts and committed switch values when a write fails', async () => {
       const { host, snapshot } = await mountOpen()
       await openAdvanced()
