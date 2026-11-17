@@ -101,4 +101,20 @@ describe('appearance theme immediate writes', () => {
     expect(snapshot()).toMatchObject({ appliedAppearanceTheme: 'classic', dirty: false })
     expect(form.getSnapshot().value?.appearanceTheme).toBe('classic')
   })
+
+  it('projects legacy plain pill style as borderless badge until overridden', async () => {
+    const { actions, set, snapshot } = setup({
+      value: { usagePillStyle: 'plain' as never },
+      user: { usagePillStyle: 'plain' as never },
+    })
+    expect(snapshot()).toMatchObject({
+      usagePillStyle: { text: 'badge', overridden: true, invalid: false },
+      usagePillBorder: { text: 'false', overridden: false, invalid: false },
+    })
+    actions.edit('usagePillBorder', 'true')
+    expect(set).toHaveBeenCalledWith('usagePillBorder', true)
+    await vi.waitFor(() => {
+      expect(snapshot().usagePillBorder).toMatchObject({ text: 'true', overridden: true, invalid: false })
+    })
+  })
 })

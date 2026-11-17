@@ -245,7 +245,13 @@ export declare const en: {
     usagePillStyleHint: string;
     usagePillStylePreviewHint: string;
     usagePillStyle_badge: string;
-    usagePillStyle_plain: string;
+    usagePillStyle_concentric: string;
+    usagePillStyle_fill: string;
+    usagePillStyle_bars: string;
+    usagePillStyle_rings: string;
+    usagePillBorderLabel: string;
+    usagePillBorderSummary: string;
+    usagePillBorderHint: string;
     groupConnection: string;
     groupCacheTimeouts: string;
     groupImages: string;

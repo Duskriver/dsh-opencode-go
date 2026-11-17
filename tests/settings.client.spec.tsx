@@ -46,7 +46,7 @@ describe("settings page and typed capacity editing", () => {
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
     | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
-    | 'usageDisplay' | 'usagePillStyle' | 'appearanceTheme' | 'showSidebarQuota' | 'freeEnabled'
+    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'showSidebarQuota' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -85,6 +85,7 @@ describe("settings page and typed capacity editing", () => {
       ...settled,
       usageDisplay: field('auto'),
       usagePillStyle: field('badge'),
+      usagePillBorder: field('true'),
       appearanceTheme: field('native'),
       showSidebarQuota: field('false'),
       freeEnabled: field('false'),
@@ -169,10 +170,11 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
-    it('keeps appearance on its own tab and applies all three edits immediately', () => {
+    it('keeps appearance on its own tab and applies all four edits immediately', () => {
       const reading = actions()
       renderSection(stateOf(), reading, { foldedModels: true })
       expect(screen.queryByRole('switch', { name: en.showSidebarQuotaLabel })).toBeNull()
+      expect(screen.queryByRole('switch', { name: en.usagePillBorderLabel })).toBeNull()
       expect(screen.queryByRole('radiogroup', { name: en.appearanceThemeLabel })).toBeNull()
       expect(screen.queryByRole('radiogroup', { name: en.usagePillStyleLabel })).toBeNull()
       selectTab('appearance')
@@ -188,9 +190,16 @@ describe("settings page and typed capacity editing", () => {
       fireEvent.click(toggle)
       expect(reading.edit).toHaveBeenCalledWith('showSidebarQuota', 'true')
       const group = screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })
+      expect(within(group).getAllByRole('radio')).toHaveLength(5)
       expect(within(group).getByRole<HTMLInputElement>('radio', { name: en.usagePillStyle_badge }).checked).toBe(true)
-      fireEvent.click(within(group).getByRole('radio', { name: en.usagePillStyle_plain }))
-      expect(reading.edit).toHaveBeenCalledWith('usagePillStyle', 'plain')
+      for (const style of ['concentric', 'fill', 'bars', 'rings'] as const) {
+        fireEvent.click(within(group).getByRole('radio', { name: en[`usagePillStyle_${style}`] }))
+        expect(reading.edit).toHaveBeenLastCalledWith('usagePillStyle', style)
+      }
+      const borderToggle = screen.getByRole('switch', { name: en.usagePillBorderLabel })
+      expect(borderToggle.getAttribute('aria-checked')).toBe('true')
+      fireEvent.click(borderToggle)
+      expect(reading.edit).toHaveBeenLastCalledWith('usagePillBorder', 'false')
       expect(reading.save).not.toHaveBeenCalled()
     })
 
@@ -208,17 +217,25 @@ describe("settings page and typed capacity editing", () => {
 
     it('disables appearance changes for read-only settings and resets saved appearance overrides', () => {
       const reading = actions()
-      const state = stateOf({ appearanceTheme: field('classic', { overridden: true }), showSidebarQuota: field('true', { overridden: true }), usagePillStyle: field('plain', { overridden: true }) })
+      const state = stateOf({
+        appearanceTheme: field('classic', { overridden: true }),
+        showSidebarQuota: field('true', { overridden: true }),
+        usagePillStyle: field('concentric', { overridden: true }),
+        usagePillBorder: field('false', { overridden: true }),
+      })
       const store = renderSection(state, reading)
       selectTab('appearance')
+      const styleGroup = screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })
+      expect(Array.from(styleGroup.querySelectorAll('[data-pill-border]')).every(node => node.getAttribute('data-pill-border') === 'false')).toBe(true)
       fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
-      expect(reading.resetField.mock.calls).toEqual([['appearanceTheme'], ['showSidebarQuota'], ['usagePillStyle']])
+      expect(reading.resetField.mock.calls).toEqual([['appearanceTheme'], ['showSidebarQuota'], ['usagePillStyle'], ['usagePillBorder']])
       act(() => { store.set({ ...state, writable: false }) })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.showSidebarQuotaLabel }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.usagePillBorderLabel }).disabled).toBe(true)
       for (const radio of within(screen.getByRole('radiogroup', { name: en.appearanceThemeLabel })).getAllByRole<HTMLInputElement>('radio')) {
         expect(radio.disabled).toBe(true)
       }
-      for (const radio of within(screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })).getAllByRole<HTMLInputElement>('radio')) {
+      for (const radio of within(styleGroup).getAllByRole<HTMLInputElement>('radio')) {
         expect(radio.disabled).toBe(true)
       }
     })
@@ -374,7 +391,8 @@ describe("settings page and typed capacity editing", () => {
       renderSection(stateOf({
         appearanceTheme: field('classic', { overridden: true }),
         showSidebarQuota: field('true', { overridden: true }),
-        usagePillStyle: field('plain', { overridden: true }),
+        usagePillStyle: field('concentric', { overridden: true }),
+        usagePillBorder: field('false', { overridden: true }),
         usageDisplay: field('always', { overridden: true }),
       }), {}, { foldedModels: true })
       // Appearance writes immediately now, so it never claims a pending draft.
@@ -1082,7 +1100,8 @@ describe("settings page and typed capacity editing", () => {
         usageDisplay: field('always', { overridden: true }),
         baseURL: field('https://other.test/v1', { overridden: true }),
         showSidebarQuota: field('true', { overridden: true }),
-        usagePillStyle: field('plain', { overridden: true }),
+        usagePillStyle: field('concentric', { overridden: true }),
+        usagePillBorder: field('false', { overridden: true }),
       }), edits)
       openAdvanced()
       fireEvent.click(screen.getByRole('button', { name: en.advancedResetAll }))
@@ -1091,7 +1110,7 @@ describe("settings page and typed capacity editing", () => {
       selectTab('appearance')
       fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
       expect(edits.resetField.mock.calls.map(call => call[0]).sort())
-        .toEqual(['baseURL', 'showSidebarQuota', 'usageDisplay', 'usagePillStyle'])
+        .toEqual(['baseURL', 'showSidebarQuota', 'usageDisplay', 'usagePillBorder', 'usagePillStyle'])
     })
 
     it('keeps the card reset out of reach while every row inherits its value', () => {
@@ -1667,7 +1686,8 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
   /** Every immediate text control, with the text its surface sends and the value it stores. */
   const immediateFields: ReadonlyArray<readonly [ImmediateTextField, string, string | boolean]> = [
     ['usageDisplay', 'always', 'always'],
-    ['usagePillStyle', 'plain', 'plain'],
+    ['usagePillStyle', 'concentric', 'concentric'],
+    ['usagePillBorder', 'false', false],
     ['appearanceTheme', 'classic', 'classic'],
     ['showSidebarQuota', 'true', true],
     ['freeEnabled', 'true', true],
@@ -1736,6 +1756,7 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['freeEnabled', 'maybe'],
     ['usageDisplay', 'neon'],
     ['usagePillStyle', 'neon'],
+    ['usagePillBorder', 'maybe'],
     ['appearanceTheme', 'system'],
     ['showSidebarQuota', '1'],
   ] as const)('refuses the invalid immediate %s=%s without a draft or a write', async (field, text) => {
@@ -1862,12 +1883,12 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
 
   it('resets immediate fields immediately and stages advanced clears for Save', async () => {
     const value = { apiKeyEnv: 'ACCOUNT_A', freeEnabled: true, usageDisplay: 'always' as const,
-      showSidebarQuota: true, usagePillStyle: 'plain' as const, appearanceTheme: 'classic' as const }
+      showSidebarQuota: true, usagePillStyle: 'concentric' as const, usagePillBorder: false, appearanceTheme: 'classic' as const }
     const { host, controller, actions, snapshot } = setup(value)
     const base = { freeEnabled: false, usageDisplay: 'auto' as const, showSidebarQuota: false,
-      usagePillStyle: 'badge' as const, appearanceTheme: 'native' as const }
+      usagePillStyle: 'badge' as const, usagePillBorder: true, appearanceTheme: 'native' as const }
     host.publish({ base, user: value })
-    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'appearanceTheme'] as const) {
+    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme'] as const) {
       actions.resetField(field)
       expect(host.unset).toHaveBeenLastCalledWith(field)
     }
@@ -1875,6 +1896,7 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     expect(snapshot()).toMatchObject({
       freeEnabled: { text: 'false', overridden: false }, usageDisplay: { text: 'auto' },
       showSidebarQuota: { text: 'false' }, usagePillStyle: { text: 'badge' },
+      usagePillBorder: { text: 'true' },
       appearanceTheme: { text: 'native' }, appliedAppearanceTheme: 'native',
     })
     expect(host.form.getSnapshot().value?.apiKeyEnv).toBe('ACCOUNT_A')

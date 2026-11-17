@@ -25,9 +25,17 @@ export declare function assertProxyURL(raw: string | undefined): string;
 export declare const USAGE_DISPLAY_MODES: readonly ["auto", "always", "off"];
 export type UsageDisplayMode = typeof USAGE_DISPLAY_MODES[number];
 export declare const DEFAULT_USAGE_DISPLAY: UsageDisplayMode;
-export declare const USAGE_PILL_STYLES: readonly ["badge", "plain"];
+export declare const USAGE_PILL_STYLES: readonly ["badge", "concentric", "fill", "bars", "rings"];
 export type UsagePillStyle = typeof USAGE_PILL_STYLES[number];
 export declare const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle;
+export declare const DEFAULT_USAGE_PILL_BORDER = true;
+/** Accepted in profiles saved before 0.4.5 and mapped to `badge` without a border. */
+export declare const LEGACY_USAGE_PILL_STYLE: "plain";
+/** Resolve stored pill style and border flag, migrating legacy `'plain'` to borderless `'badge'`. */
+export declare function resolveUsagePillAppearance(style: unknown, border: unknown, hasExplicitBorder?: boolean): {
+    style: UsagePillStyle;
+    border: boolean;
+};
 /** Global plugin appearance, shared by Host validation and browser settings. */
 export declare const OPENCODE_GO_THEMES: readonly ["native", "classic"];
 export type OpencodeGoTheme = typeof OPENCODE_GO_THEMES[number];
@@ -129,6 +137,8 @@ export interface OpencodeGoConfig {
     showSidebarQuota: boolean;
     /** Appearance of the conversation input's quota trigger. */
     usagePillStyle: UsagePillStyle;
+    /** Draw an outer border and background frame around the conversation input's quota trigger. */
+    usagePillBorder: boolean;
     /** Global plugin appearance theme. */
     appearanceTheme: OpencodeGoTheme;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */

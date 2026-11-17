@@ -6,21 +6,77 @@
 .trigger:hover, .trigger:focus-visible { border-color: color-mix(in srgb, var(--go-accent) 65%, var(--go-border)); background: var(--go-surface-2); }
 .trigger.plain { padding: 4px 6px; border-color: transparent; background: transparent; color: inherit; }
 .trigger.plain:hover, .trigger.plain:focus-visible { background: color-mix(in srgb, var(--go-accent) 7%, transparent); }
+.trigger[data-pill-style='fill'] { position: relative; overflow: hidden; }
+.trigger[data-pill-style='fill'].plain { padding: 5px 8px; }
+.trigger[data-pill-style='bars'] { padding: 5px 10px; }
+.trigger[data-pill-style='bars'].plain { padding: 4px 7px; }
 .trigger:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .pillStatus { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--go-success); }
 .pillStatus[data-warning] { background: var(--go-warning); }
 .reading { flex: none; min-width: 0; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
 .unit { color: var(--go-muted); }
+.sep { color: var(--go-muted); }
 .stale, .fallback { color: var(--go-warning); font-size: 11px; }
 .account { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--go-muted); }
+.limitMark { margin-left: 2px; font-weight: 600; color: var(--go-danger); }
+
+/* Ring variants (concentric dual ring and minimal dual rings). */
+.ring { display: block; flex: none; transform: rotate(-90deg); }
+.ringTrack { fill: none; stroke: var(--go-track); }
+.ringArc { fill: none; stroke-linecap: round; transition: stroke-dashoffset .25s ease, stroke .18s ease; }
+.ringArc[data-role='rolling'] { stroke: var(--go-accent); }
+.ringArc[data-role='weekly'] { stroke: var(--go-success); }
+.ringArc[data-level='high'] { stroke: var(--go-warning); }
+.ringArc[data-level='limited'] { stroke: var(--go-danger); }
+.ringsGroup { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ringItem { display: inline-flex; align-items: center; gap: 4px; }
+.valTone[data-level='high'] { color: var(--go-warning); }
+.valTone[data-level='limited'] { color: var(--go-danger); }
+
+/* Liquid-fill pill variant. */
+.fillTrack { position: absolute; inset: 0; pointer-events: none; }
+.fillBar { display: block; height: 100%; --fill-tone: var(--go-accent);
+  background: color-mix(in srgb, var(--fill-tone) 18%, transparent); transition: width .25s ease, background-color .18s ease; }
+.fillBottom { position: absolute; left: 0; bottom: 0; height: 2px; --fill-tone: var(--go-success);
+  background: var(--fill-tone); pointer-events: none; transition: width .25s ease, background-color .18s ease; }
+.fillBar[data-level='high'], .fillBottom[data-level='high'] { --fill-tone: var(--go-warning); }
+.fillBar[data-level='limited'], .fillBottom[data-level='limited'] { --fill-tone: var(--go-danger); }
+.fillContent { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+
+/* Dual mini-bars variant. */
+.barsGroup { flex: none; display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.barItem { display: inline-flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 48px; }
+.barItem[data-kind='weekly'] { min-width: 38px; }
+.barMeta { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; font-size: 11px; line-height: 1.05; }
+.barVal { font-family: var(--go-number-font); font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+.miniProgress { display: block; width: 100%; min-width: 0; height: 3px; appearance: none; border: 0 solid; border-radius: 99px;
+  overflow: clip; background: var(--go-track); }
+.miniProgress::-webkit-progress-bar { background: transparent; border-radius: 99px; }
+.miniProgress::-webkit-progress-value { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.miniProgress::-moz-progress-bar { background: var(--go-progress, var(--go-accent)); border-radius: 99px; }
+.miniProgress.progressWeekly { --go-progress: var(--go-success); }
+.miniProgress.high { --go-progress: var(--go-warning); }
+.miniProgress.limited { --go-progress: var(--go-danger); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ringArc, .fillBar, .fillBottom { transition: none; }
+}
+@media (forced-colors: active) {
+  .ring { forced-color-adjust: none; }
+  .ringTrack { stroke: CanvasText; opacity: .25; }
+  .ringArc { stroke: Highlight; }
+}
 
 /* Preserve the readings and account identity as the composer narrows. */
 @container (max-width: 460px) {
   .stale, .fallback { display: none; }
-  .reading[data-stale]::after { content: '*'; }
+  .reading[data-stale]::after, .ringsGroup[data-stale]::after, .barsGroup[data-stale]::after { content: '*'; }
   .trigger[data-fallback]::after { content: ' ↳'; color: var(--go-warning); }
 }
-@container (max-width: 360px) { .unit { display: none; } }
+@container (max-width: 360px) {
+  .unit { display: none; }
+  .barItem, .barItem[data-kind='weekly'] { min-width: 34px; }
+}
 
 /* The popover keeps its own line-height so the Host's inherited 24px rhythm cannot
    stretch single-line rows; every text block below declares its own line box. */

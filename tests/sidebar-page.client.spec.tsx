@@ -442,6 +442,7 @@ describe('console sub-pages', () => {
     expect(screen.getByText(en.appearanceTheme_native)).toBeTruthy()
     expect(screen.getByText(en.showSidebarQuotaLabel)).toBeTruthy()
     expect(screen.getByText(en.usagePillStyleLabel)).toBeTruthy()
+    expect(screen.getByText(en.usagePillBorderLabel)).toBeTruthy()
     expect(screen.getByText(en.usageDisplayLabel)).toBeTruthy()
     expect(screen.queryByText(en.groupConnection)).toBeNull()
     expect(screen.queryByLabelText(en.baseURLLabel)).toBeNull()
@@ -451,8 +452,14 @@ describe('console sub-pages', () => {
     const usageModes = screen.getByRole('radiogroup', { name: en.usageDisplayLabel })
     fireEvent.click(within(usageModes).getByRole('radio', { name: en.usageDisplay_off }))
     expect(props.actions.edit).toHaveBeenCalledWith('usageDisplay', 'off')
-    fireEvent.click(screen.getByRole('radio', { name: en.usagePillStyle_plain }))
-    expect(props.actions.edit).toHaveBeenCalledWith('usagePillStyle', 'plain')
+    const styleGroup = screen.getByRole('radiogroup', { name: en.usagePillStyleLabel })
+    expect(within(styleGroup).getAllByRole('radio')).toHaveLength(5)
+    for (const style of ['concentric', 'fill', 'bars', 'rings'] as const) {
+      fireEvent.click(within(styleGroup).getByRole('radio', { name: en[`usagePillStyle_${style}`] }))
+      expect(props.actions.edit).toHaveBeenLastCalledWith('usagePillStyle', style)
+    }
+    fireEvent.click(screen.getByRole('switch', { name: en.usagePillBorderLabel }))
+    expect(props.actions.edit).toHaveBeenLastCalledWith('usagePillBorder', 'false')
     fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
     expect(props.actions.resetField).toHaveBeenCalledWith('appearanceTheme')
     // The shell owns the staged save bar; this page never renders one.
@@ -485,6 +492,7 @@ describe('console sub-pages', () => {
       <AdvancedPage {...pagePropsOf({ state: { writable: false } })} />
     </>)
     expect((screen.getByRole('radio', { name: en.appearanceTheme_native }) as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('switch', { name: en.usagePillBorderLabel }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByLabelText(en.baseURLLabel) as HTMLInputElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: en.usageAppearanceReset }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: en.advancedResetAll }) as HTMLButtonElement).disabled).toBe(true)

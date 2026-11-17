@@ -57,11 +57,37 @@ export type UsageDisplayMode = typeof USAGE_DISPLAY_MODES[number]
 
 export const DEFAULT_USAGE_DISPLAY: UsageDisplayMode = 'auto'
 
-export const USAGE_PILL_STYLES = ['badge', 'plain'] as const
+export const USAGE_PILL_STYLES = ['badge', 'concentric', 'fill', 'bars', 'rings'] as const
 
 export type UsagePillStyle = typeof USAGE_PILL_STYLES[number]
 
 export const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle = 'badge'
+
+export const DEFAULT_USAGE_PILL_BORDER = true
+
+/** Accepted in profiles saved before 0.4.5 and mapped to `badge` without a border. */
+export const LEGACY_USAGE_PILL_STYLE = 'plain' as const
+
+/** Resolve stored pill style and border flag, migrating legacy `'plain'` to borderless `'badge'`. */
+export function resolveUsagePillAppearance(
+  style: unknown,
+  border: unknown,
+  hasExplicitBorder = border !== undefined,
+): { style: UsagePillStyle; border: boolean } {
+  if (style === LEGACY_USAGE_PILL_STYLE) {
+    return {
+      style: DEFAULT_USAGE_PILL_STYLE,
+      border: hasExplicitBorder && typeof border === 'boolean' ? border : false,
+    }
+  }
+  const resolvedStyle = (USAGE_PILL_STYLES as readonly string[]).includes(String(style))
+    ? (style as UsagePillStyle)
+    : DEFAULT_USAGE_PILL_STYLE
+  return {
+    style: resolvedStyle,
+    border: typeof border === 'boolean' ? border : DEFAULT_USAGE_PILL_BORDER,
+  }
+}
 
 /** Global plugin appearance, shared by Host validation and browser settings. */
 export const OPENCODE_GO_THEMES = ['native', 'classic'] as const
@@ -212,6 +238,8 @@ export interface OpencodeGoConfig {
   showSidebarQuota: boolean
   /** Appearance of the conversation input's quota trigger. */
   usagePillStyle: UsagePillStyle
+  /** Draw an outer border and background frame around the conversation input's quota trigger. */
+  usagePillBorder: boolean
   /** Global plugin appearance theme. */
   appearanceTheme: OpencodeGoTheme
   /** Per-model picker switches; absent entries default to enabled unless deprecated. */

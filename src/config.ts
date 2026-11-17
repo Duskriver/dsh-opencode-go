@@ -13,6 +13,10 @@ import {
   USAGE_DISPLAY_MODES,
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
+  DEFAULT_USAGE_PILL_BORDER,
+  LEGACY_USAGE_PILL_STYLE,
+  resolveUsagePillAppearance,
+  type UsagePillStyle,
   DEFAULT_OPENCODE_GO_THEME,
   OPENCODE_GO_THEMES,
   ACCOUNT_REF_PATTERN,
@@ -51,7 +55,9 @@ const fields = {
   sidebarEntry: z.boolean().default(false),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   showSidebarQuota: z.boolean().default(false),
-  usagePillStyle: z.union(USAGE_PILL_STYLES.map(style => z.const(style))).default(DEFAULT_USAGE_PILL_STYLE),
+  usagePillStyle: z.union([...USAGE_PILL_STYLES, LEGACY_USAGE_PILL_STYLE].map(style => z.const(style)))
+    .default(DEFAULT_USAGE_PILL_STYLE) as unknown as z<UsagePillStyle>,
+  usagePillBorder: z.boolean().default(DEFAULT_USAGE_PILL_BORDER),
   appearanceTheme: z.union(OPENCODE_GO_THEMES.map(theme => z.const(theme))).default(DEFAULT_OPENCODE_GO_THEME),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   // A bare environment variable name: an empty string would otherwise pass the
@@ -92,10 +98,19 @@ export const PlainConfig: z<OpencodeGoConfig> = z.object(fields)
 /** Derive defaults from the same schema used by persisted profile settings. */
 export const DEFAULT_CONFIG: Readonly<OpencodeGoConfig> = PlainConfig()
 
-/** Fill omitted profile fields and normalize the legacy official gateway. */
+/** Fill omitted profile fields and normalize legacy gateway and pill settings. */
 export function normalizeConfig(value: Partial<OpencodeGoConfig> = {}): OpencodeGoConfig {
   const config = PlainConfig({ ...DEFAULT_CONFIG, ...value })
-  return { ...config, baseURL: migrateGatewayBaseURL(config.baseURL) }
+  const rawStyle = (value as { usagePillStyle?: unknown }).usagePillStyle
+  const pill = rawStyle === LEGACY_USAGE_PILL_STYLE
+    ? resolveUsagePillAppearance(rawStyle, value.usagePillBorder, Object.hasOwn(value, 'usagePillBorder'))
+    : { style: config.usagePillStyle, border: config.usagePillBorder }
+  return {
+    ...config,
+    baseURL: migrateGatewayBaseURL(config.baseURL),
+    usagePillStyle: pill.style,
+    usagePillBorder: pill.border,
+  }
 }
 
 /** The Loader retains these references when profile fields change. */
@@ -111,7 +126,15 @@ export function readConfig(config: LiveConfig): OpencodeGoConfig {
   // fields declared above are volatile references owned by this plugin.
   const value = Object.fromEntries((Object.keys(fields) as Array<keyof OpencodeGoConfig>)
     .map(key => [key, config[key].get()])) as unknown as OpencodeGoConfig
-  return { ...value, baseURL: migrateGatewayBaseURL(value.baseURL) }
+  const pill = (value.usagePillStyle as string) === LEGACY_USAGE_PILL_STYLE
+    ? resolveUsagePillAppearance(value.usagePillStyle, value.usagePillBorder, false)
+    : { style: value.usagePillStyle, border: value.usagePillBorder }
+  return {
+    ...value,
+    baseURL: migrateGatewayBaseURL(value.baseURL),
+    usagePillStyle: pill.style,
+    usagePillBorder: pill.border,
+  }
 }
 
 /**
@@ -193,26 +216,46 @@ export function installHostSettings(ctx: Context): void {
   ctx.inject(['settings'], settingsCtx => {
     settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber))
     let migrating = false
-    const migrateSavedGateway = (): void => {
+    const migrateSavedProfile = (): void => {
       if (migrating || !settingsCtx.settings.writable) return
       const row = settingsCtx.settings.describe().find(row => row.ns === PROFILE_ENTRY_ID)
-      const raw = (row?.user as { baseURL?: unknown } | undefined)?.baseURL
-      if (typeof raw !== 'string' || migrateGatewayBaseURL(raw) === raw) return
+      const user = row?.user as { baseURL?: unknown; usagePillStyle?: unknown; usagePillBorder?: unknown } | undefined
+      if (!user) return
+      const ops: Array<{ op: 'set'; path: string[]; value: unknown }> = []
+      if (typeof user.baseURL === 'string' && migrateGatewayBaseURL(user.baseURL) !== user.baseURL) {
+        ops.push({ op: 'set', path: ['baseURL'], value: migrateGatewayBaseURL(user.baseURL) })
+      }
+      if (user.usagePillStyle === LEGACY_USAGE_PILL_STYLE) {
+        const pill = resolveUsagePillAppearance(user.usagePillStyle, user.usagePillBorder, Object.hasOwn(user, 'usagePillBorder'))
+        ops.push({ op: 'set', path: ['usagePillStyle'], value: pill.style })
+        if (!Object.hasOwn(user, 'usagePillBorder')) {
+          ops.push({ op: 'set', path: ['usagePillBorder'], value: pill.border })
+        }
+      }
+      if (!ops.length) return
       migrating = true
-      void settingsCtx.settings.mutate(PROFILE_ENTRY_ID,
-        [{ op: 'set', path: ['baseURL'], value: migrateGatewayBaseURL(raw) }], row!.revision)
-        .catch(() => { ctx.logger.warn('llm-opencode-go: could not save the migrated gateway address') })
+      void settingsCtx.settings.mutate(PROFILE_ENTRY_ID, ops, row!.revision)
+        .catch(() => { ctx.logger.warn('llm-opencode-go: could not save migrated profile settings') })
         .finally(() => { migrating = false })
     }
-    settingsCtx.on('settings/document-updated', ns => { if (ns === PROFILE_ENTRY_ID) migrateSavedGateway() })
-    migrateSavedGateway()
+    settingsCtx.on('settings/document-updated', ns => { if (ns === PROFILE_ENTRY_ID) migrateSavedProfile() })
+    migrateSavedProfile()
   })
   ctx.on('internal/config', function (_raw, next) {
     const value = next()
     if (this !== ctx.fiber) return value
-    const raw = value as { apiKeyEnv?: unknown; baseURL?: unknown }
+    const raw = value as { apiKeyEnv?: unknown; baseURL?: unknown; usagePillStyle?: unknown; usagePillBorder?: unknown }
     if (typeof raw.apiKeyEnv === 'string') assertApiKeyEnv(raw.apiKeyEnv)
     validateGoConfig(PlainConfig(value))
-    return typeof raw.baseURL === 'string' ? { ...value, baseURL: migrateGatewayBaseURL(raw.baseURL) } : value
+    let migrated = value as Record<string, unknown>
+    if (typeof raw.baseURL === 'string') {
+      const nextBase = migrateGatewayBaseURL(raw.baseURL)
+      if (nextBase !== raw.baseURL) migrated = { ...migrated, baseURL: nextBase }
+    }
+    if (raw.usagePillStyle === LEGACY_USAGE_PILL_STYLE) {
+      const pill = resolveUsagePillAppearance(raw.usagePillStyle, raw.usagePillBorder, Object.hasOwn(raw, 'usagePillBorder'))
+      migrated = { ...migrated, usagePillStyle: pill.style, usagePillBorder: pill.border }
+    }
+    return migrated
   })
 }
