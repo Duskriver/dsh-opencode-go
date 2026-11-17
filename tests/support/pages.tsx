@@ -47,6 +47,7 @@ export function pageStateOf(overrides: Partial<OpencodeGoSectionState> = {}): Op
     enabledFailed: false,
     usageDisplay: field('auto'),
     usagePillStyle: field('badge'),
+    usagePillBorder: field('true'),
     appearanceTheme: field('native'),
     showSidebarQuota: field('false'),
     freeEnabled: field('false'),

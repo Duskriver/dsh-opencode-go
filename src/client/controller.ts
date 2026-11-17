@@ -13,6 +13,9 @@ import {
   USAGE_DISPLAY_MODES,
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
+  DEFAULT_USAGE_PILL_BORDER,
+  LEGACY_USAGE_PILL_STYLE,
+  type UsagePillStyle,
   DEFAULT_OPENCODE_GO_THEME,
   OPENCODE_GO_THEMES,
   type OpencodeGoTheme,
@@ -40,7 +43,7 @@ export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
  * Fields that apply the moment they change. Every non-advanced surface is
  * immediate, so the form has exactly one save gesture: the Advanced tab.
  */
-export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled'] as const
+export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled'] as const
 
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number]
 
@@ -110,7 +113,11 @@ export const NUMERIC_FIELD_LIMITS: Partial<Record<TextField, NumericFieldLimit>>
 
 function formatField(field: TextField, value: unknown): string {
   if (field === 'usageDisplay') return typeof value === 'string' ? value : DEFAULT_USAGE_DISPLAY
-  if (field === 'usagePillStyle') return typeof value === 'string' ? value : DEFAULT_USAGE_PILL_STYLE
+  if (field === 'usagePillStyle') {
+    return typeof value === 'string' && (USAGE_PILL_STYLES as readonly string[]).includes(value)
+      ? value : DEFAULT_USAGE_PILL_STYLE
+  }
+  if (field === 'usagePillBorder') return String(typeof value === 'boolean' ? value : DEFAULT_USAGE_PILL_BORDER)
   if (field === 'appearanceTheme') return typeof value === 'string' ? value : DEFAULT_OPENCODE_GO_THEME
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return String(value === true)
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
@@ -118,7 +125,8 @@ function formatField(field: TextField, value: unknown): string {
 
 function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'usageDisplay') return USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as OpencodeGoConfig['usageDisplay'] } : undefined
-  if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as OpencodeGoConfig['usagePillStyle'] } : undefined
+  if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as UsagePillStyle } : undefined
+  if (field === 'usagePillBorder') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   if (field === 'appearanceTheme') return OPENCODE_GO_THEMES.some(theme => theme === text) ? { kind: 'set', value: text as OpencodeGoTheme } : undefined
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   const trimmed = text.trim()
@@ -245,6 +253,7 @@ export interface OpencodeGoSectionState extends FormShell {
   showSidebarQuota: FieldState
   freeEnabled: FieldState
   usagePillStyle: FieldState
+  usagePillBorder: FieldState
   appearanceTheme: FieldState
   /** Last saved theme; text drafts preview without switching the applied interface. */
   appliedAppearanceTheme: OpencodeGoTheme
@@ -359,9 +368,13 @@ export class OpencodeGoSectionController {
 
   private field(field: TextField): FieldState {
     const draft = this.drafts.get(field)
-    const text = draft?.kind === 'text' ? draft.text : formatField(field, this.value(field))
+    const snapshot = this.scope.getSnapshot()
+    const legacyPlainBorder = field === 'usagePillBorder' && !draft && !this.stored('usagePillBorder')
+      && (snapshot.value?.usagePillStyle as string | undefined) === LEGACY_USAGE_PILL_STYLE
+    const text = draft?.kind === 'text' ? draft.text
+      : legacyPlainBorder ? 'false' : formatField(field, this.value(field))
     const write = draft?.kind === 'clear' ? { kind: 'clear' as const } : parseField(field, text)
-    const changed = draft?.kind === 'text' && text !== formatField(field, this.scope.getSnapshot().value?.[field])
+    const changed = draft?.kind === 'text' && text !== formatField(field, snapshot.value?.[field])
     return { text, overridden: draft?.kind === 'clear' ? false : changed ? write?.kind === 'set' : this.stored(field), invalid: !!draft && !write }
   }
 

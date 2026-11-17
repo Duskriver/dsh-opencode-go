@@ -269,12 +269,12 @@ describe('quota bar tracks', () => {
   const tracks: ReadonlyArray<readonly [string, readonly string[]]> = [
     ['Section.module.css', ['.accountBar', '.accountUsage progress']],
     ['AnalyticsDialog.module.css', ['.quotaWindow progress', '.rankTrack']],
-    ['UsagePill.module.css', ['.win progress', '.sidebarWindow progress']],
+    ['UsagePill.module.css', ['.win progress', '.sidebarWindow progress', '.miniProgress']],
   ]
   const clearedPseudoBars: ReadonlyArray<readonly [string, readonly string[]]> = [
     ['Section.module.css', ['.accountUsage progress::-webkit-progress-bar']],
     ['AnalyticsDialog.module.css', ['.quotaWindow progress::-webkit-progress-bar']],
-    ['UsagePill.module.css', ['.win progress::-webkit-progress-bar', '.sidebarWindow progress::-webkit-progress-bar']],
+    ['UsagePill.module.css', ['.win progress::-webkit-progress-bar', '.sidebarWindow progress::-webkit-progress-bar', '.miniProgress::-webkit-progress-bar']],
   ]
 
   function ruleBody(css: string, selector: string): string | null {

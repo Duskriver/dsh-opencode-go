@@ -1,6 +1,7 @@
 /** Settings cards, account editors, model capacities and accessible field help. */
 import css from './Section.module.css'
 import usageCss from './UsagePill.module.css'
+import { UsageTriggerPreview } from './UsagePill.tsx'
 import {
   Tooltip,
   IconQuestionOutlineRegular,
@@ -45,6 +46,8 @@ import {
   type InputModality,
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
+  DEFAULT_USAGE_PILL_STYLE,
+  type UsagePillStyle,
   OPENCODE_GO_THEMES,
 } from '../contracts.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
@@ -775,7 +778,7 @@ function numericBounds(field: TextField): { numeric: true; min?: number; max?: n
   }
 }
 
-const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'usagePillStyle'] as const
+const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder'] as const
 /** The appearance tab also owns the quota display mode, so one reset covers that card. */
 const APPEARANCE_TAB_FIELDS = [...APPEARANCE_FIELDS, 'usageDisplay'] as const
 
@@ -919,6 +922,10 @@ function QuotaAppearance({ state, t, disabled, onEdit }: {
   const themeDescribedBy = state.appearanceTheme.invalid ? `${themeId}-hint ${themeId}-error` : `${themeId}-hint`
   const styleId = 'opencode-go-usage-pill-style'
   const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
+  const selectedStyle = (USAGE_PILL_STYLES as readonly string[]).includes(state.usagePillStyle?.text ?? '')
+    ? (state.usagePillStyle.text as UsagePillStyle)
+    : DEFAULT_USAGE_PILL_STYLE
+  const borderEnabled = state.usagePillBorder?.text !== 'false'
   return <div className={css.appearanceGroup}>
     <div className={css.rows}>
     <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
@@ -968,23 +975,35 @@ function QuotaAppearance({ state, t, disabled, onEdit }: {
       <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
       <div className={css.appearanceChoices}>
         {USAGE_PILL_STYLES.map(value => <label key={value} className={css.appearanceChoice}
-          data-selected={state.usagePillStyle.text === value} data-disabled={locked}>
+          data-selected={selectedStyle === value} data-disabled={locked}>
           <span className={css.appearanceChoiceHead}>
             <span>{t(`usagePillStyle_${value}`)}</span>
             <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
-              checked={state.usagePillStyle.text === value} disabled={locked} aria-describedby={describedBy}
+              checked={selectedStyle === value} disabled={locked} aria-describedby={describedBy}
               onChange={() => { onEdit('usagePillStyle', value) }} />
           </span>
           <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
-            <span className={`${usageCss.trigger} ${value === 'plain' ? usageCss.plain : ''} ${css.appearanceSample}`}>
-              {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
-            </span>
+            <UsageTriggerPreview style={value} border={borderEnabled}
+              rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+              className={css.appearanceSample} />
           </span>
         </label>)}
       </div>
       {state.usagePillStyle.invalid
         ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
     </fieldset>
+    <div className={css.appearanceToggle}>
+      <div className={css.appearanceCopy}>
+        <div className={css.rowLabel}>
+          <span className={css.rowTitle}>{t('usagePillBorderLabel')}</span>
+          <HintMark hint={t('usagePillBorderHint')} />
+        </div>
+        <p className={css.appearanceHint}>{t('usagePillBorderSummary')}</p>
+      </div>
+      <Switch checked={borderEnabled} label={t('usagePillBorderLabel')}
+        title={t('usagePillBorderHint')} disabled={locked}
+        onChange={next => { onEdit('usagePillBorder', String(next)) }} />
+    </div>
     </div>
   </div>
 }
@@ -1060,7 +1079,7 @@ export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetFi
   surface?: 'settings' | 'page'
 }) {
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
-  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field]?.overridden || state[field]?.invalid)
   // Appearance writes as each control changes; a refused write names this card.
   const writeFailed = state.writeFailed !== undefined
     && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
