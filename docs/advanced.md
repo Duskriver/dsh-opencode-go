@@ -2,13 +2,62 @@
 
 [返回 README](../README.md) · [English](advanced.en.md)
 
+## 手动安装与离线升级（.tgz）
+
+仓库根目录会随每次发版同步追踪**唯一一个**预打包归档文件（例如 `dsh-opencode-go-0.4.5.tgz`），内含完整的编译产物 `lib/`、清单、`cordis.patch.yml` 与许可说明，不需要本机安装 `git` 或执行构建脚本。当 npm 源尚未发布最新版本（例如 npm 仍停留在 `0.4.0`）、或在 DS Bot / 桌面端 / 离线环境中需要获取最新修复（如 #94 自动高度外壳塌陷修复）时，请按以下步骤手动安装或升级。
+
+### 1. 下载到本地并检查路径
+
+- 在 GitHub 仓库根目录打开 [`dsh-opencode-go-0.4.5.tgz`](../dsh-opencode-go-0.4.5.tgz)，点击 **Download raw file**（或下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.5.tgz)）。
+- 建议保存到**不含空格与特殊字符**的本地目录（例如 Windows：`C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.5.tgz`；macOS / Linux：`~/Downloads/dsh-opencode-go-0.4.5.tgz`）。
+
+### 2. 从图形界面安装或升级（DSH Web / DSH Desktop / DS Bot）
+
+1. 打开 **插件 → 添加插件**（Plugins → Add plugin）。
+2. 如果当前已安装旧版（如 `0.4.0`），建议先在插件列表移除旧版 `dsh-opencode-go`（DSH 会保留凭据库中的 API Key 与 profile 配置，不会丢失账号）。
+3. 在输入框填入本地 `.tgz` 文件的**完整绝对路径**（若路径中包含空格，建议先移至无空格路径，或按 `file:` URL 格式填写）。
+4. 点击 **安装**，完成后点击 **立即启用**。
+5. **彻底退出并重启**：DS Bot / DSH Desktop 请退出全部托盘与后台进程后重开；Web 端请重启 `dsh web` 并强制刷新浏览器页面。
+6. 重启后打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认当前版本为 `0.4.5`。
+
+### 3. 从命令行安装或升级（按 profile 独立生效）
+
+Web 与 Headless 使用不同的 DSH profile，需要分别安装和更新：
+
+```sh
+# 首次安装到 web profile（将路径替换为本地 .tgz 实际路径）
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.5.tgz
+
+# 从旧版（如 npm 0.4.0）升级到新版 .tgz：先移除旧包再安装本地 .tgz 最稳妥
+dsh plugin --profile web remove dsh-opencode-go
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.5.tgz
+
+# Headless profile 同理
+dsh plugin --profile headless remove dsh-opencode-go
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
+```
+
+> 💡 **为什么建议先下载到本地再传本地路径，而不是直接填写远程 `.tgz` URL？**
+> 一方面可以避免直连 GitHub 时的网络超时；另一方面，DSH 部分内置 `pnpm` 版本在重复解析远程 HTTP(S) `.tgz` URL 时可能触发 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 报错。下载到本地文件后按本地路径安装最稳定。
+
+### 4. 常见安装问题排查
+
+- **提示 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`**：请勿继续复用远程 tarball URL；先执行 `dsh plugin --profile <profile> remove dsh-opencode-go`，再改用已下载到本地磁盘的 `.tgz` 路径安装。
+- **安装后功能或界面仍停留在旧版（如 DS Bot 设置看板依旧塌陷）**：多半是旧版进程未完全退出或安装到了另一个 profile。请确认彻底关闭 DS Bot / DSH 进程后重启，并检查对应 profile 下 `node_modules/dsh-opencode-go/package.json` 中的 `version` 字段。
+- **Free 通道提示 `MISSING_BUN_RUNTIME`**：确认安装时未使用 `--omit=optional`。本插件直接声明 `@oven/bun-*` 平台可选包（无 `postinstall` 脚本），正常安装无需额外批准构建脚本；Go 通道不受影响。
+- **网络受限无法拉取可选依赖**：离线安装 `.tgz` 仍可能需要从 npm 源解析少量声明的依赖（如 `openai`、`@anthropic-ai/sdk`、`undici` 或 `@oven/bun-*`）；若身处受限网络，可在命令行配置环境变量代理或 npm/pnpm 镜像源后再执行 `dsh plugin add`。
+
 ## 高级用法
 
 ### Headless 模式
 
-安装插件：
+安装插件（若 npm 尚未同步最新版，请使用本地 `.tgz` 路径）：
 
 ```sh
+# 从本地 .tgz 安装（推荐用于获取最新版本）
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
+
+# 或当 npm 已发布最新版时在线安装
 dsh plugin --profile headless add dsh-opencode-go
 ```
 
@@ -44,7 +93,7 @@ socks5://127.0.0.1:1080
 
 ### 双路由与手动配置
 
-`dsh-opencode-go`（DSH OpenCode Go）从 `baseURL` 的 `/models` 动态发现全部聊天模型，需要至少一个可用 API Key 才激活。`dsh-opencode-free`（DSH OpenCode Free）从 `freeBaseURL` 的 `/models` 筛选已声明合法价格、且文本输入、输出、缓存及所有上下文阶梯均为零的聊天模型；缺失或非法价格不会被视为免费。Free 是**默认关闭的显式 opt-in**：需在 **设置 → OpenCode Go → 高级设置 → 免费通道** 打开（或配置 `freeEnabled: true`）后，插件才会注册 Free 路由、拉取 Free 目录并在设置与模型发现中显示 Free 模型；默认配置下不会访问 `freeBaseURL`。关闭该开关并保存后 Free 路由立即撤回，进行中的请求允许完成；Go 通道行为不变。
+`dsh-opencode-go`（DSH OpenCode Go）从 `baseURL` 的 `/models` 动态发现全部聊天模型，需要至少一个可用 API Key 才激活。`dsh-opencode-free`（DSH OpenCode Free）从 `freeBaseURL` 的 `/models` 筛选已声明合法价格、且文本输入、输出、缓存及所有上下文阶梯均为零的聊天模型；缺失或非法价格不会被视为免费。Free 是**默认关闭的显式 opt-in**：需在 **设置 → OpenCode Go → 概览 → 免费通道** 打开（或配置 `freeEnabled: true`）后，插件才会注册 Free 路由、拉取 Free 目录并在设置与模型发现中显示 Free 模型；该开关修改后立即生效，无需保存。默认配置下不会访问 `freeBaseURL`。关闭该开关后 Free 路由立即撤回，进行中的请求允许完成；Go 通道行为不变。
 
 Free 共用账号列表，但**已存 Key 与端点绑定**：只有 `freeBaseURL` 是官方 HTTPS 端点（hostname 为 `opencode.ai`、协议为 `https:` 且使用默认端口），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才复用已存账号 Key 并遵循多账号自动切换设置；`http://opencode.ai`、自定义端口的 `opencode.ai` 以及其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并产生不含密钥的 info/debug 诊断。两个路由分别保留原始模型 ID，同名模型可同时存在。设置页顶部的两个模型 Tab 分别编辑各自列表；Go 沿用原 ID 设置键，Free 使用 `dsh-opencode-free/<模型 ID>`。
 
@@ -76,7 +125,7 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
         name: 备用账号
         apiKeyEnv: OPENCODE_GO_BACKUP_KEY
     autoSwitch: true
-    # Free 默认关闭；需要平台免费模型时显式开启（等同于 高级设置 → 免费通道）
+    # Free 默认关闭；需要平台免费模型时显式开启（等同于 设置 → OpenCode Go → 概览 → 免费通道）
     freeEnabled: true
     # 多账号轮询：同一会话固定一个账号，新会话轮流用下一个账号
     balanceAccounts: true
@@ -104,10 +153,11 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
 | `baseURL` | OpenCode Go 网关地址，默认 `https://opencode.ai/inference/go/v1`；官方网关自动按模型协议选择推理端点 |
 | `freeBaseURL` | 平台免费模型网关，默认 `https://opencode.ai/inference/v1`；高级设置可编辑并校验 URL |
 | `freeEnabled` | Free 通道显式 opt-in，默认 `false`；为 `true` 时才注册 Free 路由、拉取 Free 目录并发现 Free 模型 |
+| `sidebarEntry` | 是否注册侧边栏入口与完整控制台页面，默认 `false`；等价于 **设置 → OpenCode Go → 概览 → 侧边栏入口**，修改后立即生效 |
 | `usageDisplay` | 额度显示模式：`auto`、`always` 或 `off` |
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
-| `modelVisibility` | Go 用原模型 ID；Free 用 `dsh-opencode-free/<模型 ID>`，分别控制显示 |
+| `modelVisibility` | Go 用原模型 ID；Free 用 `dsh-opencode-free/<模型 ID>`，分别控制显示；未配置时非过时模型默认开启（`deprecated` 默认关闭） |
 | `modelLimits` | 按模型覆盖 `contextWindow`、`maxTokens`，或用 `thinkingBudgets` 添加思考预算选项；空值使用默认设置 |
 | `maxImages` | 单次请求历史中的图片数量上限，默认不设上限；超过时先卸载最旧图片 |
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |
@@ -115,7 +165,7 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
 | `requestPreparationTimeoutMs` | 目录查询及每次尝试的凭据、图片准备时限，默认 60000 毫秒 |
 | `requestTimeoutMs` | 一次发送的完整时限，包含目录查询、账号切换和流式输出，默认 1800000 毫秒；预先准备的调用从发送时计时 |
 
-未显式配置 `freeEnabled` 的旧 profile 按默认值 `false` 处理：升级后 Free 路由保持关闭，需要时在高级设置中开启；升级前已选择 `DSH OpenCode Free` 模型的旧会话，需要重新选择 Go 模型，或先开启 Free 再继续使用。
+未显式配置 `freeEnabled` 的旧 profile 按默认值 `false` 处理：升级后 Free 路由保持关闭，需要时在 **设置 → OpenCode Go → 概览** 中开启（立即生效）；升级前已选择 `DSH OpenCode Free` 模型的旧会话，需要重新选择 Go 模型，或先开启 Free 再继续使用。
 
 默认官方网关使用 `GET https://opencode.ai/inference/go/v1/models` 读取模型列表，使用 `GET https://opencode.ai/inference/go/v1/usage` 查询额度。推理端点按模型目录声明的协议选择，与[官方文档](https://opencode.ai/v2/docs/console/go/#endpoints)一致，以下路径均以 `https://opencode.ai/inference/go` 为前缀：
 
@@ -143,3 +193,5 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
 账号操作按宿主内存队列顺序执行，凭据写入完成后再更新设置。页面中断不会取消已经开始的存储写入；进程重启后没有事务日志或自动恢复循环，未成功的操作可从账号卡片重新执行。
 
 高级设置的“全部恢复默认”会清除当前层的自定义覆盖，恢复继承值；需要保存后才生效。它不删除账号或 Key，也不清除模型容量覆盖。
+
+除高级设置外，其余设置在修改时立即写入：启用 / 侧边栏入口、免费通道、额度显示、界面主题、侧边栏额度、输入栏额度样式、模型可见性与容量以及全部账号操作都无需保存；高级设置与「全部恢复默认」共用同一个保存 / 放弃操作。

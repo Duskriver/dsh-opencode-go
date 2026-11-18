@@ -77,17 +77,53 @@ describe("conversation usage", () => {
 
   const showDetails = () => { fireEvent.click(trigger()) }
 
-  it.each([undefined, 'badge', 'plain'] as const)('applies input quota style %s and changes it without restarting polling or closing details', async usagePillStyle => {
+  it.each([undefined, 'badge', 'concentric', 'fill', 'bars', 'rings'] as const)('applies input quota style %s and border toggle without restarting polling or closing details', async usagePillStyle => {
     const host = usageSettings({ usageDisplay: 'always', usagePillStyle })
     const read = vi.fn().mockResolvedValue(usage)
     await act(async () => { render(<UsagePill settings={host.form} directory={directory()} readUsage={read} t={t} />) })
-    expect(trigger().classList.contains(css.plain)).toBe(usagePillStyle === 'plain')
+    expect(trigger().getAttribute('data-pill-style')).toBe(usagePillStyle ?? 'badge')
+    expect(trigger().getAttribute('data-pill-border')).toBe('true')
+    expect(trigger().classList.contains(css.plain)).toBe(false)
     showDetails()
-    const next = usagePillStyle === 'plain' ? 'badge' : 'plain'
-    await act(async () => { host.publish({ value: { usageDisplay: 'always', usagePillStyle: next } }) })
-    expect(trigger().classList.contains(css.plain)).toBe(next === 'plain')
+    const next = usagePillStyle === 'concentric' ? 'rings' : 'concentric'
+    await act(async () => { host.publish({ value: { usageDisplay: 'always', usagePillStyle: next, usagePillBorder: false } }) })
+    expect(trigger().getAttribute('data-pill-style')).toBe(next)
+    expect(trigger().getAttribute('data-pill-border')).toBe('false')
+    expect(trigger().classList.contains(css.plain)).toBe(true)
     expect(screen.getByRole('dialog')).toBeTruthy()
     expect(read).toHaveBeenCalledOnce()
+  })
+
+  it('migrates legacy plain style to borderless badge and renders each visual geometry accurately', async () => {
+    const legacy = usageSettings({ usageDisplay: 'always', usagePillStyle: 'plain' as never })
+    const read = vi.fn().mockResolvedValue({
+      ...usage,
+      rolling: { ...usageWindow, percent: 85 },
+      weekly: { ...usageWindow, status: 'rate-limited' as const, percent: 100 },
+    })
+    await act(async () => { render(<UsagePill settings={legacy.form} directory={directory()} readUsage={read} t={t} />) })
+    expect(trigger().getAttribute('data-pill-style')).toBe('badge')
+    expect(trigger().getAttribute('data-pill-border')).toBe('false')
+    expect(trigger().classList.contains(css.plain)).toBe(true)
+
+    await act(async () => { legacy.publish({ value: { usageDisplay: 'always', usagePillStyle: 'concentric', usagePillBorder: true } }) })
+    expect(trigger().querySelectorAll('svg')).toHaveLength(1)
+    expect(trigger().querySelectorAll('circle')).toHaveLength(4)
+    expect(trigger().querySelector(`.${css.ringArc}[data-role="rolling"]`)?.getAttribute('data-level')).toBe('high')
+    expect(trigger().querySelector(`.${css.ringArc}[data-role="weekly"]`)?.getAttribute('data-level')).toBe('limited')
+    expect(trigger().querySelector(`.${css.valTone}[data-level="high"]`)?.textContent).toBe('85%')
+    expect(trigger().querySelector(`.${css.valTone}[data-level="limited"]`)?.textContent).toBe('100%!')
+
+    await act(async () => { legacy.publish({ value: { usageDisplay: 'always', usagePillStyle: 'rings', usagePillBorder: false } }) })
+    expect(trigger().querySelectorAll('svg')).toHaveLength(2)
+    expect(trigger().classList.contains(css.plain)).toBe(true)
+
+    await act(async () => { legacy.publish({ value: { usageDisplay: 'always', usagePillStyle: 'bars', usagePillBorder: true } }) })
+    expect(trigger().querySelectorAll('progress')).toHaveLength(2)
+
+    await act(async () => { legacy.publish({ value: { usageDisplay: 'always', usagePillStyle: 'fill', usagePillBorder: true } }) })
+    expect((trigger().querySelector(`.${css.fillBar}`) as HTMLElement).style.width).toBe('85%')
+    expect((trigger().querySelector(`.${css.fillBottom}`) as HTMLElement).style.width).toBe('100%')
   })
 
   it.each([
@@ -941,6 +977,36 @@ describe("conversation usage", () => {
     await act(async () => { credentials.set(1) })
     expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
     expect(analytics).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens the console page from the expanded panel when the host offers it', async () => {
+    const host = usageSettings({ usageDisplay: 'always' })
+    const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
+    const openUsagePage = vi.fn(() => true)
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
+        readAnalytics={analytics} openUsagePage={openUsagePage} t={t} />)
+    })
+    showDetails()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+    expect(openUsagePage).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog', { name: en.analyticsTitle })).toBeNull()
+    expect(analytics).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the in-place dialog when the console page reports it is unavailable', async () => {
+    const host = usageSettings({ usageDisplay: 'always' })
+    const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))
+    const openUsagePage = vi.fn(() => false)
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={vi.fn().mockResolvedValue(usage)}
+        readAnalytics={analytics} openUsagePage={openUsagePage} t={t} />)
+    })
+    showDetails()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.analyticsOpen })) })
+    expect(openUsagePage).toHaveBeenCalledOnce()
+    expect(screen.getByRole('dialog', { name: en.analyticsTitle })).toBeTruthy()
+    expect(analytics).toHaveBeenCalledTimes(1)
   })
 
   it('names the active account in full no matter how many accounts follow it', async () => {

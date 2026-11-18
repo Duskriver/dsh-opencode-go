@@ -1,0 +1,9 @@
+/*
+ * The page shell owns the page title, outer padding, max width and scrolling,
+ * so this module only contributes the page-level container and the notice card.
+ * Colors, radius and font consume the --go-* variables that themeStyle() writes
+ * on the page root (Native maps them to Host semantic tokens).
+ */
+.page { display: flex; flex-direction: column; min-width: 0; width: 100%; }
+.unavailable { margin: 0; padding: 18px 20px; border: 1px solid var(--go-border); border-radius: var(--go-radius-card); background: var(--go-surface); color: var(--go-muted); font-family: var(--go-font); font-size: 13px; line-height: 1.6; }
+.unavailable p { margin: 0; }

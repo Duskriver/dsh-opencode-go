@@ -15,7 +15,7 @@ export declare const DEFAULT_REQUEST_TIMEOUT_MS: number;
 export declare const PlainConfig: z<OpencodeGoConfig>;
 /** Derive defaults from the same schema used by persisted profile settings. */
 export declare const DEFAULT_CONFIG: Readonly<OpencodeGoConfig>;
-/** Fill omitted profile fields and normalize the legacy official gateway. */
+/** Fill omitted profile fields and normalize legacy gateway and pill settings. */
 export declare function normalizeConfig(value?: Partial<OpencodeGoConfig>): OpencodeGoConfig;
 /** The Loader retains these references when profile fields change. */
 export type LiveConfig = {
