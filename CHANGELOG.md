@@ -18,6 +18,64 @@
 - 新增 `balanceAccounts` 多账号轮询：开启后每个请求依次从账号列表中的下一个账号开始，几份订阅的额度同时消耗。它只改变每次请求的起点，不写回列表顺序和当前主账号，账号不足两个时保持原顺序；与 `autoSwitch` 相互独立，希望额度耗尽后继续切换时需同时开启。设置页账号卡片新增“多账号轮询”开关，中文与英文文案同步更新。
 - 合入上游 0.4.0：四页签设置页（概览 / 模型 / 外观 / 高级）、`appearanceTheme` 主题（Native / Classic）、Free 通道显式 opt-in、`check:pack`、`check:install:pnpm` 与 `check:hygiene` 检查，以及 P1/P2 批次加固。
 - 保留本 fork 的本地隐私保护：Go `deepseek-v4.1-flash` 文本秘密遮罩（privacy-guard），默认关闭，发送前替换识别出的秘密，响应和工具参数在本地还原。
+## [0.4.5] - 2026-11-17
+
+### Added
+
+- 新增输入栏额度展示样式与独立边框开关：在 **设置 → OpenCode Go → 外观** 以及侧边栏控制台的 **外观** 子页中，除原有「徽章（默认）」外，新增「同心嵌套双环（`concentric`）」、「水位填充胶囊（`fill`）」、「双行微进度条（`bars`）」与「极简双环（`rings`）」四种可视化样式，并新增「显示边框（`usagePillBorder`，默认开启）」开关，支持自由组合任意样式与有/无边框效果，所有预览随选项实时更新并即时生效。
+- 模型页支持按当前渠道（Go / Free）与当前搜索及筛选视图一键 **全部开启 / 全部关闭**（#102）：
+  - 点击「全部开启」或「全部关闭」以单次原子写入更新可见性并立即生效，跳过配置缺失（`configurationMissing`）模型，且「全部开启」同样对过时（`deprecated`）模型生效；
+  - 全部已开 / 全部已关、正在保存、只读或当前筛选无可配置模型时自动禁用对应按钮。
+
+### Changed
+
+- 兼容旧版配置中的 `usagePillStyle: 'plain'`：加载与运行时自动映射为无边框的默认徽章（`badge` + `usagePillBorder: false`），并在配置可写时迁移为新字段。
+- 补充 `README.md`、`README.en.md`、`docs/advanced.md` 与 `docs/advanced.en.md` 中关于模型目录默认开启行为与批量开关的说明。
+- 预打包发布归档更新为 `dsh-opencode-go-0.4.5.tgz`。
+
+## [0.4.4] - 2026-11-15
+
+### Fixed
+
+- 修复对话输入框额度胶囊（`UsagePill`）在部分字体（如衬线体）下末尾百分号 `%` 右侧被轻微裁切的问题（#98）。
+
+### Changed
+
+- 微调面板、看板与弹窗文字字号及亚像素抗锯齿渲染。
+- 仓库发布规则更新：根目录同步追踪唯一一个与当前版本一致的预打包归档 `dsh-opencode-go-<version>.tgz`（当前为 `dsh-opencode-go-0.4.4.tgz`），供无法等待 npm 发版的用户（如 DS Bot / DSH 桌面端 / 离线环境）直接手动安装或升级；更新 `.gitignore`（`*.tgz` 保留忽略、仅放行 `/dsh-opencode-go-*.tgz`）与 `.gitattributes`（`*.tgz binary`）。
+- 新增 `npm run pack:release`（清理旧版根目录 `.tgz` 并重新打包校验），并将“唯一版本 `.tgz` + 包内文件与工作区逐字节一致”校验接入 `npm run check:pack` 与 CI。
+- 更新 `README.md`、`README.en.md`、`docs/advanced.md`、`docs/advanced.en.md`、`docs/development.md` 与 `docs/independent-package.md`，补充 `.tgz` 手动安装、升级、排查与仓库发版说明。
+
+## [0.4.3] - 2026-11-13
+
+### Changed
+
+- 设置对话框左侧导航的「OpenCode Go」行图标改为手绘 go 标记：优先通过宿主 DSH 0.2.2+ 新增的 `settings.section.icon` 图标 seat 注册（普通/选中态跟随宿主文字颜色）；对未声明该 seat 的旧宿主退回 DOM 兜底——按本地化 label 认行、隐藏兜底齿轮、用 CSS mask 画同款图标，宿主 DOM 变化时保留齿轮且不报错。
+- 图标几何抽成 `GO_ROW_GEOMETRY` 单一来源：侧栏入口组件与设置导航 mask 共用同一份路径，避免两处图形漂移；新增 `tests/settings-nav-icon.client.spec.tsx`（图标 seat、旧宿主兜底、locale 切换、卸载清理、无 `MutationObserver` 降级）。
+
+## [0.4.2] - 2026-11-13
+
+### Changed
+
+- 侧边栏入口图标改为手绘轮廓的「go」标记：由手绘 `g` 轮廓、实心棋石与空心棋石组成（`GoRowIcon` 独立实现并继承 `currentColor`），16px 展开栏与 18px 收起栏下渲染一致；页面头部、关于页品牌方块（`GoMark` / `GoLogo`）仍保留原波浪标记。
+- 新增 `tests/icon.client.spec.tsx` 图标契约测试（24 viewBox、手绘路径与描边、实心/空心棋石、`currentColor`、16/18/24px 尺寸）；侧栏注册测试同时断言入口行使用该图标，避免后续重构回退成旧波形。
+
+## [0.4.1] - 2026-11-13
+
+### Added
+
+- 新增侧边栏控制台入口：通过 `sidebar.panellist` + `main` 槽位在宿主侧边栏（插件市场之后）注册「OpenCode Go」入口行，点击在主内容区打开整页控制台；宿主未声明该槽位时保持原有设置页入口不变，不影响旧宿主。
+- 控制台页包含 6 个子页：概览、用量看板、账号、模型、外观、关于。用量看板由原弹窗 `AnalyticsDialog` 抽出为可复用的 `AnalyticsDashboard`（对话输入框用量胶囊与侧栏配额卡的「用量历史」改为跳转页面；没有页面入口的宿主仍回退到原弹窗）。
+- 设置页新增「打开完整页面」入口；账号卡片与模型/外观/高级设置拆分为可复用组件（`AccountsCard` / `ModelsSettings` / `AppearanceSettings` / `AdvancedSettings`），设置页与控制台共用同一套控制器，避免双份状态。
+- 新增「侧边栏入口」开关（配置项 `sidebarEntry`，默认 `false`）：位于 **设置 → OpenCode Go → 概览**。开启后插件才在宿主侧边栏（插件市场之后）注册入口行与完整控制台页面；默认关闭，安装插件不会自动增加侧边栏条目。旧宿主或未声明 `sidebar.panellist` 槽位的客户端组合保持原有设置页与对话内弹窗入口不变。
+- 控制台页「关于」页签显示入口状态：开启时展示 `sidebar.panellist · order 2`，关闭时提示在设置中开启。
+
+### Changed
+
+- **设置改为单一保存手势**：只有「高级设置」保留保存 / 放弃，其余开关与选项（启用、侧边栏入口、免费通道、额度显示、界面主题、侧边栏额度、输入栏额度样式、模型可见性与容量、全部账号操作）在修改时立即写入并生效。高级设置卡新增一行说明，外观、模型容量与可见性等相关提示语同步改写，不再暗示这些页面需要保存；页签上的外观草稿标记随之移除。
+- 侧边栏入口与控制台页跟随开关动态注册：关闭开关时先离开页面再注销 `main` + `sidebar.panellist` 这一对槽位，重新开启时再注册。设置页的「打开完整页面」按钮随入口一起出现或消失；对话内用量胶囊在页面不可用时回退到内置用量历史弹窗。
+- 控制台概览页的服务状态卡在免费通道写入被拒绝时显示即时失败提示（`immediateWriteFailed`）；页面底部的保存条只对高级设置草稿出现（`dirty || failed`），不再为其他页面的即时修改出现。
+- 设置页底部操作条统一高度：保存 / 放弃只出现在高级设置页签，其余页签保留同样的 `size="md"` 控件行高度（36px），切换页签时面板与滚动区高度不再跳动。
 
 ### Fixed
 

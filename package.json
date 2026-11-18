@@ -61,6 +61,7 @@
     "compile": "node scripts/build.mjs",
     "check:dist": "node scripts/build.mjs --check",
     "check:pack": "node scripts/check-pack.mjs",
+    "pack:release": "node scripts/pack-release.mjs",
     "check:install:pnpm": "node scripts/check-pnpm-install.mjs",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "check:hygiene": "node scripts/check-source.mjs",

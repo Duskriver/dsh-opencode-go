@@ -165,7 +165,7 @@ describe("model availability and picker visibility", () => {
       expect(checked('Same Go')).toBe(false)
     })
 
-    it('stages capacities and resets only the active source while preserving the other route', async () => {
+    it('writes capacities immediately and resets only the active source while preserving the other route', async () => {
       const { host, snapshot } = await mountOpen({ value: { modelLimits: {
         same: { contextWindow: 10000, maxTokens: 1000 }, 'dsh-opencode-free/same': { contextWindow: 20000, maxTokens: 2000 },
       } }, catalog: { stale: false, models: [
@@ -176,12 +176,19 @@ describe("model availability and picker visibility", () => {
       fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
       const input = screen.getByRole('spinbutton', { name: t('limitsContextLabel', { name: 'Same Free' }) })
       fireEvent.change(input, { target: { value: '30000' } })
+      // Typing alone writes nothing: the settled field is the write, with no Save gesture.
+      expect(host.set).not.toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+      fireEvent.blur(input)
+      await act(async () => { await Promise.resolve() })
+      expect(host.set).toHaveBeenLastCalledWith('modelLimits', { same: { contextWindow: 10000, maxTokens: 1000 },
+        'dsh-opencode-free/same': { contextWindow: 30000, maxTokens: 2000 } })
       expect(snapshot().modelLimitDraft).toEqual({ same: { contextWindow: 10000, maxTokens: 1000 },
         'dsh-opencode-free/same': { contextWindow: 30000, maxTokens: 2000 } })
-      expect(host.mutate).not.toHaveBeenCalled()
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.save })) })
       expect(host.form.getSnapshot().value?.modelLimits?.['dsh-opencode-free/same']?.contextWindow).toBe(30000)
+
       fireEvent.click(screen.getByRole('button', { name: en.limitsResetAll }))
+      await act(async () => { await Promise.resolve() })
       expect(snapshot().modelLimitDraft).toEqual({ same: { contextWindow: 10000, maxTokens: 1000 }, 'dsh-opencode-free/same': null })
       fireEvent.click(screen.getByRole('tab', { name: en.modelsGoTab }))
       expect(screen.getByRole<HTMLInputElement>('spinbutton', { name: t('limitsContextLabel', { name: 'Same Go' }) }).value).toBe('10000')
@@ -205,10 +212,12 @@ describe("model availability and picker visibility", () => {
       expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { beta: false, old: true })
       expect(checked('Old')).toBe(true)
       expect(snapshot().dirty).toBe(false)
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(true)
+      // The models tab writes immediately, so it carries no Save/Discard gesture.
+      expect(screen.queryByRole('button', { name: en.save })).toBeNull()
+      expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
     })
 
-    it('preserves unrelated drafts and committed switch values when a write fails', async () => {
+    it('preserves unrelated advanced drafts and committed switch values when a write fails', async () => {
       const { host, snapshot } = await mountOpen()
       await openAdvanced()
       fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '30' } })
@@ -222,8 +231,9 @@ describe("model availability and picker visibility", () => {
       // The staged tuning draft survives the trip between tabs and the failed write.
       await openAdvanced()
       expect(screen.getByLabelText(en.refreshMinutesLabel)).toHaveProperty('value', '30')
-      await openModels()
       fireEvent.click(screen.getByRole('button', { name: en.discard }))
+      expect(snapshot().dirty).toBe(false)
+      await openModels()
       expect(checked('Old')).toBe(true)
     })
 
@@ -243,17 +253,14 @@ describe("model availability and picker visibility", () => {
       const { host } = await mountOpen()
       let finish!: (accepted: boolean) => void
       host.set.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve }))
-      await openAdvanced()
-      fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '30' } })
-      await openModels()
-      fireEvent.click(toggle('Alpha'))
-      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.save }).disabled).toBe(true)
+      await act(async () => { fireEvent.click(toggle('Alpha')) })
       expect(toggle('Alpha').disabled).toBe(true)
       expect(toggle('Old').disabled).toBe(true)
-      // The provider switch lives on the overview tab and shares the pending latch.
-      await openAdvanced()
+      // The provider switch lives on the overview tab and shares the pending latch;
+      // the sidebar-entry opt-in is another switch in the same window.
       await act(async () => { fireEvent.click(document.getElementById('opencode-go-tab-overview') as HTMLElement) })
       expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.enabledLabel }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('switch', { name: en.sidebarEntryLabel }).disabled).toBe(true)
       await act(async () => { finish(false) })
       await openModels()
       expect(checked('Alpha')).toBe(true) // unacknowledged write did not change the switch
@@ -345,6 +352,103 @@ describe("model availability and picker visibility", () => {
       await openModels()
       expect(screen.getByRole('alert').textContent).toBe(en.modelsStale)
       expect(screen.getByText('request timed out')).toBeTruthy()
+    })
+
+    it('enables and disables all configurable models in the current view (including deprecated) in one write', async () => {
+      const missing = { id: 'missing-model', name: 'Missing', configurationMissing: true }
+      const { host } = await mountOpen({ catalog: { models: [missing, ...models], stale: false } })
+      const enableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll })
+      const disableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll })
+
+      // Initially Alpha & Beta are on, Old (deprecated) is off, Missing is unconfigurable.
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(false)
+
+      await act(async () => { fireEvent.click(enableAll) })
+      expect(host.set).toHaveBeenCalledTimes(1)
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: true, beta: true, old: true })
+      expect(checked('Alpha')).toBe(true)
+      expect(checked('Beta')).toBe(true)
+      expect(checked('Old')).toBe(true)
+      expect(checked('Missing')).toBe(false)
+      expect(enableAll.disabled).toBe(true)
+      expect(disableAll.disabled).toBe(false)
+
+      await act(async () => { fireEvent.click(disableAll) })
+      expect(host.set).toHaveBeenCalledTimes(2)
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: false, beta: false, old: false })
+      expect(checked('Alpha')).toBe(false)
+      expect(checked('Beta')).toBe(false)
+      expect(checked('Old')).toBe(false)
+      expect(checked('Missing')).toBe(false)
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(true)
+    })
+
+    it('scopes batch enable/disable to the active search query, filter tab, and source tab', async () => {
+      const { host } = await mountOpen({
+        value: { modelVisibility: { alpha: true, beta: false, old: false } },
+        catalog: {
+          stale: false,
+          models: [...models, { id: 'free-one', name: 'Free One', source: 'free' }],
+        },
+      })
+      const enableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll })
+      const disableAll = screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll })
+
+      // Narrow by search query: only Beta matches; Alpha, Old and Free One stay untouched.
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'beta' } })
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(true)
+      await act(async () => { fireEvent.click(enableAll) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: true, beta: true, old: false })
+
+      // Narrow to Deprecated filter: only Old matches.
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: '' } })
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterDeprecated + ' 1') }))
+      expect(enableAll.disabled).toBe(false)
+      expect(disableAll.disabled).toBe(true)
+      await act(async () => { fireEvent.click(enableAll) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { alpha: true, beta: true, old: true })
+
+      // Empty search view disables both batch buttons.
+      fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'does-not-exist' } })
+      expect(enableAll.disabled).toBe(true)
+      expect(disableAll.disabled).toBe(true)
+
+      // Free tab scopes strictly to Free models without touching Go visibility.
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsDisableAll })) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', {
+        alpha: true, beta: true, old: true, 'dsh-opencode-free/free-one': false,
+      })
+    })
+
+    it('disables batch buttons while a write is pending, when read-only, or when only configurationMissing models exist', async () => {
+      await mountOpen({ catalog: { models: [{ id: 'm', name: 'Missing', configurationMissing: true }], stale: false } })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+
+      cleanup()
+      const next = await mountOpen()
+      const applySet = next.host.set.getMockImplementation()!
+      let finish!: (accepted: boolean) => void
+      next.host.set.mockImplementationOnce((field, value) => new Promise<boolean>(resolve => {
+        finish = accepted => {
+          if (accepted) void applySet(field, value).then(resolve)
+          else resolve(false)
+        }
+      }))
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsDisableAll })) })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+      await act(async () => { finish(true) })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(false)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+
+      await act(async () => { next.host.publish({ writable: false }) })
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
     })
 
   })
@@ -682,32 +786,35 @@ describe("account cards, quota rows and ordering", () => {
     fixture.controller.dispose()
   })
 
-  it('lays a row out as two lines, so a longer name cannot move the bar', async () => {
+  it('separates identity header from the bottom edge bar when folded and splits management above Bento quotas when open', async () => {
     const fixture = setup()
     await fixture.controller.refreshAccounts()
     const state = fixture.controller.accountState()
-    const main = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
-      .closest('[data-account-row]')!.querySelector('[data-account-main]') as HTMLElement
-    const body = () => main().children[1] as HTMLElement
-    const top = () => body().children[0] as HTMLElement
-    const meta = () => body().children[1] as HTMLElement
+    const row = () => screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) })
+      .closest('[data-account-row]') as HTMLElement
+    const main = () => row().querySelector('[data-account-main]') as HTMLElement
     const { unmount } = render(<AccountsCard state={state} actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    // Handle + summary column; inside it the identity line and the quota line.
-    expect(Array.from(main().children).map(child => child.tagName)).toEqual(['BUTTON', 'DIV'])
-    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'SPAN', 'BUTTON'])
-    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN', 'SPAN'])
-    expect(meta().children[0]!.getAttribute('role')).toBe('progressbar')
-    // The name may ellipsise, so the full value stays reachable.
-    expect(top().children[0]!.getAttribute('title')).toBe('Primary')
+    // Folded card keeps the primary rank marker, reachable full name, single rolling edge bar, and summary stat.
+    expect(row().getAttribute('data-active')).toBe('true')
+    expect(within(main()).getByText('#1 Current')).toBeTruthy()
+    expect(within(main()).getByText('Primary').getAttribute('title')).toBe('Primary')
+    expect(within(row()).getByRole('progressbar', { name: `Primary ${en.usage_rolling}` })).toBeTruthy()
+    // Expanding hides the folded rolling summary/edge bar and splits management actions above the 3 Bento quota tiles.
+    fireEvent.click(within(main()).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+    const detail = row().querySelector('[data-account-detail]') as HTMLElement
+    const manage = detail.querySelector('[data-account-manage]') as HTMLElement
+    const quotas = detail.querySelector('[data-account-quotas]') as HTMLElement
+    expect(Boolean(manage.compareDocumentPosition(quotas) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(within(quotas).getAllByRole('progressbar')).toHaveLength(3)
+    expect(within(row()).getAllByRole('progressbar')).toHaveLength(3)
     unmount()
-    // A row with nothing to read yet keeps the two lines: the message takes the
-    // quota line, so the identity line and the disclosure stay put.
+    // Rows without loaded usage still preserve identity markers and render the loading state cleanly.
     render(<AccountsCard state={{ ...state, entries: state.entries.map(entry => ({ ...entry, usage: undefined, loading: true })) }}
       actions={fixture.actions} writable t={t} />)
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
-    expect(Array.from(top().children).map(child => child.tagName)).toEqual(['STRONG', 'SPAN', 'BUTTON'])
-    expect(Array.from(meta().children).map(child => child.tagName)).toEqual(['SPAN'])
+    expect(within(main()).getByText('#1 Current')).toBeTruthy()
+    expect(within(main()).getByText('Primary')).toBeTruthy()
     expect(screen.getAllByText(en.usageLoading)).toHaveLength(2)
     fixture.controller.dispose()
   })

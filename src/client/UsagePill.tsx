@@ -9,7 +9,7 @@ import {
   type UsageWindow,
   PROVIDER_ID,
   DEFAULT_USAGE_DISPLAY,
-  DEFAULT_USAGE_PILL_STYLE,
+  resolveUsagePillAppearance,
   DEFAULT_OPENCODE_GO_THEME,
   type OpencodeGoTheme,
   type UsagePillStyle,
@@ -38,6 +38,13 @@ export interface UsagePillProps {
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>
   selectAccount?: (ref: string) => Promise<boolean>
+  /**
+   * Open the console page instead of the in-place dialog. Set by the client
+   * registration once the host declares a sidebar panel; omitted hosts (and
+   * tests) keep the self-contained dialog. Returns whether navigation happened,
+   * so a page withdrawn since the face was built still opens the dialog.
+   */
+  openUsagePage?: () => boolean
 }
 
 /** A root sidebar entry receives its width mode from the host slot owner. */
@@ -104,10 +111,193 @@ function panelDateTime(value: string | number, locale?: string): string {
   })
 }
 
+/** Clamp quota percentage into [0, 100] for SVG arcs and progress elements. */
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value))
+}
+
+/** Semantic severity tone for rings, fills and bars. */
+function windowTone(window: UsageWindow): 'normal' | 'high' | 'limited' {
+  if (window.status === 'rate-limited' || window.percent >= 100) return 'limited'
+  return window.percent >= 80 ? 'high' : 'normal'
+}
+
 /** Bars turn amber near the limit and red once the window is exhausted. */
 function usageLevel(window: UsageWindow): string | undefined {
-  if (window.status === 'rate-limited' || window.percent >= 100) return css.limited
-  return window.percent >= 80 ? css.high : undefined
+  const tone = windowTone(window)
+  return tone === 'limited' ? css.limited : tone === 'high' ? css.high : undefined
+}
+
+/** Compute SVG stroke dash parameters; nonzero values keep a 12-o'clock starter cap. */
+function ringArc(radius: number, percent: number): { c: string; offset: string } {
+  const circumference = 2 * Math.PI * radius
+  const clamped = clampPercent(percent)
+  const dash = clamped === 0 ? 0 : Math.max(circumference * 0.045, (clamped / 100) * circumference)
+  return { c: circumference.toFixed(2), offset: (circumference - dash).toFixed(2) }
+}
+
+function MiniRing({ window, role, size = 14, stroke = 2 }: {
+  window: UsageWindow; role: 'rolling' | 'weekly'; size?: number; stroke?: number
+}) {
+  const radius = (size - stroke) / 2
+  const center = size / 2
+  const tone = windowTone(window)
+  const { c, offset } = ringArc(radius, window.percent)
+  return <svg className={css.ring} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+    <circle cx={center} cy={center} r={radius} className={css.ringTrack} strokeWidth={stroke} />
+    {window.percent > 0 || window.status === 'rate-limited'
+      ? <circle cx={center} cy={center} r={radius} className={css.ringArc} data-role={role}
+        data-level={tone} strokeWidth={stroke} strokeDasharray={c} strokeDashoffset={offset} />
+      : null}
+  </svg>
+}
+
+function ConcentricRings({ rolling, weekly, size = 18 }: {
+  rolling: UsageWindow; weekly: UsageWindow; size?: number
+}) {
+  const center = size / 2
+  const outerR = center - 2
+  const innerR = outerR - 3.1
+  const outer = ringArc(outerR, rolling.percent)
+  const inner = ringArc(innerR, weekly.percent)
+  return <svg className={css.ring} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+    <circle cx={center} cy={center} r={outerR} className={css.ringTrack} strokeWidth={2} />
+    {rolling.percent > 0 || rolling.status === 'rate-limited'
+      ? <circle cx={center} cy={center} r={outerR} className={css.ringArc} data-role="rolling"
+        data-level={windowTone(rolling)} strokeWidth={2} strokeDasharray={outer.c} strokeDashoffset={outer.offset} />
+      : null}
+    <circle cx={center} cy={center} r={innerR} className={css.ringTrack} strokeWidth={2} />
+    {weekly.percent > 0 || weekly.status === 'rate-limited'
+      ? <circle cx={center} cy={center} r={innerR} className={css.ringArc} data-role="weekly"
+        data-level={windowTone(weekly)} strokeWidth={2} strokeDasharray={inner.c} strokeDashoffset={inner.offset} />
+      : null}
+  </svg>
+}
+
+interface UsageTriggerContentProps {
+  style: UsagePillStyle
+  rolling: UsageWindow
+  weekly: UsageWindow
+  rollingShort: string
+  weekShort: string
+  accountName?: string
+  stale?: boolean
+  staleLabel?: string
+  fallback?: boolean
+  fallbackLabel?: string
+}
+
+function UsageTriggerSuffix({ stale, staleLabel, fallback, fallbackLabel, accountName }: Pick<
+  UsageTriggerContentProps, 'stale' | 'staleLabel' | 'fallback' | 'fallbackLabel' | 'accountName'
+>) {
+  return <>
+    {stale && staleLabel ? <span className={css.stale}> · {staleLabel}</span> : null}
+    {fallback && fallbackLabel ? <span className={css.fallback}> · {fallbackLabel}</span> : null}
+    {accountName ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
+  </>
+}
+
+function LimitMark({ window }: { window: UsageWindow }) {
+  return window.status === 'rate-limited' ? <span className={css.limitMark} aria-hidden="true">!</span> : null
+}
+
+function UsageTriggerContent(props: UsageTriggerContentProps) {
+  const { style, rolling, weekly, rollingShort, weekShort, stale, fallback } = props
+  const warning = Boolean(stale || fallback)
+  const suffix = <UsageTriggerSuffix {...props} />
+  if (style === 'concentric') {
+    return <>
+      <ConcentricRings rolling={rolling} weekly={weekly} />
+      <span className={css.reading} data-stale={stale ? '' : undefined}>
+        <span className={css.valTone} data-level={windowTone(rolling)}>{rolling.percent}%<LimitMark window={rolling} /></span>
+        <span className={css.sep}> / </span>
+        <span className={css.valTone} data-level={windowTone(weekly)}>{weekly.percent}%<LimitMark window={weekly} /></span>
+      </span>
+      {suffix}
+    </>
+  }
+  if (style === 'rings') {
+    return <>
+      <span className={css.ringsGroup} data-stale={stale ? '' : undefined}>
+        <span className={css.ringItem}>
+          <MiniRing window={rolling} role="rolling" />
+          <span className={`${css.reading} ${css.valTone}`} data-level={windowTone(rolling)}>
+            {rolling.percent}%<LimitMark window={rolling} />
+          </span>
+        </span>
+        <span className={css.sep}>·</span>
+        <span className={css.ringItem}>
+          <MiniRing window={weekly} role="weekly" />
+          <span className={`${css.reading} ${css.valTone}`} data-level={windowTone(weekly)}>
+            {weekly.percent}%<LimitMark window={weekly} />
+          </span>
+        </span>
+      </span>
+      {suffix}
+    </>
+  }
+  if (style === 'bars') {
+    return <>
+      <span className={css.barsGroup} data-stale={stale ? '' : undefined}>
+        <span className={css.barItem}>
+          <span className={css.barMeta}>
+            <span className={css.unit}>{rollingShort}</span>
+            <span className={`${css.barVal} ${css.valTone}`} data-level={windowTone(rolling)}>
+              {rolling.percent}%<LimitMark window={rolling} />
+            </span>
+          </span>
+          <progress className={[css.miniProgress, css.progressRolling, usageLevel(rolling)].filter(Boolean).join(' ')}
+            max={100} value={clampPercent(rolling.percent)} aria-hidden="true" />
+        </span>
+        <span className={css.barItem} data-kind="weekly">
+          <span className={css.barMeta}>
+            <span className={css.unit}>{weekShort}</span>
+            <span className={`${css.barVal} ${css.valTone}`} data-level={windowTone(weekly)}>
+              {weekly.percent}%<LimitMark window={weekly} />
+            </span>
+          </span>
+          <progress className={[css.miniProgress, css.progressWeekly, usageLevel(weekly)].filter(Boolean).join(' ')}
+            max={100} value={clampPercent(weekly.percent)} aria-hidden="true" />
+        </span>
+      </span>
+      {suffix}
+    </>
+  }
+  const reading = <>
+    <span className={css.pillStatus} data-warning={warning ? '' : undefined} aria-hidden="true" />
+    <span className={css.reading} data-stale={stale ? '' : undefined}>
+      <span className={css.unit}>{rollingShort} </span>{rolling.percent}%
+      {' · '}
+      <span className={css.unit}>{weekShort} </span>{weekly.percent}%
+    </span>
+    {suffix}
+  </>
+  if (style === 'fill') {
+    return <>
+      <span className={css.fillTrack} aria-hidden="true">
+        <span className={css.fillBar} data-level={windowTone(rolling)} style={{ width: `${clampPercent(rolling.percent)}%` }} />
+      </span>
+      <span className={css.fillBottom} data-level={windowTone(weekly)} style={{ width: `${clampPercent(weekly.percent)}%` }} aria-hidden="true" />
+      <span className={css.fillContent}>{reading}</span>
+    </>
+  }
+  return reading
+}
+
+const PREVIEW_WINDOWS = {
+  rolling: { status: 'ok' as const, percent: 24, resetsAt: '2026-11-17T00:00:00Z' },
+  weekly: { status: 'ok' as const, percent: 48, resetsAt: '2026-11-24T00:00:00Z' },
+}
+
+/** Render a live, non-interactive quota trigger sample for Settings and Console appearance cards. */
+export function UsageTriggerPreview({ style, border, rollingShort, weekShort, className }: {
+  style: UsagePillStyle; border: boolean; rollingShort: string; weekShort: string; className?: string
+}) {
+  return <span className={[css.trigger, !border ? css.plain : undefined, className].filter(Boolean).join(' ')}
+    data-pill-style={style} data-pill-border={String(border)}>
+    <UsageTriggerContent style={style} rolling={PREVIEW_WINDOWS.rolling} weekly={PREVIEW_WINDOWS.weekly}
+      rollingShort={rollingShort} weekShort={weekShort} />
+  </span>
 }
 
 /** The panel's own glyphs: no host icon set is required, and each one carries its meaning in text. */
@@ -142,7 +332,7 @@ export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
 }
 
 /** The sidebar's viewed account is independent of the profile's request order. */
-function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, ...props }:
+function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, openUsagePage, ...props }:
   Omit<UsagePillProps, 'directory'> & {
     variant: UsageVariant; provider?: string
   }) {
@@ -159,6 +349,11 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   // endpoint or roster change remounts the polling subtree, and that must not close
   // an open dashboard or drop its in-flight report.
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  /** Open the console page when the host offers one; otherwise the local dialog. */
+  const openAnalytics = useCallback((next: boolean): void => {
+    if (next && openUsagePage?.() === true) return
+    setAnalyticsOpen(next)
+  }, [openUsagePage])
   const [viewedAccountId, setViewedAccountId] = useState<string | null>(() => {
     if (variant === 'pill') return null
     try { return globalThis.localStorage?.getItem(sidebarAccountStorageKey) ?? null } catch { return null }
@@ -193,15 +388,26 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
       return accounts[(index + 1) % accounts.length]!.id
     })
   }
+  const hasExplicitBorder = config.user
+    ? Object.hasOwn(config.user, 'usagePillBorder')
+    : config.value?.usagePillBorder !== undefined
+  const pillAppearance = resolveUsagePillAppearance(
+    config.value?.usagePillStyle,
+    config.value?.usagePillBorder,
+    hasExplicitBorder,
+  )
   return visible ? <>
     <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts.map(a => [a.id, a.apiKeyEnv])])}
       {...props} readUsage={variant === 'pill' ? props.readUsage : readSidebarUsage}
       accounts={accounts} activeRef={activeRef} writable={config.writable}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
-      variant={variant} pillStyle={config.value?.usagePillStyle ?? DEFAULT_USAGE_PILL_STYLE}
-      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={setAnalyticsOpen} />
+      variant={variant} pillStyle={pillAppearance.style} pillBorder={pillAppearance.border}
+      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
-        its own theme tokens, so leaving the pill's themed span costs no styling. */}
+        its own theme tokens, so leaving the pill's themed span costs no styling.
+        It must stay mounted even when the console page offers itself: a page
+        withdrawn after this face was built reports the miss from openUsagePage()
+        and falls back to this dialog, which could not appear if it were absent. */}
     {props.readAnalytics ? <AnalyticsDialog open={analyticsOpen} onClose={() => { setAnalyticsOpen(false) }}
       readAnalytics={props.readAnalytics} exportAnalytics={props.exportAnalytics} readQuota={readDialogQuota}
       accounts={accounts} activeRef={callingRef}
@@ -210,12 +416,12 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, appearanceTheme }:
+function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
     onNextAccount?: () => void
-    variant: UsageVariant; pillStyle: UsagePillStyle; appearanceTheme: OpencodeGoTheme
+    variant: UsageVariant; pillStyle: UsagePillStyle; pillBorder: boolean; appearanceTheme: OpencodeGoTheme
   }) {
   const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
@@ -355,30 +561,22 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
    *  wording, while the account name truncates with an ellipsis instead of pushing the readings
    *  out. jsdom does not evaluate container queries, so the tests below exercise the full label
    *  in every tier. */
-  const segments = usage
-    ? <>
-      <span className={css.reading} data-stale={failure || stale ? '' : undefined}>
-        <span className={css.unit}>{t('usageRollingShort')} </span>{usage.rolling.percent}%
-        {' · '}
-        <span className={css.unit}>{t('usageWeekShort')} </span>{usage.weekly.percent}%
-      </span>
-      {failure || stale ? <span className={css.stale}> · {t('usageStaleShort')}</span> : null}
-      {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
-      {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
-    </>
-    : <>
-      {failure ? t('usageUnavailable') : '…'}
-      {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
-      {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
-    </>
+  const unavailableSegments = <>
+    <span className={css.pillStatus} data-warning={failure || stale || notice ? '' : undefined} aria-hidden="true" />
+    {failure ? t('usageUnavailable') : '…'}
+    {notice ? <span className={css.fallback}> · {t('usageFallbackShort')}</span> : null}
+    {accounts.length > 1 ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
+  </>
   const triggerClass = variant === 'sidebar' ? css.sidebarCard : variant === 'sidebar-icon' ? css.sidebarIcon
-    : [css.trigger, pillStyle === 'plain' ? css.plain : undefined].filter(Boolean).join(' ')
+    : [css.trigger, !pillBorder ? css.plain : undefined].filter(Boolean).join(' ')
   const iconOpensHistory = variant === 'sidebar-icon' && readAnalytics !== undefined
   const Trigger = !sidebar || iconOpensHistory ? 'button' : 'span'
   return <span className={[css.root, sidebar ? css.sidebarRoot : undefined].filter(Boolean).join(' ')}
     data-wide={sidebar ? String(variant === 'sidebar') : undefined} ref={root} style={themeStyle(tokens)}>
     <Trigger type={!sidebar || iconOpensHistory ? 'button' : undefined} role={sidebar && !iconOpensHistory ? 'group' : undefined}
       ref={!sidebar ? triggerRef : undefined} className={triggerClass}
+      data-pill-style={!sidebar ? pillStyle : undefined}
+      data-pill-border={!sidebar ? String(pillBorder) : undefined}
       aria-expanded={iconOpensHistory ? analyticsOpen : sidebar ? undefined : open}
       aria-controls={!sidebar ? panelId : undefined}
       aria-haspopup={!sidebar || iconOpensHistory ? 'dialog' : undefined} data-fallback={notice ? '' : undefined}
@@ -407,9 +605,13 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
           onClick={() => { onAnalyticsOpenChange(true) }}>
           <ChartIcon /><span>{t('analyticsOpen')}</span><ChevronRight />
         </button> : null}
-      </> : variant === 'sidebar-icon' ? <ChartIcon /> : <>
-        <span className={css.pillStatus} data-warning={failure || stale || notice ? '' : undefined} aria-hidden="true" />{segments}
-      </>}
+      </> : variant === 'sidebar-icon' ? <ChartIcon />
+        : usage ? <UsageTriggerContent style={pillStyle} rolling={usage.rolling} weekly={usage.weekly}
+          rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+          accountName={accounts.length > 1 ? accountName : undefined}
+          stale={Boolean(failure || stale)} staleLabel={t('usageStaleShort')}
+          fallback={Boolean(notice)} fallbackLabel={t('usageFallbackShort')} />
+        : unavailableSegments}
     </Trigger>
     {!sidebar && open && <div className={css.panel} id={panelId} ref={panelRef} role="dialog"
       aria-label={t('usageTitle')} aria-busy={refreshing} tabIndex={-1}>

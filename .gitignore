@@ -1,5 +1,7 @@
 node_modules/
+# 默认忽略临时打包产物，仅追踪根目录与当前版本一致的手动安装压缩包（例如 dsh-opencode-go-0.4.3.tgz）
 *.tgz
+!/dsh-opencode-go-*.tgz
 coverage/
 .env
 # 宣传片渲染产物（逐帧 JPEG 约 150MB，可随时用 video/render.mjs 重生成）
@@ -21,3 +23,4 @@ opencode-protocol-benchmark-*/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+.tmp-dist-check/

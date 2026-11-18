@@ -717,11 +717,15 @@ describe("Loader composition", () => {
 
 describe('profile forms and live configuration', () => {
   it('normalizes old profiles to badge appearance with sidebar quota disabled and validates saved choices', () => {
-    expect(DEFAULT_CONFIG).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
-    expect(normalizeConfig()).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
-    expect(normalizeConfig({ showSidebarQuota: true, usagePillStyle: 'plain' })).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
-    expect(DEFAULT_CONFIG).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(DEFAULT_CONFIG).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge', usagePillBorder: true })
+    expect(normalizeConfig()).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge', usagePillBorder: true })
+    expect(normalizeConfig({ showSidebarQuota: true, usagePillStyle: 'concentric', usagePillBorder: false }))
+      .toMatchObject({ showSidebarQuota: true, usagePillStyle: 'concentric', usagePillBorder: false })
+    expect(normalizeConfig({ showSidebarQuota: true, usagePillStyle: 'plain' as never }))
+      .toMatchObject({ showSidebarQuota: true, usagePillStyle: 'badge', usagePillBorder: false })
+    expect(DEFAULT_CONFIG).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge', usagePillBorder: true })
     expect(() => normalizeConfig({ usagePillStyle: 'neon' as never })).toThrow()
+    expect(() => normalizeConfig({ usagePillBorder: 'false' as never })).toThrow()
     expect(() => normalizeConfig({ showSidebarQuota: 'true' as never })).toThrow()
   })
 
@@ -816,16 +820,21 @@ describe('profile forms and live configuration', () => {
   it('persists quota placement and appearance through the live profile without remounting the provider', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
     const { ctx, entry, fiber, view } = await profile(gateway.url)
-    expect(view().value).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
-    await ctx.settings.update('opencode-go', { showSidebarQuota: true, usagePillStyle: 'plain' }, view().revision)
-    expect(view().value).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
-    expect(entry.options.config).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
+    expect(view().value).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge', usagePillBorder: true })
+    await ctx.settings.update('opencode-go', { showSidebarQuota: true, usagePillStyle: 'concentric', usagePillBorder: false }, view().revision)
+    expect(view().value).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'concentric', usagePillBorder: false })
+    expect(entry.options.config).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'concentric', usagePillBorder: false })
     expect(entry.fiber).toBe(fiber)
+    for (const style of ['fill', 'bars', 'rings'] as const) {
+      await ctx.settings.update('opencode-go', { usagePillStyle: style })
+      expect(view().value).toMatchObject({ usagePillStyle: style, usagePillBorder: false })
+    }
     await expect(ctx.settings.update('opencode-go', { usagePillStyle: 'neon' })).rejects.toThrow()
+    await expect(ctx.settings.update('opencode-go', { usagePillBorder: 'false' })).rejects.toThrow()
     await expect(ctx.settings.update('opencode-go', { showSidebarQuota: 'true' })).rejects.toThrow()
-    expect(view().value).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'plain' })
-    await ctx.settings.update('opencode-go', { showSidebarQuota: false, usagePillStyle: 'badge' })
-    expect(view().value).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge' })
+    expect(view().value).toMatchObject({ showSidebarQuota: true, usagePillStyle: 'rings', usagePillBorder: false })
+    await ctx.settings.update('opencode-go', { showSidebarQuota: false, usagePillStyle: 'badge', usagePillBorder: true })
+    expect(view().value).toMatchObject({ showSidebarQuota: false, usagePillStyle: 'badge', usagePillBorder: true })
     expect(entry.fiber).toBe(fiber)
   })
 
