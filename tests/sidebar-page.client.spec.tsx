@@ -429,6 +429,8 @@ describe('console sub-pages', () => {
     const visible = en.modelVisibleLabel.replace('{name}', GO_MODEL.name)
     fireEvent.click(screen.getByRole('switch', { name: visible }))
     expect(props.actions.setModelEnabled).toHaveBeenCalledWith(GO_MODEL.id, false)
+    fireEvent.click(screen.getByRole('button', { name: en.modelsDisableAll }))
+    expect(props.actions.setModelEnabled).toHaveBeenCalledWith([GO_MODEL.id], false)
   })
 
   it('renders only the appearance controls with their live actions', () => {

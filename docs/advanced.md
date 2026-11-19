@@ -153,7 +153,7 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
 | `usageDisplay` | 额度显示模式：`auto`、`always` 或 `off` |
 | `proxyURL` | 网络代理；空字符串使用默认网络设置 |
 | `refreshMinutes` | 模型目录缓存时长，默认 60 分钟；设置页可随时手动刷新 |
-| `modelVisibility` | Go 用原模型 ID；Free 用 `dsh-opencode-free/<模型 ID>`，分别控制显示 |
+| `modelVisibility` | Go 用原模型 ID；Free 用 `dsh-opencode-free/<模型 ID>`，分别控制显示；未配置时非过时模型默认开启（`deprecated` 默认关闭） |
 | `modelLimits` | 按模型覆盖 `contextWindow`、`maxTokens`，或用 `thinkingBudgets` 添加思考预算选项；空值使用默认设置 |
 | `maxImages` | 单次请求历史中的图片数量上限，默认不设上限；超过时先卸载最旧图片 |
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |

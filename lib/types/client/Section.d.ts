@@ -49,7 +49,7 @@ export declare function ModelEditor({ source, models, draft, modelVisibility, t,
     disabled: boolean;
     visibilitySaving: boolean;
     onEdit: (next: OpencodeGoModelLimits) => void;
-    onModelEnabled: (id: string, enabled: boolean) => void;
+    onModelEnabled: (id: string | readonly string[], enabled: boolean) => void;
 }): import("react").JSX.Element;
 export type { OpencodeGoSectionState } from './controller.ts';
 /** Section copy lookup, including the optional `{name}` template params. */
@@ -108,7 +108,7 @@ export declare function ModelsSettings({ state, t, locale, disabled, onEdit, set
     locale?: string;
     disabled: boolean;
     onEdit: (value: OpencodeGoModelLimits) => void;
-    setModelEnabled: (id: string, next: boolean) => void;
+    setModelEnabled: (id: string | readonly string[], next: boolean) => void;
     loadModels: () => void;
     surface?: 'settings' | 'page';
 }): import("react").JSX.Element;

@@ -156,6 +156,8 @@ export declare const en: {
     modelsGoSource: string;
     modelsFreeSource: string;
     modelsRefresh: string;
+    modelsEnableAll: string;
+    modelsDisableAll: string;
     modelsLoading: string;
     modelsFailed: string;
     modelsStale: string;
@@ -167,7 +169,6 @@ export declare const en: {
     modelsRefreshingShort: string;
     modelsEmpty: string;
     limitsLabel: string;
-    limitsHint: string;
     limitsFilterLabel: string;
     limitsFilterPlaceholder: string;
     limitsSummary: string;
@@ -189,7 +190,6 @@ export declare const en: {
     modalityVideo: string;
     modalityPdf: string;
     modalityUnknown: string;
-    modalitiesSource: string;
     modalitiesForwarding: string;
     priceLabel: string;
     priceInput: string;
@@ -201,7 +201,6 @@ export declare const en: {
     priceFree: string;
     priceMultiplier: string;
     priceUnpublished: string;
-    priceSource: string;
     visibilityHint: string;
     modelVisibleLabel: string;
     configurationMissing: string;

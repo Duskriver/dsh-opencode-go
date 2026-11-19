@@ -164,7 +164,7 @@ export interface OpencodeGoSectionFace extends FormActions, GoAccountsActions {
     setEnabled(next: boolean): void;
     /** Opt the sidebar row and the console page in or out; applied immediately. */
     setSidebarEntry(next: boolean): void;
-    setModelEnabled(id: string, next: boolean): void;
+    setModelEnabled(id: string | readonly string[], next: boolean): void;
 }
 /** One controller owns the page's typed drafts and immediate account operations. */
 export declare class OpencodeGoSectionController {
@@ -238,7 +238,7 @@ export declare class OpencodeGoSectionController {
     save(): Promise<void>;
     setEnabled(next: boolean): Promise<void>;
     setSidebarEntry(next: boolean): Promise<void>;
-    setModelEnabled(id: string, next: boolean): Promise<void>;
+    setModelEnabled(id: string | readonly string[], next: boolean): Promise<void>;
     private writePickerSetting;
     inject(): OpencodeGoSectionFace;
     loadModels(): void;

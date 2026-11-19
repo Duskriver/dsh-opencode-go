@@ -153,7 +153,7 @@ Search **Available models** by name or ID, or filter by **New in 7 days**, **Cus
 
 ![Model settings: search, filters, visibility switches, and parameter editing](docs/assets/model-settings.png)
 
-- Each model's switch controls its visibility in the conversation picker and takes effect immediately.
+- Each model's switch controls its visibility in the conversation picker and takes effect immediately. Non-deprecated models are enabled by default while deprecated models default to disabled; use **Enable all / Disable all** to toggle all configurable models in the current search and filter view (including deprecated models) at once.
 - Each row shows the input / output price the gateway declares in `/models` (US dollars per million tokens). The selected model's card adds cache read / write rates, any context-tier rates, and a note when the gateway declares time-based multipliers. Models the gateway does not price show no rate and say so in the card; Free models read **Free**.
 - Select a model to inspect its catalog context window, maximum output, and input modalities. Limit overrides apply as you edit them — committed on blur, Enter, or shortly after typing stops; empty values use defaults.
 - Reasoning models offer the applicable switch, effort, or token budget options. Budget-based models also accept custom budgets, which apply immediately.
