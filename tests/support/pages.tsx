@@ -49,6 +49,7 @@ export function pageStateOf(overrides: Partial<OpencodeGoSectionState> = {}): Op
     usagePillStyle: field('badge'),
     usagePillBorder: field('true'),
     appearanceTheme: field('native'),
+    goPlan: field('go'),
     showSidebarQuota: field('false'),
     freeEnabled: field('false'),
     freeBaseURL: field('https://opencode.ai/inference/v1'),

@@ -1,5 +1,7 @@
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol';
+import { validReleaseDate, type PriceMultiplier } from './pricing.ts';
+export { validReleaseDate, type PriceMultiplier };
 /** Public DSH route and the private SDK transport have separate identities. */
 export declare const PROVIDER_ID = "dsh-opencode-go";
 export declare const DISPLAY_NAME = "DSH OpenCode Go";
@@ -40,12 +42,21 @@ export declare function resolveUsagePillAppearance(style: unknown, border: unkno
 export declare const OPENCODE_GO_THEMES: readonly ["native", "classic"];
 export type OpencodeGoTheme = typeof OPENCODE_GO_THEMES[number];
 export declare const DEFAULT_OPENCODE_GO_THEME: OpencodeGoTheme;
+/** OpenCode Go subscription tiers used to translate shared quota percentages into per-model limits. */
+export declare const GO_PLANS: readonly ["go", "go-plus", "go-teams"];
+export type GoPlan = typeof GO_PLANS[number];
+export declare const DEFAULT_GO_PLAN: GoPlan;
+export type GoMonthlyUsage = Record<GoPlan, number>;
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
     id: string;
     name: string;
     apiKeyEnv: string;
+    /** Optional display-only subscription tier used to convert quota percentages into call/token estimates. */
+    plan?: GoPlan;
 };
+/** Resolve one account's display-only Go tier, falling back to the profile default. */
+export declare function accountPlanOf(account: Pick<GoAccount, 'plan'> | undefined, fallback?: GoPlan): GoPlan;
 export declare const MAX_ACCOUNTS = 20;
 /**
  * Upper bound for one configured thinking budget, in tokens. Shared with the
@@ -62,6 +73,7 @@ export interface AccountSettings {
     /** Omission/null preserves legacy credentials; an explicit empty list removes all accounts. */
     accounts?: readonly GoAccount[] | null;
     autoSwitch?: boolean;
+    goPlan?: GoPlan;
 }
 export declare function accountRefOf(settings: AccountSettings): string;
 /** Promote one account while preserving every other account's relative order. */
@@ -141,6 +153,8 @@ export interface OpencodeGoConfig {
     usagePillBorder: boolean;
     /** Global plugin appearance theme. */
     appearanceTheme: OpencodeGoTheme;
+    /** Active OpenCode Go subscription tier for per-model remaining quota estimation. */
+    goPlan: GoPlan;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
     /** Legacy credential reference, kept in sync with the first/current account. */
@@ -190,6 +204,10 @@ export interface GoModel {
     inputModalities?: readonly InputModality[];
     /** The text tariff the gateway publishes; absent when it declares none. */
     price?: GoModelPrice;
+    /** Per-plan monthly dollar allowance declared under `/models`'s `go.monthly_usage`. */
+    goMonthlyUsage?: GoMonthlyUsage;
+    /** Time/date multiplier schedule declared under `/models`'s `cost.multipliers`. */
+    pricingMultipliers?: readonly PriceMultiplier[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
 }
@@ -216,6 +234,8 @@ export interface ThinkingBudgetRange {
     min: number;
     max: number;
 }
+/** Validate per-plan monthly dollar limits (`go`, `go-plus`, `go-teams`); malformed fields drop cleanly. */
+export declare function parseGoMonthlyUsage(value: unknown): GoMonthlyUsage | undefined;
 /**
  * Input modalities this page can name; MIME types are normalized to these tokens.
  */
@@ -247,7 +267,6 @@ export interface GoModelCatalog {
 }
 /** Missing configuration cannot be enabled; configured models follow explicit switches or lifecycle defaults. */
 export declare function isModelEnabled(model: Pick<GoModel, 'id' | 'source' | 'deprecated' | 'configurationMissing'>, modelVisibility?: Readonly<Record<string, boolean>>): boolean;
-export declare function validReleaseDate(value: unknown): value is string;
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export declare function isNewModel(model: GoModel, now?: number): boolean;
 export declare function sortModels(models: readonly GoModel[], now?: number): GoModel[];
@@ -320,6 +339,10 @@ export type AccountCommand = {
 } | {
     kind: 'auto-switch';
     value: boolean;
+} | {
+    kind: 'set-plan';
+    ref: string;
+    plan: GoPlan;
 };
 export declare function parseAccountCommand(value: unknown): AccountCommand;
 declare module '@deepseek-ai/dsh-typert-protocol' {

@@ -1,6 +1,10 @@
 /** Strict gateway tariff validation for model discovery and Free eligibility. */
 import type { ModelCost } from './sdk-types.ts'
-import { validReleaseDate } from './contracts.ts'
+
+export function validReleaseDate(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value
+}
 
 type Comparison<T> = { in?: T[]; eq?: T; gt?: T; gte?: T; lt?: T; lte?: T }
 
@@ -22,6 +26,40 @@ function object(value: unknown): Record<string, unknown> {
 function rate(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('invalid price')
   return value
+}
+
+const TTL_SECONDS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 }
+
+function ttlSeconds(key: string): number {
+  const match = /^(\d+)([smhd])$/.exec(key)
+  if (!match) throw new Error('invalid cache write TTL')
+  const count = Number(match[1])
+  if (!Number.isSafeInteger(count) || count <= 0) throw new Error('invalid cache write TTL')
+  return count * TTL_SECONDS[match[2]!]!
+}
+
+/** Accept either a flat rate or a TTL-keyed map (such as `{ "5m": 1.875, "1h": 3 }`), keeping the shortest TTL as base rate. */
+function cacheWriteRate(value: unknown): { rate: number; allZero: boolean } {
+  if (typeof value === 'number') {
+    const flat = rate(value)
+    return { rate: flat, allZero: flat === 0 }
+  }
+  const map = object(value)
+  const entries = Object.entries(map)
+  if (entries.length === 0) throw new Error('empty cache write map')
+  let shortestSeconds = Number.POSITIVE_INFINITY
+  let shortestRate = 0
+  let allZero = true
+  for (const [ttl, raw] of entries) {
+    const seconds = ttlSeconds(ttl)
+    const price = rate(raw)
+    if (price !== 0) allZero = false
+    if (seconds < shortestSeconds) {
+      shortestSeconds = seconds
+      shortestRate = price
+    }
+  }
+  return { rate: shortestRate, allZero }
 }
 
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
@@ -52,6 +90,51 @@ function condition(value: unknown, depth = 0): PricingCondition {
   return row as PricingCondition
 }
 
+/** Validate a gateway multiplier schedule, throwing on malformed rules. */
+export function parsePricingMultipliers(value: unknown): PriceMultiplier[] {
+  if (!Array.isArray(value)) throw new Error('invalid multipliers')
+  return value.map(item => {
+    const row = object(item)
+    return { when: condition(row.when), factor: rate(row.factor) }
+  })
+}
+
+function compareValue(actual: string, comparison: Comparison<string>): boolean {
+  if (comparison.in !== undefined && !comparison.in.includes(actual)) return false
+  if (comparison.eq !== undefined && actual !== comparison.eq) return false
+  if (comparison.gt !== undefined && !(actual > comparison.gt)) return false
+  if (comparison.gte !== undefined && !(actual >= comparison.gte)) return false
+  if (comparison.lt !== undefined && !(actual < comparison.lt)) return false
+  if (comparison.lte !== undefined && !(actual <= comparison.lte)) return false
+  return true
+}
+
+function matchesCondition(node: PricingCondition, utcDay: string, utcHour: string, utcDate: string): boolean {
+  if (node.all !== undefined && !node.all.every(child => matchesCondition(child, utcDay, utcHour, utcDate))) return false
+  if (node.any !== undefined && !node.any.some(child => matchesCondition(child, utcDay, utcHour, utcDate))) return false
+  if (node.utc_days !== undefined && !compareValue(utcDay, node.utc_days)) return false
+  if (node.utc_hours !== undefined && !compareValue(utcHour, node.utc_hours)) return false
+  if (node.date !== undefined && !compareValue(utcDate, node.date)) return false
+  return true
+}
+
+/**
+ * Evaluate the active tariff multiplier at a UTC instant (`nowMs`).
+ * Unmatched or absent schedules resolve to `1`.
+ */
+export function evaluatePriceMultiplier(multipliers: readonly PriceMultiplier[] | undefined, nowMs = Date.now()): number {
+  if (!multipliers || multipliers.length === 0 || !Number.isFinite(nowMs)) return 1
+  const now = new Date(nowMs)
+  const utcDay = DAYS[now.getUTCDay()]!
+  const utcHour = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`
+  const utcDate = now.toISOString().slice(0, 10)
+  let factor = 1
+  for (const rule of multipliers) {
+    if (matchesCondition(rule.when, utcDay, utcHour, utcDate)) factor *= rule.factor
+  }
+  return factor
+}
+
 export interface ParsedCost { cost: ModelCost; multipliers?: PriceMultiplier[]; free: boolean }
 
 /** Missing base prices or malformed optional components invalidate the entire tariff. */
@@ -59,11 +142,14 @@ export function readModelCost(value: unknown): ParsedCost | undefined {
   try {
     const raw = object(value), text = object(raw.text)
     const input = object(text.input), output = object(text.output)
+    let hasNonZeroWrite = false
     const cache = (raw: unknown): { cacheRead?: number; cacheWrite?: number } => {
       if (raw === undefined) return {}
       const row = object(raw)
+      const write = row.write === undefined ? undefined : cacheWriteRate(row.write)
+      if (write && !write.allZero) hasNonZeroWrite = true
       return { ...(row.read === undefined ? {} : { cacheRead: rate(row.read) }),
-        ...(row.write === undefined ? {} : { cacheWrite: rate(row.write) }) }
+        ...(write === undefined ? {} : { cacheWrite: write.rate }) }
     }
     const cost: ModelCost = { input: rate(input.price), output: rate(output.price), cacheRead: 0, cacheWrite: 0, ...cache(input.cache) }
     // A cache declaration on output is not a supported text tariff.
@@ -94,15 +180,8 @@ export function readModelCost(value: unknown): ParsedCost | undefined {
       if (cost.tiers.at(-1)?.inputTokensAbove === patch.threshold) cost.tiers[cost.tiers.length - 1] = tier
       else cost.tiers.push(tier)
     }
-    let multipliers: PriceMultiplier[] | undefined
-    if (raw.multipliers !== undefined) {
-      if (!Array.isArray(raw.multipliers)) throw new Error('invalid multipliers')
-      multipliers = raw.multipliers.map(item => {
-        const row = object(item)
-        return { when: condition(row.when), factor: rate(row.factor) }
-      })
-    }
+    const multipliers = raw.multipliers === undefined ? undefined : parsePricingMultipliers(raw.multipliers)
     const zero = (rates: ModelCost): boolean => rates.input === 0 && rates.output === 0 && rates.cacheRead === 0 && rates.cacheWrite === 0
-    return { cost, ...(multipliers === undefined ? {} : { multipliers }), free: zero(cost) && (cost.tiers ?? []).every(zero) }
+    return { cost, ...(multipliers === undefined ? {} : { multipliers }), free: !hasNonZeroWrite && zero(cost) && (cost.tiers ?? []).every(zero) }
   } catch { return undefined }
 }

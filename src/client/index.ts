@@ -7,6 +7,7 @@ import type { Context as ClientContext, Context } from '@deepseek-ai/cordis'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   PROFILE_ENTRY_ID,
+  type GoModelCatalog,
   type GoUsage,
   type AnalyticsQuery,
   type AnalyticsReport,
@@ -143,7 +144,13 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     ...(pageRegistered() ? { openPage } : {}),
   })
   pageRegistered = registerSidebarPage(ctx, pageInjected, () => layout, scope)
-  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered)
+  const readModelsCatalog = async (): Promise<GoModelCatalog> => {
+    await modelsReady
+    const result = await ctx.remote.opencodeGoModels.read()
+    if (!result.ok) throw result.error
+    return result.value
+  }
+  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered, readModelsCatalog)
 
   ctx.effect(() => {
     const refresh = (ref: string): void => { controller.refreshCredential(ref) }
@@ -301,6 +308,7 @@ export function registerUsagePill(
   readers?: PageReaders,
   openPage?: (tab?: PageTab) => void,
   canOpenPage: () => boolean = () => false,
+  readModels?: () => Promise<GoModelCatalog>,
 ): void {
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     const credentialChanges = createSnapshotStore(0)
@@ -342,6 +350,7 @@ export function registerUsagePill(
       },
       readUsage: readers?.readUsage ?? fallbackUsage,
       readAccountUsage,
+      ...(readModels ? { readModels } : {}),
       readAnalytics: readers?.readAnalytics ?? unavailableAnalytics,
       exportAnalytics: readers?.exportAnalytics ?? unavailableExport,
       // The page may have been withdrawn since this face was built: report the
@@ -354,7 +363,7 @@ export function registerUsagePill(
         },
       } : {}),
       getLocale: () => ready.locale.getLocale().active,
-      t: (key: string) => translate(key as OpencodeGoKey),
+      t: (key: string, params?: Record<string, unknown>) => translate(key as OpencodeGoKey, params),
     })
     ready.slots.inject('sidebar.footer.action', () => ready.slots.register({
       name: 'sidebar.footer.action', id: 'opencode-go-sidebar-quota', order: 1000,

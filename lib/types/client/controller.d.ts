@@ -2,23 +2,23 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol';
 import { type SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
-import { type ModelSource, type OpencodeGoTheme, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
+import { type ModelSource, type OpencodeGoTheme, type GoPlan, type OpencodeGoSettings, type OpencodeGoModelLimits, type GoAccount, type GoModel, type GoModelCatalog, type GoUsage, type AccountCommand, type SettingsWriteResult } from '../contracts.ts';
 export type { OpencodeGoSettings, OpencodeGoModelLimit, OpencodeGoModelLimits } from '../contracts.ts';
 export declare const OPENCODE_GO_NS = "llm-opencode-go";
 /**
  * Fields that apply the moment they change. Every non-advanced surface is
  * immediate, so the form has exactly one save gesture: the Advanced tab.
  */
-export declare const IMMEDIATE_TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "showSidebarQuota", "freeEnabled"];
+export declare const IMMEDIATE_TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled"];
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number];
 /** Fields the Advanced tab keeps behind Save/Discard. */
 export declare const STAGED_TEXT_FIELDS: readonly ["baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type StagedTextField = typeof STAGED_TEXT_FIELDS[number];
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
 /** An immediate field also covers the per-model capacity map. */
 export type ImmediateField = ImmediateTextField | 'modelLimits';
-export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
@@ -118,6 +118,8 @@ export interface GoAccountsActions {
     replaceAccountKey: (ref: string, key: string) => Promise<boolean>;
     /** Move one account to a new position; the first row becomes the preferred account. */
     moveAccount: (ref: string, toIndex: number) => Promise<boolean>;
+    /** Display-only subscription tier for translating this account's quota percentages into calls/tokens. */
+    setAccountPlan?: (ref: string, plan: GoPlan) => Promise<boolean>;
 }
 export interface OpencodeGoSectionState extends FormShell {
     accounts: GoAccountsState;
@@ -134,6 +136,7 @@ export interface OpencodeGoSectionState extends FormShell {
     usagePillStyle: FieldState;
     usagePillBorder: FieldState;
     appearanceTheme: FieldState;
+    goPlan: FieldState;
     /** Last saved theme; text drafts preview without switching the applied interface. */
     appliedAppearanceTheme: OpencodeGoTheme;
     modelVisibility: Readonly<Record<string, boolean>>;

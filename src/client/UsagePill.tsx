@@ -5,6 +5,12 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import {
   parseAccountSwitch,
+  accountPlanOf,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
+  type GoModel,
+  type GoModelCatalog,
+  type GoPlan,
   type GoUsage,
   type UsageWindow,
   PROVIDER_ID,
@@ -24,17 +30,19 @@ import {
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { OpencodeGoSettings } from './controller.ts'
 import { AnalyticsDialog } from './AnalyticsDialog.tsx'
-import { formatDateTime, themeStyle, useGoThemeTokens } from './presentation.ts'
+import { formatDateTime, formatTokenCount, themeStyle, useGoThemeTokens } from './presentation.ts'
+import { estimateModelQuota } from '../quota-estimate.ts'
 
 export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
   settings: ConfigForm<OpencodeGoSettings>
   readUsage: () => Promise<GoUsage>
   readAccountUsage?: (ref: string) => Promise<GoUsage>
+  readModels?: () => Promise<GoModelCatalog>
   /** Optional so an embedded/test render can omit the dashboard. */
   readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>
-  t: (key: string) => string
+  t: (key: string, params?: Record<string, unknown>) => string
   getLocale?: () => string
   credentialChanges?: SnapshotStore<number>
   selectAccount?: (ref: string) => Promise<boolean>
@@ -324,7 +332,7 @@ function Tick() {
 /** Only a visible, enabled input indicator mounts the usage poller. */
 export function UsagePill({ directory, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
-  return <UsageSurface {...props} variant="pill" provider={state.current?.provider} />
+  return <UsageSurface {...props} variant="pill" provider={state.current?.provider} selectedModel={state.current?.model} />
 }
 
 export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
@@ -332,9 +340,9 @@ export function SidebarQuota({ wide, ...props }: SidebarQuotaProps) {
 }
 
 /** The sidebar's viewed account is independent of the profile's request order. */
-function UsageSurface({ settings, credentialChanges, variant, provider, readAccountUsage, openUsagePage, ...props }:
+function UsageSurface({ settings, credentialChanges, variant, provider, selectedModel, readAccountUsage, openUsagePage, ...props }:
   Omit<UsagePillProps, 'directory'> & {
-    variant: UsageVariant; provider?: string
+    variant: UsageVariant; provider?: string; selectedModel?: string
   }) {
   // The Host scope is a class instance whose methods read their own state, so
   // React has to reach them through this receiver: a reference handed over as a
@@ -396,13 +404,17 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
     config.value?.usagePillBorder,
     hasExplicitBorder,
   )
+  const configPlan: GoPlan = (GO_PLANS as readonly string[]).includes(config.value?.goPlan ?? '')
+    ? (config.value!.goPlan as GoPlan) : DEFAULT_GO_PLAN
+  const goPlan = accountPlanOf(accounts.find(account => account.apiKeyEnv === activeRef), configPlan)
   return visible ? <>
     <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts.map(a => [a.id, a.apiKeyEnv])])}
       {...props} readUsage={variant === 'pill' ? props.readUsage : readSidebarUsage}
       accounts={accounts} activeRef={activeRef} writable={config.writable}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={pillAppearance.style} pillBorder={pillAppearance.border}
-      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics} />
+      appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics}
+      goPlan={goPlan} activeModelId={provider === PROVIDER_ID ? selectedModel : undefined} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling.
         It must stay mounted even when the console page offers itself: a page
@@ -416,12 +428,21 @@ function UsageSurface({ settings, credentialChanges, variant, provider, readAcco
   </> : null
 }
 
-function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme }:
+function formatTranslated(t: UsagePillProps['t'], key: string, params: Record<string, unknown>): string {
+  let text = t(key, params)
+  for (const [name, value] of Object.entries(params)) {
+    text = text.replaceAll(`{${name}}`, String(value))
+  }
+  return text
+}
+
+function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme, goPlan, activeModelId }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
     onNextAccount?: () => void
     variant: UsageVariant; pillStyle: UsagePillStyle; pillBorder: boolean; appearanceTheme: OpencodeGoTheme
+    goPlan: GoPlan; activeModelId?: string
   }) {
   const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
@@ -433,6 +454,7 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
   const [rovingIndex, setRovingIndex] = useState(0)
+  const [catalogModels, setCatalogModels] = useState<readonly GoModel[] | null>(null)
   const tokens = useGoThemeTokens(appearanceTheme)
   const root = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -516,6 +538,12 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('mousedown', click); document.removeEventListener('keydown', key) }
   }, [open, focusTrigger])
+  useEffect(() => {
+    if (sidebar || !open || !readModels || !activeModelId || catalogModels) return
+    let alive = true
+    void readModels().then(catalog => { if (alive) setCatalogModels(catalog.models) }).catch(() => {})
+    return () => { alive = false }
+  }, [sidebar, open, readModels, activeModelId, catalogModels])
   // The popover is non-modal, but opening it must land focus inside: on the first
   // action of the reading view, or on the current account of the drill-down list.
   useEffect(() => {
@@ -702,6 +730,27 @@ function ActiveUsage({ readUsage, readAnalytics, t, getLocale, accounts, activeR
             {usage[key].status === 'rate-limited' && <div className={css.limitedText}>{t('usageLimited')}</div>}
           </div>)}
         </div> : failure ? null : <p className={css.hint}>{t('usageLoading')}</p>}
+        {usage && catalogModels && activeModelId ? (() => {
+          const activeEntry = catalogModels.find(entry => entry.id === activeModelId && (entry.source ?? 'go') === 'go')
+          if (!activeEntry) return null
+          const estimate = estimateModelQuota({ model: activeEntry, plan: goPlan, usage, nowMs: Date.now() })
+          if (estimate?.kind !== 'go' || estimate.remainingRequests === undefined) return null
+          const locale = getLocale?.()
+          const callText = estimate.limited
+            ? t('quotaPillModelLimited')
+            : formatTranslated(t, 'quotaPillRemainingCalls', {
+              count: formatTokenCount(estimate.remainingRequests, locale),
+            })
+          return <div className={css.modelSection}>
+            <div className={css.modelEstimateRow} data-active="">
+              <span className={css.modelEstimateName} title={activeEntry.name ?? activeEntry.id}>
+                {activeEntry.name ?? activeEntry.id}
+              </span>
+              {estimate.multiplier !== 1 ? <span className={css.modelEstimatePeak}>{estimate.multiplier}×</span> : null}
+              <strong className={css.modelEstimateVal}>{callText}</strong>
+            </div>
+          </div>
+        })() : null}
         {readAnalytics || current ? <div className={css.actions}>
           {readAnalytics ? <button type="button" className={css.hist} aria-haspopup="dialog"
             onClick={() => { setOpen(false); onAnalyticsOpenChange(true) }}>

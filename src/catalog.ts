@@ -19,6 +19,7 @@ import {
   validReleaseDate,
   type GoModel,
   type GoModelPrice,
+  parseGoMonthlyUsage,
   DEFAULT_BASE_URL,
   type OpencodeGoConfig,
   DEFAULT_FREE_BASE_URL,
@@ -235,7 +236,8 @@ export function reasoningRequest(intent: ReasoningIntent): {
   }
 }
 
-export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'> & { readonly costKnown?: false }
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities' | 'goMonthlyUsage' | 'pricingMultipliers'>
+  & { readonly costKnown?: false }
 
 export interface ModelDirectory {
   readonly models: ReadonlyMap<string, Model<Api>>
@@ -368,10 +370,13 @@ export function readModelDirectory(body: unknown, baseURL: string, source: Model
     if (source === 'free' && !pricing?.free) continue
     if (details.has(id)) continue
     const input = normalizeInputModalities(record(data.modalities).input)
+    const goMonthlyUsage = source === 'go' ? parseGoMonthlyUsage(record(data.go).monthly_usage) : undefined
     details.set(id, { deprecated: data.status === 'deprecated' || data.deprecated === true,
       ...validReleaseDate(data.release_date) ? { releaseDate: data.release_date } : {},
       ...input === undefined ? {} : { inputModalities: input },
       ...pricing === undefined ? { costKnown: false } : {},
+      ...goMonthlyUsage === undefined ? {} : { goMonthlyUsage },
+      ...pricing?.multipliers?.length ? { pricingMultipliers: pricing.multipliers } : {},
     })
     try {
       const declaration = record(data.api)

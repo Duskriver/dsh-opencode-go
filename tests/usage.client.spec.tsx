@@ -1070,6 +1070,54 @@ describe("conversation usage", () => {
     showDetails()
     expect(openPanel()).toBeTruthy()
   })
+
+  it('shows remaining estimated calls only for the currently selected Go model and halves during 2x peak hours', async () => {
+    vi.setSystemTime(Date.parse('2026-11-16T05:00:00Z'))
+    const readModels = vi.fn().mockResolvedValue({
+      stale: false,
+      models: [
+        {
+          id: 'kimi-k3', name: 'Kimi K3', source: 'go',
+          price: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+        },
+        {
+          id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', source: 'go',
+          price: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+          pricingMultipliers: [{
+            when: { utc_days: { in: ['mon'] }, utc_hours: { gte: '01:00', lt: '04:00' } },
+            factor: 2,
+          }],
+        },
+      ],
+    })
+    await act(async () => {
+      render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(usage)} readModels={readModels} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(trigger())
+      await Promise.resolve()
+    })
+    expect(readModels).toHaveBeenCalledOnce()
+    expect(screen.getByText('DeepSeek V4 Pro')).toBeTruthy()
+    expect(screen.queryByText('Kimi K3')).toBeNull()
+    expect(screen.getByText('~1,190 calls left')).toBeTruthy()
+
+    cleanup()
+    vi.setSystemTime(Date.parse('2026-11-16T02:00:00Z')) // Monday 02:00 UTC -> peak 2x active
+    await act(async () => {
+      render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(usage)} readModels={readModels} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(trigger())
+      await Promise.resolve()
+    })
+    expect(screen.getByText('2×')).toBeTruthy()
+    expect(screen.getByText('~595 calls left')).toBeTruthy()
+  })
 })
 
 describe('Native and Classic presentation', () => {

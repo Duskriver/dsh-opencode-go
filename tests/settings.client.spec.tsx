@@ -46,7 +46,7 @@ describe("settings page and typed capacity editing", () => {
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
     | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
-    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'showSidebarQuota' | 'freeEnabled'
+    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'goPlan' | 'showSidebarQuota' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -87,6 +87,7 @@ describe("settings page and typed capacity editing", () => {
       usagePillStyle: field('badge'),
       usagePillBorder: field('true'),
       appearanceTheme: field('native'),
+      goPlan: field('go'),
       showSidebarQuota: field('false'),
       freeEnabled: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
@@ -1689,6 +1690,7 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['usagePillStyle', 'concentric', 'concentric'],
     ['usagePillBorder', 'false', false],
     ['appearanceTheme', 'classic', 'classic'],
+    ['goPlan', 'go-plus', 'go-plus'],
     ['showSidebarQuota', 'true', true],
     ['freeEnabled', 'true', true],
   ]
@@ -1758,6 +1760,7 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['usagePillStyle', 'neon'],
     ['usagePillBorder', 'maybe'],
     ['appearanceTheme', 'system'],
+    ['goPlan', 'enterprise'],
     ['showSidebarQuota', '1'],
   ] as const)('refuses the invalid immediate %s=%s without a draft or a write', async (field, text) => {
     const { host, controller, actions, snapshot } = setup()
@@ -1883,12 +1886,12 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
 
   it('resets immediate fields immediately and stages advanced clears for Save', async () => {
     const value = { apiKeyEnv: 'ACCOUNT_A', freeEnabled: true, usageDisplay: 'always' as const,
-      showSidebarQuota: true, usagePillStyle: 'concentric' as const, usagePillBorder: false, appearanceTheme: 'classic' as const }
+      showSidebarQuota: true, usagePillStyle: 'concentric' as const, usagePillBorder: false, appearanceTheme: 'classic' as const, goPlan: 'go-plus' as const }
     const { host, controller, actions, snapshot } = setup(value)
     const base = { freeEnabled: false, usageDisplay: 'auto' as const, showSidebarQuota: false,
-      usagePillStyle: 'badge' as const, usagePillBorder: true, appearanceTheme: 'native' as const }
+      usagePillStyle: 'badge' as const, usagePillBorder: true, appearanceTheme: 'native' as const, goPlan: 'go' as const }
     host.publish({ base, user: value })
-    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme'] as const) {
+    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'goPlan'] as const) {
       actions.resetField(field)
       expect(host.unset).toHaveBeenLastCalledWith(field)
     }

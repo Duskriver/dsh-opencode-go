@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readModelCost } from '../src/pricing.ts'
+import { evaluatePriceMultiplier, readModelCost } from '../src/pricing.ts'
 import { peakMultipliers, zeroCost } from './support/data.ts'
 
 describe('gateway text tariff validation', () => {
@@ -63,5 +63,45 @@ describe('gateway multiplier validation', () => {
     [{ factor: 2, when: { utc_days: { in: ['monday'] } } }],
   ])('rejects malformed multipliers, including for zero-cost entries: %j', multipliers => {
     expect(readModelCost({ ...zeroCost(), multipliers })).toBeUndefined()
+  })
+  it('evaluates weekday UTC hours and date-based multiplier schedules', () => {
+    expect(evaluatePriceMultiplier(peakMultipliers, Date.parse('2026-11-16T02:30:00Z'))).toBe(2) // Monday 02:30 UTC
+    expect(evaluatePriceMultiplier(peakMultipliers, Date.parse('2026-11-16T05:30:00Z'))).toBe(1) // Monday 05:30 UTC
+    expect(evaluatePriceMultiplier(peakMultipliers, Date.parse('2026-11-14T02:30:00Z'))).toBe(1) // Saturday 02:30 UTC
+    const scheduled = [{ when: { date: { gte: '2026-12-01' } }, factor: 2 }]
+    expect(evaluatePriceMultiplier(scheduled, Date.parse('2026-11-30T23:59:00Z'))).toBe(1)
+    expect(evaluatePriceMultiplier(scheduled, Date.parse('2026-12-01T00:00:00Z'))).toBe(2)
+  })
+})
+
+describe('TTL-keyed cache write pricing', () => {
+  it('picks the shortest TTL rate for TTL-keyed cache.write maps and keeps non-zero maps paid', () => {
+    const qwen = readModelCost({
+      text: {
+        input: { price: 1.5, cache: { read: 0.075, write: { '1h': 3, '5m': 1.875 } } },
+        output: { price: 4.5 },
+      },
+    })!
+    expect(qwen.free).toBe(false)
+    expect(qwen.cost.cacheWrite).toBe(1.875)
+
+    const gpt = readModelCost({
+      text: {
+        input: { price: 0.2, cache: { read: 0.02, write: { '30m': 0.25, '12h': 0.5 } } },
+        output: { price: 1.2 },
+      },
+    })!
+    expect(gpt.cost.cacheWrite).toBe(0.25)
+
+    const partialZero = readModelCost({
+      text: {
+        input: { price: 0, cache: { write: { '5m': 0, '1h': 1 } } },
+        output: { price: 0 },
+      },
+    })!
+    expect(partialZero.free).toBe(false)
+  })
+  it.each([{}, { '5m': -1 }, { forever: 1 }, { '0m': 1 }])('rejects invalid cache.write TTL maps: %j', write => {
+    expect(readModelCost({ text: { input: { price: 1, cache: { write } }, output: { price: 2 } } })).toBeUndefined()
   })
 })

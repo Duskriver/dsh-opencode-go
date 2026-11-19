@@ -587,6 +587,19 @@ describe('settings RPC and lifecycle', () => {
       expect(parseGoModelCatalog({ ...value, models: [{ id: 'same', price: { ...price, tiers } }] }).models[0]?.price)
         .toEqual({ input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25, multipliers: true })
     }
+    const goMonthlyUsage = { go: 15, 'go-plus': 60, 'go-teams': 20 }
+    const parsedQuota = parseGoModelCatalog({ ...value, models: [{
+      id: 'same', goMonthlyUsage, pricingMultipliers: peakMultipliers,
+    }] }).models[0]!
+    expect(parsedQuota.goMonthlyUsage).toEqual(goMonthlyUsage)
+    expect(parsedQuota.pricingMultipliers).toEqual(peakMultipliers)
+    // Malformed display-only quota/multiplier metadata drops without losing the model.
+    const brokenQuota = parseGoModelCatalog({ ...value, models: [{
+      id: 'same', goMonthlyUsage: { go: 0, 'go-plus': 60, 'go-teams': 20 }, pricingMultipliers: [{ factor: -1, when: {} }],
+    }] }).models[0]!
+    expect(brokenQuota.id).toBe('same')
+    expect(brokenQuota.goMonthlyUsage).toBeUndefined()
+    expect(brokenQuota.pricingMultipliers).toBeUndefined()
   })
   it('keeps original Go keys and separate Free keys for picker visibility and capacities', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })

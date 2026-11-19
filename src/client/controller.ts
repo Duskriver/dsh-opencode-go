@@ -19,6 +19,9 @@ import {
   DEFAULT_OPENCODE_GO_THEME,
   OPENCODE_GO_THEMES,
   type OpencodeGoTheme,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
+  type GoPlan,
   SETTINGS_NAMESPACE,
   type OpencodeGoConfig,
   type OpencodeGoSettings,
@@ -43,7 +46,7 @@ export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
  * Fields that apply the moment they change. Every non-advanced surface is
  * immediate, so the form has exactly one save gesture: the Advanced tab.
  */
-export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled'] as const
+export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'goPlan', 'showSidebarQuota', 'freeEnabled'] as const
 
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number]
 
@@ -119,6 +122,7 @@ function formatField(field: TextField, value: unknown): string {
   }
   if (field === 'usagePillBorder') return String(typeof value === 'boolean' ? value : DEFAULT_USAGE_PILL_BORDER)
   if (field === 'appearanceTheme') return typeof value === 'string' ? value : DEFAULT_OPENCODE_GO_THEME
+  if (field === 'goPlan') return typeof value === 'string' && (GO_PLANS as readonly string[]).includes(value) ? value : DEFAULT_GO_PLAN
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return String(value === true)
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 }
@@ -128,6 +132,7 @@ function parseField(field: TextField, text: string): FieldWrite | undefined {
   if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as UsagePillStyle } : undefined
   if (field === 'usagePillBorder') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   if (field === 'appearanceTheme') return OPENCODE_GO_THEMES.some(theme => theme === text) ? { kind: 'set', value: text as OpencodeGoTheme } : undefined
+  if (field === 'goPlan') return GO_PLANS.some(plan => plan === text) ? { kind: 'set', value: text as GoPlan } : undefined
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
@@ -238,6 +243,8 @@ export interface GoAccountsActions {
   replaceAccountKey: (ref: string, key: string) => Promise<boolean>
   /** Move one account to a new position; the first row becomes the preferred account. */
   moveAccount: (ref: string, toIndex: number) => Promise<boolean>
+  /** Display-only subscription tier for translating this account's quota percentages into calls/tokens. */
+  setAccountPlan?: (ref: string, plan: GoPlan) => Promise<boolean>
 }
 
 export interface OpencodeGoSectionState extends FormShell {
@@ -255,6 +262,7 @@ export interface OpencodeGoSectionState extends FormShell {
   usagePillStyle: FieldState
   usagePillBorder: FieldState
   appearanceTheme: FieldState
+  goPlan: FieldState
   /** Last saved theme; text drafts preview without switching the applied interface. */
   appliedAppearanceTheme: OpencodeGoTheme
   modelVisibility: Readonly<Record<string, boolean>>
@@ -726,6 +734,7 @@ export class OpencodeGoSectionController {
         return accepted
       }, false),
       moveAccount: (ref, toIndex) => this.runAccountAction(() => command({ kind: 'move', ref, toIndex })),
+      setAccountPlan: (ref, plan) => this.runAccountAction(() => command({ kind: 'set-plan', ref, plan })),
     }
   }
 

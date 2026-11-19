@@ -132,6 +132,13 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .progressRolling, .progressWeekly, .progressMonthly { --go-progress: var(--go-accent); }
 .limitedText { font-size: 10px; line-height: 14px; color: var(--go-danger); }
 
+.modelSection { flex: none; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--go-border); }
+.modelEstimateRow { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; line-height: 16px; }
+.modelEstimateName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); }
+.modelEstimateRow[data-active] .modelEstimateName { color: var(--go-accent); font-weight: 500; }
+.modelEstimatePeak { flex: none; padding: 0 4px; border-radius: var(--go-radius-small); background: color-mix(in srgb, var(--go-warning) 14%, transparent); color: var(--go-warning); font-size: 10px; font-weight: 500; }
+.modelEstimateVal { flex: none; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; color: var(--go-muted); }
+
 .actions { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 8px;
   font-size: 11px; line-height: 17px; color: var(--go-muted); }
 .actions .hist { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: -4px; padding: 2px 4px;

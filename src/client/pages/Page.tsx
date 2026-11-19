@@ -90,6 +90,7 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     setAutoSwitch: seats.setAutoSwitch,
     replaceAccountKey: seats.replaceAccountKey,
     moveAccount: seats.moveAccount,
+    setAccountPlan: seats.setAccountPlan,
     t: seats.t,
     getLocale: seats.getLocale,
     readers: seats.readers,

@@ -19,6 +19,8 @@ import {
   type UsagePillStyle,
   DEFAULT_OPENCODE_GO_THEME,
   OPENCODE_GO_THEMES,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
   ACCOUNT_REF_PATTERN,
   DEFAULT_ACCOUNT_REF,
   MAX_ACCOUNTS,
@@ -59,6 +61,7 @@ const fields = {
     .default(DEFAULT_USAGE_PILL_STYLE) as unknown as z<UsagePillStyle>,
   usagePillBorder: z.boolean().default(DEFAULT_USAGE_PILL_BORDER),
   appearanceTheme: z.union(OPENCODE_GO_THEMES.map(theme => z.const(theme))).default(DEFAULT_OPENCODE_GO_THEME),
+  goPlan: z.union(GO_PLANS.map(plan => z.const(plan))).default(DEFAULT_GO_PLAN),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   // A bare environment variable name: an empty string would otherwise pass the
   // schema, then never match any account (accountRefOf normalizes it away) and
@@ -67,6 +70,7 @@ const fields = {
   accounts: z.union([z.const(null), z.array(z.object({
     id: z.string().required(), name: z.string().required(),
     apiKeyEnv: z.string().role('credential-ref').pattern(ACCOUNT_REF_PATTERN).required(),
+    plan: z.union(GO_PLANS.map(plan => z.const(plan))),
   })).max(MAX_ACCOUNTS)]).default(null),
   autoSwitch: z.boolean().default(false),
   // Settings rebuild and serialize this schema before sending it to clients.

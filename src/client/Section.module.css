@@ -1025,10 +1025,21 @@
   border-radius: var(--go-radius-option);
 }
 .modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: normal; word-break: normal; overflow: hidden; flex: 0 1 auto; min-width: 0; }
-/* The rate line stays on one line: a narrow list truncates it rather than
-   growing rows to different heights, and the parameter card holds the full
-   breakdown with its unit. */
-.modelPrice { font-size: 11px; line-height: 1.4; color: var(--go-muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 6px 10px; border: 1px solid var(--go-border); border-radius: var(--go-radius-option); background: var(--go-surface-sunken); }
+.planMeta { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--go-text); }
+.planSeg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--go-radius-small); background: var(--go-surface-2); border: 1px solid var(--go-border-subtle); }
+.planOption { padding: 3px 9px; border: 0; border-radius: var(--go-radius-small); background: transparent; color: var(--go-muted); font: inherit; font-size: 11px; line-height: 1.5; cursor: pointer; }
+.planOption[aria-pressed="true"] { background: var(--go-accent-soft); color: var(--go-accent); font-weight: 500; }
+.planOption:disabled { opacity: .5; cursor: default; }
+.accountPlanBadge { padding: 1px 6px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small); background: var(--go-surface-2); color: var(--go-muted); font-size: 11px; line-height: 1.5; white-space: nowrap; }
+.quotaCard { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--go-border-subtle); border-radius: var(--go-radius-option); background: var(--go-surface-sunken); }
+.quotaLead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 8px; }
+.quotaSecondary { font-size: 11px; line-height: 1.4; color: var(--go-muted); font-variant-numeric: tabular-nums; }
+.quotaGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.quotaCell { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: var(--go-radius-small); background: var(--go-surface-2); border: 1px solid var(--go-border-subtle); }
+.quotaCellLabel { font-size: 11px; line-height: 1.3; color: var(--go-muted); }
+.quotaCellValue { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--go-text); font-variant-numeric: tabular-nums; }
+.quotaPeakNote { font-size: 11px; line-height: 1.4; color: var(--go-warning); }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--go-accent); }
 .modelDetails { overflow-y: auto; min-height: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface-elevated); }
 .modelDetails h3 { font-family: var(--go-display-font); font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }

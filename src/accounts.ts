@@ -208,9 +208,26 @@ export class GoAccountManager {
     if (command.kind === 'rename') return this.write(connection, {
       accounts: accounts.map(account => account.apiKeyEnv === command.ref ? { ...account, name: command.name.trim() } : account),
     })
+    if (command.kind === 'set-plan') {
+      if (value.accounts?.some(entry => entry.apiKeyEnv === command.ref)) {
+        return this.write(connection, {
+          accounts: accounts.map(entry => entry.apiKeyEnv === command.ref ? { ...entry, plan: command.plan } : entry),
+          ...(command.ref === accountRefOf(value) ? { goPlan: command.plan } : {}),
+        })
+      }
+      if (value.accounts == null && command.ref === accountRefOf(value)) {
+        return this.write(connection, { goPlan: command.plan })
+      }
+      return 'rejected'
+    }
     if (command.kind === 'select') {
       const next = [...moveAccountFirst(accounts, command.ref)]
-      return this.write(connection, { accounts: next, apiKeyEnv: command.ref })
+      const selectedPlan = next[0]?.plan
+      return this.write(connection, {
+        accounts: next,
+        apiKeyEnv: command.ref,
+        ...(selectedPlan ? { goPlan: selectedPlan } : {}),
+      })
     }
     const from = accounts.findIndex(account => account.apiKeyEnv === command.ref)
     if (from < 0 || command.toIndex >= accounts.length) return 'rejected'

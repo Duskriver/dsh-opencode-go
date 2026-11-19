@@ -47,12 +47,17 @@ import {
   type GoModel,
   type GoModelPrice,
   type InputModality,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
+  accountPlanOf,
+  type GoPlan,
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_STYLE,
   type UsagePillStyle,
   OPENCODE_GO_THEMES,
 } from '../contracts.ts'
+import { estimateModelQuota, isFreePrice, type ModelQuotaEstimate } from '../quota-estimate.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 
 export function HintMark(props: { hint: string }) {
@@ -159,12 +164,34 @@ function slotAt(container: HTMLElement, clientY: number): number {
  * the preferred account. Every row is read in the same pass, so the one refresh
  * stamp belongs to the card and sits in its header.
  */
-export function AccountsCard({ state, actions, writable, t, locale, addRequest = 0, defaultOpen = false, surface = 'settings' }: {
+function PlanSelector({ label, hint, value, disabled, t, onSelect }: {
+  label: string
+  hint: string
+  value: GoPlan
+  disabled: boolean
+  t: AccountTranslate
+  onSelect: (plan: GoPlan) => void
+}) {
+  return <div className={css.planRow}>
+    <span className={css.planMeta}>
+      <span>{label}</span>
+      <HintMark hint={hint} />
+    </span>
+    <div className={css.planSeg} role="group" aria-label={label}>
+      {GO_PLANS.map(option => <button key={option} type="button" className={css.planOption}
+        aria-pressed={value === option} disabled={disabled}
+        onClick={() => { onSelect(option) }}>{t(`goPlan_${option}`)}</button>)}
+    </div>
+  </div>
+}
+
+export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan = DEFAULT_GO_PLAN, addRequest = 0, defaultOpen = false, surface = 'settings' }: {
   state: GoAccountsState
   actions: GoAccountsActions
   writable: boolean
   t: AccountTranslate
   locale?: string
+  fallbackPlan?: GoPlan
   /**
    * Rising counter from a page-level "Add account" action. The page owns the
    * button, the card owns the editor: asking through a counter keeps one add
@@ -298,6 +325,14 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
             onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
         </div>
       </div>
+      {total > 1 && actions.setAccountPlan ? <PlanSelector
+        label={t('goPlanLabel')}
+        hint={t('goPlanHint')}
+        value={accountPlanOf(account, fallbackPlan)}
+        disabled={disabled}
+        t={t}
+        onSelect={plan => { void actions.setAccountPlan!(account.apiKeyEnv, plan) }}
+      /> : null}
       {account.usage ? <div className={css.accountUsage} data-account-quotas="">
         {WINDOWS.map(window => <div key={window} className={css.accountBentoTile}>
           <div className={css.accountBentoTop}>
@@ -429,6 +464,9 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
                       <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
                       {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
                     </span>
+                    {account.plan && (total > 1 || account.plan !== DEFAULT_GO_PLAN)
+                      ? <span className={css.accountPlanBadge}>{t(`goPlan_${account.plan}`)}</span>
+                      : null}
                   </div>
                 </div>
                 <div className={css.accountTail}>
@@ -460,6 +498,16 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
         })}
       </div>
       {editor ? (editor.kind === 'add' ? editorForm() : null) : null}
+      {preferred && actions.setAccountPlan ? <PlanSelector
+        label={total > 1
+          ? t('goPlanForAccountLabel', { name: preferred.name || t('accountDefault') })
+          : t('goPlanLabel')}
+        hint={t('goPlanHint')}
+        value={accountPlanOf(preferred, fallbackPlan)}
+        disabled={disabled}
+        t={t}
+        onSelect={plan => { void actions.setAccountPlan!(preferred.apiKeyEnv, plan) }}
+      /> : null}
       <div className={css.accountsFoot}>
         {editor ? null : <Button className={css.addAccount} variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
           onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
@@ -490,7 +538,7 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
 
 /** Every control here applies immediately; the editor only stages what the
  *  reader is still typing (Capacity commits a settled value). */
-export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
+export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled, plan = DEFAULT_GO_PLAN }: {
   source?: ModelSource
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
@@ -501,6 +549,7 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   visibilitySaving: boolean
   onEdit: (next: OpencodeGoModelLimits) => void
   onModelEnabled: (id: string | readonly string[], enabled: boolean) => void
+  plan?: GoPlan
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
@@ -537,6 +586,10 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const canEnableAll = toggleable.some(entry => !isModelEnabled(entry, modelVisibility))
   const canDisableAll = toggleable.some(entry => isModelEnabled(entry, modelVisibility))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
+  const selectedEstimate = useMemo(
+    () => model ? estimateModelQuota({ model, plan }) : undefined,
+    [model, plan],
+  )
   const visibilityDisabled = disabled || visibilitySaving
   const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | number[] | undefined): void => {
     const current = draft[id] === null ? { contextWindow: null, maxTokens: null, thinkingBudgets: null } : draft[id] ?? {}
@@ -584,7 +637,6 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                     ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
                     : null}
                 </span>
-                <ModelPriceLine price={entry.price} t={t} locale={locale} />
               </button>
               <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
@@ -613,6 +665,10 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                   <span className={css.statLabel}>{t('modalityLabel')}</span>
                   <Modalities model={model} t={t} />
                 </div>
+                {selectedEstimate?.kind === 'go' ? <div className={css.stat}>
+                  <span className={css.statLabel}>{t('quotaEstimateLabel')}</span>
+                  <QuotaEstimateDetails estimate={selectedEstimate} t={t} locale={locale} />
+                </div> : null}
                 <div className={css.stat}>
                   <span className={css.statLabel}>{t('priceLabel')}</span>
                   <PriceDetails price={model.price} t={t} locale={locale} />
@@ -670,19 +726,49 @@ function priceRates(rates: GoModelPrice, t: ModelTranslate, locale?: string): st
   return parts.join(' · ')
 }
 
-/** A tariff every tier of which is zero is the Free tab's copy, not a $0.00 price. */
-function isFreePrice(price: GoModelPrice): boolean {
-  return [price, ...price.tiers ?? []].every(rates => rates.input === 0 && rates.output === 0
-    && rates.cacheRead === 0 && rates.cacheWrite === 0)
+function formatUsdCap(amount: number, locale?: string): string {
+  return Number.isInteger(amount) ? `$${formatTokenCount(amount, locale)}` : formatTokenPrice(amount, locale)
 }
 
-/** The list line under a model name: its base rates, Free, or nothing when unpriced. */
-function ModelPriceLine({ price, t, locale }: { price: GoModelPrice | undefined; t: ModelTranslate; locale?: string }) {
-  if (price === undefined) return null
-  if (isFreePrice(price)) return <span className={css.modelPrice}>{t('priceFree')}</span>
-  return <span className={css.modelPrice} title={`${t('priceLabel')}: ${priceRates(price, t, locale)}`}>
-    {t('priceRow', { input: formatTokenPrice(price.input, locale), output: formatTokenPrice(price.output, locale) })}
-  </span>
+/** Full-capacity 5h / weekly / monthly estimated request specs in the parameter card. */
+function QuotaEstimateDetails({ estimate, t, locale }: {
+  estimate: Extract<ModelQuotaEstimate, { kind: 'go' }>
+  t: ModelTranslate
+  locale?: string
+}) {
+  const windows = [
+    ['usage_rolling', estimate.fullRequests.rolling],
+    ['usage_weekly', estimate.fullRequests.weekly],
+    ['usage_monthly', estimate.fullRequests.monthly],
+  ] as const
+  return <div className={css.quotaCard}>
+    <div className={css.quotaLead}>
+      <span className={css.quotaSecondary}>
+        {t('quotaPlanCap', {
+          plan: t(`goPlan_${estimate.plan}`),
+          monthly: formatUsdCap(estimate.monthlyUsd, locale),
+        })}
+      </span>
+    </div>
+    <div className={css.quotaGrid}>
+      {windows.map(([labelKey, count]) => (
+        <div key={labelKey} className={css.quotaCell}>
+          <span className={css.quotaCellLabel}>{t(labelKey)}</span>
+          <strong className={css.quotaCellValue}>
+            {t('quotaRequestCount', { count: formatTokenCount(count, locale) })}
+          </strong>
+        </div>
+      ))}
+    </div>
+    {estimate.peakFactor !== undefined ? (
+      <span className={css.quotaPeakNote}>
+        {estimate.peakFactor === 2
+          ? t('quotaPeakDoubleNote')
+          : t('quotaPeakFactorNote', { factor: estimate.peakFactor })}
+      </span>
+    ) : null}
+    <span className={css.priceNote}>{t('quotaBasisNote')}</span>
+  </div>
 }
 
 /** The parameter card's tariff block: base rates, context tiers and the multiplier note. */
@@ -1348,6 +1434,12 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
   const goModels = useMemo(() => modelsForSource(state.models, 'go'), [state.models])
   const freeModels = useMemo(() => modelsForSource(state.models, 'free'), [state.models])
   const models = modelSource === 'go' ? goModels : freeModels
+  const activeRef = state.accounts.activeRef
+  const activeAccount = state.accounts.entries.find(entry => entry.apiKeyEnv === activeRef) ?? state.accounts.entries[0]
+  const fallbackPlan: GoPlan = (GO_PLANS as readonly string[]).includes(state.goPlan?.text ?? '')
+    ? (state.goPlan.text as GoPlan) : DEFAULT_GO_PLAN
+  const plan = accountPlanOf(activeAccount, fallbackPlan)
+
   // The model tab carries the listing's own diagnostics and a refused switch write.
   const modelNotices = (
     <>
@@ -1397,6 +1489,7 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
             locks the editor. Visibility switches keep the pending-write lock. */}
         <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
           modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+          plan={plan}
           onModelEnabled={setModelEnabled}
           onEdit={onEdit} />
       </div>
@@ -1436,6 +1529,7 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
         loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
         resetAddition: props.resetAddition, removeAccount: props.removeAccount, selectAccount: props.selectAccount,
         setAutoSwitch: props.setAutoSwitch, replaceAccountKey: props.replaceAccountKey, moveAccount: props.moveAccount,
+        ...(props.setAccountPlan ? { setAccountPlan: props.setAccountPlan } : {}),
       }}
     />
   )
@@ -1481,9 +1575,11 @@ function Loaded(props: {
   const disabled = !state.writable
   // The provider switch says what its state means; the mark opens the sentence.
   const enabledHint = state.enabled ? t('enabledHint') : t('enabledOff')
+  const fallbackPlan: GoPlan = (GO_PLANS as readonly string[]).includes(state.goPlan?.text ?? '')
+    ? (state.goPlan.text as GoPlan) : DEFAULT_GO_PLAN
   const accountCard = <AccountsCard
     state={state.accounts} actions={props.accountActions} writable={state.writable}
-    t={t} locale={props.locale} />
+    fallbackPlan={fallbackPlan} t={t} locale={props.locale} />
   // Only Advanced keeps a draft: appearance writes as soon as it changes, so
   // its tab must not claim pending edits (the models mark reports its listing).
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)

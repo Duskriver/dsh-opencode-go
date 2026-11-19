@@ -1,5 +1,8 @@
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
+import { parsePricingMultipliers, validReleaseDate, type PriceMultiplier } from './pricing.ts'
+
+export { validReleaseDate, type PriceMultiplier }
 
 /** Public DSH route and the private SDK transport have separate identities. */
 export const PROVIDER_ID = 'dsh-opencode-go'
@@ -96,11 +99,27 @@ export type OpencodeGoTheme = typeof OPENCODE_GO_THEMES[number]
 
 export const DEFAULT_OPENCODE_GO_THEME: OpencodeGoTheme = 'native'
 
+/** OpenCode Go subscription tiers used to translate shared quota percentages into per-model limits. */
+export const GO_PLANS = ['go', 'go-plus', 'go-teams'] as const
+
+export type GoPlan = typeof GO_PLANS[number]
+
+export const DEFAULT_GO_PLAN: GoPlan = 'go'
+
+export type GoMonthlyUsage = Record<GoPlan, number>
+
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
   id: string
   name: string
   apiKeyEnv: string
+  /** Optional display-only subscription tier used to convert quota percentages into call/token estimates. */
+  plan?: GoPlan
+}
+
+/** Resolve one account's display-only Go tier, falling back to the profile default. */
+export function accountPlanOf(account: Pick<GoAccount, 'plan'> | undefined, fallback: GoPlan = DEFAULT_GO_PLAN): GoPlan {
+  return account?.plan && GO_PLANS.includes(account.plan) ? account.plan : fallback
 }
 
 export const MAX_ACCOUNTS = 20
@@ -124,6 +143,7 @@ export interface AccountSettings {
   /** Omission/null preserves legacy credentials; an explicit empty list removes all accounts. */
   accounts?: readonly GoAccount[] | null
   autoSwitch?: boolean
+  goPlan?: GoPlan
 }
 
 export function accountRefOf(settings: AccountSettings): string {
@@ -159,6 +179,7 @@ export function assertAccounts(accounts: readonly GoAccount[] | null | undefined
       || account.id.startsWith('legacy:') && account.id !== `legacy:${account.apiKeyEnv}`
       || typeof account.name !== 'string' || (!account.name.trim() && account.id !== `legacy:${account.apiKeyEnv}`) || account.name.length > 80
       || typeof account.apiKeyEnv !== 'string' || !ACCOUNT_REF_PATTERN.test(account.apiKeyEnv)
+      || (account.plan !== undefined && !GO_PLANS.includes(account.plan))
       || ids.has(account.id) || refs.has(account.apiKeyEnv)) throw new Error('Invalid or duplicate OpenCode Go account')
     ids.add(account.id)
     refs.add(account.apiKeyEnv)
@@ -242,6 +263,8 @@ export interface OpencodeGoConfig {
   usagePillBorder: boolean
   /** Global plugin appearance theme. */
   appearanceTheme: OpencodeGoTheme
+  /** Active OpenCode Go subscription tier for per-model remaining quota estimation. */
+  goPlan: GoPlan
   /** Per-model picker switches; absent entries default to enabled unless deprecated. */
   modelVisibility?: Record<string, boolean>
   /** Legacy credential reference, kept in sync with the first/current account. */
@@ -293,6 +316,10 @@ export interface GoModel {
   inputModalities?: readonly InputModality[]
   /** The text tariff the gateway publishes; absent when it declares none. */
   price?: GoModelPrice
+  /** Per-plan monthly dollar allowance declared under `/models`'s `go.monthly_usage`. */
+  goMonthlyUsage?: GoMonthlyUsage
+  /** Time/date multiplier schedule declared under `/models`'s `cost.multipliers`. */
+  pricingMultipliers?: readonly PriceMultiplier[]
   /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
   configurationMissing?: boolean
 }
@@ -359,6 +386,19 @@ function parseGoModelPrice(value: unknown): GoModelPrice | undefined {
   return price
 }
 
+/** Validate per-plan monthly dollar limits (`go`, `go-plus`, `go-teams`); malformed fields drop cleanly. */
+export function parseGoMonthlyUsage(value: unknown): GoMonthlyUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const row = value as Record<string, unknown>
+  const parsed = {} as GoMonthlyUsage
+  for (const plan of GO_PLANS) {
+    const limit = row[plan]
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return undefined
+    parsed[plan] = limit
+  }
+  return parsed
+}
+
 /**
  * Input modalities this page can name; MIME types are normalized to these tokens.
  */
@@ -411,11 +451,6 @@ export function isModelEnabled(
   return typeof enabled === 'boolean' ? enabled : !model.deprecated
 }
 
-export function validReleaseDate(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value
-}
-
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export function isNewModel(model: GoModel, now = Date.now()): boolean {
   if (model.deprecated || !validReleaseDate(model.releaseDate)) return false
@@ -456,6 +491,14 @@ export function parseGoModels(value: unknown): GoModel[] {
     if (modalities !== undefined) model.inputModalities = modalities
     const price = parseGoModelPrice(row.price)
     if (price !== undefined) model.price = price
+    const goMonthlyUsage = parseGoMonthlyUsage(row.goMonthlyUsage)
+    if (goMonthlyUsage !== undefined) model.goMonthlyUsage = goMonthlyUsage
+    if (row.pricingMultipliers !== undefined) {
+      try {
+        const parsed = parsePricingMultipliers(row.pricingMultipliers)
+        if (parsed.length > 0) model.pricingMultipliers = parsed
+      } catch { /* Multiplier schedules are display-only; drop malformed entries without failing the model. */ }
+    }
     return model
   })
 }
@@ -614,6 +657,7 @@ export type AccountCommand =
   | { kind: 'replace-key'; ref: string; key: string }
   | { kind: 'move'; ref: string; toIndex: number }
   | { kind: 'auto-switch'; value: boolean }
+  | { kind: 'set-plan'; ref: string; plan: GoPlan }
 
 export function parseAccountCommand(value: unknown): AccountCommand {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid account command')
@@ -622,6 +666,7 @@ export function parseAccountCommand(value: unknown): AccountCommand {
     add: ['kind', 'id', 'name', 'key'], remove: ['kind', 'ref'], select: ['kind', 'ref'],
     rename: ['kind', 'ref', 'name'], 'replace-key': ['kind', 'ref', 'key'],
     move: ['kind', 'ref', 'toIndex'], 'auto-switch': ['kind', 'value'],
+    'set-plan': ['kind', 'ref', 'plan'],
   }
   if (typeof row.kind !== 'string' || !Object.hasOwn(fields, row.kind)
     || Object.keys(row).some(key => !fields[row.kind as string]!.includes(key))
@@ -632,6 +677,7 @@ export function parseAccountCommand(value: unknown): AccountCommand {
   if (row.kind === 'add' && (typeof row.id !== 'string' || !/^[a-f0-9]{32}$/.test(row.id))) throw new Error('Invalid account operation ID')
   if (row.kind === 'move' && (!Number.isInteger(row.toIndex) || (row.toIndex as number) < 0)) throw new Error('Invalid account position')
   if (row.kind === 'auto-switch' && typeof row.value !== 'boolean') throw new Error('Invalid account switch')
+  if (row.kind === 'set-plan' && (typeof row.plan !== 'string' || !GO_PLANS.includes(row.plan as GoPlan))) throw new Error('Invalid account plan')
   return { ...row } as AccountCommand
 }
 

@@ -1596,6 +1596,10 @@ interface PriceMultiplier {
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 
 type ModelSource = 'go' | 'free';
+/** OpenCode Go subscription tiers used to translate shared quota percentages into per-model limits. */
+declare const GO_PLANS: readonly ["go", "go-plus", "go-teams"];
+type GoPlan = typeof GO_PLANS[number];
+type GoMonthlyUsage = Record<GoPlan, number>;
 /** Safe UI notice for a successful request using a fallback account. */
 interface GoAccountSwitch {
     fromRef: string;
@@ -1617,6 +1621,10 @@ interface GoModel {
     inputModalities?: readonly InputModality[];
     /** The text tariff the gateway publishes; absent when it declares none. */
     price?: GoModelPrice;
+    /** Per-plan monthly dollar allowance declared under `/models`'s `go.monthly_usage`. */
+    goMonthlyUsage?: GoMonthlyUsage;
+    /** Time/date multiplier schedule declared under `/models`'s `cost.multipliers`. */
+    pricingMultipliers?: readonly PriceMultiplier[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
 }
@@ -1704,6 +1712,10 @@ type AccountCommand = {
 } | {
     kind: 'auto-switch';
     value: boolean;
+} | {
+    kind: 'set-plan';
+    ref: string;
+    plan: GoPlan;
 };
 type SettingsWriteResult = 'applied' | 'rejected' | 'unknown';
 type AnalyticsRange = 'today' | '7d' | '30d' | '90d';

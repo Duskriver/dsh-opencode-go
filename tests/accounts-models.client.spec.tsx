@@ -217,7 +217,7 @@ describe("model availability and picker visibility", () => {
       expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
     })
 
-    it('shows each model\'s gateway tariff in the list and the parameter card', async () => {
+    it('keeps the model list clean and shows each model\'s gateway tariff in the parameter card', async () => {
       const money = (rate: number): string => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD',
         currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(rate)
       const tier = { inputTokensAbove: 200000, input: 2, output: 8, cacheRead: 0.2, cacheWrite: 0 }
@@ -228,9 +228,7 @@ describe("model availability and picker visibility", () => {
       await mountOpen({ catalog: { models: [priced, free, { id: 'bare', name: 'Bare' }], stale: false } })
 
       const list = screen.getByRole('group', { name: en.modelsLabel })
-      // A priced row carries its base rates; tiers stay in the card, and the
-      // line says Free for a zero tariff instead of $0.00.
-      expect(within(list).getByText(t('priceRow', { input: money(1), output: money(4) }))).toBeTruthy()
+      expect(within(list).getByRole('button', { name: /^Priced$/ }).textContent).not.toContain('$')
       expect(within(list).getByRole('button', { name: /^Bare$/ }).textContent).not.toContain('$')
       const card = within(screen.getByRole('region', { name: en.modelDetails }))
       expect(card.getByText(`${t('priceInput')} ${money(1)} · ${t('priceOutput')} ${money(4)} · ${t('priceCacheRead')} ${money(0.1)}`)).toBeTruthy()
@@ -244,7 +242,60 @@ describe("model availability and picker visibility", () => {
 
       await act(async () => { fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab })) })
       const freeList = screen.getByRole('group', { name: en.modelsLabel })
-      expect(within(freeList).getByText(en.priceFree)).toBeTruthy()
+      expect(within(freeList).queryByText(en.priceFree)).toBeNull()
+      const freeCard = within(screen.getByRole('region', { name: en.modelDetails }))
+      expect(freeCard.getByText(en.priceFree)).toBeTruthy()
+    })
+
+    it('renders 5h/weekly/monthly full-capacity request estimates, peak-hour note and active account plan in model details', async () => {
+      const deepseek: GoModel = {
+        id: 'deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro',
+        source: 'go',
+        price: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0, multipliers: true },
+        goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+        pricingMultipliers: [{
+          when: { utc_days: { in: ['mon'] }, utc_hours: { gte: '01:00', lt: '04:00' } },
+          factor: 2,
+        }],
+      }
+      const { host } = await mountOpen({
+        value: {
+          apiKeyEnv: 'ACCOUNT_A',
+          accounts: [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A', plan: 'go' }],
+        },
+        catalog: { models: [deepseek], stale: false },
+      })
+      const list = screen.getByRole('group', { name: en.modelsLabel })
+      expect(within(list).getByRole('button', { name: /^DeepSeek V4 Pro$/ })).toBeTruthy()
+
+      const card = within(screen.getByRole('region', { name: en.modelDetails }))
+      expect(card.getByText(en.quotaEstimateLabel)).toBeTruthy()
+      expect(card.getByText(t('quotaPlanCap', { plan: en['goPlan_go'], monthly: '$15' }))).toBeTruthy()
+      expect(card.getByText(en.usage_rolling)).toBeTruthy()
+      expect(card.getByText(en.usage_weekly)).toBeTruthy()
+      expect(card.getByText(en.usage_monthly)).toBeTruthy()
+      expect(card.getByText('~1,190')).toBeTruthy()
+      expect(card.getByText('~2,977')).toBeTruthy()
+      expect(card.getByText('~5,954')).toBeTruthy()
+      expect(card.getByText(en.quotaPeakDoubleNote)).toBeTruthy()
+      expect(card.getByText(en.quotaBasisNote)).toBeTruthy()
+      // Subscription tier selection belongs in AccountsCard, not the Models tab.
+      expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
+
+      // Updating the active account's plan reflects immediately in the Models tab.
+      await act(async () => {
+        host.publish({
+          value: {
+            apiKeyEnv: 'ACCOUNT_A',
+            accounts: [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A', plan: 'go-plus' }],
+          },
+        })
+      })
+      expect(card.getByText(t('quotaPlanCap', { plan: en['goPlan_go-plus'], monthly: '$60' }))).toBeTruthy()
+      expect(card.getByText('~4,763')).toBeTruthy()
+      expect(card.getByText('~11,909')).toBeTruthy()
+      expect(card.getByText('~23,818')).toBeTruthy()
     })
 
     it('preserves unrelated advanced drafts and committed switch values when a write fails', async () => {
@@ -973,6 +1024,33 @@ describe("account cards, quota rows and ordering", () => {
     expect(await fixture.actions.replaceAccountKey('ACCOUNT_A', 'new-key')).toBe(false)
     expect(fixture.execute).not.toHaveBeenCalled()
     expect(fixture.secrets.get('ACCOUNT_A')).toBe('secret-a')
+  })
+
+  it('lets the user configure each account subscription tier in AccountsCard without refetching quota', async () => {
+    const fixture = setup()
+    await fixture.controller.refreshAccounts()
+    render(<AccountsCard state={fixture.controller.accountState()} actions={fixture.actions} writable t={t} />)
+    await act(async () => { await Promise.resolve() })
+    const readsAfterMount = fixture.read.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+
+    const activeGroup = screen.getByRole('group', { name: t('goPlanForAccountLabel', { name: 'Primary' }) })
+    await act(async () => {
+      fireEvent.click(within(activeGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
+    })
+    expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_A', plan: 'go-plus' })
+    expect(fixture.read.mock.calls.length).toBe(readsAfterMount)
+
+    // Backup accounts also expose per-account tier selection inside their expanded detail strip.
+    const backupRow = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Backup' }) }).closest('[data-account-row]') as HTMLElement
+    fireEvent.click(within(backupRow).getByRole('button', { name: t('accountsDetails', { name: 'Backup' }) }))
+    const backupGroup = within(backupRow).getByRole('group', { name: en.goPlanLabel })
+    await act(async () => {
+      fireEvent.click(within(backupGroup).getByRole('button', { name: en['goPlan_go-teams'] }))
+    })
+    expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_B', plan: 'go-teams' })
+    expect(fixture.read.mock.calls.length).toBe(readsAfterMount)
+    fixture.controller.dispose()
   })
 
 })

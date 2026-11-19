@@ -1,5 +1,6 @@
 import type { Context as ClientContext, Context } from '@deepseek-ai/cordis';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
+import { type GoModelCatalog } from '../contracts.ts';
 import type { PageReaders, PageTab } from './pages/types.ts';
 import { type OpencodeGoSettings, type ExecuteAccountCommand } from './controller.ts';
 import { en } from './presentation.ts';
@@ -52,4 +53,4 @@ export declare function accountCommands(ctx: Context): ExecuteAccountCommand;
  * @param canOpenPage - whether the opt-in console page is registered right now;
  * read at click time so withdrawing the entry restores the in-place dialog.
  */
-export declare function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>, readers?: PageReaders, openPage?: (tab?: PageTab) => void, canOpenPage?: () => boolean): void;
+export declare function registerUsagePill(ctx: Context, settings: ConfigForm<OpencodeGoSettings>, selectAccount?: (ref: string) => Promise<boolean>, readers?: PageReaders, openPage?: (tab?: PageTab) => void, canOpenPage?: () => boolean, readModels?: () => Promise<GoModelCatalog>): void;

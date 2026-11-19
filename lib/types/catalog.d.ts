@@ -56,7 +56,7 @@ export declare function reasoningRequest(intent: ReasoningIntent): {
     thinkingBudgets?: ThinkingBudgets;
     onPayload: (payload: unknown) => unknown;
 };
-export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'> & {
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities' | 'goMonthlyUsage' | 'pricingMultipliers'> & {
     readonly costKnown?: false;
 };
 export interface ModelDirectory {

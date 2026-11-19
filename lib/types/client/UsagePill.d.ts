@@ -1,6 +1,6 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client';
-import { type GoUsage, type UsagePillStyle, type AnalyticsQuery, type AnalyticsReport, type AnalyticsExport } from '../contracts.ts';
+import { type GoModelCatalog, type GoUsage, type UsagePillStyle, type AnalyticsQuery, type AnalyticsReport, type AnalyticsExport } from '../contracts.ts';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
 import type { OpencodeGoSettings } from './controller.ts';
 export interface UsagePillProps {
@@ -8,10 +8,11 @@ export interface UsagePillProps {
     settings: ConfigForm<OpencodeGoSettings>;
     readUsage: () => Promise<GoUsage>;
     readAccountUsage?: (ref: string) => Promise<GoUsage>;
+    readModels?: () => Promise<GoModelCatalog>;
     /** Optional so an embedded/test render can omit the dashboard. */
     readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>;
     exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>;
-    t: (key: string) => string;
+    t: (key: string, params?: Record<string, unknown>) => string;
     getLocale?: () => string;
     credentialChanges?: SnapshotStore<number>;
     selectAccount?: (ref: string) => Promise<boolean>;

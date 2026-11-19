@@ -489,8 +489,26 @@ describe('serialized account commands and primary selection', () => {
     { kind: 'move', ref: 'A', toIndex: -1 },
     { kind: 'auto-switch', value: 'yes' },
     { kind: 'remove', ref: 'A', key: 'unexpected' },
+    { kind: 'set-plan', ref: 'A', plan: 'enterprise' },
   ])('rejects malformed commands before any side effect: %j', command => {
     expect(() => parseAccountCommand(command)).toThrow()
+  })
+
+  it('stores per-account display plans and falls back to goPlan for legacy profiles', async () => {
+    const legacy = accountHarness({ apiKeyEnv: 'OPENCODE_API_KEY' })
+    expect(await legacy.manager.execute({ kind: 'set-plan', ref: 'OPENCODE_API_KEY', plan: 'go-plus' })).toBe('applied')
+    expect(legacy.value().goPlan).toBe('go-plus')
+
+    const multi = accountHarness({
+      apiKeyEnv: 'ACCOUNT_A',
+      accounts: [
+        { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
+        { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+      ],
+    })
+    expect(await multi.manager.execute({ kind: 'set-plan', ref: 'ACCOUNT_B', plan: 'go-teams' })).toBe('applied')
+    expect(multi.value().accounts?.find(a => a.apiKeyEnv === 'ACCOUNT_B')?.plan).toBe('go-teams')
+    expect(await multi.manager.execute({ kind: 'set-plan', ref: 'MISSING', plan: 'go' })).toBe('rejected')
   })
 
   it('serializes actual storage writes while callers add accounts concurrently', async () => {
