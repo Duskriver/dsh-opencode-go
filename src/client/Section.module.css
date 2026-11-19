@@ -216,42 +216,52 @@
   padding: 0 4px 16px 0;
 }
 
-/* One slim scrollbar for every scroller on this page: an 8px rounded thumb on a
-   transparent track, instead of the platform bar with its arrow buttons. */
+/* Scrollbars for every scroller on this page: WCAG 1.4.11 contrast-checked thumb
+   on a transparent track, with legacy WebKit fallback isolated to browsers that
+   lack standard scrollbar-color support. */
 .pageBody,
 .modelList,
 .modelDetails {
-  scrollbar-width: thin;
-  scrollbar-color: var(--go-border) transparent;
+  --scrollbar-thumb: var(--go-border-strong);
+  --scrollbar-track: transparent;
+  scrollbar-width: auto;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-.pageBody::-webkit-scrollbar,
-.modelList::-webkit-scrollbar,
-.modelDetails::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.pageBody:hover,
+.modelList:hover,
+.modelDetails:hover {
+  --scrollbar-thumb: var(--go-muted);
 }
 
-.pageBody::-webkit-scrollbar-track,
-.modelList::-webkit-scrollbar-track,
-.modelDetails::-webkit-scrollbar-track {
-  background: transparent;
-}
+@supports not (scrollbar-color: auto) {
+  .pageBody,
+  .modelList,
+  .modelDetails {
+    scrollbar-width: auto;
+  }
 
-.pageBody::-webkit-scrollbar-thumb,
-.modelList::-webkit-scrollbar-thumb,
-.modelDetails::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background: var(--go-border);
-  background-clip: content-box;
-}
+  .pageBody::-webkit-scrollbar,
+  .modelList::-webkit-scrollbar,
+  .modelDetails::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
 
-.pageBody:hover::-webkit-scrollbar-thumb,
-.modelList:hover::-webkit-scrollbar-thumb,
-.modelDetails:hover::-webkit-scrollbar-thumb {
-  background: var(--go-muted);
-  background-clip: content-box;
+  .pageBody::-webkit-scrollbar-track,
+  .modelList::-webkit-scrollbar-track,
+  .modelDetails::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  .pageBody::-webkit-scrollbar-thumb,
+  .modelList::-webkit-scrollbar-thumb,
+  .modelDetails::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    background-clip: content-box;
+  }
 }
 
 .field {
@@ -996,6 +1006,11 @@
 .modelLayout {
   display: grid;
   grid-template-columns: minmax(0, 45fr) minmax(0, 55fr);
+  /* Explicit bounded row track: an implicit `auto` track grows to its children's
+     intrinsic height inside auto-height shells (ModelsPage, #94), leaving each
+     pane's clientHeight === scrollHeight while overflow: hidden clips both panes
+     with no scrollbars. */
+  grid-template-rows: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 260px;
   /* Both panes share one frame height, so the list and the parameter card stop
@@ -1008,7 +1023,11 @@
   overflow: hidden;
 }
 
-.modelList { overflow-y: auto; min-height: 0; padding: 4px 6px; border-right: 1px solid var(--go-border); background: var(--go-surface-sunken); }
+.cardModelsPage .modelLayout {
+  max-height: clamp(448px, calc(100dvh - 420px), 640px);
+}
+
+.modelList { overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 6px; border-right: 1px solid var(--go-border); background: var(--go-surface-sunken); }
 .modelPanel { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
 .modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-right: 6px; }
 .modelRow + .modelRow { border-top: 0.5px solid var(--go-border); }
@@ -1041,7 +1060,7 @@
 .quotaCellValue { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--go-text); font-variant-numeric: tabular-nums; }
 .quotaPeakNote { font-size: 11px; line-height: 1.4; color: var(--go-warning); }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--go-accent); }
-.modelDetails { overflow-y: auto; min-height: 0; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface-elevated); }
+.modelDetails { overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface-elevated); }
 .modelDetails h3 { font-family: var(--go-display-font); font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
 .modelHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .stats { display: flex; flex-direction: column; gap: 10px; }
@@ -1080,7 +1099,8 @@
   .appearanceChoices { grid-template-columns: minmax(0, 1fr); }
   /* One column cannot stretch: the list and the card stack, and each keeps its
      own ceiling. */
-  .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); }
+  .modelLayout,
+  .cardModelsPage .modelLayout { flex: none; max-height: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
   .modelList { max-height: 240px; border-right: 0; border-bottom: 0.5px solid var(--go-border); }
   .modelDetails { max-height: 460px; }
   .modelSearchRow > .input { flex-basis: 100%; }

@@ -586,6 +586,13 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const canEnableAll = toggleable.some(entry => !isModelEnabled(entry, modelVisibility))
   const canDisableAll = toggleable.some(entry => isModelEnabled(entry, modelVisibility))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
+  const detailsRef = useRef<HTMLElement | null>(null)
+  const selectedModelId = model?.id
+  useEffect(() => {
+    if (detailsRef.current && detailsRef.current.scrollTop > 0) {
+      detailsRef.current.scrollTop = 0
+    }
+  }, [selectedModelId])
   const selectedEstimate = useMemo(
     () => model ? estimateModelQuota({ model, plan }) : undefined,
     [model, plan],
@@ -643,7 +650,7 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                 onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
             </div>)}
           </div>
-          <section className={css.modelDetails} aria-label={t('modelDetails')}>
+          <section ref={detailsRef} className={css.modelDetails} aria-label={t('modelDetails')}>
             <div className={css.modelHeading}>
               <h3>{model.name ?? model.id}</h3>
               {badges(model)}

@@ -489,6 +489,25 @@ describe('console sub-pages', () => {
     expect(props.actions.setModelEnabled).toHaveBeenCalledWith([GO_MODEL.id], false)
   })
 
+  it('renders a large model catalog and resets detail scroll position when switching models', () => {
+    const catalog = Array.from({ length: 35 }, (_, index) => ({
+      id: `model-${index + 1}`,
+      name: `Model ${index + 1}`,
+      contextWindow: 128_000,
+      maxTokens: 16_384,
+    }))
+    const props = pagePropsOf({ state: { models: modelsOf(catalog) } })
+    render(<ModelsPage {...props} />)
+    const list = screen.getByRole('group', { name: en.modelsLabel })
+    expect(within(list).getAllByRole('switch')).toHaveLength(35)
+    const details = screen.getByRole('region', { name: en.modelDetails })
+    details.scrollTop = 180
+    expect(details.scrollTop).toBe(180)
+    fireEvent.click(within(list).getByRole('button', { name: 'Model 25' }))
+    expect(within(details).getByRole('heading', { level: 3, name: 'Model 25' })).toBeTruthy()
+    expect(details.scrollTop).toBe(0)
+  })
+
   it('renders only the appearance controls with their live actions', () => {
     const props = pagePropsOf({
       state: {

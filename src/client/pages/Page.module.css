@@ -26,18 +26,30 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: calc(26px + var(--dsh-frame-top-clearance, 0px)) 0 56px;
+  --scrollbar-thumb: var(--go-border-strong);
+  --scrollbar-track: transparent;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--go-border) transparent;
+  scrollbar-width: auto;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-.scroller::-webkit-scrollbar { width: 10px; height: 10px; }
-.scroller::-webkit-scrollbar-track { background: transparent; }
-.scroller::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: var(--go-border);
-  background-clip: content-box;
+.scroller:hover {
+  --scrollbar-thumb: var(--go-muted);
+}
+
+@supports not (scrollbar-color: auto) {
+  .scroller {
+    scrollbar-width: auto;
+  }
+
+  .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
+  .scroller::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .scroller::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    background-clip: content-box;
+  }
 }
 
 /* 980px is the Host's own settings-page measure. The percentage padding keeps the
