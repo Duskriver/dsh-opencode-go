@@ -9,7 +9,7 @@
  */
 export const CLIENT_BUILD_INFO = {
   packageName: 'dsh-opencode-go',
-  version: '0.4.5',
+  version: '0.4.6',
   minHost: '0.2.1-rc.5',
   build: 'esbuild + lightningcss',
 } as const

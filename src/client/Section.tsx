@@ -13,6 +13,8 @@ import {
 import {
   type en,
   formatDateTime,
+  formatTokenCount,
+  formatTokenPrice,
   GO_THEME_TOKENS,
   useGoThemeTokens,
   useHostScheme,
@@ -43,6 +45,7 @@ import {
   isNewModel,
   sortModels,
   type GoModel,
+  type GoModelPrice,
   type InputModality,
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
@@ -581,6 +584,7 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                     ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
                     : null}
                 </span>
+                <ModelPriceLine price={entry.price} t={t} locale={locale} />
               </button>
               <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                 checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
@@ -609,17 +613,18 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                   <span className={css.statLabel}>{t('modalityLabel')}</span>
                   <Modalities model={model} t={t} />
                 </div>
+                <div className={css.stat}>
+                  <span className={css.statLabel}>{t('priceLabel')}</span>
+                  <PriceDetails price={model.price} t={t} locale={locale} />
+                </div>
               </div>
               {model.reasoningBudget ? <BudgetPresets key={model.id} model={model} limit={draft[modelSettingsKey(model)]}
                 t={t} locale={locale} disabled={disabled} onChange={values => { write(modelSettingsKey(model), 'thinkingBudgets', values) }} /> : null}
               {hasCapacityOverride(draft[modelSettingsKey(model)]) ? <button type="button" className={css.reset} disabled={disabled}
                 onClick={() => { onEdit({ ...draft, [modelSettingsKey(model)]: null }) }}>{t('limitsResetModel')}</button> : null}
-              <p className={css.paneFoot}>
-                {t('limitsHint')} {t('modalitiesSource')}
-                {/* Only models declaring more than text and images need the caveat. */}
-                {model.inputModalities?.some(modality => modality !== 'text' && modality !== 'image') === true
-                  ? ` ${t('modalitiesForwarding')}` : ''}
-              </p>
+              {/* Only models declaring more than text and images need the caveat. */}
+              {model.inputModalities?.some(modality => modality !== 'text' && modality !== 'image') === true
+                ? <p className={css.paneFoot}>{t('modalitiesForwarding')}</p> : null}
             </>}
           </section>
         </div>
@@ -648,6 +653,49 @@ function Modalities({ model, t }: { model: GoModel; t: ModelTranslate }) {
       {t(MODALITY_COPY[modality])}
     </span>)}
   </span>
+}
+
+/**
+ * One labeled rate list; zero cache rates stay out of the sentence.
+ * @param rates - the tariff or one of its context tiers.
+ * @param t - page translator.
+ * @param locale - active client locale for number formatting.
+ * @returns the rates as one line.
+ */
+function priceRates(rates: GoModelPrice, t: ModelTranslate, locale?: string): string {
+  const parts = [`${t('priceInput')} ${formatTokenPrice(rates.input, locale)}`,
+    `${t('priceOutput')} ${formatTokenPrice(rates.output, locale)}`]
+  if (rates.cacheRead > 0) parts.push(`${t('priceCacheRead')} ${formatTokenPrice(rates.cacheRead, locale)}`)
+  if (rates.cacheWrite > 0) parts.push(`${t('priceCacheWrite')} ${formatTokenPrice(rates.cacheWrite, locale)}`)
+  return parts.join(' · ')
+}
+
+/** A tariff every tier of which is zero is the Free tab's copy, not a $0.00 price. */
+function isFreePrice(price: GoModelPrice): boolean {
+  return [price, ...price.tiers ?? []].every(rates => rates.input === 0 && rates.output === 0
+    && rates.cacheRead === 0 && rates.cacheWrite === 0)
+}
+
+/** The list line under a model name: its base rates, Free, or nothing when unpriced. */
+function ModelPriceLine({ price, t, locale }: { price: GoModelPrice | undefined; t: ModelTranslate; locale?: string }) {
+  if (price === undefined) return null
+  if (isFreePrice(price)) return <span className={css.modelPrice}>{t('priceFree')}</span>
+  return <span className={css.modelPrice} title={`${t('priceLabel')}: ${priceRates(price, t, locale)}`}>
+    {t('priceRow', { input: formatTokenPrice(price.input, locale), output: formatTokenPrice(price.output, locale) })}
+  </span>
+}
+
+/** The parameter card's tariff block: base rates, context tiers and the multiplier note. */
+function PriceDetails({ price, t, locale }: { price: GoModelPrice | undefined; t: ModelTranslate; locale?: string }) {
+  if (price === undefined) return <span className={css.priceNote}>{t('priceUnpublished')}</span>
+  if (isFreePrice(price)) return <span className={css.priceFree}>{t('priceFree')}</span>
+  return <>
+    <span className={css.priceLine}>{priceRates(price, t, locale)}</span>
+    {(price.tiers ?? []).map(tier => <span key={tier.inputTokensAbove} className={css.priceTier}>
+      {t('priceTier', { context: formatTokenCount(tier.inputTokensAbove, locale), rates: priceRates(tier, t, locale) })}
+    </span>)}
+    {price.multipliers ? <span className={css.priceNote}>{t('priceMultiplier')}</span> : null}
+  </>
 }
 
 /** How long typing must pause before a capacity field commits itself. */

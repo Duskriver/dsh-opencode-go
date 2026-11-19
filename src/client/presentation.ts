@@ -171,7 +171,6 @@ export const en = {
   modelsRefreshingShort: 'Updating…',
   modelsEmpty: 'The gateway currently serves no model this adapter can route.',
   limitsLabel: 'Model capacities',
-  limitsHint: 'Capacities come from the online configuration; blank keeps the default. Changes apply immediately.',
   limitsFilterLabel: 'Find a model',
   limitsFilterPlaceholder: 'Search by model name or id…',
   limitsSummary: '{count} customized',
@@ -193,8 +192,17 @@ export const en = {
   modalityVideo: 'Video',
   modalityPdf: 'PDF',
   modalityUnknown: 'Not declared',
-  modalitiesSource: 'Input modalities come from the online /models configuration.',
   modalitiesForwarding: 'This plugin converts and forwards image attachments only.',
+  priceLabel: 'Price per 1M tokens',
+  priceInput: 'Input',
+  priceOutput: 'Output',
+  priceCacheRead: 'Cache read',
+  priceCacheWrite: 'Cache write',
+  priceRow: 'Input {input} · Output {output} / 1M',
+  priceTier: 'Above {context} tokens: {rates}',
+  priceFree: 'Free',
+  priceMultiplier: 'Some periods carry a price multiplier; the rates above are the base.',
+  priceUnpublished: 'The gateway publishes no price for this model.',
   visibilityHint: 'Model switches and capacity changes apply immediately.',
   modelVisibleLabel: 'Show {name} in conversations',
   configurationMissing: 'Configuration missing',
@@ -534,7 +542,6 @@ export const zh: typeof en = {
   modelsRefreshingShort: '更新中…',
   modelsEmpty: '网关当前没有本适配器可路由的模型。',
   limitsLabel: '模型容量',
-  limitsHint: '容量来自在线模型配置；留空用默认值。修改会立即生效。',
   limitsFilterLabel: '查找模型',
   limitsFilterPlaceholder: '按模型名称或 ID 搜索…',
   limitsSummary: '{count} 个已自定义',
@@ -556,8 +563,17 @@ export const zh: typeof en = {
   modalityVideo: '视频',
   modalityPdf: 'PDF',
   modalityUnknown: '未声明',
-  modalitiesSource: '输入模态来自 /models 的在线配置。',
   modalitiesForwarding: '本插件目前仅转换并转发图像附件。',
+  priceLabel: '价格（每 100 万 Token）',
+  priceInput: '输入',
+  priceOutput: '输出',
+  priceCacheRead: '缓存读取',
+  priceCacheWrite: '缓存写入',
+  priceRow: '输入 {input} · 输出 {output} / 1M',
+  priceTier: '上下文超过 {context}：{rates}',
+  priceFree: '免费',
+  priceMultiplier: '部分时段按倍率计价，以上为基础价。',
+  priceUnpublished: '网关未公布该模型的价格。',
   visibilityHint: '模型开关与容量调整都会立即生效。',
   modelVisibleLabel: '在会话中显示 {name}',
   configurationMissing: '配置缺失',
@@ -923,6 +939,29 @@ export function useGoThemeTokens(theme: OpencodeGoTheme = DEFAULT_OPENCODE_GO_TH
 }
 
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+const priceFormatters = new Map<string, Intl.NumberFormat>()
+const tokenFormatters = new Map<string, Intl.NumberFormat>()
+
+/** A published rate in USD per million tokens, with only the digits the rate needs. */
+export function formatTokenPrice(rate: number, locale?: string): string {
+  let formatter = priceFormatters.get(locale ?? '')
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2, maximumFractionDigits: 4 })
+    priceFormatters.set(locale ?? '', formatter)
+  }
+  return formatter.format(rate)
+}
+
+/** Group a token count, as used by context-tier thresholds. */
+export function formatTokenCount(value: number, locale?: string): string {
+  let formatter = tokenFormatters.get(locale ?? '')
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale)
+    tokenFormatters.set(locale ?? '', formatter)
+  }
+  return formatter.format(value)
+}
 
 const DEFAULT_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   year: 'numeric', month: 'numeric', day: 'numeric',
