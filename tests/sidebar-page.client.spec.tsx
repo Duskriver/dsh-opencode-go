@@ -15,6 +15,7 @@ import { pageTabStore, resetPageTab, setPageTab } from '../src/client/pages/nav.
 import { PAGE_TABS, TAB_COPY } from '../src/client/pages/types.ts'
 import { CLIENT_BUILD_INFO } from '../src/client/build-info.ts'
 import { en, GO_THEME_TOKENS } from '../src/client/presentation.ts'
+import { createAnalyticsReport } from './support/analytics.ts'
 import {
   accountsStateOf,
   field,
@@ -332,16 +333,59 @@ describe('console page shell', () => {
 })
 
 describe('console sub-pages', () => {
-  it('shows the overview KPIs and the three quota windows from the readers', async () => {
-    const props = pagePropsOf({ state: { accounts: accountsStateOf([ACCOUNT]) } })
+  it('shows today UTC KPIs instead of 7-day totals and the three quota windows from the readers', async () => {
+    const zeroDay = {
+      requests: '0', inputTokens: '0', outputTokens: '0', cacheReadTokens: '0',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '0', costMicroCents: '0',
+    }
+    const todayCounts = {
+      requests: '22', inputTokens: '1000', outputTokens: '500', cacheReadTokens: '3000',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '4500', costMicroCents: '3845705',
+    }
+    const priorCounts = {
+      requests: '2527', inputTokens: '99000', outputTokens: '19500', cacheReadTokens: '297000',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '415500', costMicroCents: '913749114',
+    }
+    const sevenDayTotals = {
+      requests: '2549', inputTokens: '100000', outputTokens: '20000', cacheReadTokens: '300000',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '420000', costMicroCents: '917594819',
+    }
+    const props = pagePropsOf({
+      state: { accounts: accountsStateOf([ACCOUNT]) },
+      readers: {
+        readAnalytics: vi.fn(async query => createAnalyticsReport(query, {
+          generatedAt: Date.UTC(2026, 10, 18, 2, 0),
+          totals: sevenDayTotals,
+          byDay: [
+            { day: '2026-11-12', ...priorCounts },
+            { day: '2026-11-13', ...zeroDay },
+            { day: '2026-11-14', ...zeroDay },
+            { day: '2026-11-15', ...zeroDay },
+            { day: '2026-11-16', ...zeroDay },
+            { day: '2026-11-17', ...zeroDay },
+            { day: '2026-11-18', ...todayCounts },
+          ],
+        })),
+      },
+    })
     render(<OverviewPage {...props} />)
-    await waitFor(() => { expect(screen.getByTitle('12')).toBeTruthy() })
-    expect(screen.getByTitle('12').textContent).toBe('12')
-    expect(screen.getByTitle('6,500').textContent).toBe('6.5K')
-    expect(screen.getByText('66.7')).toBeTruthy()
-    expect(screen.getByText('$1.23')).toBeTruthy()
-    expect(screen.getByText('6 per day on average')).toBeTruthy()
-    expect(screen.getByText('Input 1K · Output 2K')).toBeTruthy()
+    await waitFor(() => { expect(screen.getByTitle('22')).toBeTruthy() })
+    expect(screen.getByTitle('22').textContent).toBe('22')
+    expect(screen.getByTitle('4,500').textContent).toBe('4.5K')
+    // Today cache rate = 3000 / (3000 + 1000 + 0) = 75.0%.
+    expect(screen.getByText('75.0')).toBeTruthy()
+    expect(screen.getByText('$0.0385')).toBeTruthy()
+    expect(screen.getByText('Nov 18 · 7d avg 364')).toBeTruthy()
+    expect(screen.getByText('Input 1K · Output 500')).toBeTruthy()
+    expect(screen.getByText('3K cached tokens')).toBeTruthy()
+    // 7-day aggregate numbers must not appear as today's KPI values.
+    expect(screen.queryByTitle('2,549')).toBeNull()
+    expect(screen.queryByTitle('420,000')).toBeNull()
+    expect(screen.queryByText('$9.18')).toBeNull()
     expect(props.actions.readers!.readAnalytics).toHaveBeenCalledWith(
       { accountRef: 'OPENCODE_API_KEY', range: '7d' },
       expect.any(AbortSignal),
@@ -353,6 +397,18 @@ describe('console sub-pages', () => {
     expect(screen.getByRole('progressbar', { name: en.usage_weekly + ' 18%' }).getAttribute('aria-valuenow')).toBe('18')
     expect(screen.getByRole('progressbar', { name: en.usage_monthly + ' 21%' }).getAttribute('aria-valuenow')).toBe('21')
     expect(screen.getByText(en.pageStatusOn)).toBeTruthy()
+  })
+
+  it('shows zero KPIs when UTC today has no usage yet even when earlier days in the 7d window do', async () => {
+    const props = pagePropsOf({ state: { accounts: accountsStateOf([ACCOUNT]) } })
+    render(<OverviewPage {...props} />)
+    await waitFor(() => { expect(screen.getAllByTitle('0')).toHaveLength(2) })
+    expect(screen.getByText('0.0')).toBeTruthy()
+    expect(screen.getByText('$0.0000')).toBeTruthy()
+    expect(screen.getByText('Nov 6 · 7d avg 6')).toBeTruthy()
+    expect(screen.getByText('Input 0 · Output 0')).toBeTruthy()
+    expect(screen.queryByTitle('12')).toBeNull()
+    expect(screen.queryByText('$1.23')).toBeNull()
   })
 
   it('routes the overview shortcuts into the sibling tabs', () => {

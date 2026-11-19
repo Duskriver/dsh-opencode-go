@@ -183,10 +183,18 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   const usage = quota ?? active?.usage ?? null
   const usageNote = readUsage === undefined || quotaFailed ? t('usageUnavailable') : t('usageLoading')
   const totals = report?.totals
+  // The overview fetches a 7-day report once to power both the sparkline and
+  // the today KPIs; pick the UTC calendar day matching generatedAt (fallback to
+  // the final day row) rather than using the 7-day aggregate totals.
+  const utcToday = report !== null && Number.isFinite(report.generatedAt)
+    ? new Date(report.generatedAt).toISOString().slice(0, 10)
+    : undefined
+  const today = report === null ? undefined
+    : (utcToday === undefined ? undefined : report.byDay.find(row => row.day === utcToday)) ?? report.byDay.at(-1)
   const dayCount = report === null ? 1 : Math.max(1, report.byDay.length)
-  const cacheRead = totals === undefined ? 0n : BigInt(totals.cacheReadTokens)
-  const cacheTotal = totals === undefined ? 0n
-    : cacheRead + BigInt(totals.inputTokens) + BigInt(totals.cacheWriteTokens)
+  const cacheRead = today === undefined ? 0n : BigInt(today.cacheReadTokens)
+  const cacheTotal = today === undefined ? 0n
+    : cacheRead + BigInt(today.inputTokens) + BigInt(today.cacheWriteTokens)
   const cacheRate = percentOf(cacheRead, cacheTotal)
   const recent = report === null ? [] : report.byDay.slice(-7)
   const maximum = recent.reduce((max, day) => { const tokens = BigInt(day.tokens); return tokens > max ? tokens : max }, 0n)
@@ -199,21 +207,24 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   return <div className={css.overview}>
     <section className={css.kpis} aria-busy={reportLoading}>
       <Kpi label={t('overviewTodayRequests')}
-        value={totals === undefined ? '—' : historyNumber(totals.requests, locale)}
-        title={totals === undefined ? undefined : historyNumber(totals.requests, locale)}
-        foot={totals === undefined ? undefined
-          : t('overviewRequestsFoot', { count: historyNumber(String(BigInt(totals.requests) / BigInt(dayCount)), locale) })} />
+        value={today === undefined ? '—' : historyNumber(today.requests, locale)}
+        title={today === undefined ? undefined : historyNumber(today.requests, locale)}
+        foot={today === undefined || totals === undefined ? undefined
+          : t('overviewRequestsFoot', {
+            day: dayText(today.day, locale),
+            count: historyNumber(String(BigInt(totals.requests) / BigInt(dayCount)), locale),
+          })} />
       <Kpi label={t('overviewTodayTokens')}
-        value={totals === undefined ? '—' : historyNumber(totals.tokens, locale, true)}
-        title={totals === undefined ? undefined : historyNumber(totals.tokens, locale)}
-        foot={totals === undefined ? undefined
-          : t('overviewTokensFoot', { input: historyNumber(totals.inputTokens, locale, true), output: historyNumber(totals.outputTokens, locale, true) })} />
+        value={today === undefined ? '—' : historyNumber(today.tokens, locale, true)}
+        title={today === undefined ? undefined : historyNumber(today.tokens, locale)}
+        foot={today === undefined ? undefined
+          : t('overviewTokensFoot', { input: historyNumber(today.inputTokens, locale, true), output: historyNumber(today.outputTokens, locale, true) })} />
       <Kpi label={t('overviewCacheHitRate')}
-        value={totals === undefined ? '—' : <>{cacheRate.toFixed(1)}<em className={css.kpiUnit}>%</em></>}
-        foot={totals === undefined ? undefined : t('overviewCacheFoot', { tokens: historyNumber(totals.cacheReadTokens, locale, true) })} />
+        value={today === undefined ? '—' : <>{cacheRate.toFixed(1)}<em className={css.kpiUnit}>%</em></>}
+        foot={today === undefined ? undefined : t('overviewCacheFoot', { tokens: historyNumber(today.cacheReadTokens, locale, true) })} />
       <Kpi label={t('overviewTodaySpend')}
-        value={totals === undefined ? '—' : historyMoney(totals.costMicroCents, locale)}
-        foot={totals === undefined ? undefined : t('overviewSpendFoot')} />
+        value={today === undefined ? '—' : historyMoney(today.costMicroCents, locale)}
+        foot={today === undefined ? undefined : t('overviewSpendFoot')} />
     </section>
     {report === null ? <p className={css.note} role={reportLoading ? 'status' : undefined}>{reportNote}</p> : null}
     <div className={css.mainGrid}>
