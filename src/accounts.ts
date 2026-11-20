@@ -6,12 +6,14 @@ import {
   ACCOUNT_REF_PREFIX,
   accountRefOf,
   accountsOf,
+  DEFAULT_GO_PLAN,
   MAX_ACCOUNTS,
   moveAccountFirst,
   type AccountSettings,
   type GoAccount,
   parseAccountCommand,
   type AccountCommand,
+  type GoPlan,
   parseGoUsage,
   type GoUsage,
   assertProxyURL,
@@ -74,6 +76,11 @@ type Connection = { settings: AccountSettingsWriter; credentials: AccountCredent
 
 function accountIdentity(config: OpencodeGoConfig): string {
   return JSON.stringify([config.enabled, accountRefOf(config), config.accounts, config.autoSwitch, config.baseURL, config.proxyURL, config.freeBaseURL])
+}
+
+function syncedPlanPatch(accounts: readonly GoAccount[], previousPlan: GoPlan | undefined): { goPlan: GoPlan } | Record<string, never> {
+  const nextPlan = accounts[0]?.plan ?? (previousPlan && previousPlan !== DEFAULT_GO_PLAN ? DEFAULT_GO_PLAN : undefined)
+  return nextPlan ? { goPlan: nextPlan } : {}
 }
 
 function ownsAccountCredential(account: GoAccount): boolean {
@@ -196,7 +203,11 @@ export class GoAccountManager {
       try {
         value = this.read(connection).value
         const accounts = accountsOf(value).filter(entry => entry.apiKeyEnv !== command.ref)
-        return await this.write(connection, { accounts: [...accounts], apiKeyEnv: accounts[0]?.apiKeyEnv ?? accountRefOf(value) })
+        return await this.write(connection, {
+          accounts: [...accounts],
+          apiKeyEnv: accounts[0]?.apiKeyEnv ?? accountRefOf(value),
+          ...(accounts.length > 0 ? syncedPlanPatch(accounts, value.goPlan) : {}),
+        })
       } catch (error) {
         if (previous && this.connection === connection && accountsOf(this.read(connection).value).some(entry => entry.id === account.id && entry.apiKeyEnv === command.ref)) await credentials.set(credentialRef(command.ref), previous.value).catch(() => {
           this.logger.warn('llm-opencode-go: could not restore an account credential after a refused removal')
@@ -222,11 +233,10 @@ export class GoAccountManager {
     }
     if (command.kind === 'select') {
       const next = [...moveAccountFirst(accounts, command.ref)]
-      const selectedPlan = next[0]?.plan
       return this.write(connection, {
         accounts: next,
         apiKeyEnv: command.ref,
-        ...(selectedPlan ? { goPlan: selectedPlan } : {}),
+        ...syncedPlanPatch(next, value.goPlan),
       })
     }
     const from = accounts.findIndex(account => account.apiKeyEnv === command.ref)
@@ -234,7 +244,11 @@ export class GoAccountManager {
     if (from === command.toIndex) return 'applied'
     const [moved] = accounts.splice(from, 1)
     accounts.splice(command.toIndex, 0, moved!)
-    return this.write(connection, { accounts, apiKeyEnv: accounts[0]!.apiKeyEnv })
+    return this.write(connection, {
+      accounts,
+      apiKeyEnv: accounts[0]!.apiKeyEnv,
+      ...syncedPlanPatch(accounts, value.goPlan),
+    })
   }
 
   /**
@@ -270,8 +284,9 @@ export class GoAccountManager {
       const connection = this.connection
       if (!connection || event.generation !== this.capture() || event.seq !== this.latestSeq) return
       try {
-        const accounts = [...moveAccountFirst(accountsOf(this.read(connection).value), event.ref)]
-        await this.write(connection, { accounts, apiKeyEnv: event.ref })
+        const current = this.read(connection).value
+        const accounts = [...moveAccountFirst(accountsOf(current), event.ref)]
+        await this.write(connection, { accounts, apiKeyEnv: event.ref, ...syncedPlanPatch(accounts, current.goPlan) })
         this.capture()
         if (this.connection === connection && event.seq === this.latestSeq && accountRefOf(this.config()) === event.ref) this.notice = event.notice
       } catch {

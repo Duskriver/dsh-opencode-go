@@ -1026,7 +1026,7 @@ describe("account cards, quota rows and ordering", () => {
     expect(fixture.secrets.get('ACCOUNT_A')).toBe('secret-a')
   })
 
-  it('lets the user configure each account subscription tier in AccountsCard without refetching quota', async () => {
+  it('lets the user configure each account subscription tier inside its own account detail panel', async () => {
     const fixture = setup()
     await fixture.controller.refreshAccounts()
     render(<AccountsCard state={fixture.controller.accountState()} actions={fixture.actions} writable t={t} />)
@@ -1034,7 +1034,13 @@ describe("account cards, quota rows and ordering", () => {
     const readsAfterMount = fixture.read.mock.calls.length
     fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
 
-    const activeGroup = screen.getByRole('group', { name: t('goPlanForAccountLabel', { name: 'Primary' }) })
+    // Plan selector lives inside each account row, never as a stray row outside the account list.
+    expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
+
+    const primaryRow = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) }).closest('[data-account-row]') as HTMLElement
+    expect(within(primaryRow).getByText(en['goPlan_go'])).toBeTruthy()
+    fireEvent.click(within(primaryRow).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+    const activeGroup = within(primaryRow).getByRole('group', { name: en.goPlanLabel })
     await act(async () => {
       fireEvent.click(within(activeGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
     })
@@ -1043,6 +1049,7 @@ describe("account cards, quota rows and ordering", () => {
 
     // Backup accounts also expose per-account tier selection inside their expanded detail strip.
     const backupRow = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Backup' }) }).closest('[data-account-row]') as HTMLElement
+    expect(within(backupRow).getByText(en['goPlan_go'])).toBeTruthy()
     fireEvent.click(within(backupRow).getByRole('button', { name: t('accountsDetails', { name: 'Backup' }) }))
     const backupGroup = within(backupRow).getByRole('group', { name: en.goPlanLabel })
     await act(async () => {
@@ -1050,6 +1057,26 @@ describe("account cards, quota rows and ordering", () => {
     })
     expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_B', plan: 'go-teams' })
     expect(fixture.read.mock.calls.length).toBe(readsAfterMount)
+    fixture.controller.dispose()
+  })
+
+  it('exposes the subscription tier inside the single account row as well', async () => {
+    const fixture = setup({
+      apiKeyEnv: 'ACCOUNT_A',
+      accounts: [{ id: 'a', name: 'Solo', apiKeyEnv: 'ACCOUNT_A' }],
+    })
+    await fixture.controller.refreshAccounts()
+    render(<AccountsCard state={fixture.controller.accountState()} actions={fixture.actions} writable defaultOpen t={t} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
+    const soloRow = document.querySelector('[data-account-row="ACCOUNT_A"]') as HTMLElement
+    expect(within(soloRow).getByText(en['goPlan_go'])).toBeTruthy()
+    fireEvent.click(within(soloRow).getByRole('button', { name: t('accountsDetails', { name: 'Solo' }) }))
+    const soloGroup = within(soloRow).getByRole('group', { name: en.goPlanLabel })
+    await act(async () => {
+      fireEvent.click(within(soloGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
+    })
+    expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_A', plan: 'go-plus' })
     fixture.controller.dispose()
   })
 

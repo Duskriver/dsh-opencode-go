@@ -91,7 +91,8 @@
 .panel:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--go-surface); pointer-events: none; }
 .body { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; box-sizing: border-box;
-  padding: 10px 16px 14px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+  padding: 10px 16px 14px; overflow-y: auto; overscroll-behavior: contain; --scrollbar-thumb: var(--go-border-strong); --scrollbar-track: transparent; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+.body:hover { --scrollbar-thumb: var(--go-muted); }
 .panelHead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0;
   color: var(--go-text); }
 .panelHead strong { font-family: var(--go-display-font); font-size: 15px; font-weight: 600; letter-spacing: 0; line-height: 21px; color: var(--go-text); }
@@ -136,7 +137,9 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .modelEstimateRow { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; line-height: 16px; }
 .modelEstimateName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); }
 .modelEstimateRow[data-active] .modelEstimateName { color: var(--go-accent); font-weight: 500; }
-.modelEstimatePeak { flex: none; padding: 0 4px; border-radius: var(--go-radius-small); background: color-mix(in srgb, var(--go-warning) 14%, transparent); color: var(--go-warning); font-size: 10px; font-weight: 500; }
+.modelEstimatePeak, .modelEstimateOffPeak { flex: none; padding: 0 4px; border-radius: var(--go-radius-small); font-size: 10px; font-weight: 500; cursor: help; }
+.modelEstimatePeak { background: color-mix(in srgb, var(--go-warning) 14%, transparent); color: var(--go-warning); }
+.modelEstimateOffPeak { background: color-mix(in srgb, var(--go-success) 14%, transparent); color: var(--go-success); }
 .modelEstimateVal { flex: none; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; color: var(--go-muted); }
 
 .actions { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 8px;

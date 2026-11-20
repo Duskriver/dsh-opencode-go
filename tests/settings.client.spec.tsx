@@ -171,6 +171,16 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
+    it('resets the section scroll body to the top when switching settings tabs', () => {
+      renderSection(stateOf(), actions(), { foldedModels: true })
+      const pageBody = document.getElementById('opencode-go-tab-overview')?.closest('[class*="pageBody"]') as HTMLElement
+      expect(pageBody).toBeTruthy()
+      pageBody.scrollTop = 220
+      expect(pageBody.scrollTop).toBe(220)
+      selectTab('appearance')
+      expect(pageBody.scrollTop).toBe(0)
+    })
+
     it('keeps appearance on its own tab and applies all four edits immediately', () => {
       const reading = actions()
       renderSection(stateOf(), reading, { foldedModels: true })

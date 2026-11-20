@@ -7,7 +7,6 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
   LlmError,
-  assertUsableApiKey,
   resolveImageAttachmentAccess,
   type AdapterRegistrationHandle,
   type LlmModelDiscoveryRequest,
@@ -69,6 +68,30 @@ export const inject = ['llm']
 
 /** Settings namespace this plugin installs and the Web page edits. */
 export const NS = SETTINGS_NAMESPACE
+
+/** Printable ASCII excluding space: the characters HTTP headers carry verbatim. */
+const LEGAL_API_KEY = /^[\x21-\x7E]+$/
+
+/**
+ * Trim and validate a supplied API key locally instead of importing
+ * `assertUsableApiKey` from `@deepseek-ai/dsh-llm`, which newer DSH builds remove.
+ */
+function assertUsableApiKey(raw: string, pkg: string, ref: string): string {
+  const value = raw.trim()
+  if (value.length === 0) {
+    throw new LlmError(
+      `${pkg}: the API key resolved from ${ref} is blank; set ${ref} to the raw key (the web Models page writes it) or export it in the launching environment`,
+      'INVALID_CREDENTIAL',
+    )
+  }
+  if (!LEGAL_API_KEY.test(value)) {
+    throw new LlmError(
+      `${pkg}: the API key resolved from ${ref} contains characters no HTTP header can carry; set ${ref} to the raw key alone (the web Models page writes it)`,
+      'INVALID_CREDENTIAL',
+    )
+  }
+  return value
+}
 
 /**
  * Register the route, model discovery and settings presentation for one mount.

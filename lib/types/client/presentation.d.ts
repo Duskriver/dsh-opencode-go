@@ -214,6 +214,10 @@ export declare const en: {
     quotaBasisNote: string;
     quotaPillRemainingCalls: string;
     quotaPillModelLimited: string;
+    quotaPillPeakBadge: string;
+    quotaPillPeakTitle: string;
+    quotaPillOffPeakBadge: string;
+    quotaPillOffPeakTitle: string;
     visibilityHint: string;
     modelVisibleLabel: string;
     configurationMissing: string;

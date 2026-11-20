@@ -67,9 +67,17 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
   const tab = usePageTab()
   const tokens = useGoThemeTokens(state.appliedAppearanceTheme)
   const scroller = useRef<HTMLDivElement | null>(null)
+  const tabsRef = useRef<HTMLDivElement | null>(null)
   // The tab store outlives the host panel, so a re-entry can restore a tab the
-  // reader left halfway down: every tab starts at its own top instead.
-  useEffect(() => { scroller.current?.scrollTo({ top: 0 }) }, [tab])
+  // reader left halfway down: every tab starts at its own top instead, and a
+  // narrow horizontal tab strip keeps the newly selected tab in view.
+  useEffect(() => {
+    scroller.current?.scrollTo?.({ top: 0 })
+    tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({
+      block: 'nearest',
+      inline: 'nearest',
+    })
+  }, [tab])
   const locale = seats.getLocale?.()
   const actions: PageActions = {
     edit: seats.edit,
@@ -116,7 +124,7 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
             </span>
           </div>
         </header>
-        {ready ? <div className={css.tabs} role="tablist" aria-label={seats.t('pageTabsLabel')}>
+        {ready ? <div ref={tabsRef} className={css.tabs} role="tablist" aria-label={seats.t('pageTabsLabel')}>
           {PAGE_TABS.map((item, index) => <button key={item} type="button" role="tab"
             id={tabId(item)} aria-selected={tab === item} aria-controls={panelId(item)}
             tabIndex={tab === item ? 0 : -1} className={css.tab}

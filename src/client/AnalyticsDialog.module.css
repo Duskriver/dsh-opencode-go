@@ -1,5 +1,6 @@
 /* Native Host tokens or Classic editorial colors, shared with every other surface. */
-.shell { width: min(1100px, 100%); max-height: 100%; padding: 0; gap: 0; border-radius: var(--go-radius-modal); overflow: auto; scrollbar-width: thin; }
+.shell { width: min(1100px, 100%); max-height: 100%; padding: 0; gap: 0; border-radius: var(--go-radius-modal); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; --scrollbar-thumb: var(--go-border-strong); --scrollbar-track: transparent; scrollbar-width: auto; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+.shell:hover { --scrollbar-thumb: var(--go-muted); }
 /* Subpixel antialiasing, as on .page: the Host body is grayscale-only, which softens small text on 1x displays. */
 .dashboard { flex-shrink: 0; color: var(--go-text); background: var(--go-bg); font-family: var(--go-font); font-size: 13px; line-height: 1.6; padding: 26px 32px 24px; -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto; }
 .dashboard, .dashboard * { box-sizing: border-box; }
@@ -74,7 +75,8 @@
 .dashboard [data-part=outputTokens] { background: var(--go-accent-2); }
 .dashboard [data-part=cacheReadTokens] { background: var(--go-cache-read); }
 .dashboard [data-part=cacheWriteTokens] { background: var(--go-cache-write); }
-.chartScroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+.chartScroll { overflow-x: auto; overscroll-behavior-x: contain; --scrollbar-thumb: var(--go-border-strong); --scrollbar-track: transparent; scrollbar-width: auto; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+.chartScroll:hover { --scrollbar-thumb: var(--go-muted); }
 .chart { display: grid; grid-template-columns: 64px 1fr; grid-template-rows: 210px 31px; padding-top: 6px; }
 .yAxis { grid-column: 1; display: flex; flex-direction: column; justify-content: space-between; padding-right: 9px; color: var(--go-muted-soft); font: 11px var(--go-number-font); white-space: nowrap; }
 .plot { grid-column: 2; display: grid; gap: 4px; position: relative; isolation: isolate; }
@@ -105,7 +107,15 @@
 .rankRow > b { font-size: 12px; font-weight: 400; }
 .rankRow > small { font-size: 11px; color: var(--go-muted); }
 .dashboard .expandButton { display: block; margin: 16px auto 0; background: transparent; border: 0; padding: 6px 9px; color: var(--go-accent); font-size: 12px; }
-.tableScroll { overflow: auto; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+.tableScroll { overflow: auto; overscroll-behavior-x: contain; --scrollbar-thumb: var(--go-border-strong); --scrollbar-track: transparent; scrollbar-width: auto; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+.tableScroll:hover { --scrollbar-thumb: var(--go-muted); }
+@supports not (scrollbar-color: auto) {
+  .shell::-webkit-scrollbar, .chartScroll::-webkit-scrollbar, .tableScroll::-webkit-scrollbar { width: 12px; height: 12px; }
+  .shell::-webkit-scrollbar-track, .chartScroll::-webkit-scrollbar-track, .tableScroll::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .shell::-webkit-scrollbar-thumb, .chartScroll::-webkit-scrollbar-thumb, .tableScroll::-webkit-scrollbar-thumb {
+    border: 3px solid transparent; border-radius: 999px; background: var(--scrollbar-thumb); background-clip: content-box;
+  }
+}
 .details table { width: 100%; min-width: 890px; border-collapse: collapse; font-size: 12px; }
 .details th { color: var(--go-muted); font-weight: 400; padding: 9px 10px; text-align: right; border-bottom: 1px solid var(--go-border); white-space: nowrap; }
 .details th:first-child { text-align: left; padding-left: 0; }

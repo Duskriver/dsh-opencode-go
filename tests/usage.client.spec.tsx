@@ -1103,6 +1103,8 @@ describe("conversation usage", () => {
     expect(readModels).toHaveBeenCalledOnce()
     expect(screen.getByText('DeepSeek V4 Pro')).toBeTruthy()
     expect(screen.queryByText('Kimi K3')).toBeNull()
+    const offPeakBadge = screen.getByText('Off-peak')
+    expect(offPeakBadge.getAttribute('title')).toBe('Off-peak hours (1× standard usage).')
     expect(screen.getByText('~1,190 calls left')).toBeTruthy()
 
     cleanup()
@@ -1115,8 +1117,27 @@ describe("conversation usage", () => {
       fireEvent.click(trigger())
       await Promise.resolve()
     })
-    expect(screen.getByText('2×')).toBeTruthy()
+    const peakBadge = screen.getByText('Peak')
+    expect(peakBadge.getAttribute('title')).toBe('Peak hours (2× usage): estimated remaining calls are reduced accordingly.')
     expect(screen.getByText('~595 calls left')).toBeTruthy()
+
+    // Flat-rate model without peak multipliers shows neither Peak nor Off-peak.
+    cleanup()
+    const flatDirectory = createSnapshotStore<ModelDirectoryState>({
+      current: { provider: 'dsh-opencode-go', model: 'kimi-k3' }, routable: true,
+      groups: [], failures: [], status: 'ready', error: null,
+    })
+    await act(async () => {
+      render(<UsagePill settings={settings} directory={flatDirectory}
+        readUsage={vi.fn().mockResolvedValue(usage)} readModels={readModels} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(trigger())
+      await Promise.resolve()
+    })
+    expect(screen.getByText('Kimi K3')).toBeTruthy()
+    expect(screen.queryByText('Peak')).toBeNull()
+    expect(screen.queryByText('Off-peak')).toBeNull()
   })
 })
 

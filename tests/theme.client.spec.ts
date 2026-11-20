@@ -343,6 +343,8 @@ describe('model split-pane scroll contract', () => {
   const sectionCss = readFileSync(new URL('../src/client/Section.module.css', import.meta.url), 'utf8')
   const settingsPagesCss = readFileSync(new URL('../src/client/pages/SettingsPages.module.css', import.meta.url), 'utf8')
   const pageCss = readFileSync(new URL('../src/client/pages/Page.module.css', import.meta.url), 'utf8')
+  const analyticsCss = readFileSync(new URL('../src/client/AnalyticsDialog.module.css', import.meta.url), 'utf8')
+  const pillCss = readFileSync(new URL('../src/client/UsagePill.module.css', import.meta.url), 'utf8')
 
   function allRuleBodies(cssText: string, selector: string): string {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -353,23 +355,40 @@ describe('model split-pane scroll contract', () => {
   it('bounds the model grid row track so both panes overflow independently inside auto-height shells', () => {
     const layoutBody = allRuleBodies(sectionCss, '.modelLayout')
     expect(layoutBody).toMatch(/grid-template-rows:\s*minmax\(0,\s*1fr\)/)
+    expect(layoutBody).toMatch(/max-height:\s*clamp\(/)
+    const pageLayoutBody = allRuleBodies(sectionCss, '.cardModelsPage .modelLayout')
+    expect(pageLayoutBody).toMatch(/max-height:\s*clamp\(280px,/)
     const stackedMatch = sectionCss.match(/@container\s*\(max-width:\s*440px\)\s*\{([\s\S]*?)\n\}/)
     expect(stackedMatch, '@container (max-width: 440px) block must exist').not.toBeNull()
     expect(stackedMatch![1]).toMatch(/grid-template-rows:\s*auto/)
   })
 
-  it('keeps both model panes scrollable with contained overscroll and stable scrollbar gutters', () => {
+  it('keeps both model panes scrollable with parent scroll chaining and contained outer scrollers', () => {
     for (const selector of ['.modelList', '.modelDetails']) {
       const body = allRuleBodies(sectionCss, selector)
       expect(body, `${selector} must scroll vertically`).toMatch(/overflow-y:\s*auto/)
       expect(body, `${selector} must allow shrinking to its grid track`).toMatch(/min-height:\s*0/)
-      expect(body, `${selector} must prevent scroll chaining`).toMatch(/overscroll-behavior:\s*contain/)
+      expect(body, `${selector} must allow vertical scroll chaining to the parent page`).toMatch(/overscroll-behavior-y:\s*auto/)
+      expect(body, `${selector} must not trap vertical overscroll`).not.toMatch(/overscroll-behavior:\s*contain/)
       expect(body, `${selector} must reserve scrollbar gutter`).toMatch(/scrollbar-gutter:\s*stable/)
+      expect(body, `${selector} must reserve keyboard scroll padding`).toMatch(/scroll-padding-block:\s*6px/)
       expect(body, `${selector} must set accessible scrollbar width`).toMatch(/scrollbar-width:\s*auto/)
       expect(body, `${selector} must use contrast-checked thumb token`).toContain('--go-border-strong')
     }
+    expect(allRuleBodies(sectionCss, '.pageBody')).toMatch(/overscroll-behavior:\s*contain/)
+    expect(allRuleBodies(pageCss, '.scroller')).toMatch(/overscroll-behavior:\s*contain/)
     expect(sectionCss).toContain('@supports not (scrollbar-color: auto)')
     expect(pageCss).toContain('@supports not (scrollbar-color: auto)')
+  })
+
+  it('contains horizontal overscroll and uses contrast-checked scrollbars on page tabs, analytics, and usage popover', () => {
+    expect(allRuleBodies(pageCss, '.tabs')).toMatch(/overscroll-behavior-x:\s*contain/)
+    expect(allRuleBodies(analyticsCss, '.shell')).toMatch(/overscroll-behavior:\s*contain/)
+    expect(allRuleBodies(analyticsCss, '.chartScroll')).toMatch(/overscroll-behavior-x:\s*contain/)
+    expect(allRuleBodies(analyticsCss, '.tableScroll')).toMatch(/overscroll-behavior-x:\s*contain/)
+    expect(analyticsCss).toContain('--go-border-strong')
+    expect(analyticsCss).toContain('@supports not (scrollbar-color: auto)')
+    expect(allRuleBodies(pillCss, '.body')).toContain('--go-border-strong')
   })
 
   it('enables inline container queries on console settings pages without constraining height', () => {

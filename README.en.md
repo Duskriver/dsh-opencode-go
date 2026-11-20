@@ -24,7 +24,7 @@ DSH supports OpenCode Go natively, but power users and multi-account workflows n
 ## ✨ Highlights
 
 - 🧭 **Sidebar Console (7 Sub-pages, opt-in)**: Enable **Sidebar entry** to add a hand-drawn `go` stone entry right after the plugin market in DSH's sidebar, opening a full-page console (**Overview / Usage / Accounts / Models / Appearance / Advanced / About**) sharing one state controller with Settings. Off by default; older hosts automatically stay on Settings + the in-place history dialog.
-- 🧮 **Smart Per-Model Call Estimation**: Assign each account's OpenCode Go tier (`Go ($10)` / `Go Plus ($40)` / `Go Teams ($20)`). Combining gateway `/models` rates, monthly tier caps, and the three quota windows, the plugin displays **full-capacity request budgets** in the model detail card and **live remaining calls** (`~N calls left`, with peak-hour `2×` badges) inside the conversation quota popover.
+- 🧮 **Smart Per-Model Call Estimation**: Assign each account's OpenCode Go tier (`Go ($10)` / `Go Plus ($40)` / `Go Teams ($20)`). Combining gateway `/models` rates, monthly tier caps, and the three quota windows, the plugin displays **full-capacity request budgets** in the model detail card and **live remaining calls** (`~N calls left`, with `Peak` / `Off-peak` badges for time-of-day models) inside the conversation quota popover.
 - 📊 **5 Input Quota Pill Styles + Border Toggle**: Keep subscription usage beside the chat composer in **Badge (default), Concentric rings, Level fill, Dual mini-bars, or Minimal rings** with an independent **Show border** toggle, background sleep-saving, and one-click account switching.
 - 🛡️ **Automatic Multi-Account Failover**: Manage up to 20 accounts with drag-to-reorder priority. On HTTP `401/403`, `429`, or exhausted quota, the plugin silently retries backup accounts **before output starts**, promotes the working account, and cools down rejected keys for 5 minutes.
 - 💰 **Official Workspace History Dashboard**: Powered directly by OpenCode Console's daily CSV across all clients in the selected workspace (UTC calendar days), with today / 7 / 30 / 90-day ranges, stacked daily charts, model breakdowns, and CSV export.
@@ -106,7 +106,7 @@ OpenCode Go shares **percentage-based quotas across three windows** (5-hour, wee
 2. **Full-capacity request budgets in the Model card**
    Selecting any Go model under **Models** shows its estimated full-capacity calls across the 5-hour (`20%`), weekly (`50%`), and monthly (`100%`) caps using a **typical cached coding-agent request profile** (`1K input + 44K cache read + 450 output`), plus a peak-hour multiplier note when scheduled multipliers apply.
 3. **Live remaining calls in the composer Usage Pill popover**
-   Opening the conversation usage popover computes `~N calls left` (or `0 calls left`) for the **active Go model** based on the tightest bottleneck window and any active UTC peak multiplier (displaying a `2×` badge during peak windows).
+   Opening the conversation usage popover computes `~N calls left` (or `0 calls left`) for the **active Go model** based on the tightest bottleneck window and any active UTC time-of-day multiplier (displaying a `Peak` or `Off-peak` badge with multiplier details on hover).
 
 <p align="center">
   <img src="docs/assets/usage-pill-popover.png" alt="Expanded composer usage pill popover showing three quota windows and live remaining call estimation for the active model" width="480">

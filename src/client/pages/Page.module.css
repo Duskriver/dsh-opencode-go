@@ -25,6 +25,8 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  scroll-padding-block: 6px;
   padding: calc(26px + var(--dsh-frame-top-clearance, 0px)) 0 56px;
   --scrollbar-thumb: var(--go-border-strong);
   --scrollbar-track: transparent;
@@ -38,10 +40,6 @@
 }
 
 @supports not (scrollbar-color: auto) {
-  .scroller {
-    scrollbar-width: auto;
-  }
-
   .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
   .scroller::-webkit-scrollbar-track { background: var(--scrollbar-track); }
   .scroller::-webkit-scrollbar-thumb {
@@ -128,6 +126,7 @@
   padding: 0 2px;
   border-bottom: 1px solid var(--go-border-subtle);
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
 

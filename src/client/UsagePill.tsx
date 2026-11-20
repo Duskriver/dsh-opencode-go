@@ -746,7 +746,16 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
               <span className={css.modelEstimateName} title={activeEntry.name ?? activeEntry.id}>
                 {activeEntry.name ?? activeEntry.id}
               </span>
-              {estimate.multiplier !== 1 ? <span className={css.modelEstimatePeak}>{estimate.multiplier}×</span> : null}
+              {estimate.multiplier > 1
+                ? <span className={css.modelEstimatePeak}
+                  title={formatTranslated(t, 'quotaPillPeakTitle', { factor: estimate.multiplier })}>
+                  {t('quotaPillPeakBadge')}
+                </span>
+                : estimate.peakFactor !== undefined
+                  ? <span className={css.modelEstimateOffPeak} title={t('quotaPillOffPeakTitle')}>
+                    {t('quotaPillOffPeakBadge')}
+                  </span>
+                  : null}
               <strong className={css.modelEstimateVal}>{callText}</strong>
             </div>
           </div>

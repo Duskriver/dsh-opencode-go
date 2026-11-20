@@ -508,6 +508,14 @@ describe('serialized account commands and primary selection', () => {
     })
     expect(await multi.manager.execute({ kind: 'set-plan', ref: 'ACCOUNT_B', plan: 'go-teams' })).toBe('applied')
     expect(multi.value().accounts?.find(a => a.apiKeyEnv === 'ACCOUNT_B')?.plan).toBe('go-teams')
+    expect(await multi.manager.execute({ kind: 'set-plan', ref: 'ACCOUNT_A', plan: 'go-plus' })).toBe('applied')
+    expect(multi.value().goPlan).toBe('go-plus')
+    // Switching to an account with no explicit plan resets goPlan to default instead of leaking go-plus.
+    expect(await multi.manager.execute({ kind: 'add', id: 'c'.repeat(32), name: 'Third', key: 'synthetic-key-c' })).toBe('applied')
+    const thirdRef = multi.value().accounts?.find(a => a.id === 'c'.repeat(32))?.apiKeyEnv
+    expect(thirdRef).toBeTruthy()
+    expect(await multi.manager.execute({ kind: 'select', ref: thirdRef! })).toBe('applied')
+    expect(multi.value().goPlan).toBe('go')
     expect(await multi.manager.execute({ kind: 'set-plan', ref: 'MISSING', plan: 'go' })).toBe('rejected')
   })
 

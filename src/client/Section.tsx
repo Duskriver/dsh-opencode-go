@@ -310,7 +310,7 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
       <Button variant="outline" size="sm" type="button" disabled={state.busy} onClick={cancel}>{t('accountCancel')}</Button>
     </div>
   </form> : null
-  const detail = (account: GoAccountView, label: string, index: number, isActive: boolean, panelId: string) =>
+  const detail = (account: GoAccountView, label: string, index: number, isActive: boolean, panelId: string, rowPlan: GoPlan) =>
     <div id={panelId} className={css.accountDetail} data-account-detail="">
       <div className={css.accountManageStrip} data-account-manage="">
         <span className={css.accountManageMeta}>
@@ -325,10 +325,10 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
             onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
         </div>
       </div>
-      {total > 1 && actions.setAccountPlan ? <PlanSelector
+      {actions.setAccountPlan ? <PlanSelector
         label={t('goPlanLabel')}
         hint={t('goPlanHint')}
-        value={accountPlanOf(account, fallbackPlan)}
+        value={rowPlan}
         disabled={disabled}
         t={t}
         onSelect={plan => { void actions.setAccountPlan!(account.apiKeyEnv, plan) }}
@@ -422,6 +422,7 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
           const expanded = details === account.apiKeyEnv
           const panelId = `opencode-go-account-${index}`
           const isActive = state.activeRef ? account.apiKeyEnv === state.activeRef : index === 0
+          const rowPlan = accountPlanOf(account, isActive || total === 1 ? fallbackPlan : DEFAULT_GO_PLAN)
           return <Fragment key={account.id}>
             <div className={css.accountRow} data-account-row={account.apiKeyEnv}
               data-active={isActive ? 'true' : undefined}
@@ -464,9 +465,7 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
                       <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
                       {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
                     </span>
-                    {account.plan && (total > 1 || account.plan !== DEFAULT_GO_PLAN)
-                      ? <span className={css.accountPlanBadge}>{t(`goPlan_${account.plan}`)}</span>
-                      : null}
+                    <span className={css.accountPlanBadge}>{t(`goPlan_${rowPlan}`)}</span>
                   </div>
                 </div>
                 <div className={css.accountTail}>
@@ -491,23 +490,13 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
                 <button type="button" className={css.accountRetry} disabled={state.refreshing}
                   onClick={actions.loadAccounts}>{t('usageRetry')}</button>
               </div> : null}
-              {expanded ? detail(account, label, index, isActive, panelId) : null}
+              {expanded ? detail(account, label, index, isActive, panelId, rowPlan) : null}
               {editor?.ref === account.apiKeyEnv ? editorForm(label) : null}
             </div>
           </Fragment>
         })}
       </div>
       {editor ? (editor.kind === 'add' ? editorForm() : null) : null}
-      {preferred && actions.setAccountPlan ? <PlanSelector
-        label={total > 1
-          ? t('goPlanForAccountLabel', { name: preferred.name || t('accountDefault') })
-          : t('goPlanLabel')}
-        hint={t('goPlanHint')}
-        value={accountPlanOf(preferred, fallbackPlan)}
-        disabled={disabled}
-        t={t}
-        onSelect={plan => { void actions.setAccountPlan!(preferred.apiKeyEnv, plan) }}
-      /> : null}
       <div className={css.accountsFoot}>
         {editor ? null : <Button className={css.addAccount} variant="outline" size="sm" disabled={disabled || total >= MAX_ACCOUNTS}
           onClick={() => { start({ kind: 'add' }) }}>{t('accountAdd')}</Button>}
@@ -586,8 +575,14 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const canEnableAll = toggleable.some(entry => !isModelEnabled(entry, modelVisibility))
   const canDisableAll = toggleable.some(entry => isModelEnabled(entry, modelVisibility))
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
+  const listRef = useRef<HTMLDivElement | null>(null)
   const detailsRef = useRef<HTMLElement | null>(null)
   const selectedModelId = model?.id
+  useEffect(() => {
+    if (listRef.current && listRef.current.scrollTop > 0) {
+      listRef.current.scrollTop = 0
+    }
+  }, [filter, normalized])
   useEffect(() => {
     if (detailsRef.current && detailsRef.current.scrollTop > 0) {
       detailsRef.current.scrollTop = 0
@@ -632,7 +627,7 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
           {/* A group, not a <nav>: the model picker is not navigation, and any
               `nav button` styled by the host or a theme plugin would restyle
               every row control (issue #76). */}
-          <div className={css.modelList} role="group" aria-label={t('modelsLabel')}>
+          <div ref={listRef} className={css.modelList} role="group" aria-label={t('modelsLabel')}>
             {entries.map(entry => <div key={entry.id}
               className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
               <button type="button" className={css.modelChoice}
@@ -1566,6 +1561,12 @@ function Loaded(props: {
   // Tabs keep one class of settings on screen at a time: the overview is the
   // landing state, and the other tabs carry the former cards' contents.
   const [tab, setTab] = useState<SettingsTab>('overview')
+  const pageBodyRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (pageBodyRef.current && pageBodyRef.current.scrollTop > 0) {
+      pageBodyRef.current.scrollTop = 0
+    }
+  }, [tab])
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
@@ -1598,7 +1599,7 @@ function Loaded(props: {
   ]
   return (
     <div className={css.page} style={themeStyle(tokens)}>
-      <div className={css.pageBody}>
+      <div ref={pageBodyRef} className={css.pageBody}>
       <div className={css.pageTop}>
         {/* The sidebar row is the primary way into the page; the settings section
             keeps a secondary way there once the host wires `openPage`. The

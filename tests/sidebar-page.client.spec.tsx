@@ -489,7 +489,7 @@ describe('console sub-pages', () => {
     expect(props.actions.setModelEnabled).toHaveBeenCalledWith([GO_MODEL.id], false)
   })
 
-  it('renders a large model catalog and resets detail scroll position when switching models', () => {
+  it('renders a large model catalog and resets detail and list scroll positions appropriately', () => {
     const catalog = Array.from({ length: 35 }, (_, index) => ({
       id: `model-${index + 1}`,
       name: `Model ${index + 1}`,
@@ -506,6 +506,11 @@ describe('console sub-pages', () => {
     fireEvent.click(within(list).getByRole('button', { name: 'Model 25' }))
     expect(within(details).getByRole('heading', { level: 3, name: 'Model 25' })).toBeTruthy()
     expect(details.scrollTop).toBe(0)
+
+    list.scrollTop = 240
+    expect(list.scrollTop).toBe(240)
+    fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'Model 3' } })
+    expect(list.scrollTop).toBe(0)
   })
 
   it('renders only the appearance controls with their live actions', () => {

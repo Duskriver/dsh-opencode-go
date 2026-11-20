@@ -210,7 +210,9 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  scroll-padding-block: 6px;
   /* Room under the last card: without it a scrolled-to-end page lands the card's
      bottom edge exactly on the action bar's rule, which reads as a clipped card. */
   padding: 0 4px 16px 0;
@@ -235,12 +237,6 @@
 }
 
 @supports not (scrollbar-color: auto) {
-  .pageBody,
-  .modelList,
-  .modelDetails {
-    scrollbar-width: auto;
-  }
-
   .pageBody::-webkit-scrollbar,
   .modelList::-webkit-scrollbar,
   .modelDetails::-webkit-scrollbar {
@@ -485,6 +481,8 @@
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-control);
   background: var(--go-surface-sunken);
+  /* Mask the rounded top corners and soften scrolled content passing underneath. */
+  box-shadow: 0 -2px 0 2px var(--go-bg), 0 6px 12px -2px var(--go-bg);
 }
 
 .pageTab {
@@ -1014,9 +1012,9 @@
   flex: 1 1 auto;
   min-height: 260px;
   /* Both panes share one frame height, so the list and the parameter card stop
-     together; the ceiling keeps the whole frame at roughly four fifths of its
-     former height. */
-  max-height: 448px;
+     together; scale down smoothly on shorter viewports so the split pane fits
+     without trapping the outer scrollport. */
+  max-height: clamp(260px, calc(100dvh - 460px), 448px);
   border: 1px solid var(--go-border);
   border-radius: var(--go-radius-card);
   background: var(--go-surface-sunken);
@@ -1024,10 +1022,10 @@
 }
 
 .cardModelsPage .modelLayout {
-  max-height: clamp(448px, calc(100dvh - 420px), 640px);
+  max-height: clamp(280px, calc(100dvh - 490px), 640px);
 }
 
-.modelList { overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 6px; border-right: 1px solid var(--go-border); background: var(--go-surface-sunken); }
+.modelList { overflow-y: auto; min-height: 0; overscroll-behavior-x: contain; overscroll-behavior-y: auto; scrollbar-gutter: stable; scroll-padding-block: 6px; padding: 4px 6px; border-right: 1px solid var(--go-border); background: var(--go-surface-sunken); }
 .modelPanel { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
 .modelRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-right: 6px; }
 .modelRow + .modelRow { border-top: 0.5px solid var(--go-border); }
@@ -1060,7 +1058,7 @@
 .quotaCellValue { font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--go-text); font-variant-numeric: tabular-nums; }
 .quotaPeakNote { font-size: 11px; line-height: 1.4; color: var(--go-warning); }
 .overrideDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--go-accent); }
-.modelDetails { overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface-elevated); }
+.modelDetails { overflow-y: auto; min-height: 0; overscroll-behavior-x: contain; overscroll-behavior-y: auto; scrollbar-gutter: stable; scroll-padding-block: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--go-surface-elevated); }
 .modelDetails h3 { font-family: var(--go-display-font); font-size: 17px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
 .modelHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .stats { display: flex; flex-direction: column; gap: 10px; }
