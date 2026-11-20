@@ -8,27 +8,28 @@
 <h1 align="center">dsh-opencode-go</h1>
 
 <p align="center">
-  <a href="README.en.md">English</a> · <a href="#常见问题-faq">常见问题</a> · <a href="docs/advanced.md">高级指南</a> · <a href="docs/development.md">开发与测试</a>
+  <a href="README.en.md">English</a> · <a href="#-核心特性">核心特性</a> · <a href="#-快速开始">快速开始</a> · <a href="#-常见问题-faq">常见问题</a> · <a href="docs/advanced.md">高级指南</a> · <a href="docs/development.md">开发与测试</a>
 </p>
 
-为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 量身打造的 **OpenCode Go 专属接入与多账号管理插件**。
+为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 量身打造的 **OpenCode Go 专属接入、配额透视与多账号管理插件**。
 
-DSH 原生支持接入 OpenCode Go，但原生模式无法满足复杂的生产与日常开发需求（如多账号无感容灾、会话级 Prompt 缓存绑定、会话内实时额度透视等）。本插件基于 Cordis 微内核架构，在提供完整模型协议转换的同时，带来了流畅的客户端 UI 与企业级容灾体验。
+DSH 原生支持接入 OpenCode Go，但在高频开发与多账号协作场景下，仍缺少**会话内实时额度与剩余次数估算、多账号无感容灾、会话级 Prompt 缓存绑定、官方历史用量看板**以及**一体化控制台**。本插件基于 Cordis 微内核架构，在提供完整模型协议转换的同时，带来与 DSH 深度融合的客户端体验。
 
-文档中的现有界面截图展示 **Classic** 主题；默认的 **Native** 主题会跟随当前 DSH 的颜色、字体与几何 token。
+> 以下界面截图展示默认 **DSH Native（深色）** 主题（含 DSH 桌面端实机脱敏截图与插件真实组件示例数据）；你也可以随时在「外观」中切换为 **OpenCode Go Classic** 暖纸/陶土风主题，两套主题均跟随宿主明暗模式。
+
+![DSH 桌面端实景：左侧边栏 OpenCode Go 入口、左下角侧边栏额度卡与输入栏同心双环用量胶囊](docs/assets/dsh-desktop-overview.png)
 
 ---
 
 ## ✨ 核心特性
 
-- 🆓 **双路由动态模型目录（Free 默认为关闭的 opt-in）**：Go 与平台免费模型分别从各自网关的 `/models` 发现，保留同名模型；平台免费通道（Free）默认关闭，需在 **设置 → OpenCode Go → 概览 → 免费通道** 显式开启（立即生效，无需保存）后才注册路由、拉取目录并出现在模型选择器中；两套模型开关与容量设置独立。
-- 🛑 **免费通道限流保护**：遵循上游 `Retry-After`，冷却期间暂停新请求；共享免费额度或 IP 限制不会触发 Go 换号。
-- 🛡️ **多账号无感容灾**：支持最多 20 个账号集中管理与拖拽排序。当主账号额度耗尽或 Key 失效时，**在输出前自动尝试备用账号**，成功后自动扶正，告别“聊到一半额度没了”的打断感。
-- ⚡ **会话级 Prompt 缓存绑定**：严格遵循网关协议注入专有 `x-opencode-session` 路由头，稳定复用网关上下文缓存，显著降低响应首字延迟。
-- 📊 **会话内额度实时透视**：在聊天输入框旁常驻“用量胶囊”，直观展示 5 小时滚动、每周、每月的额度百分比及重置时间倒计时；支持休眠节能与静默刷新。
-- 🧭 **侧边栏控制台（opt-in，默认关闭）**：在 **设置 → OpenCode Go → 概览 → 侧边栏入口** 开启后，DSH 侧边栏「插件市场」之后出现「OpenCode Go」入口，把用量看板、账号、模型、外观与高级设置整合为整页控制台（概览 / 用量看板 / 账号 / 模型 / 外观 / 关于）。入口默认关闭，安装插件不会自动增加侧边栏条目，关闭时会先离开页面再注销整面板；设置页保留完整入口（「打开完整页面」按钮随入口出现），对话内用量胶囊在页面不可用时回退到内置用量历史弹窗，旧宿主自动回退到设置页。
-- 💰 **官方历史用量看板**：按所选 Key 的工作区汇总官方每日 CSV，查看请求、Token、官方用量金额与模型明细，包含其他客户端的调用。
-- 🎛️ **模型与热配置**：无需重启 DSH！随时在线调整模型上下文窗口、最大输出上限、思考预算（Thinking Budget），并支持 HTTP/HTTPS/SOCKS5 代理。
+- 🧭 **侧边栏快捷控制台（7 大子页，opt-in）**：开启「侧边栏入口」后，DSH 侧边栏「插件市场」下方出现手绘 `go` 棋石图标入口，点击在主区打开一体化控制台（**概览 / 用量看板 / 账号 / 模型 / 外观 / 高级设置 / 关于**），与设置页共享同一套状态控制器；默认关闭，旧宿主自动回退。
+- 🧮 **智能估算模型调用次数**：支持按账号选择 OpenCode Go 订阅套餐（`Go ($10)` / `Go Plus ($40)` / `Go Teams ($20)`），结合网关 `/models` 单价、月度限额与三窗口配额，自动在**模型详情页**换算三窗口「满额预估请求数」，并在**聊天输入栏用量弹层**实时计算当前所选模型「还可调用约 X 次」（高峰期自动标注倍率，如 `2×`）。
+- 📊 **5 种会话内用量胶囊 + 独立边框开关**：在聊天输入区常驻配额指示器，支持 **徽章 / 同心嵌套双环 / 水位填充胶囊 / 双行微进度条 / 极简双环** 5 种视觉形态与独立「显示边框」开关；支持休眠节能、静默刷新与弹层内一键切号。
+- 🛡️ **多账号无感容灾**：支持最多 20 个账号集中管理与拖拽排序。主账号遇 `401/403` 鉴权失败、`429` 限流或额度耗尽时，**在输出前自动尝试备用账号**并自动扶正，配合 5 分钟防雪崩冷却黑名单。
+- 💰 **官方历史用量看板**：直连官方 Console 每日 CSV 单一数据源，按 UTC 日历日汇总请求数、输入/输出/缓存 Token 与官方用量金额，支持今日 / 7 / 30 / 90 天切换、模型排行明细与 CSV 导出。
+- 🆓 **双路由动态模型目录（Free 为默认关闭的 opt-in）**：Go 与平台免费模型分别从各自网关 `/models` 动态发现，保留同名模型，支持一键 **全部开启 / 全部关闭** 与独立容量/思考预算覆盖；Free 通道遵循上游 `Retry-After` 限流冷却且绝不触发 Go 换号。
+- ⚡ **会话级 Prompt 缓存绑定与单一保存手势**：稳定透传 `x-opencode-session` 路由头以最大化命中网关上下文缓存；除「高级设置」外，所有开关、主题、胶囊样式、账号与模型调整**修改即生效**，无需反复点保存。
 
 ---
 
@@ -38,19 +39,13 @@ DSH 原生支持接入 OpenCode Go，但原生模式无法满足复杂的生产�
 
 ### 1. 安装插件
 
-> 💡 **版本提示**：当前仓库最新版本为 **`0.4.6`**（已包含 #94 修复 DS Bot 等自动高度外壳下的设置看板高度塌陷、侧边栏控制台页与单一保存手势，以及 #105 在模型开关界面显示各模型价格等更新）。若 npm 源尚未同步发布最新版本（例如 npm 仍停留在 `0.4.0`），直接按包名 `dsh-opencode-go` 安装会拿到旧版本；此时请优先使用下方 **方式 A** 下载仓库根目录附带的 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) 手动安装。
+> 💡 **版本提示**：当前仓库最新版本为 **`0.4.6`**（已包含侧边栏 7 子页控制台、智能模型调用次数估算、5 种输入栏胶囊样式、模型价格参考与批量开关，以及 `#94` 对 DS Bot 自动高度外壳的适配修复）。若 npm 源尚未同步最新版（例如仍停留在 `0.4.0`），直接按包名安装会拿到旧版，建议优先使用下方 **方式 A** 安装仓库根目录附带的 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz)。
 
-#### 方式 A：通过 `.tgz` 离线包手动安装（获取最新版本 / DS Bot 与桌面端推荐）
-1. **获取 `.tgz` 安装包**：
-   - 在 GitHub 仓库根目录点击 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz)，点击 **Download raw file**（或直接下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.6.tgz)），保存到本地固定路径（建议放在**无空格、无特殊字符**的目录，例如 `C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.6.tgz` 或 `~/Downloads/dsh-opencode-go-0.4.6.tgz`）。
-   - *如果你已将本仓库 `git clone` 到本地，仓库根目录已直接自带该 `.tgz` 文件，无需额外打包。*
-2. **在 DSH / DS Bot 界面中安装**：
-   1. 打开 DSH（Web / Desktop）或 **DS Bot**，进入 **插件 → 添加插件**。
-   2. 若之前已安装过旧版（如 npm `0.4.0`），建议先在插件列表移除旧版 `dsh-opencode-go`（不会清空已保存的 API Key 与插件配置）。
-   3. 在 **添加插件** 输入框中填入本地 `.tgz` 文件的**完整绝对路径**（例如 Windows 下 `C:\Users\alice\Downloads\dsh-opencode-go-0.4.6.tgz`，macOS/Linux 下 `/Users/alice/Downloads/dsh-opencode-go-0.4.6.tgz`；路径含空格时建议移至无空格目录或使用 `file:` 前缀）。
-   4. 点击 **安装**，完成后点击 **立即启用**。
-   5. **彻底重启客户端或服务**：DS Bot / 桌面客户端请完全退出后台进程后重新打开；Web 端请重启 `dsh web` 并强制刷新浏览器页面。
-3. **或通过命令行安装本地 `.tgz`**：
+#### 方式 A：通过 `.tgz` 离线包安装（获取最新版本 / DS Bot 与桌面端推荐）
+
+1. **下载安装包**：在仓库根目录下载 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz)（[Raw 直链](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.6.tgz)）至无空格本地路径（如 `C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.6.tgz` 或 `~/Downloads/dsh-opencode-go-0.4.6.tgz`）。若已 `git clone` 仓库，根目录已自带该文件。
+2. **图形界面安装**：打开 DSH（Web / Desktop）或 **DS Bot** → **插件 → 添加插件**（若已装旧版建议先移除，已保存的 API Key 与配置会保留），填入本地 `.tgz` 完整绝对路径，点击 **安装** → **立即启用**，随后**彻底重启客户端或 `dsh web`**。
+3. **命令行安装**：
    ```sh
    # Web profile（请替换为实际的本地 .tgz 路径）
    dsh plugin --profile web add ./dsh-opencode-go-0.4.6.tgz
@@ -58,239 +53,253 @@ DSH 原生支持接入 OpenCode Go，但原生模式无法满足复杂的生产�
    # Headless profile
    dsh plugin --profile headless add ./dsh-opencode-go-0.4.6.tgz
    ```
-   *命令行安装后请重启 `dsh web`（Headless 用户请使用 `--profile headless`）。推荐先下载到本地再传本地路径安装，可避免部分网络环境下直连超时以及部分内置 pnpm 版本在重复解析远程 `.tgz` URL 时触发 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 报错。更多安装与排查细节见[高级使用指南](docs/advanced.md#手动安装与离线升级tgz)。*
+   *更多离线升级与 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 排查细节见[高级使用指南](docs/advanced.md#手动安装与离线升级tgz)。*
 
-#### 方式 B：从 npm 在线安装（仅当 npm 已同步最新版时）
-1. 打开 DSH，进入 **插件 → 添加插件**。
-2. 输入 `dsh-opencode-go`，点击 **安装**。
-3. 安装完成后点击 **立即启用**。
+#### 方式 B：从 npm 在线安装（npm 已同步最新版时）
+
+1. 打开 DSH → **插件 → 添加插件**，输入 `dsh-opencode-go` 点击 **安装** → **立即启用**。
+2. 或执行命令：`dsh plugin --profile web add dsh-opencode-go`（安装后重启 `dsh web`）。
 
 ![在 DSH 中安装插件](docs/assets/install-via-dsh.gif)
 
-命令行在线安装：
-```sh
-dsh plugin --profile web add dsh-opencode-go
-```
-*若发现通过包名安装到的仍是旧版本（如 `0.4.0`），请改用上方的 **方式 A（`.tgz` 手动安装）**。如果本机已安装 `git` 且网络可直连 GitHub，也可在命令行尝试 `dsh plugin --profile web add github:Duskriver/dsh-opencode-go#main`（或在界面填写 `https://github.com/Duskriver/dsh-opencode-go`），但该方式依赖本机 `git` 且不支持常规自动更新。*
+### 2. 首次配置
 
-### 2. 配置与使用
-1. 安装启用并重启后，建议先打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认插件版本已显示为 `0.4.6`。
-2. 打开 **设置 → OpenCode Go → 账号**，点击添加，填写账号名称与 OpenCode Go API Key 后确认。
-3. （可选）打开 **设置 → OpenCode Go → 概览 → 侧边栏入口**，启用后侧边栏出现「OpenCode Go」入口并打开完整控制台页面；入口默认关闭，不开启时设置页与输入栏用量弹窗照常可用。
-4. 在任意会话的模型选择器中，选择 **DSH OpenCode Go** 目录下的模型。
-5. 开始对话，输入区右下角即可看到实时的用量胶囊。
+1. 重启后打开 **设置 → OpenCode Go**，确认版本为 `0.4.6`。
+2. 在 **账号** 中点击 **添加账号**，填写名称与 OpenCode Go API Key，并按实际订阅选择**套餐档位**（用于界面换算模型调用次数）。
+3. （可选）在 **概览** 中打开 **侧边栏入口**，即可在 DSH 左侧栏通过手绘 `go` 图标直达完整 7 子页控制台。
+4. 在任意对话的模型选择器中选用 **DSH OpenCode Go** 下的模型，输入区下方即可看到实时用量胶囊。
 
-> 设置只有一个保存手势：只有 **高级设置**（网关地址、代理、超时、图片上限等）需要点击保存，其余开关与选项（含免费通道、侧边栏入口、界面主题与额度显示）修改后立即生效。
+> **单一保存手势**：只有 **高级设置**（网关地址、代理、超时、图片预算等）需要点击底部「保存」；其余开关、外观、套餐、模型可见性与容量改动均**即时生效**。
 
 ---
 
-## 💡 深度功能与运行机制
+## 🧭 侧边栏快捷控制台（7 大子页面）
 
-### 1. 多账号管理与无感容灾（Auto-failover）
+在 **设置 → OpenCode Go → 概览 → 侧边栏入口** 开启开关（`sidebarEntry`，默认关闭）后，DSH 侧边栏「插件市场」之后将注册带手绘 `go` 棋石图标的 **OpenCode Go** 入口（设置页左侧导航同样使用该图标）。点击后在主内容区以整页控制台展开，不再局限于窄小的设置弹窗：
 
-在 **设置 → OpenCode Go → 账号** 中集中管理你的所有账号：
+<p align="center">
+  <img src="docs/assets/dsh-sidebar-entry.png" alt="DSH 侧边栏中的 OpenCode Go 手绘 go 入口" width="240">
+</p>
 
-![账号管理：账号排序、额度详情、Key 操作和自动使用备用账号](docs/assets/accounts.png)
+![OpenCode Go 侧边栏控制台概览页（示例数据）](docs/assets/console-overview.png)
 
-- **拖拽排序即优先级**：列表第一项为当前主账号；鼠标拖拽左侧手柄调整顺序，这个顺序也是自动尝试备用账号的优先次序。
-- **出词前无感切换**：开启“自动使用备用账号”后，若当前账号在发出请求后遇到了 **401/403 鉴权失败、429 限流或 Quota 额度耗尽**：
-  - 插件会在**开始向你输出文字前**，静默挑出下一个备用账号重新发送请求。
-  - 成功出词的备用账号会自动移至首位成为新主账号，并在会话面板给出切换提示。
-  - *防御机制*：若模型已经开始吐字或已产生计费，插件不会切换，避免拼接乱码或重复扣费。
-- **防雪崩冷却黑名单**：被网关拒绝的 Key 会进入 5 分钟的内存冷却名单，避免短时间内反复向已失效的账号发起无意义的重试。
-- **凭据安全隔离**：Key 直接存储至 DSH 底层凭据系统，前端界面永远不会回显明文密钥。
+| 子页面 | 核心能力 |
+| :--- | :--- |
+| **概览** | UTC 今日 4 项 KPI（今日请求、今日 Tokens、缓存命中率、今日花费）、当前账号三档实时额度与自动容灾开关、Go / Free 服务状态、账号回退链摘要、近 7 日 Token 柱图及快捷跳转入口 |
+| **用量看板** | 整页版官方历史用量看板，查看工作区全客户端的每日 Token 构成/请求趋势、模型分布排行与明细表，支持导出官方 CSV |
+| **账号** | 多账号增删改、拖拽调整优先级、单独设置每个账号的订阅套餐档位、Bento 三档额度展开与自动容灾开关 |
+| **模型** | Go / Free 双渠道切换、搜索筛选、一键「全部开启 / 全部关闭」、满额预估请求数、网关价格明细及上下文/最大输出/思考预算覆盖 |
+| **外观** | **DSH Native / OpenCode Go Classic** 实时预览切换、额度显示模式、5 种输入栏胶囊形态 + 边框开关预览、侧边栏额度开关 |
+| **高级设置** | Go / Free 网关地址、HTTP(S)/SOCKS5 代理、目录刷新与三类超时控制、单次请求图片预算（整页唯一需要「保存/放弃」的分区） |
+| **关于** | 版本号、包名、最低宿主版本、侧边栏槽位状态、实时诊断状态（服务/Free/历史/账号数/最近刷新）与文档外链 |
 
-### 2. 会话内订阅额度透视（UsagePill）
+- **优雅兼容旧宿主**：未开启入口或宿主未声明 `sidebar.panellist` 槽位时，不注册侧边栏条目；设置页保留完整能力，输入栏胶囊点击「用量历史」时自动回退至内置用量历史弹窗。开启后关闭开关会先安全退出页面再注销槽位。
 
-在聊天输入区旁，常驻有直观的“用量胶囊”。点击即可展开完整的用量卡片：
+---
 
-- **三窗口精准监控**：
-  - 🟢 **5 小时滚动配额**：短周期高频使用的健康度。
-  - 🟡 **每周配额**：本周累计使用进度。
-  - 🔴 **每月配额**：月度套餐消耗百分比。
-  每个窗口均显示精确的重置倒计时；进度条会随着接近上限变黄，耗尽时变红。
-- **节能与防抖机制**：默认每分钟静默刷新；当页面切入后台或浏览器最小化时**自动暂停轮询**，切换回前台时即时刷新。
-- **账号全名与快速切换**：多账号时直接显示当前账号全名（名字过长以省略号截断），展开面板点击“切换”即可直接提拔目标账号为主账号。
-- **显示模式**（在 **设置 → OpenCode Go → 外观 → 额度显示** 中配置，修改立即生效）：
-  - **自动（默认）**：仅在使用 DSH OpenCode Go 模型时显示。
-  - **常驻**：切换到其他厂商模型时，仍然保持胶囊显示。
-  - **关闭**：隐藏胶囊并停止后台用量轮询。
+## 🧮 智能估算模型调用次数
 
-### 3. 官方历史用量看板（Analytics）
+面对 OpenCode Go 的**三窗口共享百分比配额**（5 小时 / 每周 / 每月），单看百分比往往很难直观判断“我手头这个模型还能再问多少轮”。本插件基于网关实时下发的单价、月度限额与时段倍率，在三处界面联动提供透明的次数换算：
 
-从对话输入框的用量胶囊展开面板，或（侧边栏入口开启时）从侧边栏的「OpenCode Go」控制台入口打开；入口未开启或宿主不支持时，胶囊内的看板按钮回退到内置用量历史弹窗：
+1. **按账号指定订阅套餐（纯展示换算）**
+   在 **账号** 页为每个账号选择对应的 OpenCode Go 套餐档位：`Go ($10)`、`Go Plus ($40)` 或 `Go Teams ($20)`。该设置仅用于本地界面换算，绝不影响实际 API 请求或上游计费。
+2. **模型详情页「满额预估请求数」**
+   在 **模型** 页选中任意 Go 模型，右侧详情卡会结合当前主账号的套餐月限额与三窗口官方配额占比（5 小时 `20%` / 每周 `50%` / 每月 `100%`），按**典型编码缓存请求画像**（`1K 输入 + 44K 缓存读 + 450 输出`）自动算出三窗口满额可调用次数；若模型存在高峰期倍率，还会给出倍率缩减提示。
+3. **输入栏弹层实时计算「当前还可调用约 X 次」**
+   在聊天窗口展开用量胶囊弹层时，插件会结合**当前对话选中的 Go 模型**、三窗口中余量最紧的**瓶颈窗口**以及**当前 UTC 时间是否命中高峰倍率**（命中时显示 `2×` 等徽标），实时给出当前立刻可用的预估剩余调用次数（耗尽时显示 `0 次（已达上限）`）。
 
-![新版官方历史用量看板，示例数据](docs/assets/usage-history-desktop.jpg)
+<p align="center">
+  <img src="docs/assets/usage-pill-popover.png" alt="输入栏用量胶囊展开弹层：三档额度与当前模型实时剩余调用次数估算" width="480">
+</p>
 
-[窄屏浅色预览](docs/assets/usage-history-mobile.jpg) · [模型排行与明细预览](docs/assets/usage-history-models.jpg)（均为示例数据）
+![模型页：Go/Free 双渠道、批量开关、满额预估请求数与价格明细](docs/assets/model-settings.png)
 
-- **官方 CSV 单一来源**：请求、输入 / 输出 / 缓存 Token、官方用量金额、每日图表与模型明细来自同一份官方每日 CSV；provider + model 区分同名模型。支持今日、7 / 30 / 90 天，日期统一使用 UTC。
-- **独立查看账号**：默认当前调用账号，只查看所选 Key 所属工作区，包含其他客户端；切换查看账号不改变对话账号。看板的三个额度窗口跟随所选账号。匿名 Free 覆盖不作保证。
-- **官方用量金额**：直接汇总 `cost_micro_cents`（1 美元 = 1 亿单位），不等同于 Go 额外扣款。官方日汇总可能延迟。
-- **双主题统一界面**：设置页、用量胶囊、侧栏与看板共用布局，通过 `appearanceTheme` 选择 **DSH Native（默认）** 或 **OpenCode Go Classic**，并跟随宿主明暗模式；主题差异见[分组高级设置](#分组高级设置)。宽屏弹窗、窄屏全屏，保留 Token 堆叠或请求日柱图、模型排行与明细。
-- **按需查询**：打开、切账号、切区间或手动刷新时查询，Host 短缓存 30 秒，强制刷新绕过缓存，不后台轮询历史。仅官方模型网关支持历史查询；错误明确显示，不回退本地扫描。
+> 实际可调用次数会随每轮对话的上下文长度与 Prompt 缓存命中率浮动，估算值用于日常选型与配额规划参考。
 
-Key 留在 Host；常规报告只向浏览器传递聚合数字与 provider / model / day。用户主动下载的官方 CSV 可包含成员字段。完整口径见[用量统计说明](docs/usage-analytics.md)。
+---
 
-### 4. 免费通道（Free，默认关闭的 opt-in）
+## 📊 会话内额度胶囊与个性化外观
 
-`DSH OpenCode Free` 不是默认能力：为避免误用与合规风险，它默认关闭。需要时在 **设置 → OpenCode Go → 概览 → 免费通道** 打开开关（立即生效；也可配置 `freeEnabled: true`）。关闭状态下插件不注册 `dsh-opencode-free` 路由、不请求 `freeBaseURL` 的模型目录，也不会在设置页的模型目录与模型发现中暴露 Free 模型；关闭开关后该路由会撤回，进行中的请求允许完成。Go 通道与账号逻辑不受影响。
+进入 **外观** 页签（控制台或设置页均可，全部即时生效）：
 
-开启后：
+![外观设置：Native/Classic 双主题预览、5 种输入栏胶囊形态与边框开关](docs/assets/appearance-settings.png)
 
-- **复用已存账号（受端点绑定约束）**：Free 与 Go 共用账号列表，但只有在 `freeBaseURL` 是官方 HTTPS 端点（hostname 为 `opencode.ai`、协议为 `https:` 且使用默认端口），或与当前 `baseURL` 同 origin（协议 + 主机 + 端口完全一致，例如自建反向代理同时承载两个路由）时，才会复用已存账号 Key 并遵循“自动使用备用账号”设置；`http://opencode.ai`、自定义端口的 `opencode.ai` 以及其它自定义 `freeBaseURL` 一律退回匿名公共访问（`Bearer public`），不读取也不发送任何已存 Key，并记录不含密钥的诊断信息。
-- **无 Key 时匿名公共访问**：没有可用 Key 时以 `Bearer public` 发起匿名公共访问。
-- **官方 CLI 身份**：请求以官方 OpenCode CLI 的 `opencode/latest/2.2.5/cli` User-Agent 发出，而不是 DSH 自身的归属 UA。
-- **独立 Bun 运行时**：Free 推理通过 `optionalDependencies` 中版本锁定为 1.4.4 的官方 `@oven/bun-*` 平台包启动独立 HTTP worker。平台包直接提供原生二进制，不需要 `bun` 包装包或其 `postinstall`，因此无需批准 Bun 构建脚本；缺少可选依赖时的表现见下方 FAQ。
-- **限流保护**：遵循上游 `Retry-After`，冷却期间新请求直接返回 `FREE_COOLDOWN`；共享免费额度 / IP 限制不会触发 Go 换号。
+- **5 种输入栏额度样式 + 独立边框开关**：
+  - 支持 **徽章（默认）**、**同心嵌套双环**、**水位填充胶囊**、**双行微进度条**、**极简双环** 5 种形态，均可在外观页实时预览。
+  - 独立的 **显示边框** 开关可自由搭配任意一种样式：开启时带外框线与底色，关闭后呈极简无边框透明风格。
+- **额度显示模式与节能轮询**：
+  - **自动（默认）**：仅在选择 DSH OpenCode Go 模型时展示胶囊；**常驻**：切到其他厂商模型时也持续展示；**关闭**：隐藏胶囊并停止后台轮询。
+  - 可见时默认每分钟静默刷新；窗口切入后台自动休眠停轮询，切回前台即时刷新。多账号时展开弹层点击顶部账号徽标即可一键切号。
+- **侧边栏独立额度卡片**：开启「在侧边栏显示额度」后，侧边栏展开时展示三档进度条卡片（收起时为紧凑图标），点击账号名可循环预览不同账号额度，不改变实际对话账号。
+- **双主题统一体系（Native / Classic）**：
+  - **DSH Native（默认）**：通过宿主公开语义 token 自动跟随 DSH 与第三方主题的配色、字体与圆角；同时对强控件边界与图表数据系列保持受控的 WCAG 1.4.11（≥ 3:1）对比度，防止浅/深色背景下轨道或柱体发灰不可见。
+  - **OpenCode Go Classic**：保留插件专属的暖纸 / 炭灰表面、陶土强调色与衬线排版风格，依然随宿主明暗模式切换深浅配色。
 
-> ⚠️ **风险提示**：Free 通道依赖上游公开的免费入口并以官方 CLI 身份发出请求，可能违反 OpenCode / 上游服务条款，也可能触发上游风控、限流或账号限制。是否开启以及使用频度由你自行判断并承担风险；请勿在生产环境或大规模自动化调用中使用。
+---
+
+## 🛡️ 多账号无感容灾
+
+在 **账号** 页签中集中管理最多 20 个 OpenCode Go 账号：
+
+![账号管理：拖拽排序、订阅套餐、Bento 三档额度展开与自动容灾](docs/assets/accounts.png)
+
+- **拖拽排序即优先级**：首位 `#1 当前` 为主账号，拖拽左侧手柄调整顺位，同时决定备用账号的容灾尝试顺序。点击任意行可展开 Bento 三档额度卡片、重置时间、订阅套餐选择以及重命名 / 替换 Key / 删除操作。
+- **出词前无感切换**：开启 **自动使用备用账号** 后，若主账号遭遇 `401/403` 鉴权失败、`429` 限流或额度耗尽，插件会在**吐字输出前**静默改用下一个备用账号重试；成功出词后自动将其扶正为主账号，并在用量弹层给出切换通知。若本轮已开始输出或已产生计费，则不会切换，防止乱码拼接或重复扣费。
+- **5 分钟防雪崩冷却与凭据隔离**：被网关拒绝的 Key 进入 5 分钟内存冷却队列避免无效重试；所有 API Key 均托管于 DSH 底层凭据服务，前端永不回显明文。
+
+---
+
+## 💰 官方历史用量看板
+
+从侧边栏控制台的 **用量看板** 页签打开整页视图（未开启侧边栏入口或旧宿主时，从输入栏胶囊点击「用量历史」打开内置弹窗）：
+
+![整页官方历史用量看板：KPI 汇总、每日堆叠柱图与模型分布明细（示例数据）](docs/assets/console-usage.png)
+
+- **官方 CSV 单一数据源**：请求数、输入/输出/缓存读写 Token、官方用量金额（按 `cost_micro_cents` 精确汇总，`1 USD = 1 亿` 单位，不等同于 Go 额外扣款）、每日活动柱图与模型明细全部来自官方 Console 每日 CSV，统一使用 UTC 日历日，支持 **今天 / 7 天 / 30 天 / 90 天** 及一键 **导出 CSV**。
+- **独立查看账号**：默认展示当前主账号所属工作区（包含该工作区下其他客户端的调用），切换查看账号不会影响正在进行的对话账号，三档实时额度条随所选账号联动更新。
+- **按需加载与隐私边界**：仅在打开、切换账号/区间或手动刷新时请求（Host 端 30 秒短缓存，不后台轮询）。API Key 始终留在 Host 侧；常规看板报告仅向浏览器返回聚合统计值，不包含对话正文或密钥。详细口径见[用量统计说明](docs/usage-analytics.md)。
+
+---
+
+## 🆓 免费通道（Free，默认关闭的 opt-in）
+
+`DSH OpenCode Free` 为显式 opt-in 能力，默认关闭以避免误用与合规风险。需要时在 **概览 → 启用免费通道** 打开开关（立即生效，或配置 `freeEnabled: true`）。未开启时插件不注册 `dsh-opencode-free` 路由、不拉取目录，也不在模型列表中暴露 Free 模型；关闭后立即撤回路由，已开始的流式回复允许完成。
+
+开启后行为与安全边界：
+
+- **端点绑定的凭据复用**：仅当 `freeBaseURL` 为官方 HTTPS 端点（`https://opencode.ai` 默认端口）或与当前 `baseURL` 同 origin（协议 + 主机 + 端口一致，如自建反代同时承载两条路由）时，才会复用已存账号 Key 并遵循自动容灾；其余非官方或明文 HTTP 地址一律退回匿名公共访问（`Bearer public`），不发送任何已存 Key。
+- **官方 CLI 身份与独立 Bun 运行时**：请求以官方 OpenCode CLI UA（`opencode/latest/2.2.5/cli`）发出；推理通过 `optionalDependencies` 中版本锁定的 `@oven/bun-*@1.4.4` 平台包直接启动原生二进制 HTTP worker（无 `postinstall` 脚本，无需额外批准构建脚本）。
+- **独立限流冷却**：遵循上游 `Retry-After`，冷却期直接返回 `FREE_COOLDOWN`；共享免费额度或 IP 限制绝不会触发 Go 账号切换。
+
+> ⚠️ **风险提示**：Free 通道依赖上游公开免费入口并以官方 CLI 身份请求，可能违反 OpenCode / 上游服务条款，也可能触发风控、限流或账号限制。请自行评估风险，勿用于生产环境或大规模自动化调用。
+
+---
+
+## ⚙️ 模型自定义与高级设置
+
+### 模型目录与参数覆盖
+
+在 **模型** 页签（见上方模型页截图）可分别管理 **OpenCode Go** 与 **免费模型** 两个渠道：
+
+- **显示开关与一键批量操作**：未过时模型默认开启、过时模型默认关闭；支持按名称/ID 搜索、按「近 7 天发布 / 已自定义 / 过时模型」筛选，并通过 **全部开启 / 全部关闭** 对当前视图一键原子生效（自动跳过配置缺失项），左右双栏支持独立滚动。
+- **价格明细与容量覆盖**：右侧模型详情卡展示 `/models` 公布的输入 / 输出 / 缓存读 / 缓存写价格、上下文阶梯费率与时段倍率提示（Free 模型标注「免费」）；支持热覆盖上下文窗口、最大输出 Token 与深度思考预算（Thinking Budget）。
+- **默认输出安全封顶**：任意模型声明输出上限超过 `65,536` 且调用方与设置均未显式指定时，默认封顶 **`65,536 tokens`** 并同步上报给 DSH 用于上下文压缩计算，较小模型保留 SDK 默认值。
+
+### 分组高级设置（唯一需要点击保存的分区）
+
+进入 **高级设置** 页签调整底层网络、超时与图片处理参数（修改后点击底部「保存」生效）：
+
+![高级设置：连接与代理、缓存与超时、图片处理及恢复默认](docs/assets/advanced-settings.png)
+
+- **连接与代理**：独立配置 Go / Free 网关地址，并支持 **HTTP / HTTPS / SOCKS5** 代理（如 `socks5://127.0.0.1:7890`），保存后即时作用于对话、额度查询、历史统计与模型发现。
+- **缓存与超时**：支持精细调整目录刷新间隔、流空闲超时（`streamIdleTimeoutMs`）、请求准备超时（`requestPreparationTimeoutMs`）与整轮请求总超时（`requestTimeoutMs`）。
+- **图片处理预算**：支持单次请求图片张数上限（`maxImages`）、累计载荷上限、像素预算与单张字节目标，图片并行准备最多四路。
+- **一键恢复默认**：底部「恢复参数默认值」清空高级设置自定义覆盖，不影响已保存的账号与密钥。
 
 ---
 
 ## 🛠️ 架构设计与工作原理
 
-源码按领域组织，宿主与浏览器通过 DSH Typert RPC 通讯：
+源码按领域清晰分层，宿主与浏览器通过 DSH Typert RPC 通讯：
 
 ```text
 src/
-├── index.ts + config.ts          插件挂载、configure 设置与热更新
-├── contracts.ts                 浏览器可用的配置、模型与 RPC 契约
-├── adapter.ts                   请求执行、会话头、容灾与冷却
-├── catalog.ts                   模型目录与公共元数据缓存
-├── conversion.ts                上下文、单次请求图片预算、回放与流转换
-├── google.ts + sdk-types.ts      Google SDK 接入与公开类型
-├── accounts.ts                  串行账号命令、凭据写入与官方配额
-├── analytics.ts                 官方每日 CSV、历史聚合与短缓存
-├── transport.ts                 HTTP/HTTPS/SOCKS5、超时与脱敏错误
+├── index.ts + config.ts            插件挂载、configure 设置与热更新
+├── contracts.ts                    宿主与浏览器共享的配置、模型、套餐与 RPC 契约
+├── adapter.ts                      请求执行、x-opencode-session 路由头、容灾与冷却
+├── catalog.ts + pricing.ts         双路由动态模型发现、价格/阶梯/倍率解析与缓存
+├── quota-estimate.ts               三窗口配额占比、典型请求画像与模型调用次数估算
+├── conversion.ts                   上下文、单次请求图片预算、回放与流协议转换
+├── google.ts + sdk-types.ts        Google SDK 接入与公开类型定义
+├── accounts.ts                     串行账号命令队列、凭据托管与官方实时配额
+├── analytics.ts                    官方每日 CSV 拉取、UTC 聚合与 30 秒短缓存
+├── transport.ts                    HTTP/HTTPS/SOCKS5 代理传输、超时与脱敏错误
+├── free-*.ts                       opt-in 免费通道、独立 Bun HTTP worker、SOCKS 中继与退避策略
 └── client/
-    ├── index.ts + controller.ts  configForms 接入、即时写入与高级草稿、账号操作
-    ├── host-slots.ts             sidebar.panellist / main 槽位契约与导航类型
-    ├── GoMark.tsx + build-info.ts 图标（侧栏手绘 go / 页面品牌标）与构建信息
-    ├── settings-nav-icon.tsx      设置导航行图标（宿主 icon seat + 旧宿主 DOM 兜底）
-    ├── pages/                    控制台页壳与六个子页（概览 / 用量 / 账号 / 模型 / 外观 / 关于）
-    ├── Section.tsx              宿主设置页、账号卡片与模型编辑器
-    ├── UsagePill.tsx            会话额度胶囊
-    ├── AnalyticsDialog.tsx      官方历史用量看板
-    └── presentation.ts          多语言、Native / Classic 主题 token 与显示格式
+    ├── index.ts + controller.ts    configForms 接入、单一保存手势与实时状态控制器
+    ├── host-slots.ts               sidebar.panellist / main 槽位契约与导航
+    ├── GoMark.tsx + build-info.ts  手绘 go 棋石导航标 / 品牌标与构建元数据
+    ├── settings-nav-icon.tsx       设置导航行图标（宿主 icon seat + 旧宿主 DOM 兜底）
+    ├── pages/                      控制台页壳与 7 个子页（概览/用量/账号/模型/外观/高级/关于）
+    ├── Section.tsx                 设置页及可复用账号/模型/外观/高级卡片
+    ├── UsagePill.tsx               5 形态输入栏胶囊、剩余调用估算弹层与侧栏额度卡
+    ├── AnalyticsDialog.tsx         官方历史用量看板（整页 / 弹窗双形态复用）
+    └── presentation.ts             中英双语字典、Native/Classic 主题 token 与格式化
 ```
 
-账号操作在内存串行队列中直接更新凭据与设置。模型容量草稿始终保留为对象；图片按单次请求限制数量、编码字节及最多四路并行准备。宿主仅使用 DSH `0.2.1-rc.5` 起提供的设置与图片卸载接口。侧边栏入口与整页面板按 `sidebarEntry` 开关成对注册 / 注销：只有开关开启且宿主声明 `sidebar.panellist` 时才注册，关闭时先离开页面再注销。设置只有一个保存手势——高级设置保留保存 / 放弃，其余改动即时写入。包的 `.` 与 `./client` 导出路径保持不变。
+### 为什么需要 `x-opencode-session`？
 
-### 为什么必须要携带 `x-opencode-session`？
-OpenCode Go 网关具有会话粘性路由与上下文缓存共享能力。插件会把 DSH 对话 ID 规范化为稳定的 `x-opencode-session` 请求头：常见的可打印 ASCII 会话 ID **原样透传**，只有包含非常规字符（非可打印 ASCII）或恰好占用插件内部保留前缀的 ID 才会做 sha256 + base64url 单向散列；两种形式都不含对话正文。目的只是让多轮对话始终落在同一推理节点上，最大化命中网关的 Prompt Cache，显著节省思考与生成时间。
-
----
-
-## ⚙️ 模型自定义与高级配置
-
-### 模型参数覆盖
-进入 **设置 → OpenCode Go → 模型**：
-
-![模型设置：搜索、分类筛选、显示开关和参数编辑](docs/assets/model-settings.png)
-
-- **显示开关与批量操作**：未显式配置且未过时的模型默认开启（已过时模型默认关闭），可自由隐藏不常用的模型以净化聊天选择器；支持通过 **全部开启 / 全部关闭** 按钮按当前搜索与筛选视图一键批量开关（包括过时模型，跳过配置缺失模型），修改立即生效。
-- **价格参考**：每个模型在开关列表里直接显示网关 `/models` 声明的输入 / 输出价格（美元 / 百万 Token）；选中模型后，参数卡会列出缓存读取 / 写入价格、按上下文阶梯变化的费率，以及网关声明了时段倍率时的提示。网关未公布价格的模型不显示价格，卡片会说明「网关未公布该模型的价格」；Free 模型显示「免费」。
-- **容量与上下文覆盖**：可手动指定上下文窗口（Context Window）与单次最大输出 Token。
-- **思考预算（Thinking Budget）**：对支持深度思考的模型，可自定义思考强度等级或 Token 预算。
-- **默认输出预算**：任意模型声明的输出上限超过 65,536 且调用方与设置均未显式指定时，默认封顶 **65,536 tokens**；较小模型保留 SDK 默认值。该预算同时报告给 DSH，用于上下文压缩。
-
-### 分组高级设置
-支持在 **设置 → OpenCode Go** 的 **概览 / 模型 / 外观 / 高级设置** 中按需微调；只有 **高级设置** 需要保存，其余开关与选项修改后立即生效：
-
-![高级设置：分组配置、提示入口和统一恢复默认](docs/assets/advanced-settings.png)
-
-- **界面主题**：在 **设置 → OpenCode Go → 外观** 中将 `appearanceTheme` 设为 `native` 或 `classic`。**Native（默认）** 通过 Host 公开语义 token 跟随 DSH 与第三方主题的颜色、字体、圆角、阴影和焦点样式，token 不可解析时使用中性 fallback；其中强控件边界与图表状态系列（输出 / 缓存读 / 缓存写）保持插件自有的对比度受控色值，不跟随 Host 或第三方调色板——Host 的 `border-l2` 是发丝分隔线、`state-*` 是状态点色，都不保证控件边界与图表所需的 WCAG 1.4.11 3:1；品牌强调色图表系列仍跟随 Host 强调色。未设置该字段的旧配置也缺省使用 Native。**Classic** 保留暖纸 / 炭灰、陶土色强调与 Anthropic Serif / Sans / Mono、中文衬线回退，不跟随 Host 或第三方主题覆盖这些品牌 token，但仍按宿主明暗模式切换 Classic 配色。输入栏额度样式仍为 `badge`（默认）/ `plain`，侧栏额度显示仍是独立开关且默认关闭。
-- **网络代理**：支持填入 HTTP、HTTPS 或 SOCKS5 代理地址（如 `socks5://127.0.0.1:1080`），保存后即时应用于对话、用量查询与模型刷新。
-- **超时控制**：分别支持配置请求准备超时（`requestPreparationTimeoutMs`）、整轮请求超时（`requestTimeoutMs`）以及流空闲看门狗阈值（`streamIdleTimeoutMs`）。
-- **侧边栏入口（opt-in）**：在 **概览** 中开启后注册侧边栏入口与完整控制台页面，默认关闭；切换立即生效，关闭时先离开页面再注销槽位。
-- **免费通道（opt-in）**：在 **概览** 中开关，默认关闭；开启后注册 `DSH OpenCode Free` 路由、拉取平台免费模型；已存 Key 仅在 `freeBaseURL` 为官方域名或与 `baseURL` 同 origin 时复用，否则退回匿名公共访问；关闭后该路由撤回，进行中的请求允许完成。
-- **一键恢复默认**：点击卡片底部的恢复按钮可清空自定义覆盖；外观与模型容量的恢复立即生效，高级设置需保存后生效。不影响已保存的账号 Key。
+OpenCode Go 网关支持基于会话粘性的 Prompt Cache 复用。插件会将 DSH 对话 ID 规范化为稳定的 `x-opencode-session` 请求头：常见可打印 ASCII ID **原样透传**，仅当包含非常规字符或命中保留前缀时做 `sha256 + base64url` 单向散列（两种形式均不含对话正文），让多轮对话稳定命中同一推理节点，大幅降低首字延迟与成本消耗。
 
 ---
 
 ## ❓ 常见问题 (FAQ)
 
 <details>
-<summary><strong>Q: 为什么按包名安装后版本仍是 0.4.0，或在 DS Bot 中设置看板依然高度塌陷？</strong></summary>
+<summary><strong>Q: 为什么按包名安装后版本仍是旧版（如 0.4.0），或在 DS Bot 中设置面板高度塌陷？</strong></summary>
 
-由于 npm 仓库上的发布版本可能暂未同步最新源码（`#94` 对 DS Bot 等自动高度外壳下设置看板高度塌陷的修复已在 `0.4.1` 合入，当前仓库版本为 `0.4.6`），直接按包名 `dsh-opencode-go` 安装或执行 `dsh plugin update` 仍可能拉取到 `0.4.0`。
-
-解决方法：请改用上文 **方式 A** 下载仓库根目录的 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) 到本地，先在插件管理中移除旧版（不会丢失已有账号 Key 与设置），再通过本地 `.tgz` 文件路径重新安装并启用，最后**彻底退出 DS Bot / DSH 桌面端后重新启动**（Web 端请重启 `dsh web` 并强制刷新浏览器）。详见[手动安装与离线升级说明](docs/advanced.md#手动安装与离线升级tgz)。
+若 npm 仓库暂未同步最新源码，直接按包名 `dsh-opencode-go` 安装可能拿到旧版。请使用上文 **方式 A** 下载仓库根目录的 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz)，在插件列表移除旧版（不会清空已保存 Key 与设置）后通过本地 `.tgz` 路径重新安装启用，并**彻底退出重启客户端 / `dsh web`**。详见[手动安装与离线升级说明](docs/advanced.md#手动安装与离线升级tgz)。
 </details>
 
 <details>
-<summary><strong>Q: 为什么聊天输入区没有出现用量胶囊？</strong></summary>
+<summary><strong>Q: 为什么模型或输入栏弹层没有显示「预估调用次数」？</strong></summary>
 
-1. 检查当前会话选中的模型是否为 **DSH OpenCode Go** 分组下的模型。默认“自动”模式仅在选择本插件模型时展示；若希望在使用其他模型时也看到配额，可在 **设置 → OpenCode Go → 外观 → 额度显示** 中切为“常驻”（立即生效）。
-2. 检查是否已在设置中填入有效 API Key 且插件已处于启用状态。
+1. 预估次数仅适用于 **Go 渠道**且网关 `/models` 公布了单价与月度限额的模型（Free 模型或未公布价格的模型不显示估算）。
+2. 输入栏弹层仅在当前会话选中的模型属于 **DSH OpenCode Go** 渠道且配额读取成功时展示剩余次数；可在 **账号** 页核对是否选择了正确的订阅套餐档位（`Go ($10)` / `Go Plus ($40)` / `Go Teams ($20)`）。
 </details>
 
 <details>
 <summary><strong>Q: 侧边栏没有出现 OpenCode Go 入口？</strong></summary>
 
-侧边栏入口默认关闭（opt-in）。请到 **设置 → OpenCode Go → 概览** 打开「侧边栏入口」开关；开启后侧边栏「插件市场」之后会出现入口行，点击打开完整控制台页面。若宿主客户端没有声明 `sidebar.panellist` 槽位（旧版本或不含侧边栏的组合），入口不会注册，请继续使用设置页与输入栏用量弹窗中的内置历史看板。
+侧边栏入口默认关闭（opt-in）。请前往 **设置 → OpenCode Go → 概览** 开启「侧边栏入口」开关（立即生效）。若客户端未声明 `sidebar.panellist` 槽位（旧版或无侧边栏外壳），入口不会注册，可继续使用设置页与输入栏胶囊内的用量历史弹窗。
 </details>
 
 <details>
-<summary><strong>Q: 为什么在模型选择器里找不到 DSH OpenCode Free 模型？</strong></summary>
+<summary><strong>Q: 为什么聊天输入区没有出现用量胶囊？</strong></summary>
 
-Free 通道默认关闭（显式 opt-in）。请到 **设置 → OpenCode Go → 概览 → 免费通道** 打开开关（立即生效）；只有开启后插件才会注册 Free 路由、拉取 Free 模型目录并在模型选择器中显示。Free 与 Go 共用账号，但请求会以官方 OpenCode CLI 的 User-Agent 发出，可能触发上游风控 / 限流，也可能违反上游条款，请自行评估并承担风险。
+默认「自动」模式仅在当前对话选中 **DSH OpenCode Go** 模型时显示；若希望使用其他厂商模型时也常驻查看配额，请在 **外观 → 额度显示** 中切为「常驻」（立即生效），并确认已配置有效 API Key。
 </details>
 
 <details>
-<summary><strong>Q: Free 通道为什么需要额外的 Bun 运行时？</strong></summary>
+<summary><strong>Q: 为什么模型选择器里找不到 DSH OpenCode Free 模型，或报 MISSING_BUN_RUNTIME？</strong></summary>
 
-Free 推理直接使用 `optionalDependencies` 中版本锁定为 1.4.4 的官方 `@oven/bun-<platform>` 平台包启动独立 HTTP worker。平台包直接携带原生二进制，没有安装脚本，也不需要批准 `bun` 的 `postinstall`；包管理器只安装与当前系统、CPU 和 libc 匹配的运行时。若可选依赖被 `--omit=optional` 省略或未能安装，Free 会报 `MISSING_BUN_RUNTIME`，重新安装插件并启用 optional dependencies 即可恢复；Go 通道完全不受影响。Free 默认关闭并不会自动省略这项可选运行时下载。
+Free 通道默认关闭，需在 **概览 → 启用免费通道** 显式开启。Free 推理依赖 `optionalDependencies` 中锁定的 `@oven/bun-<platform>@1.4.4` 原生平台包；若安装时加了 `--omit=optional` 导致缺失，Free 会报 `MISSING_BUN_RUNTIME`（不影响 Go 通道），允许安装可选依赖重装即可恢复。
 </details>
 
 <details>
-<summary><strong>Q: 为什么长会话中偶尔会报 400 错误？</strong></summary>
+<summary><strong>Q: 长会话偶尔报 400 错误怎么办？</strong></summary>
 
-通常是因为单次上下文加输出预算超过了模型允许的 Context Window。建议：
-1. 在会话中执行 `/compact` 指令压缩历史消息。
-2. 或在 **模型** 设置中，适度调低该模型的“最大输出”上限。
-明确的上下文超限错误会被插件捕获并交由 DSH 原生恢复机制处理。
+通常是当前上下文加上输出预算超过了模型上下文窗口。建议在会话中运行 `/compact` 压缩历史，或在 **模型** 页适当调低该模型的「最大输出」上限；明确的上下文超限错误会由插件交还给 DSH 原生恢复机制处理。
 </details>
 
 <details>
-<summary><strong>Q: 升级插件后，旧会话找不到模型怎么办？</strong></summary>
+<summary><strong>Q: 插件会向第三方上传我的对话或密钥吗？</strong></summary>
 
-从 `0.1.16` 及更早版本升级时，底层 Provider ID 进行了规范化统一。只需在旧会话或 Agent 配置的模型下拉框中，重新选择一次 **DSH OpenCode Go** 下的模型即可。
-</details>
-
-<details>
-<summary><strong>Q: 插件在执行过程中会自动将我的数据上传到第三方吗？</strong></summary>
-
-正常对话会把请求内容发送到你配置的模型网关（默认为 OpenCode Go 官方网关），额度查询也会访问该网关。插件从 Go 与平台网关各自的 `/models` 下载公开的模型能力与价格；默认地址分别为 `https://opencode.ai/inference/go/v1` 与 `https://opencode.ai/inference/v1`。
-
-历史看板由 Host 使用所选 Key 请求官方 Console 的每日 CSV，仅支持官方模型网关配置，沿用代理设置。浏览器常规报告只收到聚合数字与 provider / model / day，不含 Key、会话正文或成员字段；主动下载的官方 CSV 可包含成员字段。模型发现请求不携带会话正文、账号密钥或逐条统计记录。
+对话请求与额度查询仅发往你配置的模型网关（默认 OpenCode Go 官方网关）；模型发现仅拉取公开能力与价格，不携带正文或密钥；官方历史看板由 Host 使用所选 Key 请求官方 Console 每日 CSV，浏览器常规视图仅接收聚合数字与 `provider / model / day`（用户主动导出的 CSV 可含成员字段）。
 </details>
 
 ---
 
 ## 📦 更新与卸载
 
-### 更新插件
+### 通过 `.tgz` 离线升级（npm 未同步新版时推荐）
 
-#### 通过 `.tgz` 手动升级（当 npm 尚未发布新版时推荐）
-1. 从仓库根目录下载最新版本的 `.tgz`（当前为 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz)）。
-2. 为避免旧版缓存或远程 URL 触发 pnpm 的 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 报错，建议先移除旧插件包再安装本地 `.tgz`（DSH 凭据服务中的 API Key 与 profile 配置会保留，操作前仍建议自行核对备份）：
-   ```sh
-   dsh plugin --profile web remove dsh-opencode-go
-   dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.6.tgz
-   ```
-   *若在 DSH / DS Bot 图形界面操作：在 **插件** 页移除旧版 `dsh-opencode-go`，再到 **添加插件** 填入新版 `.tgz` 的本地绝对路径安装并启用。*
-3. 更新后重启 `dsh web` 并刷新浏览器页面（DS Bot / 桌面客户端请彻底退出后台进程后重新打开）。
+下载最新 [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) 到本地，先移除旧包再安装本地路径（保留已存 Key 与配置）：
 
-#### 通过 npm 在线更新（仅当 npm 已同步最新版时）
 ```sh
-dsh plugin --profile web update dsh-opencode-go --latest
+dsh plugin --profile web remove dsh-opencode-go
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.6.tgz
 ```
-更新后重启 `dsh web` 并刷新浏览器页面（桌面客户端请完全退出后重新打开）。Headless 用户请将 `--profile web` 替换为 `--profile headless`；不同 profile 相互独立，需分别更新。
 
-### 卸载插件
+*图形界面用户可在 **插件** 页移除旧版后通过本地 `.tgz` 路径安装启用，操作完毕请彻底重启客户端或 `dsh web`。*
+
+### 通过 npm 在线更新与卸载
+
 ```sh
+# 在线更新（Headless 用户将 web 替换为 headless）
+dsh plugin --profile web update dsh-opencode-go --latest
+
+# 卸载插件
 dsh plugin --profile web remove dsh-opencode-go
 ```
 
@@ -298,7 +307,7 @@ dsh plugin --profile web remove dsh-opencode-go
 
 ## 🧪 开发与验证
 
-使用 Node.js `^22.19.0 || >=24.0.0`，开发依赖锁定 DSH `0.2.1-rc.5`、Cordis `4.0.5`；宿主 Cordis 要求 `^4.0.5`。
+需要 Node.js `^22.19.0 || >=24.0.0`，开发依赖锁定 DSH `0.2.1-rc.5`、Cordis `4.0.5`（宿主 Cordis 要求 `^4.0.5`）。
 
 ```sh
 npm ci
@@ -310,15 +319,16 @@ npm run check:pack
 npm run verify
 ```
 
-测试按领域覆盖宿主、协议转换、账号、统计、传输、免费通道退避、前端。仓库遵循**单包追踪规则**：每次版本更新或改动会被打包进 npm 包的文件后，先运行 `npm run compile` 更新 `lib/`，再运行 `npm run pack:release` 在仓库根目录同步生成唯一对应的 `dsh-opencode-go-<version>.tgz`（脚本会自动清理旧版本 `.tgz`）；`check:pack` 会在 CI 中校验根目录有且仅有当前版本的 `.tgz` 且内容与工作区逐字节一致。`verify` 包含类型检查、源码规范检查、产物一致性、全量测试与包加载冒烟。独立安装和 Headless 验证见[开发说明](docs/development.md)。
+仓库遵循**单包追踪规则**：每次改动会被打入 npm 包的文件后，运行 `npm run compile`（源码变动时）与 `npm run pack:release` 同步更新根目录唯一的 `dsh-opencode-go-<version>.tgz`；`check:pack` 在 CI 中校验包内清单及逐字节一致性。更多独立安装与 Headless 验证见[开发说明](docs/development.md)。
 
 ---
 
 ## 📚 更多文档与链接
 
-- 📖 [高级使用指南（Headless 部署、代理策略与错误排查）](docs/advanced.md)
+- 📖 [高级使用指南（Headless 部署、代理策略、离线安装与错误排查）](docs/advanced.md)
 - 📊 [用量看板统计说明（官方来源、口径与隐私）](docs/usage-analytics.md)
 - 🛠️ [开发与贡献指南](docs/development.md)
 - 🧪 [验收范围与验证记录](docs/verification.md)
+- 📋 [更新日志 (CHANGELOG)](CHANGELOG.md)
 - 🐛 [提交 Issue 与建议](https://github.com/Duskriver/dsh-opencode-go/issues)
 - 📄 [MIT 开源许可证](LICENSE)

@@ -8,104 +8,44 @@
 <h1 align="center">dsh-opencode-go</h1>
 
 <p align="center">
-  <a href="README.md">简体中文</a>
+  <a href="README.md">简体中文</a> · <a href="#-highlights">Highlights</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-faq">FAQ</a> · <a href="docs/advanced.en.md">Advanced Guide</a> · <a href="docs/development.md">Development</a>
 </p>
 
-**OpenCode Go subscription usage and multiple-account management** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), with convenient access to quotas, reset times, and account switching.
+**OpenCode Go provider, live quota visibility, smart request-budget estimation, and multi-account failover** for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
 
-DSH already supports OpenCode Go natively. This plugin focuses on usage inside conversations, managing multiple accounts, dedicated model and settings controls, and an optional full-page console that brings all of them together.
+DSH supports OpenCode Go natively, but power users and multi-account workflows need more: **in-conversation quota pills with remaining-call estimates, automatic pre-output account failover, session-level prompt-cache affinity, an official workspace history dashboard**, and an **all-in-one sidebar console**. Built on Cordis, this plugin delivers full protocol conversion alongside a cohesive client UI.
 
-- **Independent Go and Free routes**: dynamically discover each gateway’s chat models, keep overlapping IDs, and edit them in separate settings tabs. The Free route is an explicit opt-in and is **off by default**; enable it in **Settings → OpenCode Go → Overview → Free channel** (applied immediately, with no Save) before it registers, fetches its catalog, or appears in model pickers.
-- **Free rate-limit protection**: once enabled, honors upstream `Retry-After` and pauses new requests during cooldown. Shared Free quota/IP limits do not rotate Go accounts.
-- **Usage at a glance**: see usage beside the conversation input, then open the panel for five-hour, weekly, and monthly percentages and reset times.
-- **Accounts in one place**: inspect each account's quota and key status, drag to reorder, switch inside a conversation, or enable automatic fallback.
-- **Sidebar console (opt-in, off by default)**: enable **Settings → OpenCode Go → Overview → Sidebar entry** to add an **OpenCode Go** row to the DSH sidebar after the plugin market. It opens a full-page console with six tabs — Overview, Usage, Accounts, Models, Appearance and About — that shares one controller with the Settings section. With the entry off (the default) no row is registered, and the Settings section and in-place history dialog keep working; hosts that do not declare `sidebar.panellist` never register the page and fall back to Settings automatically.
-- **One save gesture**: only **Advanced settings** (gateway URLs, proxy, cache/timeouts and image limits) stages a draft behind Save/Discard. Every other control — the provider and sidebar-entry switches, the Free channel, usage display, interface theme, sidebar quota, input quota style, model visibility and capacities, and all account actions — applies as you change it.
-- **Clearer model and settings controls**: search and filter models, adjust visibility, limits, and thinking budgets; advanced settings are grouped by purpose, with hints and a reset action.
+> Supports Chinese and English, following DSH's interface language. The screenshots below show the default **DSH Native (Dark)** theme in Chinese (real redacted DSH Desktop captures alongside real plugin component views with sample data); you can switch to **OpenCode Go Classic** at any time under **Appearance**, and both themes follow the Host's light/dark scheme.
 
-Supports Chinese and English, following DSH's interface language. The existing screenshots below show the Chinese **Classic** theme; the default **Native** theme follows the active DSH color, typography, and geometry tokens.
+![DSH Desktop overview: sidebar OpenCode Go entry, bottom-left sidebar quota card, and concentric dual-ring composer usage pill](docs/assets/dsh-desktop-overview.png)
 
-## View subscription usage
+---
 
-Click the usage pill beside the conversation input to open the current account's subscription usage. Bars show the **percentage used**, turn amber near the limit, and red when exhausted. Each quota window shows its reset time.
+## ✨ Highlights
 
-While visible, usage refreshes every minute. Periodic queries pause while the page is hidden and resume with a refresh when it becomes visible. Temporary failures show a warning; retained readings are marked as previous data. Click **Retry now** after a failure, or **Refresh accounts** in the Settings account card.
+- 🧭 **Sidebar Console (7 Sub-pages, opt-in)**: Enable **Sidebar entry** to add a hand-drawn `go` stone entry right after the plugin market in DSH's sidebar, opening a full-page console (**Overview / Usage / Accounts / Models / Appearance / Advanced / About**) sharing one state controller with Settings. Off by default; older hosts automatically stay on Settings + the in-place history dialog.
+- 🧮 **Smart Per-Model Call Estimation**: Assign each account's OpenCode Go tier (`Go ($10)` / `Go Plus ($40)` / `Go Teams ($20)`). Combining gateway `/models` rates, monthly tier caps, and the three quota windows, the plugin displays **full-capacity request budgets** in the model detail card and **live remaining calls** (`~N calls left`, with peak-hour `2×` badges) inside the conversation quota popover.
+- 📊 **5 Input Quota Pill Styles + Border Toggle**: Keep subscription usage beside the chat composer in **Badge (default), Concentric rings, Level fill, Dual mini-bars, or Minimal rings** with an independent **Show border** toggle, background sleep-saving, and one-click account switching.
+- 🛡️ **Automatic Multi-Account Failover**: Manage up to 20 accounts with drag-to-reorder priority. On HTTP `401/403`, `429`, or exhausted quota, the plugin silently retries backup accounts **before output starts**, promotes the working account, and cools down rejected keys for 5 minutes.
+- 💰 **Official Workspace History Dashboard**: Powered directly by OpenCode Console's daily CSV across all clients in the selected workspace (UTC calendar days), with today / 7 / 30 / 90-day ranges, stacked daily charts, model breakdowns, and CSV export.
+- 🆓 **Dual Dynamic Model Catalogs (Free is opt-in, off by default)**: Go and platform Free routes discover models independently from their `/models` endpoints, preserve overlapping IDs, support one-click **Enable all / Disable all** batch toggles and capacity/thinking overrides, and enforce Free `Retry-After` cooldowns without ever rotating Go accounts.
+- ⚡ **Prompt-Cache Affinity & Single Save Gesture**: Sends a normalized `x-opencode-session` header to maximize gateway prompt-cache hits. Only **Advanced settings** stage changes behind Save/Discard — every other toggle, theme, pill style, tier, account, and model edit applies immediately.
 
-Under **Settings → OpenCode Go → Appearance → Usage display** (applied immediately), choose:
+---
 
-| Mode | Behavior |
-| --- | --- |
-| Auto (default) | Show while a **DSH OpenCode Go** model is selected |
-| Always | Also show configured OpenCode Go account usage while using other models |
-| Off | Hide the conversation pill and stop its polling |
+## 🚀 Quick Start
 
-## Usage analytics
+Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for the validation workflow.
 
-Open the dashboard from the conversation input's expanded usage pill, or from the **OpenCode Go** console entry in the sidebar (its **Usage** tab) once the opt-in sidebar entry is enabled. While the entry is off, or on hosts that do not declare `sidebar.panellist`, the pill's dashboard button falls back to the in-place history dialog with the same data. The Settings section keeps the full surface and offers **Open full page** only while the entry is registered.
+### 1. Install the plugin
 
-![Official workspace history dashboard with sample data](docs/assets/usage-history-desktop.jpg)
+> 💡 **Release note**: The current repository release is **`0.4.6`** (including the 7-tab sidebar console, per-model call estimation, 5 input quota pill styles, model pricing & batch switches, and `#94` fixing collapsed settings panels in auto-height shells such as DS Bot). If npm has not synced the latest build yet (for instance, npm still serves `0.4.0`), prefer **Option A** below using the tracked [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) at the repository root.
 
-[Narrow-screen light preview](docs/assets/usage-history-mobile.jpg) · [Model rankings and detail](docs/assets/usage-history-models.jpg), both using sample data.
+#### Option A: Manual install from the tracked `.tgz` tarball (recommended for latest release / DS Bot & Desktop)
 
-- **One official source**: totals, daily charts and model detail use the same official daily CSV, covering requests, input/output/cache tokens and the official usage amount. Models are grouped by provider + model. Ranges are today, 7, 30 and 90 days; all dates use UTC.
-- **Independent viewing account**: defaults to the current inference account and shows only the workspace belonging to the selected key, including calls from other clients. Changing the viewing account does not change the conversation account. All three dashboard quota windows follow the selection. Anonymous Free coverage is not guaranteed.
-- **Official usage amount**: sums `cost_micro_cents` directly (`1 USD = 100,000,000` units); it does not mean an additional Go charge. Official daily aggregates may be delayed.
-- **Two themes, shared layouts**: settings, the console page, the usage pill, sidebar and dashboard use the same component layouts. `appearanceTheme` selects **DSH Native (default)** or **OpenCode Go Classic**, with light/dark schemes following the Host; see [Appearance and advanced settings](#appearance-and-advanced-settings) for the theme behavior. On the console page the dashboard uses a full-page layout; the fallback dialog stays a dialog on wide screens and becomes full-screen on narrow screens. Both keep daily token/request bars, model rankings and details.
-- **On-demand queries**: history loads when opening, changing account or range, or refreshing manually. The Host uses a 30-second cache; forced refresh bypasses it. History is not polled in the background. Only official model gateway configurations support it; errors remain explicit without falling back to local scans.
-
-Keys stay on the Host. Normal reports send the browser only aggregate numbers and provider / model / day; an official CSV explicitly downloaded by the user may contain member fields. See [usage analytics notes](docs/usage-analytics.en.md) for accounting and privacy details.
-
-## Manage multiple accounts
-
-Open **Settings → OpenCode Go → Accounts** to manage accounts:
-
-![Account management: ordering, usage details, key actions, and automatic fallback](docs/assets/accounts.png)
-
-- Add, rename, replace keys, or remove accounts; up to 20 accounts are supported.
-- See key status, five-hour usage, and a reset countdown in each row; expand it for full usage and account actions.
-- Drag a row's handle to reorder accounts. The first row becomes current, and the order determines automatic fallback priority.
-- Click **Switch** in the conversation usage panel to move the selected account first for subsequent requests in this profile. The other accounts keep their relative order.
-
-With **Automatic fallback** enabled, HTTP 401/403/429 or exhausted quota causes the plugin to try other accounts in order before output begins. A fallback account that starts producing output moves first and becomes current, and the usage panel shows a switch notice. Requests that have already produced output, recorded token usage, or been canceled are not automatically resent through another account.
-
-Gateway-rejected keys cool down in memory for five minutes. Account commands write credentials and settings through one serial host queue.
-
-Keys are saved through DSH's credential service. Settings never displays an already saved key.
-
-## Free channel (opt-in, off by default)
-
-`DSH OpenCode Free` is not enabled by default. It is an explicit opt-in because it uses the upstream public Free entry point and sends requests as the official OpenCode CLI, which may violate upstream terms or trigger abuse controls.
-
-Enable it in **Settings → OpenCode Go → Overview → Free channel** (applied immediately, with no Save; or set `freeEnabled: true` in the profile patch). While it is off, the plugin does not register the `dsh-opencode-free` route, does not fetch `freeBaseURL`'s model catalog, and does not advertise Free models through discovery or the Settings model list. Turning the switch off later withdraws the route immediately; requests already streaming are allowed to finish. Go behavior and account handling are unchanged.
-
-Once enabled:
-
-- **Saved-key reuse is endpoint-bound**: Free shares the account roster and follows the Automatic fallback setting, but only reuses saved keys when `freeBaseURL` is the official HTTPS endpoint (`opencode.ai` over `https:` on its default port) or shares the Go gateway's origin (same scheme, host and port, e.g. one self-hosted reverse proxy serving both routes). `http://opencode.ai`, an `opencode.ai` URL on a custom port, and any other custom `freeBaseURL` fall back to anonymous `Bearer public` — no saved key is read or sent — and the decision is logged without credentials.
-- **Anonymous public access without a key**: with no usable key it sends `Bearer public`.
-- **Official CLI identity**: requests use the official OpenCode CLI user agent (`opencode/latest/2.2.5/cli`) instead of DSH's own attribution.
-- **Separate Bun runtime**: Free inference runs in its own HTTP worker started from the official `@oven/bun-*` optional platform packages, all pinned to 1.4.4. These packages ship the native binary directly, with no `bun` wrapper or `postinstall`, so no Bun build-script approval is needed. Missing optional dependencies can produce `MISSING_BUN_RUNTIME` while Go keeps working (see the FAQ).
-- **Rate-limit protection**: honors upstream `Retry-After`; new calls during cooldown fail fast with `FREE_COOLDOWN`, and shared Free quota/IP limits never rotate Go accounts.
-
-> ⚠️ **Risk**: the Free channel relies on the upstream public Free access point and an impersonated client user agent. It may violate OpenCode/upstream terms of service and may trigger rate limiting, risk controls, or account restrictions. Use it only if you understand and accept that risk; it is not intended for production or large-scale automation.
-
-## Install and get started
-
-Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for the current validation workflow.
-
-> **Release note**: The current repository release is **`0.4.6`** (including `#94` fixing the collapsed settings panel in auto-height shells such as DS Bot, the sidebar console page, and the single Save gesture). If the npm registry has not synced the latest version yet (for example, npm is still on `0.4.0`), installing by package name `dsh-opencode-go` will install the older build; use **Option A (`.tgz` manual install)** below with [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) tracked at the repository root.
-
-### Option A: Manual install from the tracked `.tgz` tarball (recommended for the latest release / DS Bot & Desktop)
-
-1. **Download the `.tgz` package**:
-   - Open [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) at the repository root on GitHub and click **Download raw file** (or download the [raw file directly](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.6.tgz)) to a local folder without spaces or special characters (for example `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.6.tgz` or `~/Downloads/dsh-opencode-go-0.4.6.tgz`).
-   - *If you already cloned this repository, `dsh-opencode-go-0.4.6.tgz` is already present at the repository root.*
-2. **Install from DSH / DS Bot UI**:
-   1. Open DSH (Web / Desktop) or **DS Bot** and go to **Plugins → Add plugin**.
-   2. If an older version (such as npm `0.4.0`) is already installed, remove the old `dsh-opencode-go` entry first (your saved API keys and settings remain in DSH credentials/profile).
-   3. Enter the **full local path** to the downloaded `.tgz` file (for example `C:\Users\alice\Downloads\dsh-opencode-go-0.4.6.tgz` or `/Users/alice/Downloads/dsh-opencode-go-0.4.6.tgz`; if the path has spaces, move it to a space-free folder or use a `file:` URL).
-   4. Click **Install**, then click **Enable now**.
-   5. **Restart the host completely**: quit DS Bot / Desktop DSH (including background/tray processes) and reopen it, or restart `dsh web` and hard-refresh the browser page.
-3. **Or install the local `.tgz` via CLI**:
+1. **Download the `.tgz` package**: Download [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) ([direct raw link](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.6.tgz)) to a space-free local folder (e.g. `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.6.tgz` or `~/Downloads/dsh-opencode-go-0.4.6.tgz`). If you cloned this repo, the tarball is already in the root directory.
+2. **Install via DSH / DS Bot UI**: Go to **Plugins → Add plugin** (remove any older `dsh-opencode-go` entry first — your saved keys and settings are preserved), paste the full local path to the `.tgz` file, click **Install → Enable now**, and **fully restart** the desktop app or `dsh web`.
+3. **Or install via CLI**:
    ```sh
    # Web profile (replace with your local .tgz path)
    dsh plugin --profile web add ./dsh-opencode-go-0.4.6.tgz
@@ -113,130 +53,168 @@ Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for t
    # Headless profile
    dsh plugin --profile headless add ./dsh-opencode-go-0.4.6.tgz
    ```
-   *Restart `dsh web` after CLI installation (Web and Headless use separate profiles). Downloading the `.tgz` locally and installing from a local path avoids GitHub network timeouts and prevents `ERR_PNPM_MISSING_TARBALL_INTEGRITY` errors that some bundled pnpm versions can hit on repeated remote tarball URL resolutions. See the [advanced guide](docs/advanced.en.md#manual-installation-and-offline-updates-tgz) for troubleshooting.*
+   *See the [advanced guide](docs/advanced.en.md#manual-installation-and-offline-updates-tgz) for troubleshooting `ERR_PNPM_MISSING_TARBALL_INTEGRITY` and offline updates.*
 
-### Option B: Install from npm (when npm has synced the latest release)
+#### Option B: Install from npm (when npm has synced the latest release)
 
-1. Open **Plugins → Add plugin**.
-2. Enter `dsh-opencode-go` and click **Install**.
-3. Click **Enable now** after installation.
+1. Open **Plugins → Add plugin**, enter `dsh-opencode-go`, and click **Install → Enable now**.
+2. Or run `dsh plugin --profile web add dsh-opencode-go` and restart `dsh web`.
 
 ![Install the plugin in DSH](docs/assets/install-via-dsh.gif)
 
-Command-line installation:
+### 2. First-time setup
 
-```sh
-dsh plugin --profile web add dsh-opencode-go
-```
+1. After restarting, open **Settings → OpenCode Go** and verify the version reads `0.4.6`.
+2. Under **Accounts**, click **Add account**, enter a name and your OpenCode Go API key, and select your **Subscription plan** (for display-only request-count estimates).
+3. *(Optional)* Under **Overview**, enable **Sidebar entry** to add the hand-drawn `go` row to DSH's sidebar and unlock the full 7-tab console.
+4. Select any model under **DSH OpenCode Go** in a conversation and check live usage right beside the composer.
 
-*If installing by package name still gives an older release (such as `0.4.0`), switch to **Option A** above. If you have `git` installed locally and want to pull directly from GitHub source, `dsh plugin --profile web add github:Duskriver/dsh-opencode-go#main` (or `https://github.com/Duskriver/dsh-opencode-go` in the UI) is also supported by DSH, though it requires `git` and does not participate in regular `dsh plugin update` checks.*
+> **Single Save gesture**: Only **Advanced settings** (gateway URLs, proxy, timeouts, and image budgets) require clicking **Save**; every other toggle and option applies immediately.
 
-Start or restart `dsh web` after command-line installation. Web and Headless use separate profiles; install and update each individually.
+---
 
-### Get started
+## 🧭 Sidebar Console (7 Sub-pages)
 
-1. After restarting, open **Settings → OpenCode Go** (or the **About** tab in the sidebar console once enabled) to verify the installed version reads `0.4.6`.
-2. Open **Settings → OpenCode Go → Accounts**, click **Add account**, enter a name and your OpenCode Go subscription API key, and confirm.
-3. (Optional) Open **Settings → OpenCode Go → Overview** and enable **Sidebar entry**. A row appears in the DSH sidebar and opens the full console; the entry is off by default, and the Settings section and in-place usage dialog keep working without it.
-4. Select a model under **DSH OpenCode Go** in the conversation model picker.
-5. Start chatting and check usage beside the input. With multiple accounts, open the panel to switch.
+Enabling **Settings → OpenCode Go → Overview → Sidebar entry** (`sidebarEntry`, off by default) registers a hand-drawn `go` stone entry after the plugin market in DSH's sidebar (the Settings nav row uses the same mark). Clicking it opens a full-page console in the main area:
 
-> Only **Advanced settings** keep Save/Discard; every other switch and option in this plugin applies immediately.
+<p align="center">
+  <img src="docs/assets/dsh-sidebar-entry.png" alt="OpenCode Go hand-drawn go entry in the DSH sidebar" width="240">
+</p>
 
-The plugin registers its own **DSH OpenCode Go** model provider. Selecting a native DSH provider does not automatically use this plugin's account switching. **Always** mode can still show usage for accounts configured in this plugin.
+![OpenCode Go sidebar console Overview page with sample data](docs/assets/console-overview.png)
 
-## Models and settings
+| Tab | What it covers |
+| :--- | :--- |
+| **Overview** | UTC today's 4 KPIs (requests, tokens, cache hit rate, spend), current account 3-window quotas & auto-failover switch, Go / Free service status, fallback chain summary, 7-day token sparkline, and quick-link cards |
+| **Usage** | Full-page official workspace history dashboard with daily stacked token/request charts, model distribution rankings, detail table, and official CSV export |
+| **Accounts** | Add/rename/replace key/remove accounts, drag-to-reorder priority, per-account subscription tier selector, expanded Bento 3-window quota tiles, and automatic fallback |
+| **Models** | Independent Go / Free tabs, search & filters, one-click **Enable all / Disable all**, full-capacity request estimates, gateway pricing details, and context / max-output / thinking-budget overrides |
+| **Appearance** | Live **DSH Native / OpenCode Go Classic** theme preview, usage display mode, 5 input pill styles + border toggle preview, and sidebar quota toggle |
+| **Advanced** | Go / Free gateway URLs, HTTP(S)/SOCKS5 proxy, catalog refresh & timeout controls, and per-request image budgets (the only tab backed by the Save/Discard bar) |
+| **About** | Version, package & host metadata, sidebar slot status, live runtime diagnostics (service, Free, history, account count, last refresh), and project links |
 
-### Select models and adjust parameters
+- **Graceful fallback**: When the entry is off, or on hosts without the `sidebar.panellist` slot, no sidebar row is registered — Settings keeps full controls and the composer pill's **Usage history** button opens the built-in history dialog. Disabling the switch cleanly leaves the page before unregistering the slot pair.
 
-Search **Available models** by name or ID, or filter by **New in 7 days**, **Customized**, or **Deprecated**. Click **Refresh** to check the latest catalog.
+---
 
-![Model settings: search, filters, visibility switches, and parameter editing](docs/assets/model-settings.png)
+## 🧮 Smart Per-Model Call Estimation
 
-- Each model's switch controls its visibility in the conversation picker and takes effect immediately. Non-deprecated models are enabled by default while deprecated models default to disabled; use **Enable all / Disable all** to toggle all configurable models in the current search and filter view (including deprecated models) at once.
-- Each row shows the input / output price the gateway declares in `/models` (US dollars per million tokens). The selected model's card adds cache read / write rates, any context-tier rates, and a note when the gateway declares time-based multipliers. Models the gateway does not price show no rate and say so in the card; Free models read **Free**.
-- Select a model to inspect its catalog context window, maximum output, and input modalities. Limit overrides apply as you edit them — committed on blur, Enter, or shortly after typing stops; empty values use defaults.
-- Reasoning models offer the applicable switch, effort, or token budget options. Budget-based models also accept custom budgets, which apply immediately.
+OpenCode Go shares **percentage-based quotas across three windows** (5-hour, weekly, and monthly), which makes it hard to tell at a glance how many calls remain for a specific model. Using gateway-published tariffs, tier caps, and live multiplier schedules, the plugin translates percentages into concrete request estimates across three views:
 
-Any model with an output capacity above **65,536 tokens** defaults to that allowance when neither the caller nor settings specifies one. Smaller models retain their SDK defaults. DSH receives the same allowance for compaction budgeting. Set a model’s **Max output** override when a longer answer is needed.
+1. **Per-account subscription tier (display-only)**
+   Under **Accounts**, choose each account's OpenCode Go plan: `Go ($10)`, `Go Plus ($40)`, or `Go Teams ($20)`. This setting is strictly for UI conversion and never alters requests or upstream billing.
+2. **Full-capacity request budgets in the Model card**
+   Selecting any Go model under **Models** shows its estimated full-capacity calls across the 5-hour (`20%`), weekly (`50%`), and monthly (`100%`) caps using a **typical cached coding-agent request profile** (`1K input + 44K cache read + 450 output`), plus a peak-hour multiplier note when scheduled multipliers apply.
+3. **Live remaining calls in the composer Usage Pill popover**
+   Opening the conversation usage popover computes `~N calls left` (or `0 calls left`) for the **active Go model** based on the tightest bottleneck window and any active UTC peak multiplier (displaying a `2×` badge during peak windows).
 
-Streaming, reasoning, tool calls, and image input depend on model capabilities. Input modalities shown in Settings come from online model metadata; this plugin currently converts and forwards only image attachments.
+<p align="center">
+  <img src="docs/assets/usage-pill-popover.png" alt="Expanded composer usage pill popover showing three quota windows and live remaining call estimation for the active model" width="480">
+</p>
 
-### Appearance and advanced settings
+![Models page: Go/Free channels, batch toggles, full-capacity request estimates, and gateway pricing details](docs/assets/model-settings.png)
 
-**Appearance** owns the usage display mode, the interface theme, the sidebar quota card and the input quota style; all four apply as you change them. **Advanced settings** is the only card with a Save gesture: it groups **Connection** (gateway URLs and proxy), **Cache and timeouts**, and **Image handling**, and its reset action clears that card's staged overrides; save to apply the reset. Hover over a question mark for help. The current account selection is preserved.
+> Actual call counts vary with conversation length and prompt-cache hit rates; treat estimates as practical planning guidance.
 
-Under **Settings → OpenCode Go → Appearance**, set `appearanceTheme` to `native` or `classic`; the choice applies immediately. **Native (default)** follows DSH and third-party themes through public Host semantic tokens for colors, fonts, radii, shadows and focus styling, with neutral fallbacks when a Host token cannot be resolved. Its strong control boundary and state-derived chart series (output, cache read, cache write) stay on plugin-owned contrast-checked values instead of the Host palette: the Host's `border-l2` is a hairline divider and its `state-*` values are status-dot colors, neither guaranteed at the WCAG 1.4.11 3:1 that control boundaries and data-viz series need. The brand-accent chart series still follows the Host accent. Existing profiles without this field also default to Native. **Classic** retains warm paper / charcoal surfaces, terracotta accents, and preferred Anthropic Serif / Sans / Mono fonts with system and CJK serif fallbacks; Host and third-party themes do not override these brand tokens, while the Host's light/dark mode still selects the Classic scheme. **Input quota style** remains `badge` (default) or `plain`, and **Show quota in the sidebar** remains an independent switch, off by default; both apply immediately.
+---
 
-![Advanced settings: grouped controls, hints, and a shared reset action](docs/assets/advanced-settings.png)
+## 📊 Input Quota Pill & Appearance
 
-Under **Advanced settings → Connection**, HTTP, HTTPS, and SOCKS5 proxies are supported. After saving, subsequent conversations, catalog updates, and usage queries use the proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
+Open **Appearance** (in the console or Settings — all changes apply immediately):
 
-Set `baseURL` and `freeBaseURL` independently under **Advanced settings → Connection**; both wait for Save. Protocol selection follows the gateway model declaration. The **Free channel** and **Sidebar entry** switches are the two opt-ins (both off by default) and live under **Overview**; see [Free channel](#free-channel-opt-in-off-by-default) for behavior and risks. See the [advanced guide](docs/advanced.en.md) for account, model-key and disk-cache details.
+![Appearance settings: Native/Classic live theme previews, 5 input quota pill styles, and border toggle](docs/assets/appearance-settings.png)
 
-Screenshots illustrate the interface. Actual models, quotas, and timestamps depend on your account and the current online catalog.
+- **5 input quota styles + independent border toggle**:
+  - Choose from **Badge (default)**, **Concentric rings**, **Level fill**, **Dual mini-bars**, and **Minimal rings** with live previews.
+  - Combine any style with **Show border** (on for framed pill fill, off for a borderless transparent look).
+- **Display modes & smart polling**:
+  - **Auto (default)** shows the pill only for **DSH OpenCode Go** models; **Always** keeps it visible with other providers; **Off** hides it and stops polling.
+  - Polls quietly every minute while visible, pauses when the page is hidden, and refreshes immediately on return. Click the account chip in the popover to switch accounts without leaving the chat.
+- **Independent sidebar quota card**: Enable **Show quota in the sidebar** to see all three windows in the expanded sidebar (or a compact icon when collapsed); click the account badge to cycle through accounts read-only without changing the active inference account.
+- **Two cohesive themes (`appearanceTheme`)**:
+  - **DSH Native (default)**: Follows DSH and third-party themes via public Host semantic tokens while keeping strong control borders and chart state series on contrast-checked WCAG 1.4.11 (≥ 3:1) values.
+  - **OpenCode Go Classic**: Keeps warm paper / charcoal surfaces, terracotta accents, and serif/sans/mono typography while still following the Host's light/dark scheme.
 
-## Updates and common questions
+---
 
-### Manual update from `.tgz` (recommended when npm is behind the repository)
+## 🛡️ Multi-Account Management & Failover
 
-Download the latest [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) from the repository root, remove the older package first (to avoid stale cache or `ERR_PNPM_MISSING_TARBALL_INTEGRITY` issues; saved keys and profile configuration remain in DSH), and install the local `.tgz` file:
+Manage up to 20 accounts under **Accounts**:
 
-```sh
-dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.6.tgz
-```
+![Accounts page: drag reordering, subscription plans, expanded Bento quota tiles, and automatic fallback](docs/assets/accounts.png)
 
-For DS Bot / DSH Desktop, you can also uninstall the old `dsh-opencode-go` entry in **Plugins**, add the local `.tgz` path under **Plugins → Add plugin**, enable it, and fully quit and reopen the application.
+- **Drag order = priority**: `#1 Current` serves active requests; drag handles reorder both primary selection and fallback order. Expand any row for Bento 3-window quota tiles, reset times, per-account plan selection, and rename / replace key / remove actions.
+- **Pre-output automatic fallback**: With **Automatic fallback** enabled, HTTP `401/403`, `429`, or exhausted quota triggers silent retries across backup accounts **before output begins**. The first backup account that produces output moves to `#1` and posts a switch notice in the usage panel. Requests that already streamed output, recorded usage, or were canceled are never re-sent.
+- **5-minute cooldown & credential isolation**: Rejected keys cool down in memory for 5 minutes to avoid retry storms. Keys live exclusively in DSH's credential service and are never echoed back to the UI.
 
-### Update from npm (when npm has synced the latest release)
+---
 
-```sh
-dsh plugin --profile web update dsh-opencode-go --latest
-```
+## 💰 Official Workspace History Dashboard
 
-Restart `dsh web` and reload the page afterward. For desktop DSH, quit and reopen the application. Headless users should replace `web` with `headless`. The repository's default branch may contain changes not yet released to npm. The current release line is `0.4.6`: it shows each model's gateway-declared price in the model switches, on top of selectable input quota styles (default badge, concentric rings, level fill, dual mini-bars, minimal rings) and an independent border toggle, the 0.4.3 settings-dialog navigation `go` mark, the 0.4.2 sidebar-entry icon (16 px expanded / 18 px collapsed), the sidebar console page with an opt-in entry (off by default), and Advanced-only Save/Discard.
+Open the **Usage** tab in the sidebar console for the full-page view (or click **Usage history** in the composer pill to open the built-in dialog when the sidebar entry is off or unsupported):
 
-**Why does DS Bot still show a collapsed settings page or version `0.4.0` after installing by package name?** The npm registry may still be serving `0.4.0`, while `#94` (auto-height shell fix for DS Bot) and the console redesign landed in `0.4.1`–`0.4.6`. Download [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) locally, remove the old plugin package, install from the local `.tgz` path, and fully restart DS Bot / DSH. See [manual installation and offline updates](docs/advanced.en.md#manual-installation-and-offline-updates-tgz).
+![Full-page official workspace history dashboard with KPIs, daily stacked chart, and model breakdown (sample data)](docs/assets/console-usage.png)
 
-**Why is usage hidden?** Auto mode shows it only for **DSH OpenCode Go** models. Check that the plugin is enabled, a key is configured, and the display mode is appropriate. The display mode lives under **Settings → OpenCode Go → Appearance → Usage display** and applies immediately; choose Always to show usage with other providers.
+- **Single official CSV source**: Requests, input/output/cache tokens, official usage amount (summed directly from `cost_micro_cents`, where `1 USD = 100,000,000` units — not an extra Go charge), daily charts, and model tables all come from OpenCode Console's daily UTC CSV across **Today / 7 / 30 / 90 days**, with one-click **Export CSV**.
+- **Independent viewing account**: Defaults to the active inference account and covers all clients in that key's workspace; switching the viewed account updates the three quota bars without changing your conversation account.
+- **On-demand & privacy-first**: Fetches only on open, account/range change, or manual refresh (30-second Host cache, no background polling). Keys never leave the Host; regular reports send only aggregate figures and `provider / model / day` to the browser (explicitly exported CSVs may include member fields). See [usage analytics notes](docs/usage-analytics.en.md).
 
-**Why is there no OpenCode Go row in the sidebar?** The sidebar entry is opt-in and off by default. Enable **Settings → OpenCode Go → Overview → Sidebar entry**; the row then appears after the plugin market and opens the full console. If your client does not declare the `sidebar.panellist` slot (older versions, or combinations without a sidebar), the row and page are not registered — keep using the Settings section and the usage pill's in-place history dialog.
+---
 
-**Where is DSH OpenCode Free?** The Free route is an explicit opt-in and is off by default. Enable it in **Settings → OpenCode Go → Overview → Free channel** (applied immediately); only then does the plugin register the route, fetch its catalog, and show Free models. See [Free channel](#free-channel-opt-in-off-by-default) for behavior and risks.
+## 🆓 Free Channel (opt-in, off by default)
 
-**Why does Free need a separate Bun runtime?** Free inference directly uses the official `@oven/bun-<platform>` optional packages, all pinned to 1.4.4. They carry native binaries without install scripts, so no `bun` `postinstall` approval is needed; the package manager installs only the runtime matching the current OS, CPU and libc. If optional dependencies are omitted with `--omit=optional` or cannot be installed, Free reports `MISSING_BUN_RUNTIME`; reinstall the plugin with optional dependencies enabled. Go is unaffected. Leaving Free disabled does not automatically omit this optional runtime download.
+`DSH OpenCode Free` is an explicit opt-in and defaults to **off** to avoid unintended usage or ToS exposure. Enable it under **Overview → Free channel** (applied immediately, or set `freeEnabled: true`). While off, the plugin neither registers `dsh-opencode-free`, fetches `freeBaseURL`'s catalog, nor exposes Free models; turning it off withdraws the route while allowing in-flight streams to finish.
 
-**What if usage queries or account additions fail?** Retry in the usage panel or refresh usage in the account card. Account actions run in a serial host queue; unsuccessful operations can be retried. See [account operations and saving](docs/advanced.en.md#account-operations-and-saving).
+When enabled:
 
-**What if a long conversation keeps returning 400?** Check the output allowance and context window in the error, then run `/compact` or lower that model's **Max output** before retrying. Explicit context overflow is passed to DSH's recovery mechanism; an unexplained 400 keeps its classification and includes troubleshooting guidance. Failed attempts without measured tokens omit zero usage so they do not report an empty context.
+- **Endpoint-bound key reuse**: Saved Go keys are reused (and follow Automatic fallback) only when `freeBaseURL` is the official HTTPS endpoint (`https://opencode.ai` on default port) or shares the exact origin of `baseURL` (e.g., a shared reverse proxy). Any other custom or plaintext HTTP `freeBaseURL` falls back to anonymous `Bearer public` without reading or sending saved keys.
+- **Official CLI UA & isolated Bun runtime**: Requests use the official OpenCode CLI user agent (`opencode/latest/2.2.5/cli`) through a dedicated HTTP worker launched from version-pinned `@oven/bun-*@1.4.4` optional platform packages (native binaries directly, no `postinstall` build scripts).
+- **Isolated rate-limit cooldown**: Honors upstream `Retry-After` and fails fast with `FREE_COOLDOWN`; shared Free quota or IP limits never rotate Go accounts.
 
-**Why does an old conversation need its model selected again?** When upgrading from `0.1.16` or earlier, select **DSH OpenCode Go** again in existing conversations or Agent presets. Manual configurations use `provider: dsh-opencode-go`.
+> ⚠️ **Risk**: The Free channel relies on the upstream public Free entry point with an official CLI user agent. It may violate upstream terms of service or trigger rate limits / account restrictions. Use at your own discretion and avoid production or large-scale automation.
 
-**Which host is targeted?** The development baseline is DSH `0.2.1-rc.5`. Developer messages, dynamic tool additions/removals, and deferred tool loading are explicitly rejected; see [development and testing](docs/development.md).
+---
 
-Uninstall:
+## ⚙️ Model Overrides & Advanced Settings
 
-```sh
-dsh plugin --profile web remove dsh-opencode-go
-```
+### Model Catalog & Capacity Overrides
 
-## Architecture and verification
+Under **Models** (see screenshot above), manage **OpenCode Go** and **Free** catalogs separately:
 
-The source is organized by domain:
+- **Visibility & batch toggles**: Non-deprecated models are enabled by default and deprecated ones default to disabled. Search by name/ID, filter by **New in 7 days / Customized / Deprecated**, and use **Enable all / Disable all** for atomic single-click updates across the current view (skipping `configurationMissing` models), with independently scrollable list and detail panes.
+- **Pricing & capacity edits**: Inspect `/models` input / output / cache-read / cache-write rates, context-tier pricing, and multiplier notes in the detail card (Free models display **Free**). Override context window, max output, and custom thinking budgets live with no restart.
+- **Default output safety cap**: Any model advertising an output capacity above `65,536` defaults to **`65,536 tokens`** unless overridden by caller or settings (reported to DSH for compaction budgeting); smaller models keep their SDK defaults.
+
+### Grouped Advanced Settings (the only Save-gated tab)
+
+Open **Advanced** to tune connection, timeout, and image parameters (click **Save** in the bottom bar to apply):
+
+![Advanced settings: connection and proxy, cache and timeouts, image handling, and reset](docs/assets/advanced-settings.png)
+
+- **Connection & Proxy**: Configure `baseURL`, `freeBaseURL`, and **HTTP / HTTPS / SOCKS5** proxies (`socks5://127.0.0.1:7890`), applied to conversations, usage polling, history analytics, and catalog discovery.
+- **Cache & Timeouts**: Tune catalog refresh interval, `streamIdleTimeoutMs`, `requestPreparationTimeoutMs`, and `requestTimeoutMs`.
+- **Image Handling**: Configure per-request `maxImages`, encoded payload limit, pixel budget, and target image bytes (up to 4 images prepared in parallel).
+- **Reset to defaults**: Clears Advanced overrides without affecting saved accounts or credentials.
+
+---
+
+## 🛠️ Architecture & Verification
+
+Source modules are organized by domain, communicating between Host and browser via DSH Typert RPC:
 
 | Domain | Modules |
-| --- | --- |
-| Plugin composition, settings and contracts | `index.ts`, `config.ts`, `contracts.ts` |
-| Requests, model catalog and protocol conversion | `adapter.ts`, `catalog.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
-| Accounts, official quota, official CSV history and transport | `accounts.ts`, `analytics.ts`, `transport.ts` |
-| Browser registration, typed state and sidebar slots | `client/index.ts`, `client/controller.ts`, `client/host-slots.ts`, `client/pages/nav.ts` |
-| Sidebar console page | `client/pages/Page.tsx`, `client/pages/OverviewPage.tsx`, `client/pages/UsagePage.tsx`, `client/pages/AccountsPage.tsx`, `client/pages/ModelsPage.tsx`, `client/pages/AppearancePage.tsx`, `client/pages/AboutPage.tsx`, `client/pages/types.ts`, `client/GoMark.tsx`, `client/build-info.ts` |
-| Host settings, account/model controls, usage and Native/Classic presentation | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
+| :--- | :--- |
+| Plugin composition, settings & contracts | `index.ts`, `config.ts`, `contracts.ts` |
+| Inference, catalog, pricing & quota estimation | `adapter.ts`, `catalog.ts`, `pricing.ts`, `quota-estimate.ts`, `conversion.ts`, `google.ts`, `sdk-types.ts` |
+| Accounts, live quota, CSV analytics & transport | `accounts.ts`, `analytics.ts`, `transport.ts` |
+| Opt-in Free channel & Bun HTTP worker | `free-channel.ts`, `free-runtime.ts`, `free-transport.ts`, `free-http-worker.ts`, `free-policy.ts`, `free-protocol.ts`, `free-socks-tunnel.ts` |
+| Client registration, state & host slots | `client/index.ts`, `client/controller.ts`, `client/host-slots.ts`, `client/settings-nav-icon.tsx`, `client/pages/nav.ts` |
+| Sidebar console (7 sub-pages) | `client/pages/Page.tsx`, `OverviewPage.tsx`, `UsagePage.tsx`, `AccountsPage.tsx`, `ModelsPage.tsx`, `AppearancePage.tsx`, `AdvancedPage.tsx`, `AboutPage.tsx`, `types.ts`, `client/GoMark.tsx`, `client/build-info.ts` |
+| Settings, quota pills, dashboard & themes | `client/Section.tsx`, `client/UsagePill.tsx`, `client/AnalyticsDialog.tsx`, `client/presentation.ts` |
 
-The `x-opencode-session` header carries a stable form of the conversation ID for gateway cache affinity: printable ASCII IDs pass through unchanged, and only non-printable or plugin-reserved IDs are hashed (sha256 + base64url); neither form contains message content. The browser uses DSH's `configForms`; only Advanced settings stage a draft, while every other setting and capacity commits immediately (capacities stay typed objects while editing). The sidebar console row and its `main` panel are registered as one pair only while the opt-in `sidebarEntry` setting is on and the host declares `sidebar.panellist`; turning it off leaves the page and disposes both. Images use per-request count and encoded-byte budgets, with at most four preparations per request. The package keeps its `.` and `./client` exports. Development dependencies pin DSH `0.2.1-rc.5` and Cordis `4.0.5`; runtime Cordis requires `^4.0.5`.
+The `x-opencode-session` header carries a stable form of the conversation ID for gateway prompt-cache affinity (printable ASCII IDs pass through verbatim; non-printable or reserved-prefix IDs are hashed with `sha256 + base64url`, containing no message content).
 
-Use Node.js `^22.19.0 || >=24.0.0`:
+Development requires Node.js `^22.19.0 || >=24.0.0`, pinning DSH `0.2.1-rc.5` and Cordis `4.0.5` (runtime Cordis `^4.0.5`):
 
 ```sh
 npm ci
@@ -248,13 +226,79 @@ npm run check:pack
 npm run verify
 ```
 
-Tests cover host services, accounts, catalog, protocols, analytics, transport, Free backoff, and browser interactions. After changing source, run `npm run compile` to rebuild `lib/`. Per repository policy, every release or packed-file update also tracks a single root tarball (`dsh-opencode-go-<version>.tgz`) generated with `npm run pack:release` (which removes older root `.tgz` files); `check:pack` asserts both tarball contents and byte-for-byte parity with the workspace. `verify` runs type checks, artifact comparison, the full test suite and the package-loading smoke. See [development](docs/development.md) for separate installed-consumer and Headless checks.
+Per repository policy, every change touching packed files updates the single tracked root tarball (`dsh-opencode-go-<version>.tgz`) via `npm run pack:release`, and `npm run check:pack` verifies byte-for-byte parity in CI. See [development](docs/development.md) for installed-consumer and Headless checks.
 
-## More documentation
+---
 
-- [Advanced guide: Headless, proxies, manual configuration, and error diagnostics](docs/advanced.en.md)
-- [Usage analytics: official source, accounting, and privacy](docs/usage-analytics.en.md)
-- [Development and testing](docs/development.md)
-- [Verification notes](docs/verification.md)
-- [Issues and suggestions](https://github.com/Duskriver/dsh-opencode-go/issues)
-- [MIT license](LICENSE)
+## ❓ FAQ
+
+<details>
+<summary><strong>Q: Why does installing by package name still give an older version (e.g. 0.4.0) or a collapsed settings panel in DS Bot?</strong></summary>
+
+The npm registry may lag behind the repository. Download [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) locally, remove the older `dsh-opencode-go` entry (saved keys and settings remain intact), install from the local `.tgz` path, and fully restart DS Bot / DSH. See [manual installation and offline updates](docs/advanced.en.md#manual-installation-and-offline-updates-tgz).
+</details>
+
+<details>
+<summary><strong>Q: Why don't I see estimated call counts on a model or in the composer popover?</strong></summary>
+
+Estimates apply to **Go channel** models with published `/models` prices and monthly tier caps (Free or unpriced models omit estimates). The composer popover shows live remaining calls only when the active conversation model is a **DSH OpenCode Go** model and quota readings succeed. Verify each account's subscription plan under **Accounts**.
+</details>
+
+<details>
+<summary><strong>Q: Why is there no OpenCode Go entry in the sidebar?</strong></summary>
+
+The sidebar entry is opt-in and off by default. Enable **Settings → OpenCode Go → Overview → Sidebar entry** (applied immediately). On hosts that do not declare `sidebar.panellist`, the plugin keeps using Settings and the pill's built-in history dialog.
+</details>
+
+<details>
+<summary><strong>Q: Why is the usage pill hidden next to the chat input?</strong></summary>
+
+**Auto** mode displays the pill only while a **DSH OpenCode Go** model is selected. Switch **Appearance → Usage display** to **Always** (applied immediately) to keep it visible with other providers, and make sure a valid key is configured.
+</details>
+
+<details>
+<summary><strong>Q: Where is DSH OpenCode Free, or why does Free report MISSING_BUN_RUNTIME?</strong></summary>
+
+Free is opt-in and off by default — enable it under **Overview → Free channel**. Free uses `@oven/bun-<platform>@1.4.4` optional packages; if optional dependencies were skipped (`--omit=optional`), reinstall with optional dependencies enabled (Go is unaffected).
+</details>
+
+<details>
+<summary><strong>Q: Why does a long conversation return HTTP 400?</strong></summary>
+
+Context plus output allowance likely exceeded the model's context window. Run `/compact` in the conversation or lower **Max output** under **Models**. Explicit context overflow errors are handed back to DSH's native recovery flow.
+</details>
+
+---
+
+## 📦 Updates & Uninstall
+
+### Manual update via `.tgz` (recommended when npm is behind)
+
+```sh
+dsh plugin --profile web remove dsh-opencode-go
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.6.tgz
+```
+
+*In DS Bot / DSH Desktop UI, remove the old plugin entry, add the local `.tgz` path, enable it, and fully quit and reopen the app.*
+
+### Online update & uninstall
+
+```sh
+# Update from npm (replace web with headless for Headless profile)
+dsh plugin --profile web update dsh-opencode-go --latest
+
+# Uninstall
+dsh plugin --profile web remove dsh-opencode-go
+```
+
+---
+
+## 📚 More Documentation
+
+- 📖 [Advanced guide (Headless, proxies, offline install, and diagnostics)](docs/advanced.en.md)
+- 📊 [Usage analytics (official source, accounting, and privacy)](docs/usage-analytics.en.md)
+- 🛠️ [Development and testing](docs/development.md)
+- 🧪 [Verification notes](docs/verification.md)
+- 📋 [Changelog](CHANGELOG.md)
+- 🐛 [Issues and suggestions](https://github.com/Duskriver/dsh-opencode-go/issues)
+- 📄 [MIT license](LICENSE)
