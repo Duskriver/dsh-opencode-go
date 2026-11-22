@@ -1031,7 +1031,7 @@
 .modelRow + .modelRow { border-top: 0.5px solid var(--go-border); }
 .modelRowSelected { background: color-mix(in srgb, var(--go-accent) 14%, var(--go-surface-2)); border-radius: var(--go-radius-option); border-top-color: transparent; box-shadow: inset 2px 0 0 var(--go-accent); }
 .modelRow > [role="switch"] { width: 36px; min-width: 36px; flex: 0 0 36px; }
-.modelChoice { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); cursor: pointer; }
+.modelChoice { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; text-align: left; padding: 9px 3px 9px 6px; border: 0; border-radius: var(--go-radius-option); background: none; color: var(--go-text); cursor: pointer; }
 /* Hover and selection cover the same whole row — name, badges, override mark and
    switch — so a row reads as one bar instead of stopping at the switch. A
    selected row keeps its own surface; hover stays one step lighter than it, so
@@ -1041,7 +1041,18 @@
   border-top-color: transparent;
   border-radius: var(--go-radius-option);
 }
-.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: normal; word-break: normal; overflow: hidden; flex: 0 1 auto; min-width: 0; }
+.modelName { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 13px; overflow-wrap: normal; word-break: normal; overflow: hidden; flex: 1 1 auto; min-width: 0; }
+.modelMultiplier {
+  flex: none;
+  font-family: var(--go-number-font);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--go-muted);
+}
+.modelMultiplier[data-tone='peak'] { color: var(--go-warning); font-weight: 500; }
+.modelMultiplier[data-tone='free'] { color: var(--go-success); font-weight: 500; }
 .planRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 6px 10px; border: 1px solid var(--go-border); border-radius: var(--go-radius-option); background: var(--go-surface-sunken); }
 .planMeta { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--go-text); }
 .planSeg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--go-radius-small); background: var(--go-surface-2); border: 1px solid var(--go-border-subtle); }

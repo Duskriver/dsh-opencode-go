@@ -68,6 +68,9 @@ export const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle = 'badge'
 
 export const DEFAULT_USAGE_PILL_BORDER = true
 
+/** Default visibility of per-model quota multipliers in the conversation model selector. */
+export const DEFAULT_SHOW_MODEL_MULTIPLIER = true
+
 /** Accepted in profiles saved before 0.4.5 and mapped to `badge` without a border. */
 export const LEGACY_USAGE_PILL_STYLE = 'plain' as const
 
@@ -190,7 +193,7 @@ export function assertAccounts(accounts: readonly GoAccount[] | null | undefined
 export interface GoAccountSwitch {
   fromRef: string
   toRef: string
-  reason: 'quota' | 'credential'
+  reason: 'quota' | 'rate-limit' | 'credential'
   at: number
 }
 
@@ -356,6 +359,8 @@ export interface OpencodeGoConfig {
   usageDisplay: UsageDisplayMode
   /** Show quota in the sidebar independently of the selected conversation model. */
   showSidebarQuota: boolean
+  /** Show per-model quota consumption multipliers in the conversation model picker. */
+  showModelMultiplier: boolean
   /** Appearance of the conversation input's quota trigger. */
   usagePillStyle: UsagePillStyle
   /** Draw an outer border and background frame around the conversation input's quota trigger. */
@@ -672,7 +677,7 @@ export function parseAccountSwitch(value: unknown): GoAccountSwitch {
   const notice = value as Partial<GoAccountSwitch> | null
   if (!notice || typeof notice.fromRef !== 'string' || typeof notice.toRef !== 'string'
     || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(notice.fromRef) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(notice.toRef)
-    || (notice.reason !== 'quota' && notice.reason !== 'credential')
+    || (notice.reason !== 'quota' && notice.reason !== 'rate-limit' && notice.reason !== 'credential')
     || typeof notice.at !== 'number' || !Number.isSafeInteger(notice.at) || notice.at < 0
     || notice.at > 8_640_000_000_000_000) throw new Error('Invalid account switch notice')
   return { fromRef: notice.fromRef, toRef: notice.toRef, reason: notice.reason, at: notice.at }

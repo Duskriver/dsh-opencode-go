@@ -994,6 +994,25 @@ describe("conversation usage", () => {
     expect(analytics).not.toHaveBeenCalled()
   })
 
+  it.each([
+    { reason: 'quota' as const, copy: en.accountFallbackQuota },
+    { reason: 'rate-limit' as const, copy: en.accountFallbackRateLimit },
+    { reason: 'credential' as const, copy: en.accountFallbackCredential },
+  ])('renders distinct fallback status copy for $reason account switches', async ({ reason, copy }) => {
+    const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
+    const read = vi.fn().mockResolvedValue({
+      ...usage,
+      lastSwitch: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason, at: 1_760_000_000_000 },
+    })
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />)
+    })
+    showDetails()
+    const status = within(openPanel()).getByRole('status')
+    expect(status.textContent).toContain(copy)
+    expect(status.textContent).toContain('Backup')
+  })
+
   it('falls back to the in-place dialog when the console page reports it is unavailable', async () => {
     const host = usageSettings({ usageDisplay: 'always' })
     const analytics = vi.fn(async (query: AnalyticsQuery) => createAnalyticsReport(query))

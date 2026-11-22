@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Context as ClientContext, Context } from '@deepseek-ai/cordis'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   PROFILE_ENTRY_ID,
   type GoModelCatalog,
   type GoUsage,
@@ -23,6 +24,8 @@ import { setPageTab } from './pages/nav.ts'
 import type { PageInjected, PageReaders, PageTab } from './pages/types.ts'
 import { PAGE_PANEL_ID, PAGE_SIDEBAR_ORDER, SETTINGS_SECTION_ID, type GoLayoutService } from './host-slots.ts'
 import { installSettingsNavIcon } from './settings-nav-icon.tsx'
+import { ModelLabel } from './ModelLabel.tsx'
+import { createSharedModelCatalog, type SharedModelCatalog } from './model-catalog-store.ts'
 import {
   OpencodeGoSectionController,
   type OpencodeGoSettings,
@@ -115,9 +118,23 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
       return result.value
     }
   })
+  const endpointKey = (): string => {
+    const value = scope.getSnapshot().value
+    return JSON.stringify([value?.baseURL ?? '', value?.freeBaseURL ?? '', value?.proxyURL ?? ''])
+  }
+  const readModelsCatalog = async (): Promise<GoModelCatalog> => {
+    await modelsReady
+    const result = await ctx.remote.opencodeGoModels.read()
+    if (!result.ok) throw result.error
+    sharedCatalog.publish(result.value, endpointKey())
+    return result.value
+  }
+  const sharedCatalog = createSharedModelCatalog(readModelsCatalog)
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
-    return ctx.remote.opencodeGoModels.read()
+    const result = await ctx.remote.opencodeGoModels.read()
+    if (result.ok) sharedCatalog.publish(result.value, endpointKey())
+    return result
   }, async ref => {
     await modelsReady
     // A session without the usage namespace cannot read a quota; say so instead
@@ -131,6 +148,7 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
   // The settings dialog's nav row: the host icon seat when this host has one
   // (DSH 0.2.2+), the DOM stand-in for older shells. Both read the same label.
   installSettingsNavIcon(ctx, () => t('nav'))
+  registerModelLabel(ctx, scope, sharedCatalog, localeOf, t)
   // The page's own slot face always offers navigation: it only mounts while the
   // host already shows the page.
   const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage })
@@ -144,12 +162,6 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     ...(pageRegistered() ? { openPage } : {}),
   })
   pageRegistered = registerSidebarPage(ctx, pageInjected, () => layout, scope)
-  const readModelsCatalog = async (): Promise<GoModelCatalog> => {
-    await modelsReady
-    const result = await ctx.remote.opencodeGoModels.read()
-    if (!result.ok) throw result.error
-    return result.value
-  }
   registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered, readModelsCatalog)
 
   ctx.effect(() => {
@@ -274,6 +286,52 @@ function registerSidebarPage(
     return () => { unsubscribe(); teardown() }
   }, 'llm-opencode-go: sidebar page opt-in')
   return () => disposePair !== undefined
+}
+
+/**
+ * Register the composer model-label slot at a yielding priority while the
+ * feature is enabled, vacating the single-occupant slot immediately when turned off.
+ */
+function registerModelLabel(
+  ctx: ClientContext,
+  settings: ConfigForm<OpencodeGoSettings>,
+  catalog: SharedModelCatalog,
+  getLocale: () => string,
+  t: OpencodeGoSectionInjected['t'],
+): void {
+  let slotReady = false
+  let disposeLabel: (() => void) | undefined
+  const teardown = (): void => {
+    const dispose = disposeLabel
+    disposeLabel = undefined
+    if (dispose !== undefined) dispose()
+  }
+  const sync = (): void => {
+    const value = settings.getSnapshot().value
+    const active = value?.enabled !== false && (value?.showModelMultiplier ?? DEFAULT_SHOW_MODEL_MULTIPLIER)
+    if (!active) { teardown(); return }
+    if (!slotReady || disposeLabel !== undefined) return
+    try {
+      const dispose = ctx.slots.register({
+        name: 'conversation.input.model.label',
+        priority: 100,
+        inject: () => ({ settings, catalog, getLocale, t }),
+      }, ModelLabel)
+      disposeLabel = typeof dispose === 'function' ? dispose : () => {}
+    } catch {
+      disposeLabel = undefined
+    }
+  }
+  ctx.effect(() => ctx.slots.inject('conversation.input.model.label', () => {
+    slotReady = true
+    sync()
+    return () => { slotReady = false; teardown() }
+  }), 'llm-opencode-go: model label slot')
+  ctx.effect(() => {
+    const unsubscribe = settings.subscribe(sync)
+    sync()
+    return () => { unsubscribe(); teardown() }
+  }, 'llm-opencode-go: model label opt-in')
 }
 
 export function accountCommands(ctx: Context): ExecuteAccountCommand {

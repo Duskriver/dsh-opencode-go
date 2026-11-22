@@ -267,7 +267,8 @@ describe("model availability and picker visibility", () => {
         catalog: { models: [deepseek], stale: false },
       })
       const list = screen.getByRole('group', { name: en.modelsLabel })
-      expect(within(list).getByRole('button', { name: /^DeepSeek V4 Pro$/ })).toBeTruthy()
+      const rowButton = within(list).getByRole('button', { name: /^DeepSeek V4 Pro\b/ })
+      expect(rowButton.textContent).toContain('8.40×')
 
       const card = within(screen.getByRole('region', { name: en.modelDetails }))
       expect(card.getByText(en.quotaEstimateLabel)).toBeTruthy()
@@ -283,7 +284,7 @@ describe("model availability and picker visibility", () => {
       // Subscription tier selection belongs in AccountsCard, not the Models tab.
       expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
 
-      // Updating the active account's plan reflects immediately in the Models tab.
+      // Updating the active account's plan reflects immediately in the Models tab and list multiplier.
       await act(async () => {
         host.publish({
           value: {
@@ -292,10 +293,60 @@ describe("model availability and picker visibility", () => {
           },
         })
       })
+      expect(rowButton.textContent).toContain('2.10×')
       expect(card.getByText(t('quotaPlanCap', { plan: en['goPlan_go-plus'], monthly: '$60' }))).toBeTruthy()
       expect(card.getByText('~4,763')).toBeTruthy()
       expect(card.getByText('~11,909')).toBeTruthy()
       expect(card.getByText('~23,818')).toBeTruthy()
+    })
+
+    it('shows Free badge in Go catalog, hides missing monthly_usage, and refreshes peak transitions in the list', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(Date.parse('2026-11-16T00:59:30Z')) // 30s before Monday 01:00 UTC peak
+        const paidPeak: GoModel = {
+          id: 'deepseek-v4-pro',
+          name: 'DeepSeek V4 Pro',
+          source: 'go',
+          price: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0, multipliers: true },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+          pricingMultipliers: [{
+            when: { utc_days: { in: ['mon'] }, utc_hours: { gte: '01:00', lt: '04:00' } },
+            factor: 2,
+          }],
+        }
+        const goFree: GoModel = {
+          id: 'beam-free',
+          name: 'Beam Free',
+          source: 'go',
+          price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        }
+        const noUsage: GoModel = {
+          id: 'unmetered',
+          name: 'Unmetered',
+          source: 'go',
+          price: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+        }
+        await mountOpen({ catalog: { models: [paidPeak, goFree, noUsage], stale: false } })
+        const list = screen.getByRole('group', { name: en.modelsLabel })
+        const proBtn = within(list).getByRole('button', { name: /^DeepSeek V4 Pro\b/ })
+        expect(proBtn.textContent).toContain('8.40×')
+        expect(proBtn.querySelector('[data-tone="normal"]')).toBeTruthy()
+
+        const freeBtn = within(list).getByRole('button', { name: /^Beam Free\b/ })
+        expect(freeBtn.textContent).toContain(en.modelMultiplierFreeBadge)
+        expect(freeBtn.querySelector('[data-tone="free"]')).toBeTruthy()
+
+        // Missing goMonthlyUsage renders no multiplier at all.
+        expect(within(list).getByRole('button', { name: /^Unmetered$/ })).toBeTruthy()
+
+        // Crossing 01:00 UTC updates the row immediately to peak (16.8×, amber tone).
+        await act(async () => { await vi.advanceTimersByTimeAsync(31_000) })
+        expect(proBtn.textContent).toContain('16.8×')
+        expect(proBtn.querySelector('[data-tone="peak"]')).toBeTruthy()
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('preserves unrelated advanced drafts and committed switch values when a write fails', async () => {

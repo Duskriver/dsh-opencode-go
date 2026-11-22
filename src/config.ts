@@ -15,6 +15,7 @@ import {
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_BORDER,
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   LEGACY_USAGE_PILL_STYLE,
   resolveUsagePillAppearance,
   type UsagePillStyle,
@@ -59,6 +60,7 @@ const fields = {
   sidebarEntry: z.boolean().default(false),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   showSidebarQuota: z.boolean().default(false),
+  showModelMultiplier: z.boolean().default(DEFAULT_SHOW_MODEL_MULTIPLIER),
   usagePillStyle: z.union([...USAGE_PILL_STYLES, LEGACY_USAGE_PILL_STYLE].map(style => z.const(style)))
     .default(DEFAULT_USAGE_PILL_STYLE) as unknown as z<UsagePillStyle>,
   usagePillBorder: z.boolean().default(DEFAULT_USAGE_PILL_BORDER),

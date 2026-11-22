@@ -56,7 +56,7 @@ export interface AttemptOutcome {
 export function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reason'] | undefined {
   if (outcome.emitted || outcome.totalTokens > 0 || outcome.aborted || !outcome.hasNext) return undefined
   switch (outcome.failure?.code) {
-    case 'RATE_LIMIT':
+    case 'RATE_LIMIT': return 'rate-limit'
     case 'QUOTA': return 'quota'
     case 'AUTH':
     case 'MISSING_CREDENTIAL':
@@ -65,9 +65,36 @@ export function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reaso
   }
 }
 
+/** Default key cooldown (5 minutes) for quota exhaustion and rejected credentials. */
+export const REJECTED_KEY_TTL_MS = 5 * 60_000
+
+/** Default key cooldown (15 seconds) for transient HTTP 429 rate limits without a Retry-After header. */
+export const DEFAULT_RATE_LIMIT_KEY_TTL_MS = 15_000
+
+/** Minimum key cooldown for transient HTTP 429 rate limits. */
+export const MIN_RATE_LIMIT_KEY_TTL_MS = 1_000
+
 /** Only credential, rate and quota failures cool down a key; PERMISSION_DENIED is model-scoped. */
 export function isGatewayKeyRejection(failure: { code: string }): boolean {
   return ['INVALID_CREDENTIAL', 'AUTH', 'RATE_LIMIT', 'QUOTA'].includes(failure.code)
+}
+
+/**
+ * Compute how long a gateway-rejected key should be cooled down before being
+ * retried. Credential and quota rejections use the 5-minute window; transient
+ * `RATE_LIMIT` failures honor `providerRetryAfterMs` (defaulting to 15s, bounded
+ * to `[1s, 5m]`).
+ */
+export function gatewayKeyRejectionTtlMs(failure: { code: string; providerRetryAfterMs?: number }): number | undefined {
+  if (!isGatewayKeyRejection(failure)) return undefined
+  if (failure.code === 'RATE_LIMIT') {
+    const raw = failure.providerRetryAfterMs
+    const delay = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+      ? Math.ceil(raw)
+      : DEFAULT_RATE_LIMIT_KEY_TTL_MS
+    return Math.min(Math.max(delay, MIN_RATE_LIMIT_KEY_TTL_MS), REJECTED_KEY_TTL_MS)
+  }
+  return REJECTED_KEY_TTL_MS
 }
 
 type AccountCredentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>
@@ -279,7 +306,10 @@ export class GoAccountManager {
       || !accountsOf(this.config()).some(account => account.apiKeyEnv === event.ref)) return
     this.latestSeq = event.seq
     this.notice = event.notice
-    if (!event.notice || !event.config.enabled || !event.config.autoSwitch) return
+    // Transient 429 rate limits borrow the backup during the short key cooldown
+    // without rewriting saved account order; quota exhaustion and credential
+    // rejections promote the working backup to the first position.
+    if (!event.notice || event.notice.reason === 'rate-limit' || !event.config.enabled || !event.config.autoSwitch) return
     void this.enqueue(async () => {
       const connection = this.connection
       if (!connection || event.generation !== this.capture() || event.seq !== this.latestSeq) return

@@ -9,16 +9,16 @@ export declare const OPENCODE_GO_NS = "llm-opencode-go";
  * Fields that apply the moment they change. Every non-advanced surface is
  * immediate, so the form has exactly one save gesture: the Advanced tab.
  */
-export declare const IMMEDIATE_TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled"];
+export declare const IMMEDIATE_TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "showModelMultiplier", "freeEnabled"];
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number];
 /** Fields the Advanced tab keeps behind Save/Discard. */
 export declare const STAGED_TEXT_FIELDS: readonly ["baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type StagedTextField = typeof STAGED_TEXT_FIELDS[number];
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "showModelMultiplier", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
 /** An immediate field also covers the per-model capacity map. */
 export type ImmediateField = ImmediateTextField | 'modelLimits';
-export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "showModelMultiplier", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
@@ -132,6 +132,7 @@ export interface OpencodeGoSectionState extends FormShell {
     writeFailed?: ImmediateField;
     usageDisplay: FieldState;
     showSidebarQuota: FieldState;
+    showModelMultiplier: FieldState;
     freeEnabled: FieldState;
     usagePillStyle: FieldState;
     usagePillBorder: FieldState;

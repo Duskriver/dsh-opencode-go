@@ -14,6 +14,7 @@ import {
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_BORDER,
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   LEGACY_USAGE_PILL_STYLE,
   type UsagePillStyle,
   DEFAULT_OPENCODE_GO_THEME,
@@ -51,7 +52,7 @@ export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
  * Fields that apply the moment they change. Every non-advanced surface is
  * immediate, so the form has exactly one save gesture: the Advanced tab.
  */
-export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'goPlan', 'showSidebarQuota', 'freeEnabled'] as const
+export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'goPlan', 'showSidebarQuota', 'showModelMultiplier', 'freeEnabled'] as const
 
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number]
 
@@ -137,6 +138,7 @@ function formatField(field: TextField, value: unknown): string {
       ? value : DEFAULT_USAGE_PILL_STYLE
   }
   if (field === 'usagePillBorder') return String(typeof value === 'boolean' ? value : DEFAULT_USAGE_PILL_BORDER)
+  if (field === 'showModelMultiplier') return String(typeof value === 'boolean' ? value : DEFAULT_SHOW_MODEL_MULTIPLIER)
   if (field === 'appearanceTheme') return typeof value === 'string' ? value : DEFAULT_OPENCODE_GO_THEME
   if (field === 'goPlan') return typeof value === 'string' && (GO_PLANS as readonly string[]).includes(value) ? value : DEFAULT_GO_PLAN
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return String(value === true)
@@ -149,7 +151,7 @@ function parseField(field: TextField, text: string, retryInitialDelayMs = DEFAUL
   if (field === 'usagePillBorder') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   if (field === 'appearanceTheme') return OPENCODE_GO_THEMES.some(theme => theme === text) ? { kind: 'set', value: text as OpencodeGoTheme } : undefined
   if (field === 'goPlan') return GO_PLANS.some(plan => plan === text) ? { kind: 'set', value: text as GoPlan } : undefined
-  if (field === 'showSidebarQuota' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
+  if (field === 'showSidebarQuota' || field === 'showModelMultiplier' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   if (field === 'retryMode') return RETRY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as RetryMode } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
@@ -276,6 +278,7 @@ export interface OpencodeGoSectionState extends FormShell {
   writeFailed?: ImmediateField
   usageDisplay: FieldState
   showSidebarQuota: FieldState
+  showModelMultiplier: FieldState
   freeEnabled: FieldState
   usagePillStyle: FieldState
   usagePillBorder: FieldState
@@ -594,6 +597,12 @@ export class OpencodeGoSectionController {
   /** Keep a draft the Advanced tab saves on its own gesture. */
   private editStaged(field: EditableField, draft: Draft): void {
     this.drafts.set(field, draft)
+    if (field === 'retryMode' && draft.kind === 'text' && draft.text === 'always') {
+      const maxRetriesDraft = this.drafts.get('retryMaxRetries')
+      if (maxRetriesDraft?.kind === 'text' && !parseField('retryMaxRetries', maxRetriesDraft.text)) {
+        this.drafts.delete('retryMaxRetries')
+      }
+    }
     this.failed = false
     this.publish()
   }

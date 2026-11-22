@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-22
+
+### Added
+
+- 会话模型选择器与模型设置列表实时显示额度消耗倍率：
+  - 通过 `conversation.input.model.label` 插槽（让位优先级 `100`）在对话输入框的模型下拉列表右侧显示各 OpenCode Go 模型的实时额度消耗倍率（如 `8.40×`、`0.30×`、免费模型显示 `免费` / `Free`），并在 **设置 → OpenCode Go → 外观** 新增「在会话模型选择器中显示额度倍率」（`showModelMultiplier`，默认开启）开关，关闭时立即释放宿主插槽；
+  - **设置 → OpenCode Go → 模型** 与控制台「模型」子页的 Go 模型列表同步展示实时额度消耗倍率，悬停可查看当前套餐档位、峰谷倍率对比、即将生效的调价日期及高上下文阶梯价提示，并按峰谷时段边界精准定时刷新。
+- 新增 Go 路由宿主重试策略配置（#112）：
+  - `OpencodeGoAdapter` 为 Go 路由暴露 `providerRetryPolicy()`（默认 `mode: 'normal'`、`maxRetries: 5`、`backoff.maxDelayMs: 30000`），开箱即可容纳上游网关常见的 15–18 秒 HTTP 429 `Retry-After` 限流等待；
+  - 在 **设置 → OpenCode Go → 高级设置 → 请求重试** 中支持配置重试模式（标准 / 始终）、最大重试次数与最大退避 / `Retry-After` 上限（毫秒），保存后热更新立即生效，无需重启。
+
+### Fixed
+
+- 修复普通 HTTP 429 请求限流被误归类为「额度耗尽（`quota`）」并固定冷却 5 分钟、永久改写主备账号顺序的问题（#113、#114）：
+  - `accountFallback()` 将 `RATE_LIMIT` 独立映射为 `'rate-limit'`，用量面板显示专属的「当前账号触发请求限流，已自动切换为：」提示；
+  - `gatewayKeyRejectionTtlMs()` 对 `RATE_LIMIT` 优先采用上游 `Retry-After`（`providerRetryAfterMs`，未提供时默认 15 秒，限制在 `[1s, 5m]` 区间内），仅 `QUOTA / AUTH / INVALID_CREDENTIAL` 维持 5 分钟冷却；
+  - 当回退原因为瞬时限流（`'rate-limit'`）时，`GoAccountManager.settle()` 仅在冷却期内临时借用备用账号，不再改写已保存的主备账号顺序，冷却结束后自动恢复主账号。
+- 修复网关 `cost.multipliers` 中纯生效日期规则（`date`）或尚未生效的复合周期规则被误判为当前日常高峰时段（`Peak`）的问题。
+
+### Changed
+
+- 补充 `README.md`、`README.en.md`、`docs/advanced.md` 与 `docs/advanced.en.md` 中关于 `retryPolicy` 配置项及单账号高并发派发 subagent 触发 429 限流的 FAQ 说明。
+- 预打包发布归档更新为 `dsh-opencode-go-0.4.7.tgz`。
+
 ## [0.4.6] - 2026-11-20
 
 ### Added

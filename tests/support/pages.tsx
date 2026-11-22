@@ -51,6 +51,7 @@ export function pageStateOf(overrides: Partial<OpencodeGoSectionState> = {}): Op
     appearanceTheme: field('native'),
     goPlan: field('go'),
     showSidebarQuota: field('false'),
+    showModelMultiplier: field('true'),
     freeEnabled: field('false'),
     freeBaseURL: field('https://opencode.ai/inference/v1'),
     baseURL: field('https://opencode.ai/zen/go/v1'),

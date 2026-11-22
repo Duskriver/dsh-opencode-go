@@ -5,12 +5,18 @@ import type {
   GoPlan,
   GoUsage,
 } from './contracts.ts'
-import { evaluatePriceMultiplier } from './pricing.ts'
+import { evaluateMultiplierBreakdown } from './pricing.ts'
 
 /** Official Go window caps expressed as fractions of the monthly allowance. */
 export const GO_ROLLING_SHARE = 0.2
 export const GO_WEEKLY_SHARE = 0.5
 export const GO_MONTHLY_SHARE = 1.0
+
+/**
+ * Standard 1.0× reference quota share per typical request: 1/50,000 of the
+ * active plan's monthly allowance (= 1/10,000 of the 5-hour rolling window).
+ */
+export const STANDARD_QUOTA_SHARE = 1 / 50_000
 
 /**
  * Typical OpenCode Go coding-agent request profile (per call) used to convert
@@ -47,15 +53,42 @@ export type ModelQuotaEstimate =
     readonly requestUsd: number
     /** Base 1× full-capacity request estimates across the 5h, weekly and monthly windows. */
     readonly fullRequests: WindowRequestEstimate
-    /** Highest scheduled peak multiplier (> 1) when the model has peak-hour pricing, else undefined. */
+    /** Highest scheduled recurring peak multiplier (> 1) when the model has peak-hour pricing, else undefined. */
     readonly peakFactor?: number
+    /** True when a recurring peak-hour multiplier (> 1) is active at `nowMs`. */
+    readonly isPeak: boolean
     /** Active rate multiplier at `nowMs` (`1` when off-peak or unscheduled). */
     readonly multiplier: number
+    /** Normalized quota consumption multiplier at `nowMs` (1.0× = STANDARD_QUOTA_SHARE of monthly cap per typical request). */
+    readonly quotaMultiplier: number
+    /** Off-peak normalized quota consumption multiplier (incorporating active date rules, excluding recurring peak). */
+    readonly baseQuotaMultiplier: number
+    /** Peak-hour normalized quota consumption multiplier when `peakFactor` is present. */
+    readonly peakQuotaMultiplier?: number
+    /** True when the model has higher-context price tiers (`cost.text.*.overrides`). */
+    readonly hasContextTiers: boolean
+    /** Lowest context threshold (tokens) that triggers a higher tariff tier, when `hasContextTiers` is true. */
+    readonly minTierThreshold?: number
+    /** Earliest future effective-date multiplier change, if scheduled in `cost.multipliers`. */
+    readonly upcomingDateChange?: {
+      readonly date: string
+      readonly factor: number
+      readonly quotaMultiplier: number
+    }
     readonly bottleneck?: QuotaWindowKey
     readonly limited: boolean
     /** Immediately remaining estimated calls under live `usage` and active `multiplier`. */
     readonly remainingRequests?: number
   }
+
+/** Format a normalized quota consumption multiplier for compact list display. */
+export function formatQuotaMultiplier(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return ''
+  if (value < 0.01) return '<0.01×'
+  if (value < 9.995) return `${value.toFixed(2)}×`
+  if (value < 99.95) return `${value.toFixed(1)}×`
+  return `${Math.round(value)}×`
+}
 
 /** True when every published base and context-tier rate is zero. */
 export function isFreePrice(price: GoModelPrice | undefined): boolean {
@@ -133,11 +166,16 @@ export function estimateModelQuota(input: {
   const requestUsd = estimateRequestCostUsd(model.price)
   if (requestUsd === undefined) return undefined
 
-  const peakFactors = (model.pricingMultipliers ?? [])
-    .map(rule => rule.factor)
-    .filter(factor => Number.isFinite(factor) && factor > 1)
-  const peakFactor = peakFactors.length > 0 ? Math.max(...peakFactors) : undefined
-  const multiplier = evaluatePriceMultiplier(model.pricingMultipliers, nowMs)
+  const breakdown = evaluateMultiplierBreakdown(model.pricingMultipliers, nowMs)
+  const multiplier = breakdown.total
+  const peakFactor = breakdown.maxRecurringPeak
+  const baseQuotaMultiplier = (requestUsd * breakdown.dated) / (monthlyUsd * STANDARD_QUOTA_SHARE)
+  const quotaMultiplier = baseQuotaMultiplier * breakdown.recurring
+  const peakQuotaMultiplier = peakFactor === undefined ? undefined : baseQuotaMultiplier * peakFactor
+  const tiers = model.price?.tiers
+  const minTierThreshold = tiers && tiers.length > 0
+    ? Math.min(...tiers.map(tier => tier.inputTokensAbove))
+    : undefined
   const remaining = usage ? effectiveUsageRemainingRatio(usage) : undefined
   const limited = remaining?.limited ?? false
   const remainingRequests = remaining
@@ -150,12 +188,25 @@ export function estimateModelQuota(input: {
     monthlyUsd,
     requestUsd,
     fullRequests: {
-      rolling: usdToRequests(monthlyUsd * GO_ROLLING_SHARE, requestUsd, 1),
-      weekly: usdToRequests(monthlyUsd * GO_WEEKLY_SHARE, requestUsd, 1),
-      monthly: usdToRequests(monthlyUsd * GO_MONTHLY_SHARE, requestUsd, 1),
+      rolling: usdToRequests(monthlyUsd * GO_ROLLING_SHARE, requestUsd, breakdown.dated),
+      weekly: usdToRequests(monthlyUsd * GO_WEEKLY_SHARE, requestUsd, breakdown.dated),
+      monthly: usdToRequests(monthlyUsd * GO_MONTHLY_SHARE, requestUsd, breakdown.dated),
     },
     ...(peakFactor === undefined ? {} : { peakFactor }),
+    isPeak: breakdown.recurring > 1,
     multiplier,
+    quotaMultiplier,
+    baseQuotaMultiplier,
+    ...(peakQuotaMultiplier === undefined ? {} : { peakQuotaMultiplier }),
+    hasContextTiers: minTierThreshold !== undefined,
+    ...(minTierThreshold === undefined ? {} : { minTierThreshold }),
+    ...(breakdown.upcomingDateChange === undefined ? {} : {
+      upcomingDateChange: {
+        date: breakdown.upcomingDateChange.date,
+        factor: breakdown.upcomingDateChange.factor,
+        quotaMultiplier: baseQuotaMultiplier * breakdown.upcomingDateChange.factor,
+      },
+    }),
     ...(remaining === undefined ? {} : { bottleneck: remaining.bottleneck }),
     limited,
     ...(remainingRequests === undefined ? {} : { remainingRequests }),

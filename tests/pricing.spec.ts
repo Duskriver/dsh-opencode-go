@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { evaluatePriceMultiplier, readModelCost } from '../src/pricing.ts'
+import {
+  evaluateMultiplierBreakdown,
+  evaluatePriceMultiplier,
+  nextCatalogMultiplierTransitionMs,
+  readModelCost,
+} from '../src/pricing.ts'
 import { peakMultipliers, zeroCost } from './support/data.ts'
 
 describe('gateway text tariff validation', () => {
@@ -71,6 +76,54 @@ describe('gateway multiplier validation', () => {
     const scheduled = [{ when: { date: { gte: '2026-12-01' } }, factor: 2 }]
     expect(evaluatePriceMultiplier(scheduled, Date.parse('2026-11-30T23:59:00Z'))).toBe(1)
     expect(evaluatePriceMultiplier(scheduled, Date.parse('2026-12-01T00:00:00Z'))).toBe(2)
+
+    // Date-only rules must not register as recurring peak-hour schedules.
+    expect(evaluateMultiplierBreakdown(scheduled, Date.parse('2026-11-30T23:59:00Z'))).toEqual({
+      total: 1,
+      recurring: 1,
+      dated: 1,
+      upcomingDateChange: { date: '2026-12-01', factor: 2 },
+    })
+    expect(evaluateMultiplierBreakdown(scheduled, Date.parse('2026-12-01T00:00:00Z'))).toEqual({
+      total: 2,
+      recurring: 1,
+      dated: 2,
+    })
+    expect(evaluateMultiplierBreakdown(peakMultipliers, Date.parse('2026-11-16T02:30:00Z'))).toEqual({
+      total: 2,
+      recurring: 2,
+      dated: 1,
+      maxRecurringPeak: 2,
+    })
+    const datedRecurring = [{
+      when: { all: [{ date: { gte: '2026-12-01' } }, { utc_hours: { gte: '01:00', lt: '04:00' } }] },
+      factor: 2,
+    }]
+    expect(evaluateMultiplierBreakdown(datedRecurring, Date.parse('2026-11-30T02:30:00Z'))).toEqual({
+      total: 1,
+      recurring: 1,
+      dated: 1,
+      upcomingDateChange: { date: '2026-12-01', factor: 2 },
+    })
+    expect(evaluateMultiplierBreakdown(datedRecurring, Date.parse('2026-12-01T02:30:00Z'))).toEqual({
+      total: 2,
+      recurring: 2,
+      dated: 1,
+      maxRecurringPeak: 2,
+    })
+
+    // Exact transition timestamps cover utc_hours boundaries, inclusive lte (+1 min) and effective dates.
+    expect(nextCatalogMultiplierTransitionMs([peakMultipliers], Date.parse('2026-11-16T00:59:30Z')))
+      .toBe(Date.parse('2026-11-16T01:00:00Z'))
+    expect(nextCatalogMultiplierTransitionMs([peakMultipliers], Date.parse('2026-11-16T01:00:00Z')))
+      .toBe(Date.parse('2026-11-16T04:00:00Z'))
+    expect(nextCatalogMultiplierTransitionMs(
+      [[{ when: { utc_hours: { gte: '01:00', lte: '03:59' } }, factor: 2 }]],
+      Date.parse('2026-11-16T03:59:00Z'),
+    )).toBe(Date.parse('2026-11-16T04:00:00Z'))
+    expect(nextCatalogMultiplierTransitionMs([scheduled], Date.parse('2026-11-30T23:00:00Z')))
+      .toBe(Date.parse('2026-12-01T00:00:00Z'))
+    expect(nextCatalogMultiplierTransitionMs([undefined], Date.parse('2026-11-16T00:00:00Z'))).toBeUndefined()
   })
 })
 

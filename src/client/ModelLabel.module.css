@@ -1,0 +1,37 @@
+.optionRow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  vertical-align: bottom;
+}
+
+.optionName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.optionBadge {
+  flex: none;
+  font-family: var(--go-number-font);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--go-muted);
+}
+
+.optionBadge[data-tone='peak'] {
+  color: var(--go-warning);
+  font-weight: 500;
+}
+
+.optionBadge[data-tone='free'] {
+  color: var(--go-success);
+  font-weight: 500;
+}

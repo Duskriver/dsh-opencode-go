@@ -54,11 +54,13 @@ import {
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_STYLE,
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   type UsagePillStyle,
   OPENCODE_GO_THEMES,
   RETRY_MODES,
 } from '../contracts.ts'
 import { estimateModelQuota, isFreePrice, type ModelQuotaEstimate } from '../quota-estimate.ts'
+import { resolveModelMultiplierBadge, useScheduledTransitionClock } from './quota-badge.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 
 export function HintMark(props: { hint: string }) {
@@ -544,21 +546,13 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [selected, setSelected] = useState<string>()
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    const update = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      setNow(Date.now())
-    }
-    const timer = setInterval(update, 3_600_000)
-    document.addEventListener('visibilitychange', update)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', update)
-    }
-  }, [])
   // Saved overrides never establish membership: only a successful gateway listing does.
   const modelEntries = models.status === 'ready' ? models.entries : undefined
+  const schedules = useMemo(
+    () => (modelEntries ?? []).map(entry => entry.pricingMultipliers),
+    [modelEntries],
+  )
+  const now = useScheduledTransitionClock(schedules, true)
   const all = useMemo(() => sortModels(modelEntries ?? [], now), [modelEntries, now])
   const normalized = query.trim().toLocaleLowerCase()
   const customized = useMemo(() => all.filter(entry => hasCapacityOverride(draft[modelSettingsKey(entry)])).length, [all, draft])
@@ -590,8 +584,8 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
     }
   }, [selectedModelId])
   const selectedEstimate = useMemo(
-    () => model ? estimateModelQuota({ model, plan }) : undefined,
-    [model, plan],
+    () => model ? estimateModelQuota({ model, plan, nowMs: now }) : undefined,
+    [model, plan, now],
   )
   const visibilityDisabled = disabled || visibilitySaving
   const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | number[] | undefined): void => {
@@ -629,22 +623,29 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
               `nav button` styled by the host or a theme plugin would restyle
               every row control (issue #76). */}
           <div ref={listRef} className={css.modelList} role="group" aria-label={t('modelsLabel')}>
-            {entries.map(entry => <div key={entry.id}
-              className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
-              <button type="button" className={css.modelChoice}
-                aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
-                {/* The row carries the name and its badges only; the model id and
-                    the release date belong to the parameter card. */}
-                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}
-                  {hasCapacityOverride(draft[modelSettingsKey(entry)])
-                    ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
-                    : null}
-                </span>
-              </button>
-              <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
-                checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
-                onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
-            </div>)}
+            {entries.map(entry => {
+              const multiplierBadge = source === 'go'
+                ? resolveModelMultiplierBadge({ model: entry, plan, t, locale, nowMs: now })
+                : undefined
+              return <div key={entry.id}
+                className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
+                <button type="button" className={css.modelChoice}
+                  aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
+                  {/* The row carries the name and its badges only; the model id and
+                      the release date belong to the parameter card. */}
+                  <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}
+                    {hasCapacityOverride(draft[modelSettingsKey(entry)])
+                      ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
+                      : null}
+                  </span>{' '}
+                  {multiplierBadge ? <span className={css.modelMultiplier} data-tone={multiplierBadge.tone}
+                    title={multiplierBadge.title}>{multiplierBadge.text}</span> : null}
+                </button>
+                <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
+                  checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
+                  onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
+              </div>
+            })}
           </div>
           <section ref={detailsRef} className={css.modelDetails} aria-label={t('modelDetails')}>
             <div className={css.modelHeading}>
@@ -927,7 +928,7 @@ function numericBounds(field: TextField): { numeric: true; min?: number; max?: n
   }
 }
 
-const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder'] as const
+const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'showModelMultiplier', 'usagePillStyle', 'usagePillBorder'] as const
 /** The appearance tab also owns the quota display mode, so one reset covers that card. */
 const APPEARANCE_TAB_FIELDS = [...APPEARANCE_FIELDS, 'usageDisplay'] as const
 
@@ -1115,6 +1116,19 @@ function QuotaAppearance({ state, t, disabled, onEdit }: {
         title={t('showSidebarQuotaHint')} disabled={locked}
         onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
     </div>
+    <div className={css.appearanceToggle}>
+      <div className={css.appearanceCopy}>
+        <div className={css.rowLabel}>
+          <span className={css.rowTitle}>{t('showModelMultiplierLabel')}</span>
+          <HintMark hint={t('showModelMultiplierHint')} />
+        </div>
+        <p className={css.appearanceHint}>{t('showModelMultiplierSummary')}</p>
+      </div>
+      <Switch checked={(state.showModelMultiplier?.text ?? String(DEFAULT_SHOW_MODEL_MULTIPLIER)) !== 'false'}
+        label={t('showModelMultiplierLabel')}
+        title={t('showModelMultiplierHint')} disabled={locked}
+        onChange={next => { onEdit('showModelMultiplier', String(next)) }} />
+    </div>
     <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
       aria-describedby={describedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
       <legend className={css.appearanceLegend}>
@@ -1255,7 +1269,7 @@ export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetFi
           disabled={disabled || saving || !canReset}
           onClick={() => {
             for (const field of APPEARANCE_TAB_FIELDS) {
-              if (state[field].overridden || state[field].invalid) resetField(field)
+              if (state[field]?.overridden || state[field]?.invalid) resetField(field)
             }
           }}>
           {t('usageAppearanceReset')}

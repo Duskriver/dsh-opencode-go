@@ -118,21 +118,194 @@ function matchesCondition(node: PricingCondition, utcDay: string, utcHour: strin
   return true
 }
 
+/** True when a pricing condition tree depends on recurring UTC day/hour windows. */
+export function isRecurringMultiplierCondition(node: PricingCondition): boolean {
+  if (node.utc_days !== undefined || node.utc_hours !== undefined) return true
+  if (node.all?.some(isRecurringMultiplierCondition)) return true
+  if (node.any?.some(isRecurringMultiplierCondition)) return true
+  return false
+}
+
+export interface MultiplierBreakdown {
+  readonly total: number
+  readonly recurring: number
+  readonly dated: number
+  readonly maxRecurringPeak?: number
+  readonly upcomingDateChange?: { readonly date: string; readonly factor: number }
+}
+
+function collectConditionDates(node: PricingCondition, out: string[]): void {
+  if (node.date !== undefined) {
+    if (node.date.eq !== undefined) out.push(node.date.eq)
+    if (node.date.gte !== undefined) out.push(node.date.gte)
+    if (node.date.gt !== undefined) out.push(addUtcDays(node.date.gt, 1))
+    if (node.date.in !== undefined) out.push(...node.date.in)
+  }
+  node.all?.forEach(child => collectConditionDates(child, out))
+  node.any?.forEach(child => collectConditionDates(child, out))
+}
+
+function addUtcDays(isoDate: string, days: number): string {
+  const ms = Date.parse(`${isoDate}T00:00:00Z`)
+  if (!Number.isFinite(ms)) return isoDate
+  return new Date(ms + days * 86_400_000).toISOString().slice(0, 10)
+}
+
+function utcClockParts(nowMs: number): { utcDay: string; utcHour: string; utcDate: string } {
+  const now = new Date(nowMs)
+  return {
+    utcDay: DAYS[now.getUTCDay()]!,
+    utcHour: `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`,
+    utcDate: now.toISOString().slice(0, 10),
+  }
+}
+
+/**
+ * True when a condition tree can match on `utcDate` for at least some UTC
+ * day/hour window (ignoring `utc_days` and `utc_hours` leaves).
+ */
+function matchesDateConstraint(node: PricingCondition, utcDate: string): boolean {
+  if (node.all !== undefined && !node.all.every(child => matchesDateConstraint(child, utcDate))) return false
+  if (node.any !== undefined && !node.any.some(child => matchesDateConstraint(child, utcDate))) return false
+  if (node.date !== undefined && !compareValue(utcDate, node.date)) return false
+  return true
+}
+
+/**
+ * Evaluate recurring peak rules separately from date-based tariff changes so
+ * scheduled effective-date changes (like a permanent rate step-up) are not
+ * mislabeled as daily peak hours.
+ */
+export function evaluateMultiplierBreakdown(
+  multipliers: readonly PriceMultiplier[] | undefined,
+  nowMs = Date.now(),
+): MultiplierBreakdown {
+  if (!multipliers || multipliers.length === 0 || !Number.isFinite(nowMs)) {
+    return { total: 1, recurring: 1, dated: 1 }
+  }
+  const { utcDay, utcHour, utcDate } = utcClockParts(nowMs)
+  let recurring = 1
+  let dated = 1
+  let maxRecurringPeak: number | undefined
+  let upcomingDateChange: { date: string; factor: number } | undefined
+  const recordUpcomingDate = (node: PricingCondition, factor: number): void => {
+    const candidates: string[] = []
+    collectConditionDates(node, candidates)
+    for (const date of candidates) {
+      if (date > utcDate && (upcomingDateChange === undefined || date < upcomingDateChange.date)) {
+        upcomingDateChange = { date, factor }
+      }
+    }
+  }
+  for (const rule of multipliers) {
+    const isRecurring = isRecurringMultiplierCondition(rule.when)
+    const matched = matchesCondition(rule.when, utcDay, utcHour, utcDate)
+    if (isRecurring) {
+      const dateActive = matchesDateConstraint(rule.when, utcDate)
+      if (dateActive && rule.factor > 1 && (maxRecurringPeak === undefined || rule.factor > maxRecurringPeak)) {
+        maxRecurringPeak = rule.factor
+      }
+      if (matched) {
+        recurring *= rule.factor
+      } else if (!dateActive && rule.factor !== 1) {
+        recordUpcomingDate(rule.when, rule.factor)
+      }
+    } else if (matched) {
+      dated *= rule.factor
+    } else if (rule.factor !== 1) {
+      recordUpcomingDate(rule.when, rule.factor)
+    }
+  }
+  return {
+    total: recurring * dated,
+    recurring,
+    dated,
+    ...(maxRecurringPeak === undefined ? {} : { maxRecurringPeak }),
+    ...(upcomingDateChange === undefined ? {} : { upcomingDateChange }),
+  }
+}
+
 /**
  * Evaluate the active tariff multiplier at a UTC instant (`nowMs`).
  * Unmatched or absent schedules resolve to `1`.
  */
 export function evaluatePriceMultiplier(multipliers: readonly PriceMultiplier[] | undefined, nowMs = Date.now()): number {
-  if (!multipliers || multipliers.length === 0 || !Number.isFinite(nowMs)) return 1
-  const now = new Date(nowMs)
-  const utcDay = DAYS[now.getUTCDay()]!
-  const utcHour = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`
-  const utcDate = now.toISOString().slice(0, 10)
-  let factor = 1
-  for (const rule of multipliers) {
-    if (matchesCondition(rule.when, utcDay, utcHour, utcDate)) factor *= rule.factor
+  return evaluateMultiplierBreakdown(multipliers, nowMs).total
+}
+
+function collectBoundaryMinutes(comparison: Comparison<string>, minutes: Set<number>): void {
+  const pushClock = (clock: string, plusOne: boolean): void => {
+    const [hRaw, mRaw] = clock.split(':')
+    const total = Number(hRaw) * 60 + Number(mRaw) + (plusOne ? 1 : 0)
+    if (Number.isFinite(total)) minutes.add(total)
   }
-  return factor
+  if (comparison.gte !== undefined) pushClock(comparison.gte, false)
+  if (comparison.lt !== undefined) pushClock(comparison.lt, false)
+  if (comparison.gt !== undefined) pushClock(comparison.gt, true)
+  if (comparison.lte !== undefined) pushClock(comparison.lte, true)
+  if (comparison.eq !== undefined) { pushClock(comparison.eq, false); pushClock(comparison.eq, true) }
+  for (const clock of comparison.in ?? []) { pushClock(clock, false); pushClock(clock, true) }
+}
+
+function collectRuleBoundaries(
+  node: PricingCondition,
+  minutes: Set<number>,
+  dates: Set<string>,
+  hasDays: { value: boolean },
+): void {
+  if (node.utc_days !== undefined) hasDays.value = true
+  if (node.utc_hours !== undefined) collectBoundaryMinutes(node.utc_hours, minutes)
+  if (node.date !== undefined) {
+    for (const key of ['eq', 'gte', 'lt'] as const) {
+      const value = node.date[key]
+      if (value !== undefined) dates.add(value)
+    }
+    for (const key of ['gt', 'lte'] as const) {
+      const value = node.date[key]
+      if (value !== undefined) dates.add(addUtcDays(value, 1))
+    }
+    for (const value of node.date.in ?? []) {
+      dates.add(value)
+      dates.add(addUtcDays(value, 1))
+    }
+  }
+  node.all?.forEach(child => collectRuleBoundaries(child, minutes, dates, hasDays))
+  node.any?.forEach(child => collectRuleBoundaries(child, minutes, dates, hasDays))
+}
+
+/**
+ * Find the earliest UTC timestamp strictly after `nowMs` at which any rule in
+ * `schedules` can transition state. Returns `undefined` when no transitions exist.
+ */
+export function nextCatalogMultiplierTransitionMs(
+  schedules: Iterable<readonly PriceMultiplier[] | undefined>,
+  nowMs = Date.now(),
+): number | undefined {
+  if (!Number.isFinite(nowMs)) return undefined
+  const minutes = new Set<number>()
+  const dates = new Set<string>()
+  const hasDays = { value: false }
+  for (const schedule of schedules) {
+    if (!schedule) continue
+    for (const rule of schedule) collectRuleBoundaries(rule.when, minutes, dates, hasDays)
+  }
+  if (minutes.size === 0 && dates.size === 0 && !hasDays.value) return undefined
+  const now = new Date(nowMs)
+  const dayStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  let earliest: number | undefined
+  const consider = (ts: number): void => {
+    if (ts > nowMs && (earliest === undefined || ts < earliest)) earliest = ts
+  }
+  if (hasDays.value) consider(dayStartMs + 86_400_000)
+  for (const offsetDay of [0, 1]) {
+    const base = dayStartMs + offsetDay * 86_400_000
+    for (const minute of minutes) consider(base + minute * 60_000)
+  }
+  for (const date of dates) {
+    const ts = Date.parse(`${date}T00:00:00Z`)
+    if (Number.isFinite(ts)) consider(ts)
+  }
+  return earliest
 }
 
 export interface ParsedCost { cost: ModelCost; multipliers?: PriceMultiplier[]; free: boolean }

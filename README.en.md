@@ -39,19 +39,19 @@ Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for t
 
 ### 1. Install the plugin
 
-> 💡 **Release note**: The current repository release is **`0.4.6`** (including the 7-tab sidebar console, per-model call estimation, 5 input quota pill styles, model pricing & batch switches, and `#94` fixing collapsed settings panels in auto-height shells such as DS Bot). If npm has not synced the latest build yet (for instance, npm still serves `0.4.0`), prefer **Option A** below using the tracked [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) at the repository root.
+> 💡 **Release note**: The current repository release is **`0.4.7`** (including the 7-tab sidebar console, per-model call estimation, 5 input quota pill styles, model pricing & batch switches, and `#94` fixing collapsed settings panels in auto-height shells such as DS Bot). If npm has not synced the latest build yet (for instance, npm still serves `0.4.0`), prefer **Option A** below using the tracked [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) at the repository root.
 
 #### Option A: Manual install from the tracked `.tgz` tarball (recommended for latest release / DS Bot & Desktop)
 
-1. **Download the `.tgz` package**: Download [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) ([direct raw link](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.6.tgz)) to a space-free local folder (e.g. `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.6.tgz` or `~/Downloads/dsh-opencode-go-0.4.6.tgz`). If you cloned this repo, the tarball is already in the root directory.
+1. **Download the `.tgz` package**: Download [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) ([direct raw link](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.7.tgz)) to a space-free local folder (e.g. `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.7.tgz` or `~/Downloads/dsh-opencode-go-0.4.7.tgz`). If you cloned this repo, the tarball is already in the root directory.
 2. **Install via DSH / DS Bot UI**: Go to **Plugins → Add plugin** (remove any older `dsh-opencode-go` entry first — your saved keys and settings are preserved), paste the full local path to the `.tgz` file, click **Install → Enable now**, and **fully restart** the desktop app or `dsh web`.
 3. **Or install via CLI**:
    ```sh
    # Web profile (replace with your local .tgz path)
-   dsh plugin --profile web add ./dsh-opencode-go-0.4.6.tgz
+   dsh plugin --profile web add ./dsh-opencode-go-0.4.7.tgz
 
    # Headless profile
-   dsh plugin --profile headless add ./dsh-opencode-go-0.4.6.tgz
+   dsh plugin --profile headless add ./dsh-opencode-go-0.4.7.tgz
    ```
    *See the [advanced guide](docs/advanced.en.md#manual-installation-and-offline-updates-tgz) for troubleshooting `ERR_PNPM_MISSING_TARBALL_INTEGRITY` and offline updates.*
 
@@ -64,7 +64,7 @@ Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for t
 
 ### 2. First-time setup
 
-1. After restarting, open **Settings → OpenCode Go** and verify the version reads `0.4.6`.
+1. After restarting, open **Settings → OpenCode Go** and verify the version reads `0.4.7`.
 2. Under **Accounts**, click **Add account**, enter a name and your OpenCode Go API key, and select your **Subscription plan** (for display-only request-count estimates).
 3. *(Optional)* Under **Overview**, enable **Sidebar entry** to add the hand-drawn `go` row to DSH's sidebar and unlock the full 7-tab console.
 4. Select any model under **DSH OpenCode Go** in a conversation and check live usage right beside the composer.
@@ -236,7 +236,7 @@ Per repository policy, every change touching packed files updates the single tra
 <details>
 <summary><strong>Q: Why does installing by package name still give an older version (e.g. 0.4.0) or a collapsed settings panel in DS Bot?</strong></summary>
 
-The npm registry may lag behind the repository. Download [`dsh-opencode-go-0.4.6.tgz`](dsh-opencode-go-0.4.6.tgz) locally, remove the older `dsh-opencode-go` entry (saved keys and settings remain intact), install from the local `.tgz` path, and fully restart DS Bot / DSH. See [manual installation and offline updates](docs/advanced.en.md#manual-installation-and-offline-updates-tgz).
+The npm registry may lag behind the repository. Download [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) locally, remove the older `dsh-opencode-go` entry (saved keys and settings remain intact), install from the local `.tgz` path, and fully restart DS Bot / DSH. See [manual installation and offline updates](docs/advanced.en.md#manual-installation-and-offline-updates-tgz).
 </details>
 
 <details>
@@ -283,7 +283,7 @@ Dispatching many parallel subagents on the same provider/model with a single acc
 
 ```sh
 dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.6.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.7.tgz
 ```
 
 *In DS Bot / DSH Desktop UI, remove the old plugin entry, add the local `.tgz` path, enable it, and fully quit and reopen the app.*

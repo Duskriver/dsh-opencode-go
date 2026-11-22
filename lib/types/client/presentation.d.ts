@@ -33,6 +33,7 @@ export declare const en: {
     sidebarNextAccount: string;
     sidebarAnalytics: string;
     accountFallbackQuota: string;
+    accountFallbackRateLimit: string;
     accountFallbackCredential: string;
     accountsSummary: string;
     accountsSummaryEmpty: string;
@@ -218,6 +219,14 @@ export declare const en: {
     quotaPillPeakTitle: string;
     quotaPillOffPeakBadge: string;
     quotaPillOffPeakTitle: string;
+    modelMultiplierFreeBadge: string;
+    modelMultiplierFreeTitle: string;
+    modelMultiplierTooltip: string;
+    modelMultiplierPeakActiveNote: string;
+    modelMultiplierPeakScheduleNote: string;
+    modelMultiplierDateChangeNote: string;
+    modelMultiplierTierNote: string;
+    modelMultiplierAria: string;
     visibilityHint: string;
     modelVisibleLabel: string;
     configurationMissing: string;
@@ -268,6 +277,9 @@ export declare const en: {
     showSidebarQuotaLabel: string;
     showSidebarQuotaSummary: string;
     showSidebarQuotaHint: string;
+    showModelMultiplierLabel: string;
+    showModelMultiplierSummary: string;
+    showModelMultiplierHint: string;
     usagePillStyleLabel: string;
     usagePillStyleHint: string;
     usagePillStylePreviewHint: string;

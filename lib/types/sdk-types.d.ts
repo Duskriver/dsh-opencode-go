@@ -1604,7 +1604,7 @@ type GoMonthlyUsage = Record<GoPlan, number>;
 interface GoAccountSwitch {
     fromRef: string;
     toRef: string;
-    reason: 'quota' | 'credential';
+    reason: 'quota' | 'rate-limit' | 'credential';
     at: number;
 }
 interface GoModel {

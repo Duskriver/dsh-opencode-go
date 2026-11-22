@@ -49,7 +49,11 @@ import {
   GoCatalogManager,
 } from './catalog.ts'
 import { createHash, randomUUID } from 'node:crypto'
-import { accountFallback, isGatewayKeyRejection } from './accounts.ts'
+import {
+  accountFallback,
+  gatewayKeyRejectionTtlMs,
+  REJECTED_KEY_TTL_MS,
+} from './accounts.ts'
 import { FreeBunTransport, OPENCODE_FREE_USER_AGENT } from './free-transport.ts'
 import { FreeChannelState } from './free-channel.ts'
 
@@ -404,9 +408,6 @@ export class OpencodeGoRequestExecutor {
     }
   }
 }
-
-/** Recheck a gateway-rejected key after a bounded window. */
-const REJECTED_KEY_TTL_MS = 5 * 60_000
 
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
@@ -774,11 +775,12 @@ export class OpencodeGoAdapter extends LlmAdapter {
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
-      const retryFailure = async (failure: { code: string } | undefined): Promise<boolean> => {
+      const retryFailure = async (failure: { code: string; providerRetryAfterMs?: number } | undefined): Promise<boolean> => {
         const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
           aborted: options.signal?.aborted === true, hasNext: snapshot.config.autoSwitch === true || this.source === 'free' })
-        if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && failure && isGatewayKeyRejection(failure)
-          && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway)
+        const rejectionTtlMs = failure ? gatewayKeyRejectionTtlMs(failure) : undefined
+        if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && rejectionTtlMs !== undefined
+          && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway, rejectionTtlMs)
         if (!reason || !failure) return false
         if (snapshot.config.autoSwitch) {
           const next = await candidates.next()
@@ -882,11 +884,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
     }
   }
 
-  private rememberRejectedKey(ref: string, gateway: string): void {
+  private rememberRejectedKey(ref: string, gateway: string, ttlMs = REJECTED_KEY_TTL_MS): void {
     const now = Date.now()
     this.pruneRejectedKeys(now)
     const rejected = this.rejectedKeys.get(ref) ?? new Map<string, number>()
-    rejected.set(gateway, now + REJECTED_KEY_TTL_MS)
+    rejected.set(gateway, now + ttlMs)
     this.rejectedKeys.set(ref, rejected)
     // Defensive cap: only account references are attempted, so this can only
     // evict under artificial reference churn. Expired entries were pruned first,

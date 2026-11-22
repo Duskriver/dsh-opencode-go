@@ -707,7 +707,8 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
         </div>
         {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
         {notice ? <p className={css.warning} role="status">
-          {t(notice.reason === 'quota' ? 'accountFallbackQuota' : 'accountFallbackCredential')}{' '}
+          {t(notice.reason === 'quota' ? 'accountFallbackQuota'
+            : notice.reason === 'rate-limit' ? 'accountFallbackRateLimit' : 'accountFallbackCredential')}{' '}
           {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
           {' · '}{panelDateTime(notice.at, getLocale?.())}
         </p> : null}
@@ -746,9 +747,9 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
               <span className={css.modelEstimateName} title={activeEntry.name ?? activeEntry.id}>
                 {activeEntry.name ?? activeEntry.id}
               </span>
-              {estimate.multiplier > 1
+              {estimate.isPeak
                 ? <span className={css.modelEstimatePeak}
-                  title={formatTranslated(t, 'quotaPillPeakTitle', { factor: estimate.multiplier })}>
+                  title={formatTranslated(t, 'quotaPillPeakTitle', { factor: estimate.peakFactor ?? estimate.multiplier })}>
                   {t('quotaPillPeakBadge')}
                 </span>
                 : estimate.peakFactor !== undefined

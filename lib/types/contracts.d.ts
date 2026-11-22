@@ -31,6 +31,8 @@ export declare const USAGE_PILL_STYLES: readonly ["badge", "concentric", "fill",
 export type UsagePillStyle = typeof USAGE_PILL_STYLES[number];
 export declare const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle;
 export declare const DEFAULT_USAGE_PILL_BORDER = true;
+/** Default visibility of per-model quota multipliers in the conversation model selector. */
+export declare const DEFAULT_SHOW_MODEL_MULTIPLIER = true;
 /** Accepted in profiles saved before 0.4.5 and mapped to `badge` without a border. */
 export declare const LEGACY_USAGE_PILL_STYLE: "plain";
 /** Resolve stored pill style and border flag, migrating legacy `'plain'` to borderless `'badge'`. */
@@ -85,7 +87,7 @@ export declare function assertAccounts(accounts: readonly GoAccount[] | null | u
 export interface GoAccountSwitch {
     fromRef: string;
     toRef: string;
-    reason: 'quota' | 'credential';
+    reason: 'quota' | 'rate-limit' | 'credential';
     at: number;
 }
 export declare const SETTINGS_NAMESPACE = "llm-opencode-go";
@@ -190,6 +192,8 @@ export interface OpencodeGoConfig {
     usageDisplay: UsageDisplayMode;
     /** Show quota in the sidebar independently of the selected conversation model. */
     showSidebarQuota: boolean;
+    /** Show per-model quota consumption multipliers in the conversation model picker. */
+    showModelMultiplier: boolean;
     /** Appearance of the conversation input's quota trigger. */
     usagePillStyle: UsagePillStyle;
     /** Draw an outer border and background frame around the conversation input's quota trigger. */

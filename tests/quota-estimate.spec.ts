@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  STANDARD_QUOTA_SHARE,
   effectiveUsageRemainingRatio,
   estimateModelQuota,
   estimateRequestCostUsd,
+  formatQuotaMultiplier,
   TYPICAL_REQUEST_TOKENS,
 } from '../src/quota-estimate.ts'
 import type { GoModel, GoUsage } from '../src/contracts.ts'
@@ -109,5 +111,55 @@ describe('estimateModelQuota', () => {
       model: { id: 'hy4-flash-free', source: 'free', price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
       plan: 'go',
     })).toEqual({ kind: 'free' })
+  })
+
+  it('computes normalized quotaMultiplier, context tiers and separates date rules from recurring peak schedules', () => {
+    const offPeak = Date.parse('2026-11-16T05:00:00Z')
+    const peak = Date.parse('2026-11-16T02:00:00Z')
+    const estOff = estimateModelQuota({ model: deepseekPro, plan: 'go', nowMs: offPeak })!
+    const estPeak = estimateModelQuota({ model: deepseekPro, plan: 'go', nowMs: peak })!
+    if (estOff.kind !== 'go' || estPeak.kind !== 'go') throw new Error('expected go estimate')
+    const expectedBase = (estOff.requestUsd / 15) / STANDARD_QUOTA_SHARE
+    expect(estOff.isPeak).toBe(false)
+    expect(estOff.quotaMultiplier).toBeCloseTo(expectedBase, 8)
+    expect(estOff.peakQuotaMultiplier).toBeCloseTo(expectedBase * 2, 8)
+    expect(estPeak.isPeak).toBe(true)
+    expect(estPeak.quotaMultiplier).toBeCloseTo(expectedBase * 2, 8)
+
+    const argonLike: GoModel = {
+      id: 'gemini-4-argon',
+      source: 'go',
+      price: {
+        input: 2,
+        output: 12,
+        cacheRead: 0.2,
+        cacheWrite: 0,
+        tiers: [{ inputTokensAbove: 100_000, input: 4, output: 24, cacheRead: 0.4, cacheWrite: 0 }],
+      },
+      goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+      pricingMultipliers: [{ when: { date: { gte: '2026-12-01' } }, factor: 2 }],
+    }
+    const beforeDate = estimateModelQuota({ model: argonLike, plan: 'go', nowMs: Date.parse('2026-11-30T12:00:00Z') })!
+    const afterDate = estimateModelQuota({ model: argonLike, plan: 'go', nowMs: Date.parse('2026-12-01T12:00:00Z') })!
+    if (beforeDate.kind !== 'go' || afterDate.kind !== 'go') throw new Error('expected go estimate')
+    expect(beforeDate.peakFactor).toBeUndefined()
+    expect(beforeDate.isPeak).toBe(false)
+    expect(beforeDate.hasContextTiers).toBe(true)
+    expect(beforeDate.minTierThreshold).toBe(100_000)
+    expect(beforeDate.upcomingDateChange).toMatchObject({ date: '2026-12-01', factor: 2 })
+    expect(afterDate.peakFactor).toBeUndefined()
+    expect(afterDate.isPeak).toBe(false)
+    expect(afterDate.multiplier).toBe(2)
+    expect(afterDate.quotaMultiplier).toBeCloseTo(beforeDate.quotaMultiplier * 2, 8)
+    expect(afterDate.fullRequests.monthly).toBeLessThan(beforeDate.fullRequests.monthly)
+  })
+
+  it('formats quota multipliers with compact precision tiers', () => {
+    expect(formatQuotaMultiplier(0.004)).toBe('<0.01×')
+    expect(formatQuotaMultiplier(0.304)).toBe('0.30×')
+    expect(formatQuotaMultiplier(8.396)).toBe('8.40×')
+    expect(formatQuotaMultiplier(9.996)).toBe('10.0×')
+    expect(formatQuotaMultiplier(42.14)).toBe('42.1×')
+    expect(formatQuotaMultiplier(99.96)).toBe('100×')
   })
 })

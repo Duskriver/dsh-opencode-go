@@ -47,7 +47,7 @@ describe("settings page and typed capacity editing", () => {
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
     | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
     | 'retryMode' | 'retryMaxRetries' | 'retryMaxDelayMs'
-    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'goPlan' | 'showSidebarQuota' | 'freeEnabled'
+    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'goPlan' | 'showSidebarQuota' | 'showModelMultiplier' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -90,6 +90,7 @@ describe("settings page and typed capacity editing", () => {
       appearanceTheme: field('native'),
       goPlan: field('go'),
       showSidebarQuota: field('false'),
+      showModelMultiplier: field('true'),
       freeEnabled: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
       baseURL: field('https://opencode.ai/zen/go/v1'),
@@ -215,6 +216,10 @@ describe("settings page and typed capacity editing", () => {
       expect(borderToggle.getAttribute('aria-checked')).toBe('true')
       fireEvent.click(borderToggle)
       expect(reading.edit).toHaveBeenLastCalledWith('usagePillBorder', 'false')
+      const multiplierToggle = screen.getByRole('switch', { name: en.showModelMultiplierLabel })
+      expect(multiplierToggle.getAttribute('aria-checked')).toBe('true')
+      fireEvent.click(multiplierToggle)
+      expect(reading.edit).toHaveBeenLastCalledWith('showModelMultiplier', 'false')
       expect(reading.save).not.toHaveBeenCalled()
     })
 
@@ -1717,6 +1722,7 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['appearanceTheme', 'classic', 'classic'],
     ['goPlan', 'go-plus', 'go-plus'],
     ['showSidebarQuota', 'true', true],
+    ['showModelMultiplier', 'false', false],
     ['freeEnabled', 'true', true],
   ]
 
@@ -2087,7 +2093,13 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
       backoff: { initialDelayMs: 250, maxDelayMs: 250, jitterRatio: 0.25 },
     })
 
-    // Switching to always mode writes an AlwaysRetryPolicyConfig without requiring maxRetries.
+    // Switching to always mode discards any invalid retryMaxRetries draft and writes an AlwaysRetryPolicyConfig.
+    actions.edit('retryMaxRetries', 'abc')
+    expect(snapshot().retryMaxRetries.invalid).toBe(true)
+    actions.edit('retryMode', 'always')
+    expect(snapshot().retryMaxRetries).toMatchObject({ text: '5', invalid: false })
+    actions.edit('retryMode', 'normal')
+    expect(snapshot().retryMaxRetries).toMatchObject({ text: '5', invalid: false })
     actions.edit('retryMode', 'always')
     actions.edit('retryMaxDelayMs', '60000')
     await controller.save()
@@ -2244,9 +2256,9 @@ describe('client registration and remote lifecycle', () => {
     expect(registration.inject!().getLocale()).toBe('en')
     expect(component).toBe(OpencodeGoSection)
     expect(harness.listeners.size).toBe(1)
-    // The typed form has two readers: the section controller and the opt-in gate
-    // that registers the sidebar row/page pair only while sidebarEntry is on.
-    expect(harness.settings.listenerCount()).toBe(2)
+    // The typed form has three readers: the section controller, the opt-in
+    // sidebar gate, and the composer model-label slot registration.
+    expect(harness.settings.listenerCount()).toBe(3)
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)
     expect(harness.settings.listenerCount()).toBe(0)
