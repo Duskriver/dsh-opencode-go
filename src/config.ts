@@ -1,6 +1,7 @@
 /** Live profile configuration, validation and settings presentation. */
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-settings'
+import { RetryPolicySchema, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import {
   DEFAULT_MAX_REQUEST_IMAGE_BYTES,
@@ -25,6 +26,7 @@ import {
   DEFAULT_ACCOUNT_REF,
   MAX_ACCOUNTS,
   MAX_THINKING_BUDGET_TOKENS,
+  defaultGoRetryPolicy,
   type OpencodeGoConfig,
   PROFILE_ENTRY_ID,
   assertProxyURL,
@@ -82,6 +84,7 @@ const fields = {
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   requestPreparationTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS),
   requestTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_REQUEST_TIMEOUT_MS),
+  retryPolicy: RetryPolicySchema.default(defaultGoRetryPolicy()),
   maxImages: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
   // The image defaults are the generic pi-ai adapter's: one normalized
   // request image fits the budget, and fifteen of them fit the payload cap.
@@ -213,6 +216,9 @@ export function validateGoConfig(value: OpencodeGoConfig): void {
   assertProxyURL(value.proxyURL)
   assertApiKeyEnv(value.apiKeyEnv)
   assertAccounts(value.accounts, value.apiKeyEnv)
+  if (value.retryPolicy !== undefined) {
+    resolveRetryPolicy(value.retryPolicy, 'llm-opencode-go.retryPolicy')
+  }
 }
 
 /** DSH profile forms edit the plugin's live Config fields directly. */

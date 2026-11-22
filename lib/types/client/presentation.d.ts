@@ -281,6 +281,7 @@ export declare const en: {
     usagePillBorderHint: string;
     groupConnection: string;
     groupCacheTimeouts: string;
+    groupRetryPolicy: string;
     groupImages: string;
     advancedHint: string;
     usageDisplayLabel: string;
@@ -303,6 +304,14 @@ export declare const en: {
     requestPreparationTimeoutMsHint: string;
     requestTimeoutMsLabel: string;
     requestTimeoutMsHint: string;
+    retryModeLabel: string;
+    retryModeHint: string;
+    retryMode_normal: string;
+    retryMode_always: string;
+    retryMaxRetriesLabel: string;
+    retryMaxRetriesHint: string;
+    retryMaxDelayMsLabel: string;
+    retryMaxDelayMsHint: string;
     maxImagesLabel: string;
     maxImagesHint: string;
     maxRequestImageBytesLabel: string;

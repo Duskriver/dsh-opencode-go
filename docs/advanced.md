@@ -159,6 +159,7 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
 | `streamIdleTimeoutMs` | 等待下一个流事件的最长时间，默认 300000 毫秒 |
 | `requestPreparationTimeoutMs` | 目录查询及每次尝试的凭据、图片准备时限，默认 60000 毫秒 |
 | `requestTimeoutMs` | 一次发送的完整时限，包含目录查询、账号切换和流式输出，默认 1800000 毫秒；预先准备的调用从发送时计时 |
+| `retryPolicy` | Go 路由的宿主重试策略（`mode`、`maxRetries`、`retryableCodes`、`backoff`），默认 `mode: normal`、`maxRetries: 5`、`backoff.maxDelayMs: 30000`；可在高级设置中调整模式、最大重试次数与最大退避上限，修改保存后热更新生效 |
 
 未显式配置 `freeEnabled` 的旧 profile 按默认值 `false` 处理：升级后 Free 路由保持关闭，需要时在 **设置 → OpenCode Go → 概览** 中开启（立即生效）；升级前已选择 `DSH OpenCode Free` 模型的旧会话，需要重新选择 Go 模型，或先开启 Free 再继续使用。
 

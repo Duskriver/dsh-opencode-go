@@ -120,6 +120,49 @@ export interface OpencodeGoModelLimit {
 }
 /** Per-model capacities; a null entry selects both original catalog values. */
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
+/** Browser-safe retry-policy vocabulary mirroring `@deepseek-ai/dsh-llm`. */
+export declare const RETRY_MODES: readonly ["normal", "always"];
+export type RetryMode = typeof RETRY_MODES[number];
+export declare const DEFAULT_RETRY_MODE: RetryMode;
+export declare const DEFAULT_RETRY_MAX_RETRIES = 5;
+export declare const DEFAULT_RETRY_INITIAL_DELAY_MS = 500;
+/** Accommodate OpenCode Go 429 Retry-After headers (typically 15–18s) out of the box. */
+export declare const DEFAULT_RETRY_MAX_DELAY_MS = 30000;
+export declare const DEFAULT_RETRY_JITTER_RATIO = 0.1;
+export declare const DEFAULT_RETRYABLE_CODES: readonly ["EMPTY_RESPONSE", "RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT"];
+export interface GoRetryBackoffConfig {
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    jitterRatio?: number;
+}
+export type GoRetryPolicyConfig = {
+    mode: 'normal';
+    maxRetries?: number;
+    retryableCodes?: string[];
+    backoff?: GoRetryBackoffConfig;
+} | {
+    mode: 'always';
+    backoff?: GoRetryBackoffConfig;
+};
+/** Fresh default Go route retry policy safe for configuration defaults and mutations. */
+export declare function defaultGoRetryPolicy(): GoRetryPolicyConfig;
+export interface ResolvedGoRetryFields {
+    mode: RetryMode;
+    maxRetries: number;
+    initialDelayMs: number;
+    maxDelayMs: number;
+    jitterRatio: number;
+    retryableCodes: string[];
+}
+/** Resolve UI-friendly scalar fields from a stored or omitted retry policy. */
+export declare function resolveGoRetryFields(policy?: GoRetryPolicyConfig): ResolvedGoRetryFields;
+/** Build a valid `GoRetryPolicyConfig` by patching mode, maxRetries, retryableCodes and/or maxDelayMs onto an existing policy. */
+export declare function mergeGoRetryPolicy(base: GoRetryPolicyConfig | undefined, patch: {
+    mode?: RetryMode;
+    maxRetries?: number;
+    maxDelayMs?: number;
+    retryableCodes?: readonly string[];
+}): GoRetryPolicyConfig;
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
     /**
@@ -177,6 +220,8 @@ export interface OpencodeGoConfig {
     requestPreparationTimeoutMs?: number;
     /** Whole dispatch deadline, including discovery and account fallback. */
     requestTimeoutMs?: number;
+    /** Host-executed request retry policy for the Go route (`dsh-llm-retry`). */
+    retryPolicy?: GoRetryPolicyConfig;
     /** Optional retained image occurrence cap per request; omission or null leaves the count unlimited. */
     maxImages?: number | null;
     /** Request-level bound on base64-encoded image payload, in bytes. */

@@ -112,3 +112,38 @@ describe('profile entry identity', () => {
     expect(SETTINGS_NAMESPACE).toBe('llm-opencode-go')
   })
 })
+
+describe('retry policy configuration', () => {
+  it('defaults to normal mode with a 30s maxDelayMs cap to absorb Go 429 Retry-After delays', () => {
+    expect(DEFAULT_CONFIG.retryPolicy).toEqual({
+      mode: 'normal',
+      maxRetries: 5,
+      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+      backoff: {
+        initialDelayMs: 500,
+        maxDelayMs: 30_000,
+        jitterRatio: 0.1,
+      },
+    })
+    expect(PlainConfig({}).retryPolicy).toEqual(DEFAULT_CONFIG.retryPolicy)
+  })
+
+  it('accepts valid normal and always retry policies and rejects invalid bounds', () => {
+    expect(() => validateGoConfig(config({
+      retryPolicy: { mode: 'normal', maxRetries: 3, backoff: { initialDelayMs: 1000, maxDelayMs: 45_000, jitterRatio: 0.2 } },
+    }))).not.toThrow()
+    expect(() => validateGoConfig(config({
+      retryPolicy: { mode: 'always', backoff: { initialDelayMs: 500, maxDelayMs: 60_000, jitterRatio: 0 } },
+    }))).not.toThrow()
+    for (const bad of [
+      { mode: 'normal', maxRetries: -1 },
+      { mode: 'normal', retryableCodes: [] },
+      { mode: 'normal', backoff: { initialDelayMs: 0, maxDelayMs: 30_000 } },
+      { mode: 'normal', backoff: { initialDelayMs: 1000, maxDelayMs: 500 } },
+      { mode: 'always', backoff: { maxDelayMs: 0 } },
+      { mode: 'always', backoff: { jitterRatio: 1.5 } },
+    ] as const) {
+      expect(() => validateGoConfig(config({ retryPolicy: bad as never }))).toThrow()
+    }
+  })
+})

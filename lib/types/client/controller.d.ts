@@ -12,13 +12,13 @@ export declare const OPENCODE_GO_NS = "llm-opencode-go";
 export declare const IMMEDIATE_TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled"];
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number];
 /** Fields the Advanced tab keeps behind Save/Discard. */
-export declare const STAGED_TEXT_FIELDS: readonly ["baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const STAGED_TEXT_FIELDS: readonly ["baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type StagedTextField = typeof STAGED_TEXT_FIELDS[number];
-export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
+export declare const TEXT_FIELDS: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes"];
 export type TextField = typeof TEXT_FIELDS[number];
 /** An immediate field also covers the per-model capacity map. */
 export type ImmediateField = ImmediateTextField | 'modelLimits';
-export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
+export declare const editableKeys: readonly ["usageDisplay", "usagePillStyle", "usagePillBorder", "appearanceTheme", "goPlan", "showSidebarQuota", "freeEnabled", "baseURL", "freeBaseURL", "proxyURL", "refreshMinutes", "streamIdleTimeoutMs", "requestPreparationTimeoutMs", "requestTimeoutMs", "retryMode", "retryMaxRetries", "retryMaxDelayMs", "maxImages", "maxRequestImageBytes", "requestImagePixelBudget", "requestImageMaxBytes", "modelLimits"];
 export type EditableField = typeof editableKeys[number];
 export interface FieldState {
     text: string;
@@ -151,6 +151,9 @@ export interface OpencodeGoSectionState extends FormShell {
     streamIdleTimeoutMs: FieldState;
     requestPreparationTimeoutMs: FieldState;
     requestTimeoutMs: FieldState;
+    retryMode: FieldState;
+    retryMaxRetries: FieldState;
+    retryMaxDelayMs: FieldState;
     maxImages: FieldState;
     maxRequestImageBytes: FieldState;
     requestImagePixelBudget: FieldState;
@@ -205,6 +208,7 @@ export declare class OpencodeGoSectionController {
     private blocked;
     private stored;
     private value;
+    private retrySnapshotPlan;
     private field;
     private plan;
     private projection;

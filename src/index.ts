@@ -228,6 +228,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
   const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().modelLimits ?? {},
     current().baseURL, current().freeBaseURL, current().proxyURL])
   let pickerVisibility = pickerVisibilityOf()
+  const retryPolicyOf = (): string => JSON.stringify(current().retryPolicy ?? null)
+  let retryPolicyKey = retryPolicyOf()
   /**
    * Serve the Go route only when a usable key exists; serve Free only when the
    * user opted in with {@link OpencodeGoConfig.freeEnabled}. `enabled` remains
@@ -279,11 +281,18 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     const config = current()
     accountManager.capture()
     const visibility = pickerVisibilityOf()
-    if (pickerVisibility !== visibility) {
+    const nextRetryPolicy = retryPolicyOf()
+    const visibilityChanged = pickerVisibility !== visibility
+    const retryPolicyChanged = retryPolicyKey !== nextRetryPolicy
+    if (visibilityChanged) {
       pickerVisibility = visibility
       // Replacing the owned route notifies every session picker without a restart.
       refreshPickers()
+    } else if (retryPolicyChanged) {
+      // Re-capture providerRetryPolicy on live Go routes after settings updates.
+      registration?.replace([PROVIDER_ID])
     }
+    retryPolicyKey = nextRetryPolicy
     const credentials = ctx.get('credentials')
     const selected = accountRefOf(config)
     // A stored selection outranks the gateway's last rejection of it: choosing an

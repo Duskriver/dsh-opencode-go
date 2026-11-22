@@ -1203,3 +1203,45 @@ describe("host and wire capacity alignment", () => {
     expect((await adapter.resolveModel('dsh-opencode-go', 'deepseek-v4.1-flash')).context?.contextWindow).toBe(42)
   })
 })
+
+describe("provider retry policy", () => {
+  it('exposes the configured Go retry policy on LlmRuntime while keeping Free on host defaults', async () => {
+    const config = configOf('https://gateway.example/v1')
+    const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async () => 'test-key' })
+    const freeAdapter = new OpencodeGoAdapter({ source: 'free', config: () => config, resolveApiKey: async () => 'test-key' })
+    expect(adapter.providerRetryPolicy('dsh-opencode-go')).toMatchObject({
+      mode: 'normal',
+      maxRetries: 5,
+      maxDelayMs: 30_000,
+    })
+    expect(freeAdapter.providerRetryPolicy('dsh-opencode-free')).toBeUndefined()
+
+    const customAdapter = new OpencodeGoAdapter({
+      config: () => configOf('https://gateway.example/v1', {
+        retryPolicy: { mode: 'normal', maxRetries: 7, backoff: { initialDelayMs: 500, maxDelayMs: 45_000, jitterRatio: 0.2 } },
+      }),
+      resolveApiKey: async () => 'test-key',
+    })
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['dsh-opencode-go'], customAdapter)
+    ctx.llm.registerAdapter(['dsh-opencode-free'], freeAdapter)
+    try {
+      expect(ctx.llm.providerRetryPolicy('dsh-opencode-go')).toEqual({
+        mode: 'normal',
+        maxRetries: 7,
+        retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+        initialDelayMs: 500,
+        maxDelayMs: 45_000,
+        jitterRatio: 0.2,
+      })
+      expect(ctx.llm.providerRetryPolicy('dsh-opencode-free')).toMatchObject({
+        mode: 'normal',
+        maxRetries: 5,
+        maxDelayMs: 10_000,
+      })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+})

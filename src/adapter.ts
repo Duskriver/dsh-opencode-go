@@ -9,6 +9,7 @@ import {
   FREE_PROVIDER_ID,
   FREE_DISPLAY_NAME,
   modelSettingsKey,
+  defaultGoRetryPolicy,
 } from './contracts.ts'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import { estimateContextTokens } from 'opencode-go-pi-ai/utils/estimate'
@@ -16,6 +17,8 @@ import {
   LlmError,
   attributionHeaders,
   contentHasImage,
+  resolveRetryPolicy,
+  type ResolvedRetryPolicy,
   type GenerateOptions,
   type ImageAttachmentAccess,
   type StreamChunk,
@@ -575,6 +578,17 @@ export class OpencodeGoAdapter extends LlmAdapter {
 
   override providerInfo(provider: string): { id: string; name: string } {
     return { id: provider, name: this.source === 'go' ? DISPLAY_NAME : FREE_DISPLAY_NAME }
+  }
+
+  /**
+   * Expose the Go route's configured retry policy so `@deepseek-ai/dsh-llm-retry`
+   * honors longer upstream `Retry-After` delays instead of falling back to the
+   * 10s host default. Free keeps its passive cooldown semantics.
+   */
+  override providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined {
+    if (this.source !== 'go') return undefined
+    const config = this.options.config()
+    return resolveRetryPolicy(config.retryPolicy ?? defaultGoRetryPolicy(), 'llm-opencode-go.retryPolicy')
   }
 
   /**

@@ -56,6 +56,7 @@ import {
   DEFAULT_USAGE_PILL_STYLE,
   type UsagePillStyle,
   OPENCODE_GO_THEMES,
+  RETRY_MODES,
 } from '../contracts.ts'
 import { estimateModelQuota, isFreePrice, type ModelQuotaEstimate } from '../quota-estimate.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
@@ -906,6 +907,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 const ADVANCED_FIELDS = [
   'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs',
+  'retryMode', 'retryMaxRetries', 'retryMaxDelayMs',
   'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
 
@@ -1356,6 +1358,37 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           invalidLabel={invalidLabel}
           disabled={disabled}
           onEdit={(text) => { edit('requestTimeoutMs', text) }}
+        />
+        <div className={css.groupHead}>{t('groupRetryPolicy')}</div>
+        <ValueField
+          id="opencode-go-retry-mode"
+          label={t('retryModeLabel')}
+          hint={t('retryModeHint')}
+          field={state.retryMode}
+          options={RETRY_MODES.map(value => ({ value, label: t(`retryMode_${value}`) }))}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('retryMode', text) }}
+        />
+        <ValueField
+          id="opencode-go-retry-max-retries"
+          label={t('retryMaxRetriesLabel')}
+          hint={t('retryMaxRetriesHint')}
+          field={state.retryMaxRetries}
+          {...numericBounds('retryMaxRetries')}
+          invalidLabel={invalidLabel}
+          disabled={disabled || state.retryMode.text === 'always'}
+          onEdit={(text) => { edit('retryMaxRetries', text) }}
+        />
+        <ValueField
+          id="opencode-go-retry-max-delay-ms"
+          label={t('retryMaxDelayMsLabel')}
+          hint={t('retryMaxDelayMsHint')}
+          field={state.retryMaxDelayMs}
+          {...numericBounds('retryMaxDelayMs')}
+          invalidLabel={invalidLabel}
+          disabled={disabled}
+          onEdit={(text) => { edit('retryMaxDelayMs', text) }}
         />
         <div className={css.groupHead}>{t('groupImages')}</div>
         <ValueField

@@ -230,6 +230,105 @@ export interface OpencodeGoModelLimit {
 /** Per-model capacities; a null entry selects both original catalog values. */
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
 
+/** Browser-safe retry-policy vocabulary mirroring `@deepseek-ai/dsh-llm`. */
+export const RETRY_MODES = ['normal', 'always'] as const
+
+export type RetryMode = typeof RETRY_MODES[number]
+
+export const DEFAULT_RETRY_MODE: RetryMode = 'normal'
+
+export const DEFAULT_RETRY_MAX_RETRIES = 5
+
+export const DEFAULT_RETRY_INITIAL_DELAY_MS = 500
+
+/** Accommodate OpenCode Go 429 Retry-After headers (typically 15–18s) out of the box. */
+export const DEFAULT_RETRY_MAX_DELAY_MS = 30_000
+
+export const DEFAULT_RETRY_JITTER_RATIO = 0.1
+
+export const DEFAULT_RETRYABLE_CODES = ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'] as const
+
+export interface GoRetryBackoffConfig {
+  initialDelayMs?: number
+  maxDelayMs?: number
+  jitterRatio?: number
+}
+
+export type GoRetryPolicyConfig =
+  | {
+    mode: 'normal'
+    maxRetries?: number
+    retryableCodes?: string[]
+    backoff?: GoRetryBackoffConfig
+  }
+  | {
+    mode: 'always'
+    backoff?: GoRetryBackoffConfig
+  }
+
+/** Fresh default Go route retry policy safe for configuration defaults and mutations. */
+export function defaultGoRetryPolicy(): GoRetryPolicyConfig {
+  return {
+    mode: DEFAULT_RETRY_MODE,
+    maxRetries: DEFAULT_RETRY_MAX_RETRIES,
+    retryableCodes: [...DEFAULT_RETRYABLE_CODES],
+    backoff: {
+      initialDelayMs: DEFAULT_RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
+      jitterRatio: DEFAULT_RETRY_JITTER_RATIO,
+    },
+  }
+}
+
+export interface ResolvedGoRetryFields {
+  mode: RetryMode
+  maxRetries: number
+  initialDelayMs: number
+  maxDelayMs: number
+  jitterRatio: number
+  retryableCodes: string[]
+}
+
+/** Resolve UI-friendly scalar fields from a stored or omitted retry policy. */
+export function resolveGoRetryFields(policy?: GoRetryPolicyConfig): ResolvedGoRetryFields {
+  const mode: RetryMode = policy?.mode === 'always' ? 'always' : DEFAULT_RETRY_MODE
+  const maxRetries = policy?.mode === 'normal' && typeof policy.maxRetries === 'number'
+    ? policy.maxRetries
+    : DEFAULT_RETRY_MAX_RETRIES
+  const retryableCodes = policy?.mode === 'normal' && Array.isArray(policy.retryableCodes)
+    ? [...policy.retryableCodes]
+    : [...DEFAULT_RETRYABLE_CODES]
+  return {
+    mode,
+    maxRetries,
+    initialDelayMs: policy?.backoff?.initialDelayMs ?? DEFAULT_RETRY_INITIAL_DELAY_MS,
+    maxDelayMs: policy?.backoff?.maxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS,
+    jitterRatio: policy?.backoff?.jitterRatio ?? DEFAULT_RETRY_JITTER_RATIO,
+    retryableCodes,
+  }
+}
+
+/** Build a valid `GoRetryPolicyConfig` by patching mode, maxRetries, retryableCodes and/or maxDelayMs onto an existing policy. */
+export function mergeGoRetryPolicy(
+  base: GoRetryPolicyConfig | undefined,
+  patch: { mode?: RetryMode; maxRetries?: number; maxDelayMs?: number; retryableCodes?: readonly string[] },
+): GoRetryPolicyConfig {
+  const resolved = resolveGoRetryFields(base)
+  const mode = patch.mode ?? resolved.mode
+  const backoff: GoRetryBackoffConfig = {
+    initialDelayMs: resolved.initialDelayMs,
+    maxDelayMs: patch.maxDelayMs ?? resolved.maxDelayMs,
+    jitterRatio: resolved.jitterRatio,
+  }
+  if (mode === 'always') return { mode: 'always', backoff }
+  return {
+    mode: 'normal',
+    maxRetries: patch.maxRetries ?? resolved.maxRetries,
+    retryableCodes: patch.retryableCodes ? [...patch.retryableCodes] : resolved.retryableCodes,
+    backoff,
+  }
+}
+
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
   /**
@@ -287,6 +386,8 @@ export interface OpencodeGoConfig {
   requestPreparationTimeoutMs?: number
   /** Whole dispatch deadline, including discovery and account fallback. */
   requestTimeoutMs?: number
+  /** Host-executed request retry policy for the Go route (`dsh-llm-retry`). */
+  retryPolicy?: GoRetryPolicyConfig
   /** Optional retained image occurrence cap per request; omission or null leaves the count unlimited. */
   maxImages?: number | null
   /** Request-level bound on base64-encoded image payload, in bytes. */

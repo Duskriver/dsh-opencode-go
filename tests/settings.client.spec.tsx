@@ -46,6 +46,7 @@ describe("settings page and typed capacity editing", () => {
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
     | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
+    | 'retryMode' | 'retryMaxRetries' | 'retryMaxDelayMs'
     | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'goPlan' | 'showSidebarQuota' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
@@ -97,6 +98,9 @@ describe("settings page and typed capacity editing", () => {
       streamIdleTimeoutMs: field('300000'),
       requestPreparationTimeoutMs: field('60000'),
       requestTimeoutMs: field('1800000'),
+      retryMode: field('normal'),
+      retryMaxRetries: field('5'),
+      retryMaxDelayMs: field('30000'),
       maxImages: field(''),
       maxRequestImageBytes: field('20971520'),
       requestImagePixelBudget: field('4194304'),
@@ -1089,6 +1093,8 @@ describe("settings page and typed capacity editing", () => {
         [en.streamIdleTimeoutMsLabel, 'streamIdleTimeoutMs'],
         [en.requestPreparationTimeoutMsLabel, 'requestPreparationTimeoutMs'],
         [en.requestTimeoutMsLabel, 'requestTimeoutMs'],
+        [en.retryMaxRetriesLabel, 'retryMaxRetries'],
+        [en.retryMaxDelayMsLabel, 'retryMaxDelayMs'],
         [en.maxImagesLabel, 'maxImages'],
         [en.maxRequestImageBytesLabel, 'maxRequestImageBytes'],
         [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget'],
@@ -1122,6 +1128,15 @@ describe("settings page and typed capacity editing", () => {
       fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
       expect(edits.resetField.mock.calls.map(call => call[0]).sort())
         .toEqual(['baseURL', 'showSidebarQuota', 'usageDisplay', 'usagePillBorder', 'usagePillStyle'])
+    })
+
+    it('disables retryMaxRetries in the Advanced UI when retryMode is always', () => {
+      renderSection(stateOf({ retryMode: field('always') }))
+      openAdvanced()
+      const maxRetries = screen.getByLabelText(en.retryMaxRetriesLabel) as HTMLInputElement
+      const maxDelay = screen.getByLabelText(en.retryMaxDelayMsLabel) as HTMLInputElement
+      expect(maxRetries.disabled).toBe(true)
+      expect(maxDelay.disabled).toBe(false)
     })
 
     it('keeps the card reset out of reach while every row inherits its value', () => {
@@ -1714,6 +1729,9 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['streamIdleTimeoutMs', '2000'],
     ['requestPreparationTimeoutMs', '3000'],
     ['requestTimeoutMs', '4000'],
+    ['retryMode', 'normal'],
+    ['retryMaxRetries', '8'],
+    ['retryMaxDelayMs', '45000'],
     ['maxImages', '5'],
     ['maxRequestImageBytes', '1024'],
     ['requestImagePixelBudget', '4096'],
@@ -1750,18 +1768,27 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     expect(host.mutate).not.toHaveBeenCalled()
     expect(snapshot()).toMatchObject({ dirty: true, invalid: false })
     await controller.save()
-    const values: Record<StagedTextField, string | number> = {
+    const directValues = {
       baseURL: 'https://gateway.example/v1', freeBaseURL: 'https://free.example/v1',
       proxyURL: 'socks5://localhost:1080', refreshMinutes: 30, streamIdleTimeoutMs: 2000,
       requestPreparationTimeoutMs: 3000, requestTimeoutMs: 4000, maxImages: 5,
       maxRequestImageBytes: 1024, requestImagePixelBudget: 4096, requestImageMaxBytes: 512,
     }
+    const retryPolicy = {
+      mode: 'normal',
+      maxRetries: 8,
+      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+      backoff: { initialDelayMs: 500, maxDelayMs: 45000, jitterRatio: 0.1 },
+    }
     expect(host.mutate).toHaveBeenCalledExactlyOnceWith(
-      stagedFields.map(([field]) => ({ op: 'set' as const, path: [field], value: values[field] })),
+      [
+        ...Object.entries(directValues).map(([field, value]) => ({ op: 'set' as const, path: [field], value })),
+        { op: 'set' as const, path: ['retryPolicy'], value: retryPolicy },
+      ],
       0,
     )
     expect(snapshot()).toMatchObject({ dirty: false, invalid: false })
-    expect(host.form.getSnapshot().user).toEqual(values)
+    expect(host.form.getSnapshot().user).toEqual({ ...directValues, retryPolicy })
   })
 
   it.each([
@@ -2004,6 +2031,8 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['requestPreparationTimeoutMs', '0'], ['requestPreparationTimeoutMs', '-1'], ['requestPreparationTimeoutMs', '1.5'],
     ['requestPreparationTimeoutMs', '2147483648'],
     ['requestTimeoutMs', '0'], ['requestTimeoutMs', '-1'], ['requestTimeoutMs', '1.5'], ['requestTimeoutMs', '2147483648'],
+    ['retryMaxRetries', '-1'], ['retryMaxRetries', '1.5'], ['retryMaxRetries', '9007199254740992'], ['retryMaxRetries', 'abc'],
+    ['retryMaxDelayMs', '0'], ['retryMaxDelayMs', '499'], ['retryMaxDelayMs', '-1'], ['retryMaxDelayMs', '2147483648'], ['retryMaxDelayMs', 'Infinity'],
     ['maxImages', '0'], ['maxImages', '-1'], ['maxImages', '1.5'], ['maxImages', '9007199254740992'],
     ['maxRequestImageBytes', '0'], ['maxRequestImageBytes', '1.5'],
     ['requestImagePixelBudget', '0'], ['requestImagePixelBudget', '1.5'],
@@ -2035,6 +2064,44 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     expect(snapshot()[field].invalid).toBe(false)
     await controller.save()
     expect(host.form.getSnapshot().value?.[field]).toBe(expected)
+  })
+
+  it('edits, preserves custom backoff metadata, supports always mode, and unsets retryPolicy on reset', async () => {
+    const { host, controller, actions, snapshot } = setup({
+      ...defaultClientSettings,
+      retryPolicy: {
+        mode: 'normal',
+        maxRetries: 5,
+        retryableCodes: ['RATE_LIMIT', 'TIMEOUT'],
+        backoff: { initialDelayMs: 250, maxDelayMs: 30_000, jitterRatio: 0.25 },
+      },
+    })
+    // Lower initialDelayMs allows setting retryMaxDelayMs down to 250ms while preserving custom fields.
+    actions.edit('retryMaxDelayMs', '250')
+    expect(snapshot().retryMaxDelayMs).toMatchObject({ invalid: false, overridden: true })
+    await controller.save()
+    expect(host.form.getSnapshot().user?.retryPolicy).toEqual({
+      mode: 'normal',
+      maxRetries: 5,
+      retryableCodes: ['RATE_LIMIT', 'TIMEOUT'],
+      backoff: { initialDelayMs: 250, maxDelayMs: 250, jitterRatio: 0.25 },
+    })
+
+    // Switching to always mode writes an AlwaysRetryPolicyConfig without requiring maxRetries.
+    actions.edit('retryMode', 'always')
+    actions.edit('retryMaxDelayMs', '60000')
+    await controller.save()
+    expect(host.form.getSnapshot().user?.retryPolicy).toEqual({
+      mode: 'always',
+      backoff: { initialDelayMs: 250, maxDelayMs: 60_000, jitterRatio: 0.25 },
+    })
+
+    // Resetting the modified retry fields unsets user.retryPolicy when returning to base.
+    actions.resetField('retryMode')
+    actions.resetField('retryMaxDelayMs')
+    await controller.save()
+    expect(host.mutate).toHaveBeenLastCalledWith([{ op: 'unset', path: ['retryPolicy'] }], 2)
+    expect(host.form.getSnapshot().user?.retryPolicy).toBeUndefined()
   })
 
   it('projects the Host namespace status through loading, ready and unavailable', () => {

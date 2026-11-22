@@ -1069,4 +1069,38 @@ describe("independent provider identity and durable continuation", () => {
       await ctx.fiber.dispose()
     }
   })
+
+  it('re-captures the Go retry policy when live settings update without a restart', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    let livePolicy: OpencodeGo.OpencodeGoConfig['retryPolicy'] = {
+      mode: 'normal',
+      maxRetries: 5,
+      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+      backoff: { initialDelayMs: 500, maxDelayMs: 30_000, jitterRatio: 0.1 },
+    }
+    const base = configOf('https://gateway.example/v1')
+    const live = Config(base) as LiveConfig
+    live.retryPolicy = { get: () => livePolicy }
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    try {
+      apply(ctx, live)
+      expect(ctx.llm.providerRetryPolicy(route)).toMatchObject({ mode: 'normal', maxRetries: 5, maxDelayMs: 30_000 })
+      const updates: number[] = []
+      ctx.on('llm/adapters-updated', () => { updates.push(ctx.llm.providerRetryPolicy(route).maxDelayMs) })
+
+      livePolicy = { mode: 'always', backoff: { initialDelayMs: 500, maxDelayMs: 60_000, jitterRatio: 0.1 } }
+      ctx.emit('loader/volatile-update', [['retryPolicy']])
+
+      expect(ctx.llm.providerRetryPolicy(route)).toEqual({
+        mode: 'always',
+        initialDelayMs: 500,
+        maxDelayMs: 60_000,
+        jitterRatio: 0.1,
+      })
+      expect(updates).toEqual([60_000])
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
 })

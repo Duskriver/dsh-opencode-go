@@ -193,6 +193,7 @@ Open **Advanced** to tune connection, timeout, and image parameters (click **Sav
 
 - **Connection & Proxy**: Configure `baseURL`, `freeBaseURL`, and **HTTP / HTTPS / SOCKS5** proxies (`socks5://127.0.0.1:7890`), applied to conversations, usage polling, history analytics, and catalog discovery.
 - **Cache & Timeouts**: Tune catalog refresh interval, `streamIdleTimeoutMs`, `requestPreparationTimeoutMs`, and `requestTimeoutMs`.
+- **Request Retry**: Configures the Go route's host-executed retry policy (defaults to `normal` mode with a **`30,000 ms`** max delay / `Retry-After` cap to absorb common gateway rate limits); adjust retry mode, max retries, and max delay live under **Advanced** without restarting (Free keeps its passive cooldown behavior).
 - **Image Handling**: Configure per-request `maxImages`, encoded payload limit, pixel budget, and target image bytes (up to 4 images prepared in parallel).
 - **Reset to defaults**: Clears Advanced overrides without affecting saved accounts or credentials.
 
@@ -266,6 +267,12 @@ Free is opt-in and off by default — enable it under **Overview → Free channe
 <summary><strong>Q: Why does a long conversation return HTTP 400?</strong></summary>
 
 Context plus output allowance likely exceeded the model's context window. Run `/compact` in the conversation or lower **Max output** under **Models**. Explicit context overflow errors are handed back to DSH's native recovery flow.
+</details>
+
+<details>
+<summary><strong>Q: What should I do about HTTP 429 rate limits when dispatching many parallel subagents on a single account?</strong></summary>
+
+Dispatching many parallel subagents on the same provider/model with a single account can trigger upstream rate limiting (often returning a 15–18s `Retry-After`). The plugin defaults the Go route's retry `maxDelayMs` cap to **`30,000 ms`** (tunable under **Advanced → Request retry**, or via `retryPolicy` in a patch config). If rate limits persist, reduce subagent concurrency, stagger dispatches, or add multiple accounts with **Automatic fallback** enabled.
 </details>
 
 ---

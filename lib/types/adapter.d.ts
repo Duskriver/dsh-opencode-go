@@ -1,6 +1,6 @@
 /** Request snapshots, SDK dispatch, deadlines and seamless account fallback. */
 import { type OpencodeGoModelLimits, type GoAccountSwitch, type ModelSource } from './contracts.ts';
-import { type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
+import { type ResolvedRetryPolicy, type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment';
 import type { Api, Model, Provider } from './sdk-types.ts';
 import { type OpencodeGoConfig } from './config.ts';
@@ -190,6 +190,12 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
         id: string;
         name: string;
     };
+    /**
+     * Expose the Go route's configured retry policy so `@deepseek-ai/dsh-llm-retry`
+     * honors longer upstream `Retry-After` delays instead of falling back to the
+     * 10s host default. Free keeps its passive cooldown semantics.
+     */
+    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
     /**
      * Report the exact request-image projection this route serializes: the
      * configured pixel budget decides the dimensions and the configured

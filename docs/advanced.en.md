@@ -160,6 +160,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `streamIdleTimeoutMs` | Maximum wait for the next stream event; defaults to 300000 milliseconds |
 | `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
 | `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
+| `retryPolicy` | Host-executed retry policy for the Go route (`mode`, `maxRetries`, `retryableCodes`, `backoff`); defaults to `mode: normal`, `maxRetries: 5`, `backoff.maxDelayMs: 30000`. Mode, max retries, and max delay can also be tuned under Advanced settings with live reload |
 
 Profiles that never set `freeEnabled` keep the default `false`: after upgrading, the Free route stays off until it is enabled under **Settings → OpenCode Go → Overview** (applied immediately). Sessions that selected a `DSH OpenCode Free` model before the upgrade need to select a Go model or enable Free first.
 
