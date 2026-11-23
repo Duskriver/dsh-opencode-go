@@ -575,6 +575,8 @@ describe("route lifecycle", () => {
         height: 2048,
         maxPixels: 2048 * 2048,
         maxBytes: 1024 * 1024,
+        maxImageBytes: 1024 * 1024,
+        imageTargetBytes: 1024 * 1024,
       }, expect.any(AbortSignal))
       expect(JSON.stringify(gateway.bodies[0])).toContain(MODEL_IMAGE_PATH)
       expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })

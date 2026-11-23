@@ -8,12 +8,10 @@
 <h1 align="center">dsh-opencode-go</h1>
 
 <p align="center">
-  <a href="README.md">简体中文</a> · <a href="#-highlights">Highlights</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-faq">FAQ</a> · <a href="docs/advanced.en.md">Advanced Guide</a> · <a href="docs/development.md">Development</a>
+  <a href="README.md">简体中文</a> · <a href="#-highlights">Highlights</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-sidebar-console-7-sub-pages">Console</a> · <a href="#️-architecture--verification">Architecture</a> · <a href="#-faq">FAQ</a> · <a href="docs/advanced.en.md">Advanced Guide</a> · <a href="docs/development.md">Development</a>
 </p>
 
-**OpenCode Go provider, live quota visibility, smart request-budget estimation, and multi-account failover** for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
-
-DSH supports OpenCode Go natively, but power users and multi-account workflows need more: **in-conversation quota pills with remaining-call estimates, automatic pre-output account failover, session-level prompt-cache affinity, an official workspace history dashboard**, and an **all-in-one sidebar console**. Built on Cordis, this plugin delivers full protocol conversion alongside a cohesive client UI.
+**OpenCode Go provider, live quota visibility, smart request-budget estimation, and multi-account failover** for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Built on Cordis, this plugin delivers full protocol conversion alongside an **in-conversation quota pill, pre-output account failover, session-level prompt-cache affinity, an official workspace history dashboard**, and an **all-in-one sidebar console**.
 
 > Supports Chinese and English, following DSH's interface language. The screenshots below show the default **DSH Native (Dark)** theme in Chinese (real redacted DSH Desktop captures alongside real plugin component views with sample data); you can switch to **OpenCode Go Classic** at any time under **Appearance**, and both themes follow the Host's light/dark scheme.
 
@@ -39,11 +37,11 @@ Requires DSH `0.2.1-rc.5` or later. See [development](docs/development.md) for t
 
 ### 1. Install the plugin
 
-> 💡 **Release note**: The current repository release is **`0.4.7`** (including the 7-tab sidebar console, per-model call estimation, 5 input quota pill styles, model pricing & batch switches, and `#94` fixing collapsed settings panels in auto-height shells such as DS Bot). If npm has not synced the latest build yet (for instance, npm still serves `0.4.0`), prefer **Option A** below using the tracked [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) at the repository root.
+> 💡 **Release note**: The current repository release is **`0.4.7`** (including the 7-tab sidebar console, per-model call estimation, 5 input quota pill styles, model pricing & batch switches, and `#94` fixing collapsed settings panels in auto-height shells such as DS Bot). If npm has not synced the latest build yet, prefer **Option A** below using the tracked [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) at the repository root.
 
 #### Option A: Manual install from the tracked `.tgz` tarball (recommended for latest release / DS Bot & Desktop)
 
-1. **Download the `.tgz` package**: Download [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) ([direct raw link](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.7.tgz)) to a space-free local folder (e.g. `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.7.tgz` or `~/Downloads/dsh-opencode-go-0.4.7.tgz`). If you cloned this repo, the tarball is already in the root directory.
+1. **Download the `.tgz` package**: Download [`dsh-opencode-go-0.4.7.tgz`](dsh-opencode-go-0.4.7.tgz) ([direct raw link](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.7.tgz)) to a space-free local folder (e.g. `~/Downloads/dsh-opencode-go-0.4.7.tgz`). If you cloned this repo, the tarball is already in the root directory.
 2. **Install via DSH / DS Bot UI**: Go to **Plugins → Add plugin** (remove any older `dsh-opencode-go` entry first — your saved keys and settings are preserved), paste the full local path to the `.tgz` file, click **Install → Enable now**, and **fully restart** the desktop app or `dsh web`.
 3. **Or install via CLI**:
    ```sh
@@ -99,14 +97,11 @@ Enabling **Settings → OpenCode Go → Overview → Sidebar entry** (`sidebarEn
 
 ## 🧮 Smart Per-Model Call Estimation
 
-OpenCode Go shares **percentage-based quotas across three windows** (5-hour, weekly, and monthly), which makes it hard to tell at a glance how many calls remain for a specific model. Using gateway-published tariffs, tier caps, and live multiplier schedules, the plugin translates percentages into concrete request estimates across three views:
+OpenCode Go shares **percentage-based quotas across three windows** (5-hour, weekly, and monthly). Using gateway-published tariffs, tier caps, and live multiplier schedules, the plugin translates percentages into concrete request estimates across three views:
 
-1. **Per-account subscription tier (display-only)**
-   Under **Accounts**, choose each account's OpenCode Go plan: `Go ($10)`, `Go Plus ($40)`, or `Go Teams ($20)`. This setting is strictly for UI conversion and never alters requests or upstream billing.
-2. **Full-capacity request budgets in the Model card**
-   Selecting any Go model under **Models** shows its estimated full-capacity calls across the 5-hour (`20%`), weekly (`50%`), and monthly (`100%`) caps using a **typical cached coding-agent request profile** (`1K input + 44K cache read + 450 output`), plus a peak-hour multiplier note when scheduled multipliers apply.
-3. **Live remaining calls in the composer Usage Pill popover**
-   Opening the conversation usage popover computes `~N calls left` (or `0 calls left`) for the **active Go model** based on the tightest bottleneck window and any active UTC time-of-day multiplier (displaying a `Peak` or `Off-peak` badge with multiplier details on hover).
+1. **Per-account subscription tier (display-only)**: Under **Accounts**, choose `Go ($10)`, `Go Plus ($40)`, or `Go Teams ($20)`. Strictly for UI conversion — never alters requests or upstream billing.
+2. **Full-capacity request budgets in the Model card**: Selecting any Go model under **Models** shows estimated full-capacity calls across the 5-hour (`20%`), weekly (`50%`), and monthly (`100%`) caps using a **typical cached coding-agent request profile** (`1K input + 44K cache read + 450 output`), plus peak-hour multiplier notes when scheduled multipliers apply.
+3. **Live remaining calls in the composer Usage Pill popover**: Computes `~N calls left` (or `0 calls left`) for the **active Go model** based on the tightest bottleneck window and any active UTC time-of-day multiplier (showing a `Peak` or `Off-peak` badge with multiplier details on hover).
 
 <p align="center">
   <img src="docs/assets/usage-pill-popover.png" alt="Expanded composer usage pill popover showing three quota windows and live remaining call estimation for the active model" width="480">
@@ -124,16 +119,10 @@ Open **Appearance** (in the console or Settings — all changes apply immediatel
 
 ![Appearance settings: Native/Classic live theme previews, 5 input quota pill styles, and border toggle](docs/assets/appearance-settings.png)
 
-- **5 input quota styles + independent border toggle**:
-  - Choose from **Badge (default)**, **Concentric rings**, **Level fill**, **Dual mini-bars**, and **Minimal rings** with live previews.
-  - Combine any style with **Show border** (on for framed pill fill, off for a borderless transparent look).
-- **Display modes & smart polling**:
-  - **Auto (default)** shows the pill only for **DSH OpenCode Go** models; **Always** keeps it visible with other providers; **Off** hides it and stops polling.
-  - Polls quietly every minute while visible, pauses when the page is hidden, and refreshes immediately on return. Click the account chip in the popover to switch accounts without leaving the chat.
+- **5 input quota styles + independent border toggle**: Choose from **Badge (default)**, **Concentric rings**, **Level fill**, **Dual mini-bars**, and **Minimal rings** with live previews, and combine any style with **Show border** (framed pill fill vs. borderless transparent look).
+- **Display modes & smart polling**: **Auto (default)** shows the pill only for **DSH OpenCode Go** models; **Always** keeps it visible with other providers; **Off** hides it and stops polling. Polls quietly every minute while visible, pauses when hidden, and refreshes immediately on return. Click the account chip in the popover to switch accounts in place.
 - **Independent sidebar quota card**: Enable **Show quota in the sidebar** to see all three windows in the expanded sidebar (or a compact icon when collapsed); click the account badge to cycle through accounts read-only without changing the active inference account.
-- **Two cohesive themes (`appearanceTheme`)**:
-  - **DSH Native (default)**: Follows DSH and third-party themes via public Host semantic tokens while keeping strong control borders and chart state series on contrast-checked WCAG 1.4.11 (≥ 3:1) values.
-  - **OpenCode Go Classic**: Keeps warm paper / charcoal surfaces, terracotta accents, and serif/sans/mono typography while still following the Host's light/dark scheme.
+- **Two cohesive themes (`appearanceTheme`)**: **DSH Native (default)** follows DSH and third-party themes via public Host semantic tokens while keeping strong control borders and chart series on WCAG 1.4.11 (≥ 3:1) contrast values; **OpenCode Go Classic** keeps warm paper / charcoal surfaces and terracotta accents while following the Host's light/dark scheme.
 
 ---
 
@@ -156,8 +145,7 @@ Open the **Usage** tab in the sidebar console for the full-page view (or click *
 ![Full-page official workspace history dashboard with KPIs, daily stacked chart, and model breakdown (sample data)](docs/assets/console-usage.png)
 
 - **Single official CSV source**: Requests, input/output/cache tokens, official usage amount (summed directly from `cost_micro_cents`, where `1 USD = 100,000,000` units — not an extra Go charge), daily charts, and model tables all come from OpenCode Console's daily UTC CSV across **Today / 7 / 30 / 90 days**, with one-click **Export CSV**.
-- **Independent viewing account**: Defaults to the active inference account and covers all clients in that key's workspace; switching the viewed account updates the three quota bars without changing your conversation account.
-- **On-demand & privacy-first**: Fetches only on open, account/range change, or manual refresh (30-second Host cache, no background polling). Keys never leave the Host; regular reports send only aggregate figures and `provider / model / day` to the browser (explicitly exported CSVs may include member fields). See [usage analytics notes](docs/usage-analytics.en.md).
+- **Independent viewing & privacy-first**: Defaults to the active inference account and covers all clients in that key's workspace; switching the viewed account updates the three quota bars without changing your conversation account. Fetches on demand (30-second Host cache, no background polling); keys never leave the Host, and regular reports send only aggregate figures and `provider / model / day` to the browser. See [usage analytics notes](docs/usage-analytics.en.md).
 
 ---
 
@@ -179,9 +167,9 @@ When enabled:
 
 ### Model Catalog & Capacity Overrides
 
-Under **Models** (see screenshot above), manage **OpenCode Go** and **Free** catalogs separately:
+Under **Models**, manage **OpenCode Go** and **Free** catalogs separately:
 
-- **Visibility & batch toggles**: Non-deprecated models are enabled by default and deprecated ones default to disabled. Search by name/ID, filter by **New in 7 days / Customized / Deprecated**, and use **Enable all / Disable all** for atomic single-click updates across the current view (skipping `configurationMissing` models), with independently scrollable list and detail panes.
+- **Visibility & batch toggles**: Non-deprecated models are enabled by default and deprecated ones default to disabled. Search by name/ID, filter by **New in 7 days / Customized / Deprecated**, and use **Enable all / Disable all** for atomic single-click updates across the current view (skipping `configurationMissing` models).
 - **Pricing & capacity edits**: Inspect `/models` input / output / cache-read / cache-write rates, context-tier pricing, and multiplier notes in the detail card (Free models display **Free**). Override context window, max output, and custom thinking budgets live with no restart.
 - **Default output safety cap**: Any model advertising an output capacity above `65,536` defaults to **`65,536 tokens`** unless overridden by caller or settings (reported to DSH for compaction budgeting); smaller models keep their SDK defaults.
 
@@ -200,6 +188,10 @@ Open **Advanced** to tune connection, timeout, and image parameters (click **Sav
 ---
 
 ## 🛠️ Architecture & Verification
+
+<p align="center">
+  <img src="./assets/readme/en/architecture.svg" width="100%" alt="dsh-opencode-go dual-route protocol and pre-output failover architecture">
+</p>
 
 Source modules are organized by domain, communicating between Host and browser via DSH Typert RPC:
 

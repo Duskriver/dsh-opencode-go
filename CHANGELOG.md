@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-11-23
+
+### Fixed
+
+- 兼容 DeepSeek Harness `0.2.3+` 图片请求目标协议（#116）：在 `requestImageTargetFor()` 与 `OpencodeGoAdapter.imageRequestTarget()` 中同时返回 `maxImageBytes`、`imageTargetBytes` 与旧字段 `maxBytes`，修复携带图片附件的会话在 DSH `0.2.3-alpha.2` 及后续版本中因缺少 `maxImageBytes` 触发 `INVALID_ATTACHMENT_REF` 导致每轮失败的问题，同时保持对 DSH `0.2.1` / `0.2.2` 宿主的向后兼容。
+
+### Changed
+
+- 预打包发布归档更新为 `dsh-opencode-go-0.4.8.tgz`。
+
 ## [0.4.7] - 2026-11-22
 
 ### Added

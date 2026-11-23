@@ -860,18 +860,36 @@ describe("requests and deadlines", () => {
 
       await adapter.resolveModel(PROVIDER_ID, 'deepseek-v4.1-flash')
       const reported = adapter.imageRequestTarget(PROVIDER_ID, 'deepseek-v4.1-flash', image)
-      expect(reported).toEqual({ width: 2048, height: 2048, maxBytes: requestImageMaxBytes })
+      expect(reported).toEqual({
+        width: 2048,
+        height: 2048,
+        maxBytes: requestImageMaxBytes,
+        maxImageBytes: requestImageMaxBytes,
+        imageTargetBytes: requestImageMaxBytes,
+      })
 
       expect(finishOf(await imageRequest(adapter)).reason).toMatchObject({ kind: 'stop' })
       expect(targets).toHaveLength(1)
-      const serialized = targets[0]!
-      expect({ width: serialized.width, height: serialized.height, maxBytes: serialized.maxBytes }).toEqual(reported)
+      const serialized = targets[0]! as typeof reported
+      expect({
+        width: serialized.width,
+        height: serialized.height,
+        maxBytes: serialized.maxBytes,
+        maxImageBytes: serialized.maxImageBytes,
+        imageTargetBytes: serialized.imageTargetBytes,
+      }).toEqual(reported)
 
       // A live settings edit moves the serialized target and the reported one together.
       requestImagePixelBudget = 1024 * 1024
       requestImageMaxBytes = 100_000
       expect(adapter.imageRequestTarget(PROVIDER_ID, 'deepseek-v4.1-flash', image))
-        .toEqual({ width: 1024, height: 1024, maxBytes: 100_000 })
+        .toEqual({
+          width: 1024,
+          height: 1024,
+          maxBytes: 100_000,
+          maxImageBytes: 100_000,
+          imageTargetBytes: 100_000,
+        })
     })
   })
 })

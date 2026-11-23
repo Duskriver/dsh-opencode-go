@@ -36,7 +36,14 @@ import {
   assertBaseURL,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './config.ts'
-import { toPiContext, toStreamChunks, piContextUsageKey, requestImageTargetFor, type PiImageRequestContext } from './conversion.ts'
+import {
+  toPiContext,
+  toStreamChunks,
+  piContextUsageKey,
+  requestImageTargetFor,
+  type CompatibleImageRequestTarget,
+  type PiImageRequestContext,
+} from './conversion.ts'
 import { GatewayDiagnostics, waitWithSignal, ProxyTransport } from './transport.ts'
 import {
   reasoningChoices,
@@ -599,13 +606,19 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * target. The token meter must price what is sent, not the normalized source.
    * Synchronous by contract; the live configuration is readable without I/O.
    */
-  override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget {
+  override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): CompatibleImageRequestTarget {
     const config = this.options.config()
     const target = requestImageTargetFor(image, {
       maxPixels: config.requestImagePixelBudget,
       maxBytes: config.requestImageMaxBytes,
     })
-    return { width: target.width, height: target.height, maxBytes: target.maxBytes }
+    return {
+      width: target.width,
+      height: target.height,
+      maxBytes: target.maxBytes,
+      maxImageBytes: target.maxImageBytes,
+      imageTargetBytes: target.imageTargetBytes,
+    }
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {

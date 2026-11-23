@@ -340,7 +340,14 @@ describe('request-local image budgets and durable offloading', () => {
     const { read, access } = fixture(), image = ref()
     const options = requestOf({ messages: [user([{ type: 'text', text: 'images' }, { type: 'image', attachment: image }, { type: 'image', attachment: image }])] })
     const result = await toPiContext(options, { ...access, requestImagePolicy: { maxPixels: 1024 * 1024, maxBytes: 1024 } })
-    expect(read).toHaveBeenCalledExactlyOnceWith(image, { width: 1024, height: 1024, maxPixels: 1024 * 1024, maxBytes: 1024 }, expect.any(AbortSignal))
+    expect(read).toHaveBeenCalledExactlyOnceWith(image, {
+      width: 1024,
+      height: 1024,
+      maxPixels: 1024 * 1024,
+      maxBytes: 1024,
+      maxImageBytes: 1024,
+      imageTargetBytes: 1024,
+    }, expect.any(AbortSignal))
     const content = result.messages[0]!.content as any[]
     expect(content.filter(block => block.type === 'image')).toEqual([{ type: 'image', data: 'AQID', mimeType: 'image/png' }, { type: 'image', data: 'AQID', mimeType: 'image/png' }])
     expect(JSON.stringify(content)).toContain(image.attachmentId)
