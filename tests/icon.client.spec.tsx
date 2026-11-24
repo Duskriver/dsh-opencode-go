@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 /**
- * Contract tests for the OpenCode Go marks: the sidebar row icon and the page
- * brand tile. The sidebar icon is the hand-drawn `go` mark (a `g` outline plus
- * the filled and hollow stone pair); pinning its geometry keeps a later refactor
- * from silently reverting to the old wave glyph.
+ * Contract tests for the OpenCode Go marks: the sidebar row icon, the page brand
+ * tile and the SVG package icon. The sidebar icon is the hand-drawn `go` mark (a
+ * `g` outline plus the filled and hollow stone pair); pinning its geometry keeps
+ * a later refactor from silently reverting to the old wave glyph.
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { GoLogo, GoMark, GoRowIcon } from '../src/client/GoMark.tsx'
+import { GO_ROW_GEOMETRY, GoLogo, GoMark, GoRowIcon } from '../src/client/GoMark.tsx'
 
 afterEach(() => { cleanup() })
 
@@ -110,5 +112,73 @@ describe('page brand mark', () => {
     expect(mark.getAttribute('width')).toBe('24')
     expect(mark.getAttribute('height')).toBe('24')
     expect(mark.getAttribute('aria-hidden')).toBe('true')
+  })
+})
+
+describe('package icon', () => {
+  // The Host renders this file through an <img>, never as inline markup.
+  const source = readFileSync(resolve('assets/icon.svg'), 'utf8')
+  const root = new DOMParser().parseFromString(source, 'image/svg+xml').documentElement
+  const attrs = (element: Element | null) =>
+    Object.fromEntries([...(element?.attributes ?? [])].map(({ name, value }) => [name, value]))
+  const gradient = (id: string) => root.querySelector(`linearGradient[id="${id}"]`)
+  const stops = (id: string) =>
+    [...root.querySelectorAll(`linearGradient[id="${id}"] stop`)].map(stop => stop.getAttribute('stop-color'))
+  const precedes = (first: Element | null, second: Element | null) =>
+    Boolean(first && second && (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING))
+  const mark = root.querySelector('g[transform]')
+  const outline = root.querySelector('path')
+  const [stone, hollow] = [...root.querySelectorAll('circle')]
+
+  it('is the manifest icon, ships in the package and stays under the Host size cap', () => {
+    const pkg = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+    expect(pkg.icon).toBe('assets/icon.svg')
+    expect(pkg.files).toContain('assets/icon.svg')
+    // The Host refuses to read an icon larger than 256 KiB.
+    expect(Buffer.byteLength(source, 'utf8')).toBeLessThanOrEqual(256 * 1024)
+  })
+
+  it('is the sidebar mark at 22px, centred in the box the Host frames', () => {
+    expect(root.getAttribute('viewBox')).toBe('0 0 36 36')
+    const placed = /translate\(([\d.]+) ([\d.]+)\) scale\(([\d.]+)\)/.exec(mark?.getAttribute('transform') ?? '')?.slice(1).map(Number)
+    const centre = (36 - 22) / 2
+    expect(placed?.slice(0, 2)).toEqual([centre, centre])
+    expect(placed?.[2]).toBeCloseTo(22 / GO_ROW_GEOMETRY.viewBox, 4)
+    expect(attrs(mark)).toMatchObject({ fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })
+  })
+
+  it('traces GO_ROW_GEOMETRY, so the row icon and the package icon cannot drift apart', () => {
+    expect(outline?.getAttribute('d')).toBe(GO_ROW_GEOMETRY.path)
+    expect(attrs(stone)).toMatchObject({
+      cx: String(GO_ROW_GEOMETRY.stone.cx), cy: String(GO_ROW_GEOMETRY.stone.cy), r: String(GO_ROW_GEOMETRY.stone.r),
+    })
+    expect(attrs(hollow)).toMatchObject({
+      cx: String(GO_ROW_GEOMETRY.outline.cx), cy: String(GO_ROW_GEOMETRY.outline.cy), r: String(GO_ROW_GEOMETRY.outline.r),
+    })
+  })
+
+  it('wears the Host palette: blue outline and hollow stone, green-to-teal filled stone', () => {
+    // Heavier strokes than the 16px row icon, as the built-in line artwork is bold.
+    expect(attrs(outline)).toMatchObject({ 'stroke-width': '2.75' })
+    expect(outline?.parentElement?.getAttribute('stroke')).toBe('url(#a)')
+    expect(attrs(stone)).toMatchObject({ fill: 'url(#b)', stroke: 'none' })
+    expect(attrs(hollow)).toMatchObject({ 'stroke-width': '2.6' })
+    expect(hollow?.parentElement?.getAttribute('stroke')).toBe('url(#a)')
+    // The hollow stone must not also be painted solid.
+    expect(hollow?.getAttribute('fill')).toBeNull()
+    // Painted in the row icon's order, so the hollow stone lies over the filled one.
+    expect(precedes(outline, stone)).toBe(true)
+    expect(precedes(stone, hollow)).toBe(true)
+    expect(stops('a')).toEqual(['#69B9FF', '#324DE2'])
+    expect(stops('b')).toEqual(['#45E7A4', '#05909D'])
+    // Both run top to bottom over the whole mark, so its parts shade alike.
+    for (const id of ['a', 'b']) {
+      expect(attrs(gradient(id))).toMatchObject({ gradientUnits: 'userSpaceOnUse', x1: '18.002', x2: '18.002', y1: '9.525', y2: '26.410' })
+    }
+  })
+
+  it('renders as a standalone image: no inherited colour, script, style or external reference', () => {
+    expect(source).not.toMatch(/currentColor|<script\b|<style\b|<foreignObject\b|\bhref\s*=|@import|url\(\s*['"]?https?:/i)
+    expect(root.querySelector('parsererror')).toBeNull()
   })
 })

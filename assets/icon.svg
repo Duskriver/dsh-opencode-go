@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="512" height="512">
+  <!--
+    Package icon (package.json "icon"). The Host paints it as an image inside its
+    own 40px frame, so nothing here can inherit theme colours.
+    The mark is the sidebar's GO_ROW_GEOMETRY (src/client/GoMark.tsx) at 22px,
+    centred. Palette after the Host's built-in plugin artwork: the g outline and
+    the hollow stone share one blue gradient, the filled stone runs green to teal.
+    tests/icon.client.spec.tsx pins this file to that geometry and palette.
+  -->
+  <defs>
+    <linearGradient id="a" gradientUnits="userSpaceOnUse" x1="18.002" y1="9.525" x2="18.002" y2="26.410">
+      <stop stop-color="#69B9FF"/>
+      <stop offset="1" stop-color="#324DE2"/>
+    </linearGradient>
+    <linearGradient id="b" gradientUnits="userSpaceOnUse" x1="18.002" y1="9.525" x2="18.002" y2="26.410">
+      <stop stop-color="#45E7A4"/>
+      <stop offset="1" stop-color="#05909D"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(7.000 7.000) scale(0.91667)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="url(#a)">
+      <path d="M12.15 4.25C6.45 3.45 2.5 6.8 2.5 11.85c0 4.92 3.3 7.95 8.02 7.95 1.17 0 2.3-.15 3.13-.55M10.52 14.25v5.55" stroke-width="2.75"/>
+    </g>
+    <g stroke="url(#b)">
+      <circle cx="10.65" cy="12.3" r="3.75" fill="url(#b)" stroke="none"/>
+    </g>
+    <g stroke="url(#a)">
+      <circle cx="17.85" cy="12.05" r="3.73" stroke-width="2.6"/>
+    </g>
+  </g>
+</svg>
