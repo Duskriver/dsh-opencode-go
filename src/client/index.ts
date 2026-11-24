@@ -288,6 +288,25 @@ function registerSidebarPage(
   return () => disposePair !== undefined
 }
 
+const MODEL_LABEL_SLOT_PRIORITY = 137
+const MODEL_LABEL_SLOT_MAX_ATTEMPTS = 8
+
+function isSlotPriorityCollision(error: unknown): boolean {
+  return error instanceof Error && /already has a registration/i.test(error.message)
+}
+
+function warnModelLabel(ctx: ClientContext, message: string, error?: unknown): void {
+  const logger = (ctx as { logger?: { warn?: (...args: unknown[]) => void } }).logger
+  const prefix = `[dsh-opencode-go] ${message}`
+  if (typeof logger?.warn === 'function') {
+    if (error !== undefined) logger.warn(prefix, error)
+    else logger.warn(prefix)
+    return
+  }
+  if (error !== undefined) console.warn(prefix, error)
+  else console.warn(prefix)
+}
+
 /**
  * Register the composer model-label slot at a yielding priority while the
  * feature is enabled, vacating the single-occupant slot immediately when turned off.
@@ -311,16 +330,35 @@ function registerModelLabel(
     const active = value?.enabled !== false && (value?.showModelMultiplier ?? DEFAULT_SHOW_MODEL_MULTIPLIER)
     if (!active) { teardown(); return }
     if (!slotReady || disposeLabel !== undefined) return
-    try {
-      const dispose = ctx.slots.register({
-        name: 'conversation.input.model.label',
-        priority: 100,
-        inject: () => ({ settings, catalog, getLocale, t }),
-      }, ModelLabel)
-      disposeLabel = typeof dispose === 'function' ? dispose : () => {}
-    } catch {
-      disposeLabel = undefined
+    let lastError: unknown
+    for (let attempt = 0; attempt < MODEL_LABEL_SLOT_MAX_ATTEMPTS; attempt += 1) {
+      const priority = MODEL_LABEL_SLOT_PRIORITY + attempt
+      try {
+        const dispose = ctx.slots.register({
+          name: 'conversation.input.model.label',
+          priority,
+          inject: () => ({ settings, catalog, getLocale, t }),
+        }, ModelLabel)
+        disposeLabel = typeof dispose === 'function' ? dispose : () => {}
+        if (attempt > 0) {
+          warnModelLabel(
+            ctx,
+            `conversation.input.model.label priority ${MODEL_LABEL_SLOT_PRIORITY} already taken; registered at yielding priority ${priority}`,
+          )
+        }
+        return
+      } catch (error) {
+        lastError = error
+        if (isSlotPriorityCollision(error) && attempt + 1 < MODEL_LABEL_SLOT_MAX_ATTEMPTS) continue
+        break
+      }
     }
+    disposeLabel = undefined
+    warnModelLabel(
+      ctx,
+      'failed to register conversation.input.model.label; model multiplier badge disabled:',
+      lastError,
+    )
   }
   ctx.effect(() => ctx.slots.inject('conversation.input.model.label', () => {
     slotReady = true

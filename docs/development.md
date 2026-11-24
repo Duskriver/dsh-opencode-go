@@ -39,7 +39,7 @@ Vitest tests are organized by domain:
 | `theme.client.spec.ts`, `appearance-theme.spec.ts` | Native/Classic token resolution, neutral Host-token fallbacks, host font inheritance, WCAG 1.4.11 3:1 control boundaries and `--go-track` quota bar contrast |
 | `sidebar-page.client.spec.tsx`, `sidebar-page-registration.client.spec.tsx` | Opt-in 7-tab console page (`sidebar.panellist` + `main`), dynamic pair registration, staged-only save bar, immediate provider failure alerts and locale copy |
 | `settings-nav-icon.client.spec.tsx`, `icon.client.spec.tsx` | `GO_ROW_GEOMETRY` hand-drawn `go` mark, DSH 0.2.2+ `settings.section.icon` seat and older-host CSS-mask DOM fallback |
-| `model-label.client.spec.tsx` | Composer `conversation.input.model.label` slot registration at yielding priority `100`, shared catalog RPC deduplication, live peak transition clock and immediate slot disposal when `showModelMultiplier` is turned off |
+| `model-label.client.spec.tsx` | Composer `conversation.input.model.label` slot registration at yielding priority `137` (with collision backoff and warning), shared catalog RPC deduplication, live peak transition clock and immediate slot disposal when `showModelMultiplier` is turned off |
 | `adapter.spec.ts` | Requests, capacity limits, `providerRetryPolicy`, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |

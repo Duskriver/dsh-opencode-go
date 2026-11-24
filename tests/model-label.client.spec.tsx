@@ -55,7 +55,13 @@ describe('composer model-label slot and multiplier rendering', () => {
     source: 'go',
   }
 
-  function harness(options: { initial?: OpencodeGoSettings; models?: GoModel[]; failRegister?: boolean } = {}) {
+  function harness(options: {
+    initial?: OpencodeGoSettings
+    models?: GoModel[]
+    failRegister?: boolean
+    failPriorities?: number[]
+    loggerWarn?: ReturnType<typeof vi.fn>
+  } = {}) {
     const settings = createConfigForm<OpencodeGoSettings>({
       enabled: true,
       showModelMultiplier: true,
@@ -65,8 +71,16 @@ describe('composer model-label slot and multiplier rendering', () => {
     })
     const effects: unknown[] = []
     const slotsRegister = vi.fn((opts: Record<string, unknown>, component: unknown) => {
-      if (options.failRegister && opts.name === 'conversation.input.model.label') {
-        throw new Error('single slot occupied')
+      if (opts.name === 'conversation.input.model.label') {
+        const priority = typeof opts.priority === 'number' ? opts.priority : 0
+        if (options.failPriorities?.includes(priority)) {
+          throw new Error(
+            `single slot "conversation.input.model.label" already has a registration at priority ${priority} — register at a different priority to shadow it (lowest renders)`,
+          )
+        }
+        if (options.failRegister) {
+          throw new Error('single slot occupied')
+        }
       }
       const dispose = vi.fn()
       registrations.push({ opts, component, dispose })
@@ -79,6 +93,7 @@ describe('composer model-label slot and multiplier rendering', () => {
     }))
     const ctx = {
       configForms: { get: () => settings.form },
+      ...(options.loggerWarn ? { logger: { warn: options.loggerWarn } } : {}),
       inject: (services: string[], install: (ready: unknown) => void) => {
         if (services.every(path => path.split('.').reduce<unknown>((v, k) => v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined, ctx))) {
           install(ctx)
@@ -215,13 +230,13 @@ describe('composer model-label slot and multiplier rendering', () => {
     expect(readModels).toHaveBeenCalledTimes(2)
   })
 
-  it('registers conversation.input.model.label at yielding priority, disposes when toggled off, and survives collisions', async () => {
+  it('registers conversation.input.model.label at yielding priority, disposes when toggled off, backs off on collision, and warns on failure', async () => {
     const h = harness()
     try {
       apply(h.ctx as never)
       const reg = h.registrations.find(entry => entry.opts.name === 'conversation.input.model.label')
       expect(reg).toBeTruthy()
-      expect(reg?.opts.priority).toBe(100)
+      expect(reg?.opts.priority).toBe(137)
       expect(reg?.component).toBe(ModelLabel)
 
       // Turning showModelMultiplier off disposes the slot registration immediately.
@@ -235,11 +250,48 @@ describe('composer model-label slot and multiplier rendering', () => {
       await h.dispose()
     }
 
-    // Slot collision at the same priority is absorbed gracefully without breaking plugin mount.
+    // Priority collision backs off to the next yielding priority and logs a warning.
+    const backoffWarn = vi.fn()
+    const backedOff = harness({ failPriorities: [137], loggerWarn: backoffWarn })
+    try {
+      expect(() => apply(backedOff.ctx as never)).not.toThrow()
+      const reg = backedOff.registrations.find(entry => entry.opts.name === 'conversation.input.model.label')
+      expect(reg?.opts.priority).toBe(138)
+      expect(backoffWarn).toHaveBeenCalledWith(
+        expect.stringContaining('registered at yielding priority 138'),
+      )
+    } finally {
+      await backedOff.dispose()
+    }
+
+    // Exhausted priority collisions still keep settings mounted and emit a warning.
+    const exhaustedWarn = vi.fn()
+    const exhausted = harness({
+      failPriorities: [137, 138, 139, 140, 141, 142, 143, 144],
+      loggerWarn: exhaustedWarn,
+    })
+    try {
+      expect(() => apply(exhausted.ctx as never)).not.toThrow()
+      expect(exhausted.registrations.some(entry => entry.opts.name === 'conversation.input.model.label')).toBe(false)
+      expect(exhausted.registrations.some(entry => entry.opts.name === 'settings.section')).toBe(true)
+      expect(exhaustedWarn).toHaveBeenCalledWith(
+        expect.stringContaining('model multiplier badge disabled'),
+        expect.any(Error),
+      )
+    } finally {
+      await exhausted.dispose()
+    }
+
+    // Non-collision failure is absorbed without breaking plugin mount and falls back to console.warn.
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const colliding = harness({ failRegister: true })
     try {
       expect(() => apply(colliding.ctx as never)).not.toThrow()
       expect(colliding.registrations.some(entry => entry.opts.name === 'settings.section')).toBe(true)
+      expect(consoleWarn).toHaveBeenCalledWith(
+        expect.stringContaining('model multiplier badge disabled'),
+        expect.any(Error),
+      )
     } finally {
       await colliding.dispose()
     }
