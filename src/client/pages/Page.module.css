@@ -15,7 +15,8 @@
   font-size: 13.5px;
   line-height: 1.55;
   overflow: hidden;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 /* The host hands the page a bare flex column, so this element is the scrollport:
@@ -67,6 +68,20 @@
   margin-bottom: 16px;
 }
 
+.headLead { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brandBadge {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--go-accent) 28%, var(--go-border));
+  border-radius: var(--go-radius-card);
+  background: color-mix(in srgb, var(--go-accent) 12%, var(--go-surface));
+  color: var(--go-accent);
+  box-shadow: var(--go-tile-shadow);
+}
 .headMain { min-width: 0; display: flex; flex-direction: column; }
 
 .title {

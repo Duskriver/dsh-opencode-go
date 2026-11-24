@@ -3,6 +3,7 @@ import css from './AboutPage.module.css'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CLIENT_BUILD_INFO } from '../build-info.ts'
+import { GoRowIcon } from '../GoMark.tsx'
 import { formatDateTime } from '../presentation.ts'
 import type { PageViewProps } from './types.ts'
 
@@ -138,7 +139,10 @@ export function AboutPage({ state, actions, locale }: PageViewProps): ReactNode 
   return <div className={css.grid}>
     <section className={css.card}>
       <div className={css.cardHead}>
-        <h2 className={css.cardTitle}>{t('aboutTitle')}</h2>
+        <span className={css.titleLead}>
+          <span className={css.aboutMark} aria-hidden="true"><GoRowIcon size={16} /></span>
+          <h2 className={css.cardTitle}>{t('aboutTitle')}</h2>
+        </span>
         <Tag tone="neutral">v{CLIENT_BUILD_INFO.version}</Tag>
       </div>
       <dl className={css.rows}>

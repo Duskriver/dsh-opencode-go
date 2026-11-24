@@ -3,6 +3,7 @@ import css from './Page.module.css'
 import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { themeStyle, useGoThemeTokens } from '../presentation.ts'
+import { GoRowIcon } from '../GoMark.tsx'
 import { setPageTab, usePageTab } from './nav.ts'
 import {
   PAGE_TABS,
@@ -114,9 +115,12 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     <div className={css.scroller} ref={scroller}>
       <div className={css.page}>
         <header className={css.head}>
-          <div className={css.headMain}>
-            <h1 className={css.title}>{seats.t('pageTitle')}</h1>
-            <p className={css.sub}>{seats.t('pageSubtitle')}</p>
+          <div className={css.headLead}>
+            <span className={css.brandBadge} aria-hidden="true"><GoRowIcon size={22} /></span>
+            <div className={css.headMain}>
+              <h1 className={css.title}>{seats.t('pageTitle')}</h1>
+              <p className={css.sub}>{seats.t('pageSubtitle')}</p>
+            </div>
           </div>
           <div className={css.headActions}>
             <span className={css.statusChip} data-on={state.enabled ? 'true' : 'false'} title={statusText}>

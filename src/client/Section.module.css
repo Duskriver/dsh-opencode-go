@@ -197,6 +197,8 @@
   font-family: var(--go-font);
   font-size: 13px;
   line-height: 1.6;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   /* The tab layout only queries width, so containment stays inline: a size
      container ignores its contents, and a shell that gives this page no
      definite height would then freeze it at the padding box while the tab
@@ -427,26 +429,61 @@
 .groupHead:first-child { margin-top: 4px; }
 .groupHead::after { content: ''; flex: 1; height: 0.5px; background: var(--go-border); }
 
-/* Appearance sits in the same list; only the two selectable previews are framed. */
+/* Appearance sits in the same list; theme Bento cards and the 3x2 pill/sandbox
+   grid give immediate visual feedback without awkward empty slots. */
 .appearanceGroup { min-width: 0; margin-top: 10px; }
 .appearanceHead::after { order: 1; }
 .appearanceHead .reset { order: 2; flex: none; letter-spacing: normal; }
 .appearanceTitle { margin: 0; font: inherit; }
-.appearanceToggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0 16px; }
+.appearanceToggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 0 13px; }
+.appearanceToggle + .appearanceToggle { border-top: 0.5px solid var(--go-border-subtle); }
 .appearanceCopy { min-width: 0; }
-.appearanceHint { margin: 4px 0 0; font-size: 12px; line-height: 1.6; color: var(--go-muted); }
-.appearanceStyles { min-width: 0; margin: 0; padding: 0 0 4px; border: 0; }
+.appearanceCopy .rowLabel { min-height: 0; }
+.appearanceHint { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: var(--go-muted); }
+.appearanceStyles { min-width: 0; margin: 0; padding: 8px 0 6px; border: 0; }
 .appearanceLegend { display: flex; align-items: center; gap: 7px; padding: 0; }
-.appearanceChoices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
-.appearanceChoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--go-border); border-radius: var(--go-radius-option); background: var(--go-surface-sunken); cursor: pointer; }
+.appearanceThemeGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.appearancePillGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.appearanceChoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--go-border); border-radius: var(--go-radius-option); background: var(--go-surface-sunken); cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
 .appearanceChoice:hover:not([data-disabled='true']) { border-color: var(--go-border-elevated); background: var(--go-surface-elevated); }
 .appearanceChoice[data-selected='true'] { border-color: var(--go-accent); background: color-mix(in srgb, var(--go-accent) 10%, var(--go-surface-2)); box-shadow: var(--go-card-shadow); }
 .appearanceChoice:has(:focus-visible) { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .appearanceChoice[data-disabled='true'] { opacity: .5; cursor: default; }
-.appearanceChoiceHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--go-text); }
+.appearanceChoiceHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 500; line-height: 1.5; color: var(--go-text); }
 .appearanceRadio { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--go-accent); cursor: inherit; }
-.appearancePreview { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 44px; padding: 6px 10px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small); background: var(--go-bg); color: var(--go-text); }
+.appearancePreview { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; min-height: 52px; padding: 8px 10px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small); background: var(--go-bg); color: var(--go-text); }
+.appearanceLegendHint { font-size: 10px; line-height: 1.3; color: var(--go-muted); white-space: nowrap; }
 .appearanceSample { max-width: 100%; box-sizing: border-box; overflow: hidden; pointer-events: none; }
+
+/* Miniature Bento card inside each theme radio so Native vs Classic are instantly legible. */
+.themeBento { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 10px 11px; border: 1px solid var(--go-border); border-radius: var(--go-radius-card); background: var(--go-bg); color: var(--go-text); font-family: var(--go-font); }
+.themeBentoTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.themeBentoTitle { font-family: var(--go-display-font); font-size: 14px; font-weight: var(--go-display-weight); letter-spacing: var(--go-display-tracking); line-height: 1.2; color: var(--go-text); }
+.themeBentoSwatches { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.themeSwatchAccent, .themeSwatchSuccess, .themeSwatchWarn { width: 8px; height: 8px; border-radius: 999px; }
+.themeSwatchAccent { background: var(--go-accent); }
+.themeSwatchSuccess { background: var(--go-success); }
+.themeSwatchWarn { background: var(--go-warning); }
+.themeBentoSub { font-size: 10.5px; line-height: 1.3; color: var(--go-muted); margin-top: -3px; }
+.themeBentoCard { display: flex; flex-direction: column; gap: 5px; padding: 6px 8px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small); background: var(--go-surface); }
+.themeBentoMeta { display: flex; align-items: baseline; justify-content: space-between; font-size: 10.5px; line-height: 1.2; color: var(--go-muted); }
+.themeBentoMeta strong { font-family: var(--go-number-font); font-weight: 600; color: var(--go-text); }
+.themeBentoTrack { display: block; height: 4px; border-radius: 99px; background: var(--go-track); overflow: hidden; }
+.themeBentoFill { display: block; width: 42%; height: 100%; border-radius: inherit; background: var(--go-accent); }
+
+/* 6th cell of the 3x2 pill style grid: live sandbox combining active style, border and states. */
+.appearanceSandbox { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; min-width: 0; padding: 10px 12px; border: 1px dashed var(--go-border-elevated); border-radius: var(--go-radius-option); background: var(--go-bg); color: var(--go-text); }
+.sandboxHead { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; line-height: 1.4; }
+.sandboxTitle { font-weight: 600; color: var(--go-text); }
+.sandboxTag { font-size: 10.5px; color: var(--go-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sandboxRows { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sandboxRow { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.sandboxLabel { font-size: 10px; line-height: 1.2; color: var(--go-muted); }
+
+/* Causal notice + dimmed styling when Usage display is switched Off. */
+.causalNotice { margin: 2px 0 6px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--go-warning) 35%, var(--go-border)); border-radius: var(--go-radius-option); background: color-mix(in srgb, var(--go-warning) 8%, var(--go-surface-sunken)); font-size: 11.5px; line-height: 1.5; color: var(--go-muted); }
+.composerStyleZone { transition: opacity 150ms ease; }
+.composerStyleZone[data-inactive='true'] { opacity: .54; }
 
 /* The hint mark a label carries: the Host's own question glyph, its own bubble. */
 .info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; background: none; font: inherit; font-size: 12px; line-height: 1; color: var(--go-muted); cursor: help; }
@@ -1167,12 +1204,14 @@
   .cardHead { flex-wrap: wrap; }
   .cardHead > .cardTrigger { flex: 1 1 180px; min-width: 0; }
   .cardHead > .trailing { margin-left: auto; }
+  .appearancePillGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @container (max-width: 440px) {
   /* One column cannot stretch: each row stacks its control under its label. */
   .row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .appearanceChoices { grid-template-columns: minmax(0, 1fr); }
+  .appearanceThemeGrid,
+  .appearancePillGrid { grid-template-columns: minmax(0, 1fr); }
   /* One column cannot stretch: the list and the card stack, and each keeps its
      own ceiling. */
   .modelLayout,

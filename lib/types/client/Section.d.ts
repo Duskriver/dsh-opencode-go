@@ -65,9 +65,10 @@ export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
 /** Props delivered by the slot outlet: the inject face spread flat. */
 export type OpencodeGoSectionProps = Partial<InjectFace<OpencodeGoSectionInjected>>;
 /**
- * The Appearance tab's card. Extracted from `Loaded` so the sidebar page and the
- * settings section render one implementation; the classes and children are the
- * ones the settings tests already read.
+ * The Appearance tab's card, organized into three clear domains:
+ * 1) Global interface theme (with miniature Bento previews),
+ * 2) Conversation input bar (display mode + causal muted 3×2 style/sandbox grid + border),
+ * 3) Sidebar & model picker toggles.
  */
 export declare function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface }: {
     state: OpencodeGoSectionState;

@@ -1403,12 +1403,26 @@ function ValueField(props: ValueFieldProps) {
   )
 }
 
-/** Appearance controls; the card above them owns the heading and reset. */
-function QuotaAppearance({ state, t, disabled, onEdit }: {
+const SANDBOX_ALERT_WINDOWS = {
+  rolling: { status: 'ok' as const, percent: 86, resetsAt: '2026-11-17T00:00:00Z' },
+  weekly: { status: 'ok' as const, percent: 64, resetsAt: '2026-11-24T00:00:00Z' },
+  monthly: { status: 'ok' as const, percent: 92, resetsAt: '2026-12-01T00:00:00Z' },
+}
+
+/**
+ * The Appearance tab's card, organized into three clear domains:
+ * 1) Global interface theme (with miniature Bento previews),
+ * 2) Conversation input bar (display mode + causal muted 3×2 style/sandbox grid + border),
+ * 3) Sidebar & model picker toggles.
+ */
+export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface = 'settings' }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
   disabled: boolean
+  saving: boolean
   onEdit: (field: TextField, text: string) => void
+  resetField: (field: EditableField) => void
+  surface?: 'settings' | 'page'
 }) {
   const scheme = useHostScheme()
   const draftTheme = state.appearanceTheme.text === 'classic' ? 'classic' : 'native'
@@ -1417,104 +1431,188 @@ function QuotaAppearance({ state, t, disabled, onEdit }: {
   const themeId = 'opencode-go-appearance-theme'
   const themeDescribedBy = state.appearanceTheme.invalid ? `${themeId}-hint ${themeId}-error` : `${themeId}-hint`
   const styleId = 'opencode-go-usage-pill-style'
-  const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
+  const styleDescribedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
   const selectedStyle = (USAGE_PILL_STYLES as readonly string[]).includes(state.usagePillStyle?.text ?? '')
     ? (state.usagePillStyle.text as UsagePillStyle)
     : DEFAULT_USAGE_PILL_STYLE
   const borderEnabled = state.usagePillBorder?.text !== 'false'
-  return <div className={css.appearanceGroup}>
-    <div className={css.rows}>
-    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
-      aria-describedby={themeDescribedBy} aria-invalid={state.appearanceTheme.invalid || undefined}>
-      <legend className={css.appearanceLegend}>
-        <span id={`${themeId}-label`} className={css.rowTitle}>{t('appearanceThemeLabel')}</span>
-        <HintMark hint={t('appearanceThemeHint')} />
-      </legend>
-      <p id={`${themeId}-hint`} className={css.appearanceHint}>{t('appearanceThemePreviewHint')}</p>
-      <div className={css.appearanceChoices}>
-        {OPENCODE_GO_THEMES.map(value => <label key={value} className={css.appearanceChoice}
-          data-selected={state.appearanceTheme.text === value} data-disabled={locked}>
-          <span className={css.appearanceChoiceHead}>
-            <span>{t(`appearanceTheme_${value}`)}</span>
-            <input type="radio" name={themeId} value={value} className={css.appearanceRadio}
-              checked={state.appearanceTheme.text === value} disabled={locked} aria-describedby={themeDescribedBy}
-              onChange={() => { onEdit('appearanceTheme', value) }} />
-          </span>
-          <span className={css.appearancePreview} style={themeStyle(GO_THEME_TOKENS[value][scheme])} aria-hidden="true">
-            <span className={`${usageCss.trigger} ${css.appearanceSample}`}>
-              {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
-            </span>
-          </span>
-        </label>)}
-      </div>
-      {state.appearanceTheme.invalid
-        ? <p id={`${themeId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
-    </fieldset>
-    <div className={css.appearanceToggle}>
-      <div className={css.appearanceCopy}>
-        <div className={css.rowLabel}>
-          <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
-          <HintMark hint={t('showSidebarQuotaHint')} />
+  const composerOff = state.usageDisplay?.text === 'off'
+  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
+  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field]?.overridden || state[field]?.invalid)
+  // Appearance writes as each control changes; a refused write names this card.
+  const writeFailed = state.writeFailed !== undefined
+    && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
+  return <section className={surface === 'page' ? css.cardPage : css.card}>
+    <div className={css.cardBody}>
+      <div className={css.rows}>
+        <div className={css.groupHead}>{t('appearanceGroupTheme')}</div>
+        <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
+          aria-describedby={themeDescribedBy} aria-invalid={state.appearanceTheme.invalid || undefined}>
+          <legend className={css.appearanceLegend}>
+            <span id={`${themeId}-label`} className={css.rowTitle}>{t('appearanceThemeLabel')}</span>
+          </legend>
+          <p id={`${themeId}-hint`} className={css.appearanceHint}>{t('appearanceThemeHint')}</p>
+          <div className={css.appearanceThemeGrid}>
+            {OPENCODE_GO_THEMES.map(value => <label key={value} className={css.appearanceChoice}
+              data-selected={state.appearanceTheme.text === value} data-disabled={locked}>
+              <span className={css.appearanceChoiceHead}>
+                <span>{t(`appearanceTheme_${value}`)}</span>
+                <input type="radio" name={themeId} value={value} className={css.appearanceRadio}
+                  checked={state.appearanceTheme.text === value} disabled={locked} aria-describedby={themeDescribedBy}
+                  onChange={() => { onEdit('appearanceTheme', value) }} />
+              </span>
+              <span className={css.themeBento} style={themeStyle(GO_THEME_TOKENS[value][scheme])} aria-hidden="true">
+                <span className={css.themeBentoTop}>
+                  <span className={css.themeBentoTitle}>OpenCode Go</span>
+                  <span className={css.themeBentoSwatches}>
+                    <span className={css.themeSwatchAccent} />
+                    <span className={css.themeSwatchSuccess} />
+                    <span className={css.themeSwatchWarn} />
+                  </span>
+                </span>
+                <span className={css.themeBentoSub}>{t(`appearanceThemeTag_${value}`)}</span>
+                <span className={css.themeBentoCard}>
+                  <span className={css.themeBentoMeta}>
+                    <span>{t('usageRollingShort')}</span>
+                    <strong>42%</strong>
+                  </span>
+                  <span className={css.themeBentoTrack}>
+                    <span className={css.themeBentoFill} />
+                  </span>
+                </span>
+                <span className={`${usageCss.trigger} ${css.appearanceSample}`}>
+                  {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
+                </span>
+              </span>
+            </label>)}
+          </div>
+          {state.appearanceTheme.invalid
+            ? <p id={`${themeId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+        </fieldset>
+
+        <div className={css.groupHead}>{t('appearanceGroupComposer')}</div>
+        <ValueField
+          id="opencode-go-usage-display"
+          label={t('usageDisplayLabel')}
+          hint={t('usageDisplayHint')}
+          field={state.usageDisplay}
+          options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
+          invalidLabel={t('invalidValue')}
+          disabled={disabled}
+          onEdit={text => { onEdit('usageDisplay', text) }}
+        />
+        {composerOff ? <p className={css.causalNotice} role="status">{t('usageDisplayOffNote')}</p> : null}
+        <div className={css.composerStyleZone} data-inactive={composerOff ? 'true' : undefined}>
+          <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
+            aria-describedby={styleDescribedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
+            <legend className={css.appearanceLegend}>
+              <span id={`${styleId}-label`} className={css.rowTitle}>{t('usagePillStyleLabel')}</span>
+            </legend>
+            <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
+            <div className={css.appearancePillGrid}>
+              {USAGE_PILL_STYLES.map(value => {
+                const legend = value === 'concentric' ? t('usagePillLegendConcentric')
+                  : value === 'rings' ? t('usagePillLegendRings') : undefined
+                return <label key={value} className={css.appearanceChoice}
+                  data-selected={selectedStyle === value} data-disabled={locked}>
+                  <span className={css.appearanceChoiceHead}>
+                    <span>{t(`usagePillStyle_${value}`)}</span>
+                    <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
+                      checked={selectedStyle === value} disabled={locked} aria-describedby={styleDescribedBy}
+                      onChange={() => { onEdit('usagePillStyle', value) }} />
+                  </span>
+                  <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
+                    <UsageTriggerPreview style={value} border={borderEnabled}
+                      rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+                      className={css.appearanceSample} />
+                    {legend ? <span className={css.appearanceLegendHint}>{legend}</span> : null}
+                  </span>
+                </label>
+              })}
+              <div className={css.appearanceSandbox} style={themeStyle(tokens)} aria-hidden="true" data-appearance-sandbox="">
+                <span className={css.sandboxHead}>
+                  <span className={css.sandboxTitle}>{t('appearanceSandboxTitle')}</span>
+                  <span className={css.sandboxTag}>{t(`usagePillStyle_${selectedStyle}`)}</span>
+                </span>
+                <div className={css.sandboxRows}>
+                  <div className={css.sandboxRow}>
+                    <span className={css.sandboxLabel}>{t('appearanceSandboxNormal')}</span>
+                    <UsageTriggerPreview style={selectedStyle} border={borderEnabled}
+                      rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+                      accountName={t('appearanceSandboxAccount')}
+                      className={css.appearanceSample} />
+                  </div>
+                  <div className={css.sandboxRow}>
+                    <span className={css.sandboxLabel}>{t('appearanceSandboxAlert')}</span>
+                    <UsageTriggerPreview style={selectedStyle} border={borderEnabled}
+                      rolling={SANDBOX_ALERT_WINDOWS.rolling}
+                      weekly={SANDBOX_ALERT_WINDOWS.weekly}
+                      monthly={SANDBOX_ALERT_WINDOWS.monthly}
+                      rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+                      monthShort={t('usageMonthShort')}
+                      className={css.appearanceSample} />
+                  </div>
+                </div>
+              </div>
+            </div>
+            {state.usagePillStyle.invalid
+              ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+          </fieldset>
+          <div className={css.appearanceToggle}>
+            <div className={css.appearanceCopy}>
+              <div className={css.rowLabel}>
+                <span className={css.rowTitle}>{t('usagePillBorderLabel')}</span>
+              </div>
+              <p className={css.appearanceHint}>{t('usagePillBorderSummary')}</p>
+            </div>
+            <Switch checked={borderEnabled} label={t('usagePillBorderLabel')}
+              title={t('usagePillBorderHint')} disabled={locked}
+              onChange={next => { onEdit('usagePillBorder', String(next)) }} />
+          </div>
         </div>
-        <p className={css.appearanceHint}>{t('showSidebarQuotaSummary')}</p>
-      </div>
-      <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
-        title={t('showSidebarQuotaHint')} disabled={locked}
-        onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
-    </div>
-    <div className={css.appearanceToggle}>
-      <div className={css.appearanceCopy}>
-        <div className={css.rowLabel}>
-          <span className={css.rowTitle}>{t('showModelMultiplierLabel')}</span>
-          <HintMark hint={t('showModelMultiplierHint')} />
+
+        <div className={css.groupHead}>{t('appearanceGroupWorkspace')}</div>
+        <div className={css.appearanceToggle}>
+          <div className={css.appearanceCopy}>
+            <div className={css.rowLabel}>
+              <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
+              <HintMark hint={t('showSidebarQuotaHint')} />
+            </div>
+            <p className={css.appearanceHint}>{t('showSidebarQuotaSummary')}</p>
+          </div>
+          <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
+            title={t('showSidebarQuotaHint')} disabled={locked}
+            onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
         </div>
-        <p className={css.appearanceHint}>{t('showModelMultiplierSummary')}</p>
-      </div>
-      <Switch checked={(state.showModelMultiplier?.text ?? String(DEFAULT_SHOW_MODEL_MULTIPLIER)) !== 'false'}
-        label={t('showModelMultiplierLabel')}
-        title={t('showModelMultiplierHint')} disabled={locked}
-        onChange={next => { onEdit('showModelMultiplier', String(next)) }} />
-    </div>
-    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
-      aria-describedby={describedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
-      <legend className={css.appearanceLegend}>
-        <span id={`${styleId}-label`} className={css.rowTitle}>{t('usagePillStyleLabel')}</span>
-        <HintMark hint={t('usagePillStyleHint')} />
-      </legend>
-      <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
-      <div className={css.appearanceChoices}>
-        {USAGE_PILL_STYLES.map(value => <label key={value} className={css.appearanceChoice}
-          data-selected={selectedStyle === value} data-disabled={locked}>
-          <span className={css.appearanceChoiceHead}>
-            <span>{t(`usagePillStyle_${value}`)}</span>
-            <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
-              checked={selectedStyle === value} disabled={locked} aria-describedby={describedBy}
-              onChange={() => { onEdit('usagePillStyle', value) }} />
-          </span>
-          <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
-            <UsageTriggerPreview style={value} border={borderEnabled}
-              rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
-              className={css.appearanceSample} />
-          </span>
-        </label>)}
-      </div>
-      {state.usagePillStyle.invalid
-        ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
-    </fieldset>
-    <div className={css.appearanceToggle}>
-      <div className={css.appearanceCopy}>
-        <div className={css.rowLabel}>
-          <span className={css.rowTitle}>{t('usagePillBorderLabel')}</span>
-          <HintMark hint={t('usagePillBorderHint')} />
+        <div className={css.appearanceToggle}>
+          <div className={css.appearanceCopy}>
+            <div className={css.rowLabel}>
+              <span className={css.rowTitle}>{t('showModelMultiplierLabel')}</span>
+            </div>
+            <p className={css.appearanceHint}>{t('showModelMultiplierSummary')}</p>
+          </div>
+          <Switch checked={(state.showModelMultiplier?.text ?? String(DEFAULT_SHOW_MODEL_MULTIPLIER)) !== 'false'}
+            label={t('showModelMultiplierLabel')}
+            title={t('showModelMultiplierHint')} disabled={locked}
+            onChange={next => { onEdit('showModelMultiplier', String(next)) }} />
         </div>
-        <p className={css.appearanceHint}>{t('usagePillBorderSummary')}</p>
       </div>
-      <Switch checked={borderEnabled} label={t('usagePillBorderLabel')}
-        title={t('usagePillBorderHint')} disabled={locked}
-        onChange={next => { onEdit('usagePillBorder', String(next)) }} />
+      {writeFailed ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
+      {/* The reset action closes the card: a title row above the fields only
+          repeated the tab label and pushed the first setting down. */}
+      <div className={css.cardActions}>
+        <button type="button" className={css.reset}
+          disabled={disabled || saving || !canReset}
+          onClick={() => {
+            for (const field of APPEARANCE_TAB_FIELDS) {
+              if (state[field]?.overridden || state[field]?.invalid) resetField(field)
+            }
+          }}>
+          {t('usageAppearanceReset')}
+        </button>
+      </div>
     </div>
-    </div>
-  </div>
+  </section>
 }
 
 /** Compact freshness for the selected source; full timestamps stay available on hover. */
@@ -1571,58 +1669,6 @@ function ModelsBody({ models, t, source, showProgress = true }: {
     .filter((warning): warning is string => Boolean(warning))
   return <>{progress}{warnings.map((warning, index) => <p className={css.failedNote} role="alert" key={index}>{warning}</p>)}
     {models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
-}
-
-/**
- * The Appearance tab's card. Extracted from `Loaded` so the sidebar page and the
- * settings section render one implementation; the classes and children are the
- * ones the settings tests already read.
- */
-export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface = 'settings' }: {
-  state: OpencodeGoSectionState
-  t: SectionTranslate
-  disabled: boolean
-  saving: boolean
-  onEdit: (field: TextField, text: string) => void
-  resetField: (field: EditableField) => void
-  surface?: 'settings' | 'page'
-}) {
-  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
-  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field]?.overridden || state[field]?.invalid)
-  // Appearance writes as each control changes; a refused write names this card.
-  const writeFailed = state.writeFailed !== undefined
-    && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
-  return <section className={surface === 'page' ? css.cardPage : css.card}>
-    <div className={css.cardBody}>
-      <div className={css.rows}>
-        <ValueField
-          id="opencode-go-usage-display"
-          label={t('usageDisplayLabel')}
-          hint={t('usageDisplayHint')}
-          field={state.usageDisplay}
-          options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
-          invalidLabel={t('invalidValue')}
-          disabled={disabled}
-          onEdit={text => { onEdit('usageDisplay', text) }}
-        />
-        <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={onEdit} />
-      </div>
-      {writeFailed ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
-      {/* The reset action closes the card: a title row above the fields only
-          repeated the tab label and pushed the first setting down. */}
-      <div className={css.cardActions}>
-        <button type="button" className={css.reset}
-          disabled={disabled || saving || !canReset}
-          onClick={() => {
-            for (const field of APPEARANCE_TAB_FIELDS) {
-              if (state[field]?.overridden || state[field]?.invalid) resetField(field)
-            }
-          }}>
-          {t('usageAppearanceReset')}
-        </button>
-      </div>
-    </div>
-  </section>
 }
 
 function ProbeRow({ label, result, t }: { label: string; result: ProbeEndpointResult; t: SectionTranslate }) {

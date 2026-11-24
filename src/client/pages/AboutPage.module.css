@@ -17,6 +17,19 @@
 }
 
 .cardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.titleLead { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.aboutMark {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--go-accent) 26%, var(--go-border));
+  border-radius: var(--go-radius-small);
+  background: color-mix(in srgb, var(--go-accent) 10%, var(--go-surface-2));
+  color: var(--go-accent);
+}
 .cardTitle { margin: 0; font-size: 13.5px; line-height: 20px; font-weight: 600; color: var(--go-text); }
 
 .rows { display: flex; flex-direction: column; margin: 0; }

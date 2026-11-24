@@ -1,6 +1,6 @@
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store';
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client';
-import { type GoModelCatalog, type GoUsage, type UsagePillStyle, type AnalyticsQuery, type AnalyticsReport, type AnalyticsExport } from '../contracts.ts';
+import { type GoModelCatalog, type GoUsage, type UsageWindow, type UsagePillStyle, type AnalyticsQuery, type AnalyticsReport, type AnalyticsExport } from '../contracts.ts';
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client';
 import type { OpencodeGoSettings } from './controller.ts';
 import type { SharedModelCatalog } from './model-catalog-store.ts';
@@ -32,11 +32,16 @@ export type SidebarQuotaProps = Omit<UsagePillProps, 'directory'> & {
     wide: boolean;
 };
 /** Render a live, non-interactive quota trigger sample for Settings and Console appearance cards. */
-export declare function UsageTriggerPreview({ style, border, rollingShort, weekShort, className }: {
+export declare function UsageTriggerPreview({ style, border, rollingShort, weekShort, monthShort, rolling, weekly, monthly, accountName, className, }: {
     style: UsagePillStyle;
     border: boolean;
     rollingShort: string;
     weekShort: string;
+    monthShort?: string;
+    rolling?: UsageWindow;
+    weekly?: UsageWindow;
+    monthly?: UsageWindow;
+    accountName?: string;
     className?: string;
 }): import("react").JSX.Element;
 /** Only a visible, enabled input indicator mounts the usage poller. */

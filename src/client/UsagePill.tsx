@@ -310,13 +310,32 @@ const PREVIEW_WINDOWS = {
 }
 
 /** Render a live, non-interactive quota trigger sample for Settings and Console appearance cards. */
-export function UsageTriggerPreview({ style, border, rollingShort, weekShort, className }: {
-  style: UsagePillStyle; border: boolean; rollingShort: string; weekShort: string; className?: string
+export function UsageTriggerPreview({
+  style, border, rollingShort, weekShort, monthShort, rolling, weekly, monthly, accountName, className,
+}: {
+  style: UsagePillStyle
+  border: boolean
+  rollingShort: string
+  weekShort: string
+  monthShort?: string
+  rolling?: UsageWindow
+  weekly?: UsageWindow
+  monthly?: UsageWindow
+  accountName?: string
+  className?: string
 }) {
   return <span className={[css.trigger, !border ? css.plain : undefined, className].filter(Boolean).join(' ')}
     data-pill-style={style} data-pill-border={String(border)}>
-    <UsageTriggerContent style={style} rolling={PREVIEW_WINDOWS.rolling} weekly={PREVIEW_WINDOWS.weekly}
-      rollingShort={rollingShort} weekShort={weekShort} />
+    <UsageTriggerContent
+      style={style}
+      rolling={rolling ?? PREVIEW_WINDOWS.rolling}
+      weekly={weekly ?? PREVIEW_WINDOWS.weekly}
+      monthly={monthly}
+      rollingShort={rollingShort}
+      weekShort={weekShort}
+      monthShort={monthShort}
+      accountName={accountName}
+    />
   </span>
 }
 
