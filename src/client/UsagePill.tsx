@@ -30,15 +30,18 @@ import {
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { OpencodeGoSettings } from './controller.ts'
 import { AnalyticsDialog } from './AnalyticsDialog.tsx'
+import type { SharedModelCatalog } from './model-catalog-store.ts'
 import { formatDateTime, formatTokenCount, themeStyle, useGoThemeTokens } from './presentation.ts'
 import { estimateModelQuota } from '../quota-estimate.ts'
 
 export interface UsagePillProps {
   directory: SnapshotStore<ModelDirectoryState>
   settings: ConfigForm<OpencodeGoSettings>
-  readUsage: () => Promise<GoUsage>
-  readAccountUsage?: (ref: string) => Promise<GoUsage>
+  readUsage: (force?: boolean) => Promise<GoUsage>
+  readAccountUsage?: (ref: string, force?: boolean) => Promise<GoUsage>
   readModels?: () => Promise<GoModelCatalog>
+  /** Shared client-side model catalog cache; falls back to `readModels` when omitted. */
+  catalog?: SharedModelCatalog
   /** Optional so an embedded/test render can omit the dashboard. */
   readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>
@@ -378,8 +381,9 @@ function UsageSurface({ settings, credentialChanges, variant, provider, selected
   const viewedRef = viewedAccount?.apiKeyEnv
   const callingRef = accountRefOf(config.value ?? {})
   const activeRef = viewedRef ?? callingRef
-  const readSidebarUsage = useCallback(() => viewedRef && readAccountUsage
-    ? readAccountUsage(viewedRef) : props.readUsage(), [viewedRef, readAccountUsage, props.readUsage])
+  const readSidebarUsage = useCallback((force?: boolean) => viewedRef && readAccountUsage
+    ? (force ? readAccountUsage(viewedRef, true) : readAccountUsage(viewedRef))
+    : (force ? props.readUsage(true) : props.readUsage()), [viewedRef, readAccountUsage, props.readUsage])
   const readDialogQuota = useCallback((ref: string): Promise<GoUsage> => {
     if (readAccountUsage) return readAccountUsage(ref)
     if (ref === callingRef) return props.readUsage()
@@ -407,6 +411,7 @@ function UsageSurface({ settings, credentialChanges, variant, provider, selected
   const configPlan: GoPlan = (GO_PLANS as readonly string[]).includes(config.value?.goPlan ?? '')
     ? (config.value!.goPlan as GoPlan) : DEFAULT_GO_PLAN
   const goPlan = accountPlanOf(accounts.find(account => account.apiKeyEnv === activeRef), configPlan)
+  const endpointKey = JSON.stringify([config.value?.baseURL ?? '', config.value?.freeBaseURL ?? '', config.value?.proxyURL ?? ''])
   return visible ? <>
     <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts.map(a => [a.id, a.apiKeyEnv])])}
       {...props} readUsage={variant === 'pill' ? props.readUsage : readSidebarUsage}
@@ -414,7 +419,7 @@ function UsageSurface({ settings, credentialChanges, variant, provider, selected
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={pillAppearance.style} pillBorder={pillAppearance.border}
       appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics}
-      goPlan={goPlan} activeModelId={provider === PROVIDER_ID ? selectedModel : undefined} />
+      goPlan={goPlan} endpointKey={endpointKey} activeModelId={provider === PROVIDER_ID ? selectedModel : undefined} />
     {/* Mounted outside the keyed subtree so remounts cannot unmount it; it paints
         its own theme tokens, so leaving the pill's themed span costs no styling.
         It must stay mounted even when the console page offers itself: a page
@@ -436,13 +441,13 @@ function formatTranslated(t: UsagePillProps['t'], key: string, params: Record<st
   return text
 }
 
-function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme, goPlan, activeModelId }:
+function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme, goPlan, endpointKey, activeModelId }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
     accounts: readonly GoAccount[]; activeRef: string; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
     onNextAccount?: () => void
     variant: UsageVariant; pillStyle: UsagePillStyle; pillBorder: boolean; appearanceTheme: OpencodeGoTheme
-    goPlan: GoPlan; activeModelId?: string
+    goPlan: GoPlan; endpointKey: string; activeModelId?: string
   }) {
   const sidebar = variant !== 'pill'
   const [snapshot, setSnapshot] = useState<{ reader: typeof readUsage; usage: GoUsage; updatedAt: number } | null>(null)
@@ -454,7 +459,14 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
   const [rovingIndex, setRovingIndex] = useState(0)
-  const [catalogModels, setCatalogModels] = useState<readonly GoModel[] | null>(null)
+  const [localCatalogModels, setLocalCatalogModels] = useState<readonly GoModel[] | null>(null)
+  const readSharedCatalog = useCallback(() => catalog?.store.getSnapshot() ?? null, [catalog])
+  const subscribeSharedCatalog = useCallback(
+    (listener: () => void) => catalog?.store.subscribe(listener) ?? noSubscription(),
+    [catalog],
+  )
+  const sharedCatalogModels = useSyncExternalStore(subscribeSharedCatalog, readSharedCatalog, readSharedCatalog)
+  const catalogModels = catalog ? sharedCatalogModels : localCatalogModels
   const tokens = useGoThemeTokens(appearanceTheme)
   const root = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -484,7 +496,7 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
       busy = true
       setRefreshing(true)
       try {
-        const value = await withRefreshTimeout(readUsage)
+        const value = await withRefreshTimeout(() => (manual ? readUsage(true) : readUsage()))
         if (alive) {
           setSnapshot({ reader: readUsage, usage: value, updatedAt: Date.now() })
           setFailed(null)
@@ -526,8 +538,14 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
     if (!open) return
     const click = (event: MouseEvent) => {
       if (root.current?.contains(event.target as Node)) return
+      const target = event.target as HTMLElement | null
+      const clickedFocusable = target?.closest?.(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"], [contenteditable=""], [tabindex]:not([tabindex="-1"])',
+      ) != null
       setOpen(false)
-      focusTrigger()
+      // Clicking inert backdrop returns focus so focus is not stranded on body;
+      // clicking another interactive target (e.g. composer textarea) must keep focus there.
+      if (!clickedFocusable) focusTrigger()
     }
     const key = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
@@ -539,11 +557,17 @@ function ActiveUsage({ readUsage, readModels, readAnalytics, t, getLocale, accou
     return () => { document.removeEventListener('mousedown', click); document.removeEventListener('keydown', key) }
   }, [open, focusTrigger])
   useEffect(() => {
-    if (sidebar || !open || !readModels || !activeModelId || catalogModels) return
+    if (sidebar || !open || !activeModelId) return
+    if (catalog) {
+      catalog.syncEndpoint(endpointKey)
+      void catalog.ensureLoaded(endpointKey)
+      return
+    }
+    if (!readModels || localCatalogModels) return
     let alive = true
-    void readModels().then(catalog => { if (alive) setCatalogModels(catalog.models) }).catch(() => {})
+    void readModels().then(result => { if (alive) setLocalCatalogModels(result.models) }).catch(() => {})
     return () => { alive = false }
-  }, [sidebar, open, readModels, activeModelId, catalogModels])
+  }, [sidebar, open, catalog, endpointKey, readModels, activeModelId, localCatalogModels])
   // The popover is non-modal, but opening it must land focus inside: on the first
   // action of the reading view, or on the current account of the drill-down list.
   useEffect(() => {

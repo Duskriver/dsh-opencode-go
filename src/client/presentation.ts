@@ -1,5 +1,5 @@
 /** English and Chinese copy and the shared Native/Classic presentation tokens. */
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useSyncExternalStore, type CSSProperties } from 'react'
 import { DEFAULT_OPENCODE_GO_THEME, type OpencodeGoTheme } from '../contracts.ts'
 
 /** Copy dictionaries for the OpenCode Go settings page. English is the key-set source of truth. */
@@ -204,7 +204,6 @@ export const en = {
   priceMultiplier: 'Some periods carry a price multiplier; the rates above are the base.',
   priceUnpublished: 'The gateway publishes no price for this model.',
   goPlanLabel: 'Subscription plan',
-  goPlanForAccountLabel: 'Subscription plan ({name})',
   goPlanHint: 'Display-only: choose this account\'s OpenCode Go tier to convert model limits and shared quota percentages into estimated request counts. Does not affect requests or billing.',
   'goPlan_go': 'Go ($10)',
   'goPlan_go-plus': 'Go Plus ($40)',
@@ -335,6 +334,7 @@ export const en = {
   requestImageMaxBytesLabel: 'Image byte target (bytes)',
   requestImageMaxBytesHint: 'The original byte target of one image before base64 expansion.',
   overridden: 'Customized',
+  tabIssue: 'Attention needed',
   reset: 'Reset to default',
   invalidValue: 'Not a valid value',
   save: 'Save',
@@ -398,8 +398,11 @@ export const en = {
   aboutEntry: 'Sidebar entry',
   aboutBuild: 'Build',
   aboutDiagnostics: 'Diagnostics',
+  aboutCopyDiagnostics: 'Copy diagnostics',
+  aboutCopiedDiagnostics: 'Copied',
+  aboutCopyFailed: 'Copy failed',
   aboutExportLog: 'Export diagnostics log',
-  aboutExportHint: 'The log contains account counts, quota percentages and error codes — never credentials.',
+  aboutExportHint: 'Contains version, configuration flags, account counts and errors — never API keys.',
   aboutRepo: 'Repository',
   aboutDocs: 'Documentation',
   aboutChangelog: 'Changelog',
@@ -613,7 +616,6 @@ export const zh: typeof en = {
   priceMultiplier: '部分时段按倍率计价，以上为基础价。',
   priceUnpublished: '网关未公布该模型的价格。',
   goPlanLabel: '订阅套餐',
-  goPlanForAccountLabel: '当前账号套餐（{name}）',
   goPlanHint: '仅用于界面换算：选择该账号对应的 OpenCode Go 套餐档位，将模型限额与共享百分比额度换算为预估请求次数；不会影响实际请求或上游计费。',
   'goPlan_go': 'Go ($10)',
   'goPlan_go-plus': 'Go Plus ($40)',
@@ -744,6 +746,7 @@ export const zh: typeof en = {
   requestImageMaxBytesLabel: '图片字节目标（字节）',
   requestImageMaxBytesHint: '单张图片 base64 扩展前的原始编码字节目标。',
   overridden: '已自定义',
+  tabIssue: '存在异常',
   reset: '恢复默认',
   invalidValue: '不是有效值',
   save: '保存',
@@ -807,8 +810,11 @@ export const zh: typeof en = {
   aboutEntry: '侧边栏入口',
   aboutBuild: '构建',
   aboutDiagnostics: '诊断',
+  aboutCopyDiagnostics: '复制诊断摘要',
+  aboutCopiedDiagnostics: '已复制',
+  aboutCopyFailed: '复制失败',
   aboutExportLog: '导出诊断日志',
-  aboutExportHint: '日志包含账号数量、配额百分比与错误码，不包含任何凭据。',
+  aboutExportHint: '仅包含版本、功能开关、账号数量与错误摘要，绝不包含任何 API Key。',
   aboutRepo: '仓库',
   aboutDocs: '文档',
   aboutChangelog: '更新日志',
@@ -989,24 +995,43 @@ export const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeScheme, GoTh
   classic: { dark: GO_THEME_FALLBACKS.dark, light: GO_THEME_FALLBACKS.light },
 }
 
-/** Follow the Host's body color-scheme marker without adding a Theme service dependency. */
-export function useHostScheme(): GoThemeScheme {
-  const [scheme, setScheme] = useState<GoThemeScheme>(() =>
-    typeof document === 'undefined' || document.body?.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light')
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const body = document.body
-    if (body === null) return
-    const update = (): void => {
-      setScheme(body.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light')
+function readHostScheme(): GoThemeScheme {
+  return typeof document === 'undefined' || document.body?.hasAttribute('data-ds-dark-theme') ? 'dark' : 'light'
+}
+
+const hostSchemeListeners = new Set<() => void>()
+let hostSchemeObserver: MutationObserver | undefined
+let hostSchemeObservedBody: HTMLElement | null = null
+
+function ensureHostSchemeObserver(): void {
+  if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return
+  const body = document.body
+  if (body === null) return
+  if (hostSchemeObserver !== undefined && hostSchemeObservedBody === body) return
+  hostSchemeObserver?.disconnect()
+  hostSchemeObservedBody = body
+  hostSchemeObserver = new MutationObserver(() => {
+    for (const listener of hostSchemeListeners) listener()
+  })
+  hostSchemeObserver.observe(body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+}
+
+function subscribeHostScheme(listener: () => void): () => void {
+  hostSchemeListeners.add(listener)
+  ensureHostSchemeObserver()
+  return () => {
+    hostSchemeListeners.delete(listener)
+    if (hostSchemeListeners.size === 0) {
+      hostSchemeObserver?.disconnect()
+      hostSchemeObserver = undefined
+      hostSchemeObservedBody = null
     }
-    update()
-    if (typeof MutationObserver === 'undefined') return
-    const observer = new MutationObserver(update)
-    observer.observe(body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
-    return () => { observer.disconnect() }
-  }, [])
-  return scheme
+  }
+}
+
+/** Follow the Host's body color-scheme marker via one shared MutationObserver. */
+export function useHostScheme(): GoThemeScheme {
+  return useSyncExternalStore(subscribeHostScheme, readHostScheme, () => 'dark')
 }
 
 /** Resolve one visual theme in the Host's current color scheme. */

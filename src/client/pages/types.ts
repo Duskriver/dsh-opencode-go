@@ -36,8 +36,8 @@ export const TAB_COPY: Readonly<Record<PageTab, keyof typeof en>> = {
  * a notice instead of failing to register.
  */
 export interface PageReaders {
-  readUsage?: () => Promise<GoUsage>
-  readAccountUsage?: (ref: string) => Promise<GoUsage>
+  readUsage?: (force?: boolean) => Promise<GoUsage>
+  readAccountUsage?: (ref: string, force?: boolean) => Promise<GoUsage>
   readAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsReport>
   exportAnalytics?: (query: AnalyticsQuery, signal?: AbortSignal) => Promise<AnalyticsExport>
 }

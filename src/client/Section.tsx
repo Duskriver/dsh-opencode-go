@@ -304,7 +304,8 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
         onChange={event => { setName(event.target.value) }} />
     </label> : null}
     {editor.kind === 'add' || editor.kind === 'key' ? <><label className={css.accountField}>{t('keyLabel')}
-      <input className={css.input} type="password" autoComplete="off" value={key} required disabled={state.busy} autoFocus
+      <input className={css.input} type="password" autoComplete="off" value={key} required disabled={state.busy}
+        autoFocus={editor.kind === 'key'}
         onChange={event => { setKey(event.target.value) }} />
     </label><p className={css.hint}>{t('accountKeyHint')}</p></> : null}
     <div className={css.accountEditorActions}>
@@ -1638,11 +1639,12 @@ function Loaded(props: {
   // Only Advanced keeps a draft: appearance writes as soon as it changes, so
   // its tab must not claim pending edits (the models mark reports its listing).
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
-  const tabs: { id: SettingsTab; label: string; marked?: boolean }[] = [
+  const modelsIssue = state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale
+  const tabs: { id: SettingsTab; label: string; mark?: 'override' | 'issue' }[] = [
     { id: 'overview', label: t('settingsTabOverview') },
-    { id: 'models', label: t('settingsTabModels'), marked: state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale },
+    { id: 'models', label: t('settingsTabModels'), mark: modelsIssue ? 'issue' : undefined },
     { id: 'appearance', label: t('settingsTabAppearance') },
-    { id: 'advanced', label: t('settingsTabAdvanced'), marked: advancedOverridden },
+    { id: 'advanced', label: t('settingsTabAdvanced'), mark: advancedOverridden ? 'override' : undefined },
   ]
   return (
     <div className={css.page} style={themeStyle(tokens)}>
@@ -1662,7 +1664,8 @@ function Loaded(props: {
       <div className={css.pageTabs} role="tablist" aria-label={t('settingsTabsLabel')}>
         {tabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`opencode-go-tab-${item.id}`}
           aria-selected={tab === item.id} aria-controls={`opencode-go-panel-${item.id}`}
-          data-marked={item.marked ? '' : undefined}
+          data-marked={item.mark ? '' : undefined}
+          data-mark-tone={item.mark}
           tabIndex={tab === item.id ? 0 : -1} className={css.pageTab}
           onClick={() => { setTab(item.id) }}
           onKeyDown={event => {
@@ -1675,7 +1678,8 @@ function Loaded(props: {
             document.getElementById(`opencode-go-tab-${next}`)?.focus()
           }}>
           {item.label}
-          {item.marked ? <span className={css.tabMark} title={t('overridden')} aria-hidden="true" /> : null}
+          {item.mark ? <span className={css.tabMark} data-tone={item.mark}
+            title={t(item.mark === 'issue' ? 'tabIssue' : 'overridden')} aria-hidden="true" /> : null}
         </button>)}
       </div>
       {tab === 'overview' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-overview" aria-labelledby="opencode-go-tab-overview">

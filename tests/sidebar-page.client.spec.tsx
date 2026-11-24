@@ -595,7 +595,7 @@ describe('console sub-pages', () => {
     expect(screen.getByRole('link', { name: en.aboutRepo }).getAttribute('href'))
       .toBe('https://github.com/Duskriver/dsh-opencode-go')
     expect(screen.getByRole('link', { name: en.aboutDocs }).getAttribute('href'))
-      .toBe('https://github.com/Duskriver/dsh-opencode-go/blob/main/docs/development.md')
+      .toBe('https://github.com/Duskriver/dsh-opencode-go/blob/main/docs/advanced.md')
     expect(screen.getByRole('link', { name: en.aboutChangelog }).getAttribute('href'))
       .toBe('https://github.com/Duskriver/dsh-opencode-go/blob/main/CHANGELOG.md')
     expect(screen.getByText(en.pageStatusOn)).toBeTruthy()
@@ -612,6 +612,66 @@ describe('console sub-pages', () => {
     expect(screen.getAllByText(en.aboutOff)).toHaveLength(2)
     expect(screen.getByText(en.aboutNa)).toBeTruthy()
     expect(screen.queryByText(en.pageStatusOn)).toBeNull()
+  })
+
+  it('auto-loads the model catalog when ModelsPage opens while models are idle', () => {
+    const props = pagePropsOf({ state: { models: { status: 'idle' } } })
+    render(<ModelsPage {...props} />)
+    expect(props.actions.loadModels).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates quota progress bars when Refresh quota is clicked on OverviewPage', async () => {
+    const readUsage = vi.fn()
+      .mockResolvedValueOnce({
+        rolling: { percent: 12, status: 'ok', resetsAt: '2026-11-13T08:00:00Z' },
+        weekly: { percent: 34, status: 'ok', resetsAt: '2026-11-16T00:00:00Z' },
+        monthly: { percent: 56, status: 'ok', resetsAt: '2026-12-01T00:00:00Z' },
+      })
+      .mockResolvedValueOnce({
+        rolling: { percent: 45, status: 'ok', resetsAt: '2026-11-13T08:00:00Z' },
+        weekly: { percent: 60, status: 'ok', resetsAt: '2026-11-16T00:00:00Z' },
+        monthly: { percent: 72, status: 'ok', resetsAt: '2026-12-01T00:00:00Z' },
+      })
+    const props = pagePropsOf({
+      state: { accounts: accountsStateOf([ACCOUNT]) },
+      readers: { readUsage },
+    })
+    render(<OverviewPage {...props} />)
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: en.usage_rolling + ' 12%' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: en.usageRefresh }))
+    expect(props.actions.loadAccounts).toHaveBeenCalledTimes(2)
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: en.usage_rolling + ' 45%' })).toBeTruthy()
+    })
+    expect(readUsage).toHaveBeenLastCalledWith(true)
+  })
+
+  it('copies a credential-free Markdown diagnostics summary from AboutPage and preserves base rowValue styles on mono cells', async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const props = pagePropsOf({
+      state: {
+        accounts: accountsStateOf([{ ...ACCOUNT, configured: true }]),
+        baseURL: field('https://opencode.ai/inference/go/v1'),
+        proxyURL: field('socks5://user:secret@127.0.0.1:7890'),
+        sidebarEntry: true,
+      },
+    })
+    const { container } = render(<AboutPage {...props} />)
+    const dds = Array.from(container.querySelectorAll('dd'))
+    expect(dds.some(dd => dd.className.split(/\s+/).length >= 2)).toBe(true)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: en.aboutCopyDiagnostics }))
+    })
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const copied = String(writeText.mock.calls[0]?.[0] ?? '')
+    expect(copied).toContain('### dsh-opencode-go diagnostics')
+    expect(copied).toContain('proxy=socks5://<redacted>')
+    expect(copied).not.toContain('secret')
+    expect(copied).not.toContain('7890')
+    expect(screen.getByRole('button', { name: en.aboutCopiedDiagnostics })).toBeTruthy()
   })
 
   it('mounts the usage dashboard inside the shell tab', async () => {

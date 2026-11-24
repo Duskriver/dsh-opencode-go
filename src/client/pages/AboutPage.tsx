@@ -1,20 +1,103 @@
 /** About tab: build facts, the project links and the diagnostics a bug report needs. */
 import css from './AboutPage.module.css'
-import type { ReactNode } from 'react'
-import { Tag } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Button, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
 import { CLIENT_BUILD_INFO } from '../build-info.ts'
 import { formatDateTime } from '../presentation.ts'
 import type { PageViewProps } from './types.ts'
 
 const REPO_URL = 'https://github.com/Duskriver/dsh-opencode-go'
-const DOCS_URL = 'https://github.com/Duskriver/dsh-opencode-go/blob/main/docs/development.md'
+const DOCS_URL = 'https://github.com/Duskriver/dsh-opencode-go/blob/main/docs/advanced.md'
 const CHANGELOG_URL = 'https://github.com/Duskriver/dsh-opencode-go/blob/main/CHANGELOG.md'
+
+/** Redact endpoint URLs to protocol + host (never paths, queries, or credentials). */
+function redactEndpoint(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return 'default'
+  try {
+    const parsed = new URL(trimmed)
+    return `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return 'invalid'
+  }
+}
+
+/** Redact proxy URLs to scheme only so credentials and local ports never leak. */
+function redactProxy(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return 'none'
+  try {
+    return `${new URL(trimmed).protocol}//<redacted>`
+  } catch {
+    return 'configured'
+  }
+}
+
+/** Build a safe, credential-free Markdown diagnostics block for issue reports. */
+export function buildDiagnosticsMarkdown(
+  state: PageViewProps['state'],
+  historyAvailable: boolean,
+): string {
+  const entries = state.accounts.entries
+  const configured = entries.filter(entry => entry.configured === true).length
+  const unreadable = entries.filter(entry => entry.failed === true).length
+  const modelStatus = state.models.status === 'ready'
+    ? `ready (${state.models.count}${state.models.stale ? ', stale' : ''})`
+    : state.models.status
+  const lines = [
+    '### dsh-opencode-go diagnostics',
+    `- Version: v${CLIENT_BUILD_INFO.version} (${CLIENT_BUILD_INFO.packageName})`,
+    `- Minimum host: ${CLIENT_BUILD_INFO.minHost}`,
+    `- Service enabled: ${state.enabled ? 'yes' : 'no'}`,
+    `- Free channel: ${state.freeEnabled.text === 'true' ? 'enabled' : 'disabled'}`,
+    `- Sidebar entry: ${state.sidebarEntry ? 'enabled' : 'disabled'}`,
+    `- Console history: ${historyAvailable ? 'available' : 'unavailable'}`,
+    `- Theme / Pill: ${state.appliedAppearanceTheme} / ${state.usagePillStyle.text} (border=${state.usagePillBorder.text}, display=${state.usageDisplay.text})`,
+    `- Accounts: ${configured}/${entries.length} configured${unreadable > 0 ? `, ${unreadable} unreadable` : ''}, autoSwitch=${state.accounts.autoSwitch ? 'on' : 'off'}`,
+    `- Models catalog: ${modelStatus}`,
+    `- Endpoints: go=${redactEndpoint(state.baseURL.text)}, free=${redactEndpoint(state.freeBaseURL.text)}, proxy=${redactProxy(state.proxyURL.text)}`,
+  ]
+  if (state.models.status === 'failed' && state.models.message) {
+    lines.push(`- Catalog error: ${state.models.message}`)
+  } else if (state.models.status === 'ready' && state.models.message) {
+    lines.push(`- Catalog notice: ${state.models.message}`)
+  }
+  return lines.join('\n')
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // Fall back to execCommand when clipboard permission is denied.
+  }
+  if (typeof document === 'undefined') return false
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  let copied = false
+  try {
+    copied = typeof document.execCommand === 'function' && document.execCommand('copy')
+  } catch {
+    copied = false
+  } finally {
+    textarea.remove()
+  }
+  return copied
+}
 
 /** One definition row of the about tables. */
 function InfoRow({ label, value, mono = false }: { label: string; value: ReactNode; mono?: boolean }): ReactNode {
   return <div className={css.row}>
     <dt className={css.rowLabel}>{label}</dt>
-    <dd className={mono ? css.rowValueMono : css.rowValue}>{value}</dd>
+    <dd className={mono ? `${css.rowValue} ${css.rowValueMono}` : css.rowValue}>{value}</dd>
   </div>
 }
 
@@ -30,13 +113,15 @@ function StateTag({ available, t, on = 'aboutOk', off = 'aboutOff' }: {
 
 /**
  * Render the About tab: the build facts with their links, then the live
- * diagnostics. There is no export-log action on purpose: the client bundle has
- * no log sink, and a button that only promised one would be a dead control.
+ * diagnostics with a credential-free Markdown summary copy action.
  * @param props - the snapshot, the business face and the locale.
  * @returns the two information cards.
  */
 export function AboutPage({ state, actions, locale }: PageViewProps): ReactNode {
   const t = actions.t
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => { if (copyTimer.current !== undefined) clearTimeout(copyTimer.current) }, [])
   const total = state.accounts.entries.length
   const history = actions.readers?.readAnalytics !== undefined
   const freeEnabled = state.freeEnabled.text === 'true'
@@ -44,6 +129,12 @@ export function AboutPage({ state, actions, locale }: PageViewProps): ReactNode 
   const refreshed = refreshedAt > 0
     ? formatDateTime(refreshedAt, locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : t('aboutNa')
+  const onCopyDiagnostics = async (): Promise<void> => {
+    const ok = await copyText(buildDiagnosticsMarkdown(state, history))
+    setCopyState(ok ? 'copied' : 'failed')
+    if (copyTimer.current !== undefined) clearTimeout(copyTimer.current)
+    copyTimer.current = setTimeout(() => { setCopyState('idle') }, 2500)
+  }
   return <div className={css.grid}>
     <section className={css.card}>
       <div className={css.cardHead}>
@@ -81,6 +172,14 @@ export function AboutPage({ state, actions, locale }: PageViewProps): ReactNode 
         <InfoRow label={t('accountsTitle')} value={String(total)} mono />
         <InfoRow label={t('aboutLastRefresh')} value={refreshed} mono />
       </dl>
+      <div className={css.divider} />
+      <div className={css.diagFoot}>
+        <p className={css.diagHint}>{t('aboutExportHint')}</p>
+        <Button variant="outline" size="sm" onClick={() => { void onCopyDiagnostics() }}>
+          {t(copyState === 'copied' ? 'aboutCopiedDiagnostics'
+            : copyState === 'failed' ? 'aboutCopyFailed' : 'aboutCopyDiagnostics')}
+        </Button>
+      </div>
     </section>
   </div>
 }

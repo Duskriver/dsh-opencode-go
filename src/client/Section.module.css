@@ -521,6 +521,9 @@
   border-radius: 50%;
   background: var(--go-accent);
 }
+.tabMark[data-tone='issue'] {
+  background: var(--go-warning);
+}
 
 /* Panels are flex columns so the model card can still take whatever height the
    page leaves, exactly as it did before the page was split into tabs. */

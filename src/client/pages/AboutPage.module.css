@@ -51,6 +51,9 @@
 .link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .link:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 
+.diagFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.diagHint { margin: 0; flex: 1 1 180px; min-width: 0; color: var(--go-muted-soft); font-size: 11.5px; line-height: 1.5; }
+
 @media (max-width: 1080px) {
   .grid { grid-template-columns: 1fr; }
 }

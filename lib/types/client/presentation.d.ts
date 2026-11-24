@@ -202,7 +202,6 @@ export declare const en: {
     priceMultiplier: string;
     priceUnpublished: string;
     goPlanLabel: string;
-    goPlanForAccountLabel: string;
     goPlanHint: string;
     goPlan_go: string;
     'goPlan_go-plus': string;
@@ -333,6 +332,7 @@ export declare const en: {
     requestImageMaxBytesLabel: string;
     requestImageMaxBytesHint: string;
     overridden: string;
+    tabIssue: string;
     reset: string;
     invalidValue: string;
     save: string;
@@ -396,6 +396,9 @@ export declare const en: {
     aboutEntry: string;
     aboutBuild: string;
     aboutDiagnostics: string;
+    aboutCopyDiagnostics: string;
+    aboutCopiedDiagnostics: string;
+    aboutCopyFailed: string;
     aboutExportLog: string;
     aboutExportHint: string;
     aboutRepo: string;
@@ -478,7 +481,7 @@ export declare const GO_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
 export declare const NATIVE_THEME_FALLBACKS: Record<GoThemeScheme, GoThemeTokens>;
 /** Theme first, color scheme second: Native follows the Host, Classic stays branded. */
 export declare const GO_THEME_TOKENS: Record<OpencodeGoTheme, Record<GoThemeScheme, GoThemeTokens>>;
-/** Follow the Host's body color-scheme marker without adding a Theme service dependency. */
+/** Follow the Host's body color-scheme marker via one shared MutationObserver. */
 export declare function useHostScheme(): GoThemeScheme;
 /** Resolve one visual theme in the Host's current color scheme. */
 export declare function useGoThemeTokens(theme?: OpencodeGoTheme): GoThemeTokens;

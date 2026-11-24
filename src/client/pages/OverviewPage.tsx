@@ -118,8 +118,9 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   const [report, setReport] = useState<AnalyticsReport | null>(null)
   const [reportFailed, setReportFailed] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
-  const [quota, setQuota] = useState<GoUsage | null>(null)
+  const [quota, setQuota] = useState<{ value: GoUsage; updatedAt: number } | null>(null)
   const [quotaFailed, setQuotaFailed] = useState(false)
+  const [quotaRevision, setQuotaRevision] = useState(0)
   // The injected face is rebuilt on some host events (a locale change, for one),
   // so the readers travel through a ref and only the identity of the data being
   // read may restart these requests.
@@ -154,14 +155,17 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
     return () => { stopped = true; controller.abort() }
   }, [accountRef, analyticsReady])
   useEffect(() => {
-    setQuota(null)
+    if (quotaRevision === 0) setQuota(null)
     setQuotaFailed(false)
     const read = readers.current.readUsage
     if (read === undefined) return
     let stopped = false
-    void read().then(next => { if (!stopped) setQuota(next) }, () => { if (!stopped) setQuotaFailed(true) })
+    void (quotaRevision > 0 ? read(true) : read()).then(
+      next => { if (!stopped) setQuota({ value: next, updatedAt: Date.now() }) },
+      () => { if (!stopped) setQuotaFailed(true) },
+    )
     return () => { stopped = true }
-  }, [accountRef, usageReady])
+  }, [accountRef, usageReady, quotaRevision])
   const loadAccounts = useRef(actions.loadAccounts)
   loadAccounts.current = actions.loadAccounts
   // The overview is the landing tab, so it seeds the account rows the other tabs
@@ -178,9 +182,18 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   const fallbackOrder = accounts.length === 0
     ? t('accountsSummaryEmpty')
     : accounts.map(entry => entry.name || t('accountDefault')).join(' → ')
-  // The gateway answers for the profile's current account; the loaded row is the
-  // fallback when that one read is unavailable, so the bars still show last data.
-  const usage = quota ?? active?.usage ?? null
+  // Prefer whichever reading (the refreshed account row or the direct active-quota
+  // read) is newer, so clicking "Refresh quota" always updates the bars as well as
+  // the timestamp.
+  const activeUpdatedAt = active?.updatedAt ?? 0
+  const usage = active?.usage && (!quota || activeUpdatedAt >= quota.updatedAt)
+    ? active.usage
+    : quota?.value ?? active?.usage ?? null
+  const usageUpdatedAt = Math.max(activeUpdatedAt, quota?.updatedAt ?? 0)
+  const refreshQuota = (): void => {
+    setQuotaRevision(value => value + 1)
+    actions.loadAccounts()
+  }
   const usageNote = readUsage === undefined || quotaFailed ? t('usageUnavailable') : t('usageLoading')
   const totals = report?.totals
   // The overview fetches a 7-day report once to power both the sparkline and
@@ -281,11 +294,11 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
             onChange={next => { void actions.setAutoSwitch(next) }} />
         </div>
         <div className={css.cardActions}>
-          {active?.updatedAt === undefined ? null : <span className={css.stamp}>
-            {t('usageLastUpdated')} {formatDateTime(active.updatedAt, locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          {usageUpdatedAt === 0 ? null : <span className={css.stamp}>
+            {t('usageLastUpdated')} {formatDateTime(usageUpdatedAt, locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>}
           <Button variant="outline" size="sm" disabled={state.accounts.refreshing}
-            onClick={actions.loadAccounts}>{t(state.accounts.refreshing ? 'usageRefreshing' : 'usageRefresh')}</Button>
+            onClick={refreshQuota}>{t(state.accounts.refreshing ? 'usageRefreshing' : 'usageRefresh')}</Button>
           <Button variant="primary" size="sm" onClick={() => { go('usage') }}>{t('overviewOpenUsage')}</Button>
         </div>
       </section>

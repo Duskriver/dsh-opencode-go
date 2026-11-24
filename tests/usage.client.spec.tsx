@@ -928,6 +928,20 @@ describe("conversation usage", () => {
     fireEvent.mouseDown(document.body)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(trigger())
+    // Clicking another focusable control (e.g. composer textarea) closes the panel
+    // without stealing focus back to the quota trigger.
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    try {
+      showDetails()
+      expect(openPanel()).toBeTruthy()
+      composer.focus()
+      fireEvent.mouseDown(composer)
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(document.activeElement).toBe(composer)
+    } finally {
+      composer.remove()
+    }
   })
 
   it('focuses the current account when the drill-down opens and restores the trigger from its back button', async () => {

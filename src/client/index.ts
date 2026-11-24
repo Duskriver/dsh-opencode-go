@@ -26,6 +26,7 @@ import { PAGE_PANEL_ID, PAGE_SIDEBAR_ORDER, SETTINGS_SECTION_ID, type GoLayoutSe
 import { installSettingsNavIcon } from './settings-nav-icon.tsx'
 import { ModelLabel } from './ModelLabel.tsx'
 import { createSharedModelCatalog, type SharedModelCatalog } from './model-catalog-store.ts'
+import { createSharedUsageStore, type SharedUsageStore } from './usage-store.ts'
 import {
   OpencodeGoSectionController,
   type OpencodeGoSettings,
@@ -91,9 +92,13 @@ export function apply(ctx: ClientContext): void {
 
 function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
   const executeAccountCommand = accountCommands(ctx)
+  const endpointKey = (): string => {
+    const value = scope.getSnapshot().value
+    return JSON.stringify([value?.baseURL ?? '', value?.freeBaseURL ?? '', value?.proxyURL ?? ''])
+  }
   // One reader set feeds every surface: the composer pill, the sidebar quota
   // card and the console page must agree on definitions and error shapes.
-  const readers = createPageReaders(ctx)
+  const { readers, usageStore } = createPageReaders(ctx, endpointKey)
   // The layout service arrives with the shell plugin; the page's navigation is
   // a no-op until it does (and on hosts that never compose a sidebar).
   let layout: GoLayoutService | undefined
@@ -108,20 +113,21 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
       // page's slot is still declaring). The tab choice is kept for the next open.
     }
   }
-  const selectAccount = async (ref: string): Promise<boolean> =>
-    (await executeAccountCommand({ kind: 'select', ref })) === 'applied'
+  const selectAccount = async (ref: string): Promise<boolean> => {
+    const applied = (await executeAccountCommand({ kind: 'select', ref })) === 'applied'
+    if (applied) usageStore()?.invalidate()
+    return applied
+  }
   let readAccount: ((ref: string) => Promise<GoUsage>) | undefined
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     readAccount = async ref => {
+      const shared = usageStore()
+      if (shared) return shared.readAccount(ref, true)
       const result = await (ready as ClientContext).remote.opencodeGoUsage.readAccount(ref)
       if (!result.ok) throw result.error
       return result.value
     }
   })
-  const endpointKey = (): string => {
-    const value = scope.getSnapshot().value
-    return JSON.stringify([value?.baseURL ?? '', value?.freeBaseURL ?? '', value?.proxyURL ?? ''])
-  }
   const readModelsCatalog = async (): Promise<GoModelCatalog> => {
     await modelsReady
     const result = await ctx.remote.opencodeGoModels.read()
@@ -162,10 +168,13 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     ...(pageRegistered() ? { openPage } : {}),
   })
   pageRegistered = registerSidebarPage(ctx, pageInjected, () => layout, scope)
-  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered, readModelsCatalog)
+  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered, readModelsCatalog, sharedCatalog)
 
   ctx.effect(() => {
-    const refresh = (ref: string): void => { controller.refreshCredential(ref) }
+    const refresh = (ref: string): void => {
+      usageStore()?.invalidate(ref)
+      controller.refreshCredential(ref)
+    }
     const dispose = ctx.remote.$on('credentials/reference-updated', refresh)
     /* v8 ignore next -- fiber teardown never runs in unit tests */
     return () => { dispose() }
@@ -187,20 +196,30 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
  * @param ctx - client root context.
  * @returns the mutable reader set (filled when the namespaces mount).
  */
-function createPageReaders(ctx: ClientContext): PageReaders {
+function createPageReaders(
+  ctx: ClientContext,
+  endpointKey?: () => string,
+): { readers: PageReaders; usageStore: () => SharedUsageStore | undefined } {
   const readers: PageReaders = {}
+  let sharedUsage: SharedUsageStore | undefined
   ctx.inject(['remote.opencodeGoUsage'], usageScope => {
     const remote = (usageScope as ClientContext).remote
-    readers.readUsage = async () => {
-      const result = await remote.opencodeGoUsage.read()
-      if (!result.ok) throw result.error
-      return result.value
-    }
-    readers.readAccountUsage = async (ref: string) => {
-      const result = await remote.opencodeGoUsage.readAccount(ref)
-      if (!result.ok) throw result.error
-      return result.value
-    }
+    const store = createSharedUsageStore({
+      readActive: async () => {
+        const result = await remote.opencodeGoUsage.read()
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      readAccount: async (ref: string) => {
+        const result = await remote.opencodeGoUsage.readAccount(ref)
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      ...(endpointKey ? { endpointKey } : {}),
+    })
+    sharedUsage = store
+    readers.readUsage = (force?: boolean) => store.readActive(force)
+    readers.readAccountUsage = (ref: string, force?: boolean) => store.readAccount(ref, force)
     usageScope.inject(['remote.opencodeGoAnalytics'], analyticsScope => {
       readers.readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal) => {
         const result = await (analyticsScope as ClientContext).remote.opencodeGoAnalytics.read(query, signal)
@@ -214,7 +233,7 @@ function createPageReaders(ctx: ClientContext): PageReaders {
       }
     })
   })
-  return readers
+  return { readers, usageStore: () => sharedUsage }
 }
 
 /**
@@ -405,6 +424,7 @@ export function registerUsagePill(
   openPage?: (tab?: PageTab) => void,
   canOpenPage: () => boolean = () => false,
   readModels?: () => Promise<GoModelCatalog>,
+  catalog?: SharedModelCatalog,
 ): void {
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     const credentialChanges = createSnapshotStore(0)
@@ -447,6 +467,7 @@ export function registerUsagePill(
       readUsage: readers?.readUsage ?? fallbackUsage,
       readAccountUsage,
       ...(readModels ? { readModels } : {}),
+      ...(catalog ? { catalog } : {}),
       readAnalytics: readers?.readAnalytics ?? unavailableAnalytics,
       exportAnalytics: readers?.exportAnalytics ?? unavailableExport,
       // The page may have been withdrawn since this face was built: report the
