@@ -145,7 +145,7 @@ describe('console page shell', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: en.tabUsage }))
     expect(pageTabStore.getSnapshot()).toBe('usage')
-    expect(screen.getByRole('heading', { level: 1, name: en.analyticsTitle })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: en.analyticsTitle })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: en.tabOverview }))
     expect(screen.getByRole('heading', { level: 2, name: en.overviewCurrentAccount })).toBeTruthy()
@@ -722,7 +722,8 @@ describe('console sub-pages', () => {
     const shell = pageShellOf({ state: { accounts: accountsStateOf([ACCOUNT]) }, readers })
     render(<GoPage {...shell} />)
     fireEvent.click(screen.getByRole('tab', { name: en.tabUsage }))
-    expect(screen.getByRole('heading', { level: 1, name: en.analyticsTitle })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: en.analyticsTitle })).toBeTruthy()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     await waitFor(() => {
       expect(readers.readAnalytics).toHaveBeenCalledWith(
         expect.objectContaining({ accountRef: 'OPENCODE_API_KEY', range: '30d' }),

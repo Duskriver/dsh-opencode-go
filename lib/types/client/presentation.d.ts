@@ -117,6 +117,8 @@ export declare const en: {
     analyticsTrendHint: string;
     analyticsTokensMode: string;
     analyticsRequestsMode: string;
+    analyticsSpendMode: string;
+    analyticsLegendHint: string;
     analyticsChartHelp: string;
     analyticsSelectDay: string;
     analyticsByModel: string;
@@ -128,6 +130,7 @@ export declare const en: {
     analyticsFewerModels: string;
     analyticsExport: string;
     analyticsExporting: string;
+    analyticsExported: string;
     analyticsExportFailed: string;
     analyticsPermission: string;
     analyticsCredentials: string;
