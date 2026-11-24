@@ -38,7 +38,7 @@ Vitest tests are organized by domain:
 | `socks-tunnel.spec.ts` | Loopback SOCKS relay: allowed-target enforcement, authentication, stream-budget-derived idle budget, idle teardown/reset and IPv4/IPv6 normalisation |
 | `theme.client.spec.ts`, `appearance-theme.spec.ts` | Native/Classic token resolution, neutral Host-token fallbacks, host font inheritance, WCAG 1.4.11 3:1 control boundaries and `--go-track` quota bar contrast |
 | `sidebar-page.client.spec.tsx`, `sidebar-page-registration.client.spec.tsx` | Opt-in 7-tab console page (`sidebar.panellist` + `main`), dynamic pair registration, staged-only save bar, immediate provider failure alerts and locale copy |
-| `settings-nav-icon.client.spec.tsx`, `icon.client.spec.tsx` | `GO_ROW_GEOMETRY` hand-drawn `go` mark, DSH 0.2.2+ `settings.section.icon` seat and older-host CSS-mask DOM fallback |
+| `settings-nav-icon.client.spec.tsx`, `icon.client.spec.tsx` | `GO_ROW_GEOMETRY` hand-drawn `go` mark, DSH 0.2.2+ `settings.section.icon` seat, older-host CSS-mask DOM fallback, and the SVG package icon pinned to the same geometry and palette |
 | `model-label.client.spec.tsx` | Composer `conversation.input.model.label` slot registration at yielding priority `137` (with collision backoff and warning), shared catalog RPC deduplication, live peak transition clock and immediate slot disposal when `showModelMultiplier` is turned off |
 | `adapter.spec.ts` | Requests, capacity limits, `providerRetryPolicy`, session/attribution headers, immutable request snapshots, cancellation and timeouts |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
@@ -92,3 +92,10 @@ Alongside npm releases (`npm publish`), the repository synchronously tracks **ex
 
 - `.gitignore` keeps `*.tgz` ignored globally except `!/dsh-opencode-go-*.tgz`, and `.gitattributes` marks `*.tgz binary`.
 - Whenever a version is bumped (`package.json` and `src/client/build-info.ts`) or any packed file (`src/` → `lib/`, `README*.md`, `docs/*.md`, `CHANGELOG.md`, etc.) changes, run `npm run compile` and then `npm run pack:release`. `pack:release` deletes any previous `dsh-opencode-go-*.tgz` in the root, packs the new `dsh-opencode-go-<version>.tgz`, and runs `check:pack` to verify byte-for-byte parity with the workspace.
+
+### Package icon
+
+`package.json` → `icon` points at `assets/icon.svg`, the only icon the package ships. The Host reads that field as a package-relative SVG, PNG, JPEG or WebP file of at most 256 KiB and hands the plugin manager a base64 data URL, which it renders through `<img>` inside a frame the Host draws itself (36×36 in a package card and 30×30 in a package row on DSH 0.2.2).
+
+- An image inherits neither `currentColor` nor the Host theme, so every colour in the file is baked in. The drawing is the sidebar mark (`GO_ROW_GEOMETRY` in `client/GoMark.tsx`) at 22px, centred in a 36-unit box, styled after the Host's built-in plugin artwork: one blue gradient (`#69B9FF → #324DE2`) for the `g` outline and the hollow stone, a green-to-teal gradient (`#45E7A4 → #05909D`) for the filled stone, and heavier strokes than the 16px row icon.
+- `tests/icon.client.spec.tsx` pins the file to that geometry and palette, so moving `GO_ROW_GEOMETRY` means editing `assets/icon.svg` in the same change. `check:pack` requires the manifest `icon` path to be one of the required packed files.

@@ -45,6 +45,7 @@
 ### Changed
 
 - 统一术语为「用量金额」，同步更新 `README.md`、`README.en.md` 与 `docs/v0.5.0-optimization-plan.md`。
+- 插件包图标由位图 `assets/icon.png` 更换为矢量 `assets/icon.svg`：图形沿用侧边栏与页头同一个手绘 `go` 标记（`GO_ROW_GEOMETRY`），配色与线条粗细向 DSH 内置插件图标看齐（`g` 轮廓与空心棋石为蓝色渐变，实心棋石为绿→青绿渐变）；图标契约测试将该文件钉在同一份几何与色板上，`check:pack` 同时校验清单 `icon` 指向的文件已入包。
 - 预打包发布归档更新为 `dsh-opencode-go-0.5.0.tgz`。
 
 ## [0.4.9] - 2026-11-24
