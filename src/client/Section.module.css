@@ -28,6 +28,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
+  cursor: pointer;
 }
 .accountLead { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .accountIdentity { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
@@ -172,6 +173,12 @@
 .accountEditorTitle { flex: none; font-size: 12.5px; font-weight: 600; line-height: 1.5; color: var(--go-text); }
 .accountEditorFor { min-width: 0; font-size: 11.5px; line-height: 1.5; color: var(--go-muted); overflow-wrap: anywhere; }
 .accountField { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; line-height: 1.5; color: var(--go-muted); }
+.keyInputWrap { position: relative; display: flex; align-items: center; }
+.keyInputWrap > .input { width: 100%; box-sizing: border-box; padding-right: 34px; }
+.keyToggle { position: absolute; right: 4px; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: none; color: var(--go-muted); cursor: pointer; }
+.keyToggle:hover:not(:disabled) { color: var(--go-text); background: var(--go-surface-2); }
+.keyToggle:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 1px; }
+.keyToggle:disabled { opacity: .45; cursor: default; }
 .accountEditorActions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 
 .page {
@@ -740,7 +747,8 @@
 }
 
 /* A card header that is also the disclosure for the region below it. */
-.cardTrigger {
+.cardTrigger,
+.cardTriggerStatic {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -755,6 +763,8 @@
   font: inherit;
   text-align: left;
   color: inherit;
+}
+.cardTrigger {
   cursor: pointer;
 }
 

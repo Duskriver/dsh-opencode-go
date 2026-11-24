@@ -756,7 +756,7 @@ export const usageRemote: TypertRemoteContribution = {
 }
 
 export type AccountCommand =
-  | { kind: 'add'; id: string; name: string; key: string }
+  | { kind: 'add'; id: string; name: string; key: string; plan?: GoPlan }
   | { kind: 'remove'; ref: string }
   | { kind: 'select'; ref: string }
   | { kind: 'rename'; ref: string; name: string }
@@ -774,13 +774,17 @@ export function parseAccountCommand(value: unknown): AccountCommand {
     move: ['kind', 'ref', 'toIndex'], 'auto-switch': ['kind', 'value'],
     'set-plan': ['kind', 'ref', 'plan'],
   }
+  const optionalFields: Partial<Record<string, string[]>> = {
+    add: ['plan'],
+  }
   if (typeof row.kind !== 'string' || !Object.hasOwn(fields, row.kind)
-    || Object.keys(row).some(key => !fields[row.kind as string]!.includes(key))
+    || Object.keys(row).some(key => !fields[row.kind as string]!.includes(key) && !(optionalFields[row.kind as string]?.includes(key) ?? false))
     || fields[row.kind]!.some(key => !Object.hasOwn(row, key))) throw new Error('Invalid account command')
   if ('ref' in row && (typeof row.ref !== 'string' || !ACCOUNT_REF_PATTERN.test(row.ref))) throw new Error('Invalid account reference')
   if ('name' in row && (typeof row.name !== 'string' || !row.name.trim() || row.name.trim().length > 80)) throw new Error('Invalid account name')
   if ('key' in row && (typeof row.key !== 'string' || !row.key.trim())) throw new Error('Missing account credential')
   if (row.kind === 'add' && (typeof row.id !== 'string' || !/^[a-f0-9]{32}$/.test(row.id))) throw new Error('Invalid account operation ID')
+  if (row.kind === 'add' && row.plan !== undefined && (typeof row.plan !== 'string' || !GO_PLANS.includes(row.plan as GoPlan))) throw new Error('Invalid account plan')
   if (row.kind === 'move' && (!Number.isInteger(row.toIndex) || (row.toIndex as number) < 0)) throw new Error('Invalid account position')
   if (row.kind === 'auto-switch' && typeof row.value !== 'boolean') throw new Error('Invalid account switch')
   if (row.kind === 'set-plan' && (typeof row.plan !== 'string' || !GO_PLANS.includes(row.plan as GoPlan))) throw new Error('Invalid account plan')

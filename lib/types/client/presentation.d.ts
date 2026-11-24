@@ -17,6 +17,9 @@ export declare const en: {
     accountRename: string;
     accountReplaceKey: string;
     accountRemove: string;
+    accountSetPrimary: string;
+    accountKeyShow: string;
+    accountKeyHide: string;
     accountRemoveHint: string;
     accountName: string;
     accountKeyHint: string;
@@ -31,6 +34,8 @@ export declare const en: {
     accountSwitchHint: string;
     accountSwitchFailed: string;
     sidebarNextAccount: string;
+    sidebarPreviewTag: string;
+    sidebarUseAccount: string;
     sidebarAnalytics: string;
     accountFallbackQuota: string;
     accountFallbackRateLimit: string;
@@ -61,6 +66,7 @@ export declare const en: {
     usageRollingCompact: string;
     usageRollingShort: string;
     usageWeekShort: string;
+    usageMonthShort: string;
     usage_rolling: string;
     usage_weekly: string;
     usage_monthly: string;
@@ -214,6 +220,9 @@ export declare const en: {
     quotaBasisNote: string;
     quotaPillRemainingCalls: string;
     quotaPillModelLimited: string;
+    quotaBottleneck_rolling: string;
+    quotaBottleneck_weekly: string;
+    quotaBottleneck_monthly: string;
     quotaPillPeakBadge: string;
     quotaPillPeakTitle: string;
     quotaPillOffPeakBadge: string;

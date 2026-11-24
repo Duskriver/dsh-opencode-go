@@ -444,14 +444,14 @@ describe('console sub-pages', () => {
     expect(screen.queryByRole('progressbar')).toBeNull()
   })
 
-  it('renders the account rows with the page surface opened', () => {
+  it('renders the account rows with the page surface permanently open', () => {
     const props = pagePropsOf({
       state: { accounts: accountsStateOf([{ ...ACCOUNT, configured: true }, { ...RESEARCH, configured: false }]) },
     })
     render(<AccountsPage {...props} />)
     expect(screen.getByText(en.accountsTitle)).toBeTruthy()
-    const trigger = screen.getByRole('button', { name: new RegExp('^' + en.accountsTitle) })
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    // The dedicated Accounts sub-page stays open and does not collapse on header click.
+    expect(screen.queryByRole('button', { name: new RegExp('^' + en.accountsTitle) })).toBeNull()
     expect(screen.getByText('Primary')).toBeTruthy()
     expect(screen.getByText('Research')).toBeTruthy()
     expect(screen.getByText(en.accountsPageHint)).toBeTruthy()

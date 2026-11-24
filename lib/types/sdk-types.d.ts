@@ -1691,6 +1691,7 @@ type AccountCommand = {
     id: string;
     name: string;
     key: string;
+    plan?: GoPlan;
 } | {
     kind: 'remove';
     ref: string;

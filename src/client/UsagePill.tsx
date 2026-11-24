@@ -189,8 +189,10 @@ interface UsageTriggerContentProps {
   style: UsagePillStyle
   rolling: UsageWindow
   weekly: UsageWindow
+  monthly?: UsageWindow
   rollingShort: string
   weekShort: string
+  monthShort?: string
   accountName?: string
   stale?: boolean
   staleLabel?: string
@@ -198,10 +200,16 @@ interface UsageTriggerContentProps {
   fallbackLabel?: string
 }
 
-function UsageTriggerSuffix({ stale, staleLabel, fallback, fallbackLabel, accountName }: Pick<
-  UsageTriggerContentProps, 'stale' | 'staleLabel' | 'fallback' | 'fallbackLabel' | 'accountName'
+function UsageTriggerSuffix({ monthly, monthShort, stale, staleLabel, fallback, fallbackLabel, accountName }: Pick<
+  UsageTriggerContentProps, 'monthly' | 'monthShort' | 'stale' | 'staleLabel' | 'fallback' | 'fallbackLabel' | 'accountName'
 >) {
+  const monthlyTone = monthly ? windowTone(monthly) : 'normal'
   return <>
+    {monthly && monthlyTone !== 'normal' && monthShort
+      ? <span className={css.monthAlert} data-level={monthlyTone}>
+        {' · '}{monthShort} {monthly.percent}%<LimitMark window={monthly} />
+      </span>
+      : null}
     {stale && staleLabel ? <span className={css.stale}> · {staleLabel}</span> : null}
     {fallback && fallbackLabel ? <span className={css.fallback}> · {fallbackLabel}</span> : null}
     {accountName ? <>{' · '}<span className={css.account}>{accountName}</span></> : null}
@@ -213,8 +221,9 @@ function LimitMark({ window }: { window: UsageWindow }) {
 }
 
 function UsageTriggerContent(props: UsageTriggerContentProps) {
-  const { style, rolling, weekly, rollingShort, weekShort, stale, fallback } = props
-  const warning = Boolean(stale || fallback)
+  const { style, rolling, weekly, monthly, rollingShort, weekShort, stale, fallback } = props
+  const monthlyAlert = monthly ? windowTone(monthly) !== 'normal' : false
+  const warning = Boolean(stale || fallback || monthlyAlert)
   const suffix = <UsageTriggerSuffix {...props} />
   if (style === 'concentric') {
     return <>
@@ -332,6 +341,14 @@ function Tick() {
   return <svg className={css.tick} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" /></svg>
 }
 
+function RefreshIcon() {
+  return <svg className={css.icon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 7.5A5 5 0 1 1 11.2 4" /><path d="M13 3v3.5H9.5" /></svg>
+}
+
+function CycleIcon() {
+  return <svg className={css.cycleIcon} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h9L9.2 2.2M11.5 9.5h-9l2.3 2.3" /></svg>
+}
+
 /** Only a visible, enabled input indicator mounts the usage poller. */
 export function UsagePill({ directory, ...props }: UsagePillProps) {
   const state = useSyncExternalStore(directory.subscribe, directory.getSnapshot, directory.getSnapshot)
@@ -412,10 +429,13 @@ function UsageSurface({ settings, credentialChanges, variant, provider, selected
     ? (config.value!.goPlan as GoPlan) : DEFAULT_GO_PLAN
   const goPlan = accountPlanOf(accounts.find(account => account.apiKeyEnv === activeRef), configPlan)
   const endpointKey = JSON.stringify([config.value?.baseURL ?? '', config.value?.freeBaseURL ?? '', config.value?.proxyURL ?? ''])
+  const isSidebarPreview = variant === 'sidebar' && Boolean(viewedRef && callingRef && viewedRef !== callingRef)
   return visible ? <>
     <ActiveUsage key={JSON.stringify([activeRef, config.value?.baseURL, config.value?.proxyURL, credentialRevision, accounts.map(a => [a.id, a.apiKeyEnv])])}
       {...props} readUsage={variant === 'pill' ? props.readUsage : readSidebarUsage}
-      accounts={accounts} activeRef={activeRef} writable={config.writable}
+      readAccountUsage={readAccountUsage}
+      accounts={accounts} activeRef={activeRef} callingRef={callingRef} writable={config.writable}
+      isSidebarPreview={isSidebarPreview}
       onNextAccount={viewedAccount && accounts.length > 1 ? nextAccount : undefined}
       variant={variant} pillStyle={pillAppearance.style} pillBorder={pillAppearance.border}
       appearanceTheme={appearanceTheme} analyticsOpen={analyticsOpen} onAnalyticsOpenChange={openAnalytics}
@@ -441,9 +461,9 @@ function formatTranslated(t: UsagePillProps['t'], key: string, params: Record<st
   return text
 }
 
-function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLocale, accounts, activeRef, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme, goPlan, endpointKey, activeModelId }:
+function ActiveUsage({ readUsage, readAccountUsage, readModels, catalog, readAnalytics, t, getLocale, accounts, activeRef, callingRef, isSidebarPreview, writable, selectAccount, analyticsOpen, onAnalyticsOpenChange, onNextAccount, variant, pillStyle, pillBorder, appearanceTheme, goPlan, endpointKey, activeModelId }:
   Omit<UsagePillProps, 'directory' | 'settings'> & {
-    accounts: readonly GoAccount[]; activeRef: string; writable: boolean
+    accounts: readonly GoAccount[]; activeRef: string; callingRef: string; isSidebarPreview: boolean; writable: boolean
     analyticsOpen: boolean; onAnalyticsOpenChange: (open: boolean) => void
     onNextAccount?: () => void
     variant: UsageVariant; pillStyle: UsagePillStyle; pillBorder: boolean; appearanceTheme: OpencodeGoTheme
@@ -459,6 +479,8 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
   const [switchFailed, setSwitchFailed] = useState(false)
   const [view, setView] = useState<'usage' | 'accounts'>('usage')
   const [rovingIndex, setRovingIndex] = useState(0)
+  const [accountQuotas, setAccountQuotas] = useState<Readonly<Record<string, GoUsage | 'failed'>>>({})
+  const [panelShiftX, setPanelShiftX] = useState(0)
   const [localCatalogModels, setLocalCatalogModels] = useState<readonly GoModel[] | null>(null)
   const readSharedCatalog = useCallback(() => catalog?.store.getSnapshot() ?? null, [catalog])
   const subscribeSharedCatalog = useCallback(
@@ -586,9 +608,46 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
     setRovingIndex(index)
     ;(options[index] ?? panel).focus()
   }, [open, accountsView, selectedIndex])
+  // Keep the non-modal popover inside viewport bounds on narrow windows so it
+  // never clips past the left/right viewport edges.
+  useEffect(() => {
+    if (sidebar || !open) { setPanelShiftX(0); return }
+    const clamp = (): void => {
+      const panel = panelRef.current
+      if (!panel || typeof window === 'undefined') return
+      const rect = panel.getBoundingClientRect()
+      if (rect.width === 0) return
+      const margin = 12
+      let shift = 0
+      if (rect.left < margin) shift = margin - rect.left
+      else if (rect.right > window.innerWidth - margin) shift = (window.innerWidth - margin) - rect.right
+      setPanelShiftX(previous => (Math.abs(previous - shift) < 1 ? previous : Math.round(shift)))
+    }
+    clamp()
+    window.addEventListener('resize', clamp)
+    return () => { window.removeEventListener('resize', clamp) }
+  }, [sidebar, open, accountsView])
+  // Lazily load per-account quota previews when opening the switcher drill-down
+  // so the user can compare backup headroom before switching accounts.
+  useEffect(() => {
+    if (sidebar || !open || !accountsView || !readAccountUsage) return
+    let alive = true
+    for (const account of accounts) {
+      const ref = account.apiKeyEnv
+      if (ref === activeRef && usage) {
+        setAccountQuotas(previous => (previous[ref] === usage ? previous : { ...previous, [ref]: usage }))
+        continue
+      }
+      void readAccountUsage(ref).then(
+        result => { if (alive) setAccountQuotas(previous => ({ ...previous, [ref]: result })) },
+        () => { if (alive) setAccountQuotas(previous => ({ ...previous, [ref]: 'failed' })) },
+      )
+    }
+    return () => { alive = false }
+  }, [sidebar, open, accountsView, readAccountUsage, accounts, activeRef, usage])
   const switchable = accounts.length > 1 && writable && selectAccount !== undefined
   const switchTo = (ref: string): void => {
-    if (ref === activeRef) { setView('usage'); focusTrigger(); return }
+    if (ref === callingRef) { setView('usage'); focusTrigger(); return }
     setSwitching(true)
     setSwitchFailed(false)
     void selectAccount?.(ref).then(accepted => {
@@ -604,8 +663,9 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
   const staleUpdated = stale && !failure && current
     ? ` · ${t('usageLastUpdated')} ${formatDateTime(current.updatedAt, getLocale?.(), { hour: '2-digit', minute: '2-digit' })}`
     : ''
+  const monthlyAlert = Boolean(usage && windowTone(usage.monthly) !== 'normal')
   const label = usage
-    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${sidebar ? ` · ${t('usage_monthly')} ${usage.monthly.percent}%` : ''}${failure || stale ? ` · ${t('usageStaleShort')}` : ''}${staleUpdated}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
+    ? `${t('usageRollingShort')} ${usage.rolling.percent}% · ${t('usageWeekShort')} ${usage.weekly.percent}%${sidebar ? ` · ${t('usage_monthly')} ${usage.monthly.percent}%` : monthlyAlert ? ` · ${t('usageMonthShort')} ${usage.monthly.percent}%` : ''}${failure || stale ? ` · ${t('usageStaleShort')}` : ''}${staleUpdated}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
     : `${failure ? t('usageUnavailable') : '…'}${notice ? ` · ${t('usageFallbackShort')}` : ''}${accounts.length > 1 ? ` · ${accountName}` : ''}`
   /** The pill's segments concatenate to exactly `label`: the two readings, the optional stale and
    *  fallback wording, and the active account's full name once a second account exists. The
@@ -640,11 +700,27 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
       {variant === 'sidebar' ? <>
         <span className={css.sidebarHead}>
           <strong>OpenCode Go</strong>
-          {onNextAccount ? <button type="button" className={`${css.sidebarBadge} ${css.sidebarAccountButton}`}
-            aria-label={`${t('sidebarNextAccount')}: ${accountName}`} title={`${accountName} · ${t('sidebarNextAccount')}`}
-            onClick={onNextAccount}>{accountName}</button>
-            : <span className={css.sidebarBadge} title={accountName}>{accounts.length ? accountName : 'Go'}</span>}
+          <span className={css.sidebarHeadRight}>
+            {onNextAccount ? <button type="button" className={`${css.sidebarBadge} ${css.sidebarAccountButton}`}
+              aria-label={`${t('sidebarNextAccount')}: ${accountName}`} title={`${accountName} · ${t('sidebarNextAccount')}`}
+              onClick={onNextAccount}>
+              <span className={css.sidebarBadgeText}>{accountName}</span>
+              <CycleIcon />
+            </button>
+              : <span className={css.sidebarBadge} title={accountName}>{accounts.length ? accountName : 'Go'}</span>}
+            <button type="button" className={css.sidebarRefresh} disabled={refreshing}
+              aria-label={t(refreshing ? 'usageRefreshing' : 'usageRefresh')}
+              title={t(refreshing ? 'usageRefreshing' : 'usageRefresh')}
+              onClick={() => { retry.current() }}>
+              <RefreshIcon />
+            </button>
+          </span>
         </span>
+        {isSidebarPreview ? <span className={css.sidebarPreviewRow}>
+          <span className={css.sidebarPreviewTag}>{t('sidebarPreviewTag')}</span>
+          {writable && selectAccount ? <button type="button" className={css.sidebarUseBtn} disabled={switching}
+            onClick={() => { switchTo(activeRef) }}>{t('sidebarUseAccount')}</button> : null}
+        </span> : null}
         {(['rolling', 'weekly', 'monthly'] as const).map(key => <span className={css.sidebarWindow} key={key}>
           <span>{t(`usage_${key}`)}</span>
           <progress aria-label={t(`usage_${key}`)} max={100} value={usage ? Math.min(100, Math.max(0, usage[key].percent)) : 0}
@@ -658,14 +734,15 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
           <ChartIcon /><span>{t('analyticsOpen')}</span><ChevronRight />
         </button> : null}
       </> : variant === 'sidebar-icon' ? <ChartIcon />
-        : usage ? <UsageTriggerContent style={pillStyle} rolling={usage.rolling} weekly={usage.weekly}
-          rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+        : usage ? <UsageTriggerContent style={pillStyle} rolling={usage.rolling} weekly={usage.weekly} monthly={usage.monthly}
+          rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')} monthShort={t('usageMonthShort')}
           accountName={accounts.length > 1 ? accountName : undefined}
           stale={Boolean(failure || stale)} staleLabel={t('usageStaleShort')}
           fallback={Boolean(notice)} fallbackLabel={t('usageFallbackShort')} />
         : unavailableSegments}
     </Trigger>
     {!sidebar && open && <div className={css.panel} id={panelId} ref={panelRef} role="dialog"
+      style={panelShiftX !== 0 ? { transform: `translateX(${panelShiftX}px)` } : undefined}
       aria-label={t('usageTitle')} aria-busy={refreshing} tabIndex={-1}>
       {/* Keep the surface separate from the scroller so its border stays fixed. */}
       <div className={css.material} aria-hidden="true" />
@@ -695,18 +772,31 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
             setRovingIndex(next)
             options[next]?.focus()
           }}>
-          {accounts.map((account, index) => <Fragment key={account.id}>
-            {index ? <div className={css.divider} /> : null}
-            <button type="button" role="option" aria-selected={account.apiKeyEnv === activeRef}
-              data-selected={account.apiKeyEnv === activeRef ? '' : undefined}
-              className={css.option} disabled={switching}
-              tabIndex={index === roving ? 0 : -1}
-              onFocus={() => { setRovingIndex(index) }}
-              onClick={() => { switchTo(account.apiKeyEnv) }}>
-              <span className={css.optionName}>{account.name || t('accountDefault')}</span>
-              {account.apiKeyEnv === activeRef ? <Tick /> : null}
-            </button>
-          </Fragment>)}
+          {accounts.map((account, index) => {
+            const preview = accountQuotas[account.apiKeyEnv]
+            const rowUsage = preview && preview !== 'failed' ? preview : undefined
+            const rowTone = rowUsage
+              ? (windowTone(rowUsage.rolling) === 'limited' || windowTone(rowUsage.weekly) === 'limited' || windowTone(rowUsage.monthly) === 'limited'
+                ? 'limited'
+                : windowTone(rowUsage.rolling) === 'high' || windowTone(rowUsage.weekly) === 'high' || windowTone(rowUsage.monthly) === 'high'
+                  ? 'high' : 'normal')
+              : undefined
+            return <Fragment key={account.id}>
+              {index ? <div className={css.divider} /> : null}
+              <button type="button" role="option" aria-selected={account.apiKeyEnv === activeRef}
+                data-selected={account.apiKeyEnv === activeRef ? '' : undefined}
+                className={css.option} disabled={switching}
+                tabIndex={index === roving ? 0 : -1}
+                onFocus={() => { setRovingIndex(index) }}
+                onClick={() => { switchTo(account.apiKeyEnv) }}>
+                <span className={css.optionName}>{account.name || t('accountDefault')}</span>
+                {rowUsage ? <span className={css.optionQuota} data-level={rowTone}>
+                  {t('usageRollingShort')} {rowUsage.rolling.percent}% · {t('usageWeekShort')} {rowUsage.weekly.percent}%
+                </span> : preview === 'failed' ? <span className={css.optionQuotaFailed}>{t('usageUnavailable')}</span> : null}
+                {account.apiKeyEnv === activeRef ? <Tick /> : null}
+              </button>
+            </Fragment>
+          })}
         </div>
         {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
         <p className={css.hint}>{t('accountSwitchHint')}</p>
@@ -783,6 +873,9 @@ function ActiveUsage({ readUsage, readModels, catalog, readAnalytics, t, getLoca
                   : null}
               <strong className={css.modelEstimateVal}>{callText}</strong>
             </div>
+            {estimate.bottleneck ? <div className={css.modelBottleneck}>
+              {t(`quotaBottleneck_${estimate.bottleneck}`)}
+            </div> : null}
           </div>
         })() : null}
         {readAnalytics || current ? <div className={css.actions}>

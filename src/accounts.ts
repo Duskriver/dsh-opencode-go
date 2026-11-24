@@ -197,10 +197,19 @@ export class GoAccountManager {
         if (retained.length >= MAX_ACCOUNTS || retained.some(account => account.id === command.id || account.apiKeyEnv === ref)) {
           throw new Error('Account list changed while storing the credential')
         }
-        const added = { id: command.id, name: command.name.trim(), apiKeyEnv: ref }
+        const added: GoAccount = {
+          id: command.id,
+          name: command.name.trim(),
+          apiKeyEnv: ref,
+          ...(command.plan ? { plan: command.plan } : {}),
+        }
         const selected = accountRefOf(value) === previousRef && configured.every(info => !info.configured) ? ref : accountRefOf(value)
         const next = [...moveAccountFirst([...retained, added], selected)]
-        return await this.write(connection, { accounts: next, apiKeyEnv: next[0]!.apiKeyEnv })
+        return await this.write(connection, {
+          accounts: next,
+          apiKeyEnv: next[0]!.apiKeyEnv,
+          ...(command.plan ? syncedPlanPatch(next, value.goPlan) : {}),
+        })
       } catch (error) {
         // A refused metadata write must not leave the new secret behind.
         await credentials.unset(credentialRef(ref)).catch(() => {

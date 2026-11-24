@@ -1131,4 +1131,52 @@ describe("account cards, quota rows and ordering", () => {
     fixture.controller.dispose()
   })
 
+  it('expands accounts on whole-row click, supports comparing multiple expanded rows and offers one-click Set as current on backups', async () => {
+    const fixture = setup()
+    await fixture.controller.refreshAccounts()
+    const selectAccount = vi.fn(async () => true)
+    render(<AccountsCard state={fixture.controller.accountState()} actions={{ ...fixture.actions, selectAccount }} writable defaultOpen t={t} />)
+    const primaryRow = document.querySelector('[data-account-row="ACCOUNT_A"]') as HTMLElement
+    const backupRow = document.querySelector('[data-account-row="ACCOUNT_B"]') as HTMLElement
+
+    // Clicking the row header itself expands both rows simultaneously for side-by-side comparison.
+    fireEvent.click(primaryRow.querySelector('[data-account-main]') as HTMLElement)
+    fireEvent.click(backupRow.querySelector('[data-account-main]') as HTMLElement)
+    expect(primaryRow.getAttribute('data-open')).toBe('true')
+    expect(backupRow.getAttribute('data-open')).toBe('true')
+
+    // Primary has no Set as current button; Backup exposes it and calls selectAccount.
+    expect(within(primaryRow).queryByRole('button', { name: en.accountSetPrimary })).toBeNull()
+    const setPrimaryBtn = within(backupRow).getByRole('button', { name: en.accountSetPrimary })
+    await act(async () => { fireEvent.click(setPrimaryBtn) })
+    expect(selectAccount).toHaveBeenCalledWith('ACCOUNT_B')
+    fixture.controller.dispose()
+  })
+
+  it('lets the user choose a subscription plan and toggle API key visibility when adding an account', async () => {
+    const fixture = setup()
+    const addAccount = vi.fn(async () => true)
+    render(<AccountsCard state={fixture.controller.accountState()} actions={{ ...fixture.actions, addAccount }} writable defaultOpen t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: en.accountAdd }))
+
+    // Only the name field receives autoFocus (never both name and key).
+    const nameInput = screen.getByLabelText(en.accountName) as HTMLInputElement
+    const keyInput = screen.getByLabelText(en.keyLabel) as HTMLInputElement
+    expect(document.activeElement).toBe(nameInput)
+    expect(keyInput.type).toBe('password')
+
+    fireEvent.click(screen.getByRole('button', { name: en.accountKeyShow }))
+    expect(keyInput.type).toBe('text')
+    fireEvent.click(screen.getByRole('button', { name: en.accountKeyHide }))
+    expect(keyInput.type).toBe('password')
+
+    fireEvent.change(nameInput, { target: { value: 'Team Plus' } })
+    fireEvent.change(keyInput, { target: { value: 'sk-team-plus' } })
+    const planGroup = screen.getByRole('group', { name: en.goPlanLabel })
+    fireEvent.click(within(planGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.accountConfirm })) })
+    expect(addAccount).toHaveBeenCalledWith('Team Plus', 'sk-team-plus', 'go-plus')
+    fixture.controller.dispose()
+  })
+
 })

@@ -253,7 +253,7 @@ function operationId(): string {
 
 export interface GoAccountsActions {
   loadAccounts: () => void
-  addAccount: (name: string, key: string) => Promise<boolean>
+  addAccount: (name: string, key: string, plan?: GoPlan) => Promise<boolean>
   /** A newly opened addition form owns a fresh ID; retries keep its existing ID. */
   resetAddition?: () => void
   renameAccount: (ref: string, name: string) => Promise<boolean>
@@ -880,10 +880,10 @@ export class OpencodeGoSectionController {
     return {
       loadAccounts: () => { void this.refreshAccounts() },
       resetAddition: () => { this.addition = undefined },
-      addAccount: (name, key) => this.runAccountAction(async () => {
+      addAccount: (name, key, plan) => this.runAccountAction(async () => {
         if (!name.trim() || name.trim().length > 80 || !key.trim()) return false
         if (this.addition?.name !== name.trim()) this.addition = { name: name.trim(), id: operationId() }
-        const accepted = await command({ kind: 'add', id: this.addition.id, name, key })
+        const accepted = await command({ kind: 'add', id: this.addition.id, name, key, ...(plan ? { plan } : {}) })
         if (accepted) this.addition = undefined
         return accepted
       }),

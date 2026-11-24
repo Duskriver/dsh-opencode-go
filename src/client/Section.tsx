@@ -206,19 +206,30 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
   /** Settings keeps the hairline card; the console page draws a real card. */
   surface?: 'settings' | 'page'
 }) {
-  const [open, setOpen] = useState(defaultOpen)
-  const [details, setDetails] = useState<string | null>(null)
+  const collapsible = surface !== 'page'
+  const [open, setOpen] = useState(defaultOpen || !collapsible)
+  const [expandedRefs, setExpandedRefs] = useState<ReadonlySet<string>>(() => new Set())
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [name, setName] = useState('')
   const [key, setKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [addPlan, setAddPlan] = useState<GoPlan>(DEFAULT_GO_PLAN)
   const disabled = state.busy || state.blocked || !writable
   const total = state.entries.length
   const ready = state.entries.filter(entry => entry.configured === true).length
   const unreadable = state.entries.filter(entry => entry.failed === true).length
   const preferred = state.entries.find(entry => entry.apiKeyEnv === state.activeRef)
   const reorderable = !disabled && total > 1
+  const toggleDetails = (ref: string): void => {
+    setExpandedRefs(previous => {
+      const next = new Set(previous)
+      if (next.has(ref)) next.delete(ref)
+      else next.add(ref)
+      return next
+    })
+  }
   /** Row the drag started on, or -1 while nothing is being dragged. */
   const draggingFrom = dragging === null ? -1 : state.entries.findIndex(entry => entry.apiKeyEnv === dragging)
   /** A slot at the dragged row's own position changes nothing: no mark, and no write. */
@@ -245,11 +256,11 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
   }, [actions.loadAccounts])
   const start = (next: Editor, label = '') => {
     if (next.kind === 'add') actions.resetAddition?.()
-    setEditor(next); setName(label); setKey('')
+    setEditor(next); setName(label); setKey(''); setShowKey(false); setAddPlan(DEFAULT_GO_PLAN)
   }
   const cancel = () => {
     if (editor?.kind === 'add') actions.resetAddition?.()
-    setEditor(null); setName(''); setKey('')
+    setEditor(null); setName(''); setKey(''); setShowKey(false); setAddPlan(DEFAULT_GO_PLAN)
   }
   // A page-level toolbar can carry the add action while the editor below stays
   // the one in the card. Comparing against the previous request keeps a re-render
@@ -278,7 +289,8 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
   }, [state.entries, dragging])
   const submit = async () => {
     if (!editor) return
-    const accepted = editor.kind === 'add' ? await actions.addAccount(name, key)
+    const accepted = editor.kind === 'add'
+      ? (addPlan !== DEFAULT_GO_PLAN ? await actions.addAccount(name, key, addPlan) : await actions.addAccount(name, key))
       : editor.kind === 'rename' ? await actions.renameAccount(editor.ref!, name)
         : editor.kind === 'key' ? await actions.replaceAccountKey(editor.ref!, key)
           : await actions.removeAccount(editor.ref!)
@@ -304,10 +316,31 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
         onChange={event => { setName(event.target.value) }} />
     </label> : null}
     {editor.kind === 'add' || editor.kind === 'key' ? <><label className={css.accountField}>{t('keyLabel')}
-      <input className={css.input} type="password" autoComplete="off" value={key} required disabled={state.busy}
-        autoFocus={editor.kind === 'key'}
-        onChange={event => { setKey(event.target.value) }} />
+      <span className={css.keyInputWrap}>
+        <input className={css.input} type={showKey ? 'text' : 'password'} autoComplete="off" value={key} required disabled={state.busy}
+          autoFocus={editor.kind === 'key'}
+          onChange={event => { setKey(event.target.value) }} />
+        <button type="button" className={css.keyToggle} disabled={state.busy}
+          aria-pressed={showKey}
+          aria-label={t(showKey ? 'accountKeyHide' : 'accountKeyShow')}
+          title={t(showKey ? 'accountKeyHide' : 'accountKeyShow')}
+          onClick={() => { setShowKey(previous => !previous) }}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {showKey
+              ? <><path d="M2 2l12 12" /><path d="M6.4 6.5a2.3 2.3 0 0 0 3.1 3.1" /><path d="M4.2 4.6C2.8 5.5 1.8 6.8 1.5 8c.9 2.4 3.5 4 6.5 4 1.1 0 2.2-.2 3.1-.7" /><path d="M7 4.1c.3 0 .7-.1 1-.1 3 0 5.6 1.6 6.5 4-.3.8-.9 1.6-1.6 2.2" /></>
+              : <><path d="M1.5 8c.9-2.4 3.5-4 6.5-4s5.6 1.6 6.5 4c-.9 2.4-3.5 4-6.5 4s-5.6-1.6-6.5-4Z" /><circle cx="8" cy="8" r="2.1" /></>}
+          </svg>
+        </button>
+      </span>
     </label><p className={css.hint}>{t('accountKeyHint')}</p></> : null}
+    {editor.kind === 'add' ? <PlanSelector
+      label={t('goPlanLabel')}
+      hint={t('goPlanHint')}
+      value={addPlan}
+      disabled={state.busy}
+      t={t}
+      onSelect={setAddPlan}
+    /> : null}
     <div className={css.accountEditorActions}>
       <Button variant="primary" size="sm" type="submit"
         disabled={editor.kind === 'key' ? state.busy || state.blocked : disabled}>{t(state.busy ? 'saving' : 'accountConfirm')}</Button>
@@ -321,6 +354,8 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
           {t(isActive ? 'accountManagePrimary' : 'accountManageBackup', { rank: index + 1 })}
         </span>
         <div className={css.accountActions}>
+          {!isActive ? <Button variant="primary" size="sm" disabled={disabled}
+            onClick={() => { void actions.selectAccount(account.apiKeyEnv) }}>{t('accountSetPrimary')}</Button> : null}
           <Button variant="outline" size="sm" disabled={disabled}
             onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
           <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false}
@@ -354,22 +389,27 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
     </div>
   const cardClass = surface === 'page' ? css.cardPage + ' ' + css.accountsCard : open ? css.card : css.card + ' ' + css.cardFolded
   const foldTone = total === 0 ? 'neutral' : unreadable > 0 || ready < total ? 'warning' : 'success'
+  const headerContent = <>
+    <span className={css.cardTriggerRow}>
+      <span className={css.cardTitle}>{t('accountsTitle')}</span>
+      <span className={css.foldBadge} data-tone={foldTone}>
+        {total > 0 ? <span className={css.foldDot} aria-hidden="true" /> : null}
+        {total > 0 ? <span className={css.foldText}>
+          {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
+        </span> : null}
+        {collapsible ? <ChevronDown className={open ? css.chevronOpen : css.chevron} /> : null}
+      </span>
+    </span>
+    <span className={css.cardSub}>{summary}</span>
+  </>
   return <section className={cardClass}>
     <div className={css.cardHead + ' ' + css.accountsHead}>
-      <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
+      {collapsible ? <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
         onClick={() => { setOpen(!open) }}>
-        <span className={css.cardTriggerRow}>
-          <span className={css.cardTitle}>{t('accountsTitle')}</span>
-          <span className={css.foldBadge} data-tone={foldTone}>
-            {total > 0 ? <span className={css.foldDot} aria-hidden="true" /> : null}
-            {total > 0 ? <span className={css.foldText}>
-              {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
-            </span> : null}
-            <ChevronDown className={open ? css.chevronOpen : css.chevron} />
-          </span>
-        </span>
-        <span className={css.cardSub}>{summary}</span>
-      </button>
+        {headerContent}
+      </button> : <div className={css.cardTriggerStatic}>
+        {headerContent}
+      </div>}
       <span className={css.trailing}>
         {updatedAt > 0 ? <span className={css.cardStamp} title={formatDateTime(updatedAt, locale)}>
           {t('usageLastUpdated')} {stampText(updatedAt, locale)}
@@ -423,7 +463,7 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
         {state.entries.map((account, index) => {
           const label = account.name || t('accountDefault')
           const rolling = account.usage?.rolling
-          const expanded = details === account.apiKeyEnv
+          const expanded = expandedRefs.has(account.apiKeyEnv)
           const panelId = `opencode-go-account-${index}`
           const isActive = state.activeRef ? account.apiKeyEnv === state.activeRef : index === 0
           const rowPlan = accountPlanOf(account, isActive || total === 1 ? fallbackPlan : DEFAULT_GO_PLAN)
@@ -449,7 +489,12 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
                 }
                 setDragging(account.apiKeyEnv)
               }}>
-              <div className={css.accountMain} data-account-main="">
+              <div className={css.accountMain} data-account-main=""
+                onClick={event => {
+                  const target = event.target as HTMLElement | null
+                  if (target?.closest('button, input, a, select, textarea, [data-account-handle]')) return
+                  toggleDetails(account.apiKeyEnv)
+                }}>
                 <div className={css.accountLead}>
                   <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
                     disabled={!reorderable} title={t('accountDragHandle', { name: label })}
@@ -479,7 +524,7 @@ export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan
                     ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>) : null}
                   <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
                     aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}
-                    onClick={() => { setDetails(expanded ? null : account.apiKeyEnv) }}>
+                    onClick={() => { toggleDetails(account.apiKeyEnv) }}>
                     <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
                   </button>
                 </div>
