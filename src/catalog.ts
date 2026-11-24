@@ -33,6 +33,9 @@ import {
   SDK_PROVIDER_ID,
   MAX_THINKING_BUDGET_TOKENS,
   assertProxyURL,
+  type ConnectionProbeInput,
+  type ConnectionProbeResult,
+  type ProbeEndpointResult,
 } from './contracts.ts'
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -688,16 +691,93 @@ export class GoCatalogManager {
   }
 }
 
+const PROBE_TIMEOUT_MS = 10_000
+
+/**
+ * Safely test reachability of one gateway's keyless `/models` listing using
+ * the same URL validation, redirect policy and failure redaction as discovery.
+ */
+export async function probeGatewayEndpoint(
+  rawBaseURL: string,
+  source: ModelSource,
+  fetcher?: typeof globalThis.fetch,
+): Promise<ProbeEndpointResult> {
+  const started = Date.now()
+  let baseURL: string
+  try {
+    baseURL = assertBaseURL(rawBaseURL, source === 'go' ? 'baseURL' : 'freeBaseURL')
+  } catch (error) {
+    return { ok: false, latencyMs: 0, error: error instanceof Error ? error.message : String(error) }
+  }
+  const url = `${baseURL}/models`
+  const safeUrl = diagnosticURL(url)
+  try {
+    const { response, body } = await fetchJsonResponse(url, {
+      method: 'GET',
+      cache: 'no-cache',
+      headers: { ...attributionHeaders(), accept: 'application/json' },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      redirect: 'error',
+    }, MODEL_LISTING_MAX_BYTES, 'gzip', fetcher)
+    const latencyMs = Math.max(0, Date.now() - started)
+    if (!response.ok) {
+      return { ok: false, url: safeUrl, status: response.status, latencyMs, error: `HTTP ${response.status}` }
+    }
+    try {
+      const directory = readModelDirectory(body, baseURL, source)
+      return { ok: true, url: safeUrl, status: response.status, latencyMs, modelCount: directory.models.size }
+    } catch (error) {
+      return {
+        ok: false,
+        url: safeUrl,
+        status: response.status,
+        latencyMs,
+        error: `invalid model listing: ${error instanceof Error ? error.message : 'invalid data'}`,
+      }
+    }
+  } catch (error) {
+    const latencyMs = Math.max(0, Date.now() - started)
+    const detail = error instanceof LlmError ? error.message
+      : error instanceof SyntaxError ? 'invalid JSON response'
+      : error instanceof RangeError ? `response exceeds the ${MODEL_LISTING_MAX_BYTES} byte limit`
+      : transportFailure(error)
+    return { ok: false, url: safeUrl, latencyMs, error: detail }
+  }
+}
+
 export class GoModelsService extends TypertRemoteService {
   constructor(ctx: Context, private readonly options: {
     catalog: () => OpencodeGoCatalog
     /** Absent while the Free channel is disabled; the directory then omits Free models. */
     freeCatalog?: () => OpencodeGoCatalog | undefined
+    config?: () => OpencodeGoConfig
+    transport?: ProxyTransport
     onRefresh?: () => void
   }) { super(ctx, 'opencodeGoModels') }
 
   async read(): Promise<GoModelCatalog> {
     try { return await discoverSettingsModels(this.options.catalog(), this.options.freeCatalog?.()) }
     finally { this.options.onRefresh?.() }
+  }
+
+  async probe(input: ConnectionProbeInput = {}): Promise<ConnectionProbeResult> {
+    const live = this.options.config?.()
+    const rawProxy = input.proxyURL !== undefined ? input.proxyURL.trim() : (live?.proxyURL ?? '')
+    let fetcher: typeof globalThis.fetch | undefined
+    try {
+      const proxy = assertProxyURL(rawProxy)
+      fetcher = this.options.transport?.forProxy(proxy)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { go: { ok: false, latencyMs: 0, error: message } }
+    }
+    const goBase = input.baseURL?.trim() || live?.baseURL || DEFAULT_BASE_URL
+    const freeBase = input.freeBaseURL?.trim() || live?.freeBaseURL || DEFAULT_FREE_BASE_URL
+    const includeFree = input.includeFree ?? (live?.freeEnabled === true)
+    const [go, free] = await Promise.all([
+      probeGatewayEndpoint(goBase, 'go', fetcher),
+      includeFree ? probeGatewayEndpoint(freeBase, 'free', fetcher) : Promise.resolve(undefined),
+    ])
+    return free === undefined ? { go } : { go, free }
   }
 }

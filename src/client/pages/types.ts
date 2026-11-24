@@ -8,6 +8,8 @@ import type {
   AnalyticsExport,
   AnalyticsQuery,
   AnalyticsReport,
+  ConnectionProbeInput,
+  ConnectionProbeResult,
   GoUsage,
 } from '../../contracts.ts'
 import type { OpencodeGoSectionFace, OpencodeGoSectionState } from '../controller.ts'
@@ -63,6 +65,7 @@ export interface PageActions extends Omit<OpencodeGoSectionFace, 'hooks'> {
   getLocale?: () => string
   readers?: PageReaders
   openPage?: (tab?: PageTab) => void
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
 }
 
 /** Props every sub-page receives from the shell. */

@@ -134,6 +134,9 @@
 
 .tab {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 38px;
   padding: 0 11px;
   border: 0;
@@ -145,6 +148,14 @@
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.tabDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--go-accent);
+  flex: none;
 }
 
 .tab:hover { color: var(--go-text); background: var(--go-surface-panel); }

@@ -1,6 +1,6 @@
 import { type LlmDiscoveredModel } from '@deepseek-ai/dsh-llm';
 import type { Api, Model, ModelThinkingLevel, ThinkingBudgets, ThinkingLevelMap, Provider } from './sdk-types.ts';
-import { type ThinkingBudgetRange, type GoModel, type OpencodeGoConfig, type ModelSource, type GoModelCatalog } from './contracts.ts';
+import { type ThinkingBudgetRange, type GoModel, type OpencodeGoConfig, type ModelSource, type GoModelCatalog, type ConnectionProbeInput, type ConnectionProbeResult, type ProbeEndpointResult } from './contracts.ts';
 import { type ProxyTransport } from './transport.ts';
 import type { Context } from '@deepseek-ai/cordis';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
@@ -148,13 +148,21 @@ export declare class GoCatalogManager {
     });
     forConfig(config: OpencodeGoConfig, source?: ModelSource): OpencodeGoCatalog;
 }
+/**
+ * Safely test reachability of one gateway's keyless `/models` listing using
+ * the same URL validation, redirect policy and failure redaction as discovery.
+ */
+export declare function probeGatewayEndpoint(rawBaseURL: string, source: ModelSource, fetcher?: typeof globalThis.fetch): Promise<ProbeEndpointResult>;
 export declare class GoModelsService extends TypertRemoteService {
     private readonly options;
     constructor(ctx: Context, options: {
         catalog: () => OpencodeGoCatalog;
         /** Absent while the Free channel is disabled; the directory then omits Free models. */
         freeCatalog?: () => OpencodeGoCatalog | undefined;
+        config?: () => OpencodeGoConfig;
+        transport?: ProxyTransport;
         onRefresh?: () => void;
     });
     read(): Promise<GoModelCatalog>;
+    probe(input?: ConnectionProbeInput): Promise<ConnectionProbeResult>;
 }

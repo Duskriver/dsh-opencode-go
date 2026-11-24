@@ -1,6 +1,6 @@
 import { type en } from './presentation.ts';
 import type { GoAccountsActions, GoAccountsState, OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels, TextField, EditableField, OpencodeGoSectionFace, OpencodeGoSectionState } from './controller.ts';
-import { type ModelSource, type GoPlan } from '../contracts.ts';
+import { type ConnectionProbeInput, type ConnectionProbeResult, type ModelSource, type GoPlan } from '../contracts.ts';
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots';
 export declare function HintMark(props: {
     hint: string;
@@ -59,6 +59,8 @@ export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
      * never register the page simply leave the secondary button out.
      */
     openPage?: () => void;
+    /** Safely probes gateway reachability from the Host without exposing credentials. */
+    probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>;
 }
 /** Props delivered by the slot outlet: the inject face spread flat. */
 export type OpencodeGoSectionProps = Partial<InjectFace<OpencodeGoSectionInjected>>;
@@ -81,14 +83,16 @@ export declare function AppearanceSettings({ state, t, disabled, saving, onEdit,
  * image budget, closed by the reset-all row. Extracted from `Loaded` unchanged
  * so the full page can carry the same fields.
  */
-export declare function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edit, resetField, surface }: {
+export declare function AdvancedSettings({ state, t, locale, disabled, saving, invalidLabel, edit, resetField, probeConnection, surface }: {
     state: OpencodeGoSectionState;
     t: SectionTranslate;
+    locale?: string;
     disabled: boolean;
     saving: boolean;
     invalidLabel: string;
     edit: (field: TextField, text: string) => void;
     resetField: (field: EditableField) => void;
+    probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>;
     surface?: 'settings' | 'page';
 }): import("react").JSX.Element;
 /**
@@ -96,7 +100,7 @@ export declare function AdvancedSettings({ state, t, disabled, saving, invalidLa
  * capacity editor. The selected source is local (as it was in `Loaded`), so the
  * page and the section behave the same on remount.
  */
-export declare function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, surface }: {
+export declare function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, onEnableFree, surface }: {
     state: OpencodeGoSectionState;
     t: SectionTranslate;
     locale?: string;
@@ -104,6 +108,7 @@ export declare function ModelsSettings({ state, t, locale, disabled, onEdit, set
     onEdit: (value: OpencodeGoModelLimits) => void;
     setModelEnabled: (id: string | readonly string[], next: boolean) => void;
     loadModels: () => void;
+    onEnableFree?: () => void;
     surface?: 'settings' | 'page';
 }): import("react").JSX.Element;
 /**

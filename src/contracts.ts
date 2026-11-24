@@ -643,19 +643,109 @@ function parseSources(value: unknown): NonNullable<GoModelCatalog['sources']> {
   return { go: parse(sources.go), free: parse(sources.free) }
 }
 
+/** Input to the safe keyless gateway connectivity probe. */
+export interface ConnectionProbeInput {
+  baseURL?: string
+  freeBaseURL?: string
+  proxyURL?: string
+  includeFree?: boolean
+}
+
+/** Sanitized connectivity probe outcome for one gateway endpoint (never carries credentials). */
+export interface ProbeEndpointResult {
+  readonly ok: boolean
+  readonly url?: string
+  readonly status?: number
+  readonly latencyMs: number
+  readonly modelCount?: number
+  readonly error?: string
+}
+
+/** Connectivity probe outcomes for Go and optionally Free gateways. */
+export interface ConnectionProbeResult {
+  readonly go: ProbeEndpointResult
+  readonly free?: ProbeEndpointResult
+}
+
+export function parseConnectionProbeInput(value: unknown): ConnectionProbeInput {
+  if (value === undefined || value === null) return {}
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid connection probe input')
+  const row = value as Record<string, unknown>
+  const allowed = ['baseURL', 'freeBaseURL', 'proxyURL', 'includeFree']
+  if (Object.keys(row).some(key => !allowed.includes(key))) throw new Error('Invalid connection probe input')
+  const result: ConnectionProbeInput = {}
+  for (const key of ['baseURL', 'freeBaseURL', 'proxyURL'] as const) {
+    if (row[key] !== undefined) {
+      if (typeof row[key] !== 'string' || row[key].length > 2048) throw new Error(`Invalid probe ${key}`)
+      result[key] = row[key]
+    }
+  }
+  if (row.includeFree !== undefined) {
+    if (typeof row.includeFree !== 'boolean') throw new Error('Invalid probe includeFree')
+    result.includeFree = row.includeFree
+  }
+  return result
+}
+
+function parseProbeEndpointResult(value: unknown): ProbeEndpointResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid probe endpoint result')
+  const row = value as Record<string, unknown>
+  if (typeof row.ok !== 'boolean' || typeof row.latencyMs !== 'number'
+    || !Number.isSafeInteger(row.latencyMs) || row.latencyMs < 0) {
+    throw new Error('Invalid probe endpoint result')
+  }
+  if (row.url !== undefined && (typeof row.url !== 'string' || row.url.length > 2048)) throw new Error('Invalid probe url')
+  if (row.status !== undefined && (typeof row.status !== 'number' || !Number.isSafeInteger(row.status) || row.status <= 0)) {
+    throw new Error('Invalid probe status')
+  }
+  if (row.modelCount !== undefined && (typeof row.modelCount !== 'number' || !Number.isSafeInteger(row.modelCount) || row.modelCount < 0)) {
+    throw new Error('Invalid probe modelCount')
+  }
+  if (row.error !== undefined && (typeof row.error !== 'string' || row.error.length > 1024)) throw new Error('Invalid probe error')
+  return {
+    ok: row.ok,
+    latencyMs: row.latencyMs,
+    ...(row.url === undefined ? {} : { url: row.url }),
+    ...(row.status === undefined ? {} : { status: row.status }),
+    ...(row.modelCount === undefined ? {} : { modelCount: row.modelCount }),
+    ...(row.error === undefined ? {} : { error: row.error }),
+  }
+}
+
+export function parseConnectionProbeResult(value: unknown): ConnectionProbeResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid connection probe result')
+  const row = value as Record<string, unknown>
+  return {
+    go: parseProbeEndpointResult(row.go),
+    ...(row.free === undefined ? {} : { free: parseProbeEndpointResult(row.free) }),
+  }
+}
+
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespaceMap {
-    opencodeGoModels: { read(): Promise<RemoteResult<GoModelCatalog>> }
+    opencodeGoModels: {
+      read(): Promise<RemoteResult<GoModelCatalog>>
+      probe(input: ConnectionProbeInput): Promise<RemoteResult<ConnectionProbeResult>>
+    }
   }
 }
 
 const codec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#GoModelCatalog',
   schema: { parse: parseGoModelCatalog }, create: () => ({ parse: parseGoModelCatalog }) }
 
+const probeInputCodec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#ConnectionProbeInput',
+  schema: { parse: parseConnectionProbeInput }, create: () => ({ parse: parseConnectionProbeInput }) }
+
+const probeResultCodec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#ConnectionProbeResult',
+  schema: { parse: parseConnectionProbeResult }, create: () => ({ parse: parseConnectionProbeResult }) }
+
 export const modelsRemote: TypertRemoteContribution = {
   package: 'dsh-opencode-go',
   descriptors: [{ id: 'dsh-opencode-go#opencodeGoModels/read', service: 'opencodeGoModels',
-    namespace: 'opencodeGoModels', method: 'read', invocation: { kind: 'direct' }, parameters: [], result: codec }],
+    namespace: 'opencodeGoModels', method: 'read', invocation: { kind: 'direct' }, parameters: [], result: codec },
+  { id: 'dsh-opencode-go#opencodeGoModels/probe', service: 'opencodeGoModels',
+    namespace: 'opencodeGoModels', method: 'probe', invocation: { kind: 'direct' },
+    parameters: [{ name: 'input', wire: 'input', source: 'json', codec: probeInputCodec }], result: probeResultCodec }],
 }
 
 export interface UsageWindow {

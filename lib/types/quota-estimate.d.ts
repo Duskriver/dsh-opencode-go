@@ -9,14 +9,26 @@ export declare const GO_MONTHLY_SHARE = 1;
  * active plan's monthly allowance (= 1/10,000 of the 5-hour rolling window).
  */
 export declare const STANDARD_QUOTA_SHARE: number;
+/** Selectable workload profiles for per-model quota request estimation. */
+export declare const QUOTA_WORKLOAD_PROFILES: readonly ["chat", "coding", "agent"];
+export type QuotaWorkloadProfile = typeof QUOTA_WORKLOAD_PROFILES[number];
+/**
+ * Representative per-call token profiles (input / cacheRead / output) used to
+ * convert per-model dollar allowances into estimated request counts.
+ */
+export declare const QUOTA_WORKLOAD_TOKENS: Record<QuotaWorkloadProfile, {
+    readonly input: number;
+    readonly cacheRead: number;
+    readonly output: number;
+}>;
 /**
  * Typical OpenCode Go coding-agent request profile (per call) used to convert
  * per-model dollar allowances into estimated request counts.
  */
 export declare const TYPICAL_REQUEST_TOKENS: {
-    readonly input: 1000;
-    readonly cacheRead: 44000;
-    readonly output: 450;
+    readonly input: number;
+    readonly cacheRead: number;
+    readonly output: number;
 };
 export type QuotaWindowKey = 'rolling' | 'weekly' | 'monthly';
 export interface EffectiveRemainingQuota {
@@ -77,10 +89,11 @@ export declare function isFreePrice(price: GoModelPrice | undefined): boolean;
  */
 export declare function effectiveUsageRemainingRatio(usage: GoUsage): EffectiveRemainingQuota;
 /**
- * Dollar cost of one typical cached coding request at base 1× rates.
+ * Dollar cost of one representative cached request at base 1× rates.
  * Models without a published cache-read tariff fall back to their input rate for cached tokens.
+ * Context tiers apply automatically when the profile's total input exceeds a published threshold.
  */
-export declare function estimateRequestCostUsd(price: GoModelPrice | undefined): number | undefined;
+export declare function estimateRequestCostUsd(price: GoModelPrice | undefined, profile?: QuotaWorkloadProfile): number | undefined;
 /**
  * Compute full-capacity (5h / weekly / monthly) and optional live remaining
  * estimated request counts for one Go model under `plan`.
@@ -90,4 +103,5 @@ export declare function estimateModelQuota(input: {
     plan: GoPlan;
     usage?: GoUsage;
     nowMs?: number;
+    profile?: QuotaWorkloadProfile;
 }): ModelQuotaEstimate | undefined;

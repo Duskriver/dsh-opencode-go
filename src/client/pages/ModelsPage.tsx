@@ -18,6 +18,7 @@ export function ModelsPage({ state, actions, locale }: PageViewProps) {
   return <div className={css.page}>
     <ModelsSettings state={state} t={actions.t} locale={locale} disabled={!state.writable}
       onEdit={actions.editModelLimits} setModelEnabled={actions.setModelEnabled} loadModels={actions.loadModels}
+      onEnableFree={() => { actions.edit('freeEnabled', 'true') }}
       surface="page" />
     <p className={css.footnote}>{actions.t('modelsPageHint')}</p>
   </div>

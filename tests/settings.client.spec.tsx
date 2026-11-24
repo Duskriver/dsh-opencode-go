@@ -18,7 +18,7 @@ import {
   type TextField,
 } from '../src/client/controller.ts'
 import { en, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
-import { MAX_THINKING_BUDGET_TOKENS, type AnalyticsQuery } from '../src/contracts.ts'
+import { DEFAULT_BASE_URL, DEFAULT_FREE_BASE_URL, MAX_THINKING_BUDGET_TOKENS, type AnalyticsQuery } from '../src/contracts.ts'
 import { createAnalyticsReport } from './support/analytics.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -1520,6 +1520,65 @@ describe("advanced settings reset", () => {
       await act(async () => { screen.getByText(en.save).click() })
       expect(host.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['refreshMinutes'] }], expect.any(Number))
       expect(host.form.getSnapshot().user).toEqual({})
+    } finally { controller.dispose() }
+  })
+
+  it('shows human-readable unit conversions, per-field reset, specific invalid details and runs the connection probe', async () => {
+    const t = translator()
+    const probe = vi.fn().mockResolvedValue({
+      go: { ok: true, status: 200, latencyMs: 128, modelCount: 9 },
+      free: { ok: false, status: 503, latencyMs: 40, error: 'HTTP 503' },
+    })
+    const host = createConfigForm<OpencodeGoSettings>()
+    acceptFormWrites(host)
+    const base: Partial<OpencodeGoSettings> = {
+      baseURL: DEFAULT_BASE_URL,
+      freeBaseURL: DEFAULT_FREE_BASE_URL,
+      proxyURL: '',
+      refreshMinutes: 60,
+      streamIdleTimeoutMs: 300_000,
+      maxRequestImageBytes: 20 * 1024 * 1024,
+      requestImagePixelBudget: 2048 * 2048,
+      freeEnabled: false,
+    }
+    const user: Partial<OpencodeGoSettings> = { refreshMinutes: 120, freeEnabled: true }
+    host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
+    const controller = new OpencodeGoSectionController(host.form, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
+    } } as never)
+    try {
+      const injected = controller.inject()
+      render(<OpencodeGoSection {...injected} useOpencodeGo={bindSnapshotSelector(injected.hooks.opencodeGo)} t={t} probeConnection={probe} />)
+      await act(async () => { await Promise.resolve() })
+      fireEvent.click(screen.getByRole('tab', { name: en.settingsTabAdvanced }))
+
+      // Human-readable unit conversions
+      expect(screen.getByText('≈ 2 h')).toBeTruthy()
+      expect(screen.getByText('≈ 5 min')).toBeTruthy()
+      expect(screen.getByText('≈ 20.0 MB')).toBeTruthy()
+      expect(screen.getByText('≈ 4.2 MP (2048×2048)')).toBeTruthy()
+
+      // Per-field reset only resets that single field
+      const resetRefresh = screen.getByRole('button', { name: t('advancedResetField', { label: en.refreshMinutesLabel }) })
+      fireEvent.click(resetRefresh)
+      expect(screen.getByLabelText<HTMLInputElement>(en.refreshMinutesLabel).value).toBe('60')
+
+      // Specific validation detail for invalid numeric field
+      fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '0' } })
+      expect(screen.getByText(en.invalidValue)).toBeTruthy()
+      expect(screen.getByRole('alert').textContent).toContain('1')
+
+      // Connection probe sends live draft connection fields and renders Go + Free statuses
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.probeConnection })) })
+      expect(probe).toHaveBeenCalledWith({
+        baseURL: DEFAULT_BASE_URL,
+        freeBaseURL: DEFAULT_FREE_BASE_URL,
+        proxyURL: '',
+        includeFree: true,
+      })
+      expect(screen.getByText(t('probeOk', { latency: 128, count: 9 }))).toBeTruthy()
+      expect(screen.getByText(t('probeFailed', { error: 'HTTP 503' }))).toBeTruthy()
     } finally { controller.dispose() }
   })
 })

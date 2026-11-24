@@ -8,6 +8,8 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   DEFAULT_SHOW_MODEL_MULTIPLIER,
   PROFILE_ENTRY_ID,
+  type ConnectionProbeInput,
+  type ConnectionProbeResult,
   type GoModelCatalog,
   type GoUsage,
   type AnalyticsQuery,
@@ -135,6 +137,16 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
     sharedCatalog.publish(result.value, endpointKey())
     return result.value
   }
+  const probeConnection = async (input: ConnectionProbeInput): Promise<ConnectionProbeResult> => {
+    await modelsReady
+    const probe = (ctx.remote.opencodeGoModels as {
+      probe?: (arg: ConnectionProbeInput) => Promise<import('@deepseek-ai/dsh-typert-protocol').RemoteResult<ConnectionProbeResult>>
+    }).probe
+    if (typeof probe !== 'function') throw new Error('Connection probe is unavailable in this session')
+    const result = await probe(input)
+    if (!result.ok) throw result.error
+    return result.value
+  }
   const sharedCatalog = createSharedModelCatalog(readModelsCatalog)
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
@@ -157,14 +169,14 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
   registerModelLabel(ctx, scope, sharedCatalog, localeOf, t)
   // The page's own slot face always offers navigation: it only mounts while the
   // host already shows the page.
-  const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage })
+  const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage, probeConnection })
   // The settings dialog keeps its full section; the extra openPage seat lets it
   // hand the user to the console page without coupling Section to the layout.
   // It is only offered while the opt-in sidebar entry is registered, so the
   // button and every other shortcut disappear together with the entry.
   let pageRegistered: () => boolean = () => false
   const injected = (): OpencodeGoSectionInjected => ({
-    ...controller.inject(), t, getLocale: localeOf,
+    ...controller.inject(), t, getLocale: localeOf, probeConnection,
     ...(pageRegistered() ? { openPage } : {}),
   })
   pageRegistered = registerSidebarPage(ctx, pageInjected, () => layout, scope)

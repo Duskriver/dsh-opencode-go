@@ -35,10 +35,22 @@ import type {
 } from './controller.ts'
 import { modelsForSource, NUMERIC_FIELD_LIMITS } from './controller.ts'
 import {
+  DEFAULT_BASE_URL,
+  DEFAULT_FREE_BASE_URL,
+  DEFAULT_RETRY_MODE,
+  DEFAULT_RETRY_MAX_RETRIES,
+  DEFAULT_RETRY_INITIAL_DELAY_MS,
+  DEFAULT_RETRY_MAX_DELAY_MS,
+  DEFAULT_MAX_REQUEST_IMAGE_BYTES,
+  DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
+  DEFAULT_REQUEST_IMAGE_MAX_BYTES,
   MAX_ACCOUNTS,
   MAX_THINKING_BUDGET_TOKENS,
   modelSettingsKey,
   FREE_PROVIDER_ID,
+  type ConnectionProbeInput,
+  type ConnectionProbeResult,
+  type ProbeEndpointResult,
   type ModelSource,
   INPUT_MODALITIES,
   isModelEnabled,
@@ -59,7 +71,13 @@ import {
   OPENCODE_GO_THEMES,
   RETRY_MODES,
 } from '../contracts.ts'
-import { estimateModelQuota, isFreePrice, type ModelQuotaEstimate } from '../quota-estimate.ts'
+import {
+  estimateModelQuota,
+  isFreePrice,
+  QUOTA_WORKLOAD_PROFILES,
+  type ModelQuotaEstimate,
+  type QuotaWorkloadProfile,
+} from '../quota-estimate.ts'
 import { resolveModelMultiplierBadge, useScheduledTransitionClock } from './quota-badge.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 
@@ -574,6 +592,15 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
   return limit?.contextWindow != null || limit?.maxTokens != null || (limit?.thinkingBudgets?.length ?? 0) > 0
 }
 
+type ModelSortMode = 'default' | 'multiplier' | 'context' | 'release'
+
+interface BatchUndoState {
+  keys: readonly string[]
+  restoreTo: boolean
+  action: 'enable' | 'disable'
+  count: number
+}
+
 /** Every control here applies immediately; the editor only stages what the
  *  reader is still typing (Capacity commits a settled value). */
 export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled, plan = DEFAULT_GO_PLAN }: {
@@ -591,6 +618,8 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
+  const [sortMode, setSortMode] = useState<ModelSortMode>('default')
+  const [batchUndo, setBatchUndo] = useState<BatchUndoState | null>(null)
   const [selected, setSelected] = useState<string>()
   // Saved overrides never establish membership: only a successful gateway listing does.
   const modelEntries = models.status === 'ready' ? models.entries : undefined
@@ -602,19 +631,47 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   const all = useMemo(() => sortModels(modelEntries ?? [], now), [modelEntries, now])
   const normalized = query.trim().toLocaleLowerCase()
   const customized = useMemo(() => all.filter(entry => hasCapacityOverride(draft[modelSettingsKey(entry)])).length, [all, draft])
+  const enabledCount = useMemo(() => all.filter(entry => isModelEnabled(entry, modelVisibility)).length, [all, modelVisibility])
   const ownKeys = Object.keys(draft).filter(key => key.startsWith(`${FREE_PROVIDER_ID}/`) === (source === 'free'))
   const filters = useMemo(() => [
     ['all', 'filterAll', all.length],
+    ['enabled', 'filterEnabled', enabledCount],
+    ['disabled', 'filterDisabled', all.length - enabledCount],
     ['new', 'filterNew', all.filter(entry => isNewModel(entry, now)).length],
     ['custom', 'filterCustom', customized],
     ['deprecated', 'filterDeprecated', all.filter(entry => entry.deprecated).length],
-  ] as const, [all, now, customized])
-  const entries = useMemo(() => all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
-    && (filter === 'all' || filter === 'new' && isNewModel(model, now)
-      || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)]) || filter === 'deprecated' && model.deprecated)), [all, normalized, filter, now, draft])
+  ] as const, [all, enabledCount, now, customized])
+  const entries = useMemo(() => {
+    const filtered = all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
+      && (filter === 'all'
+        || filter === 'enabled' && isModelEnabled(model, modelVisibility)
+        || filter === 'disabled' && !isModelEnabled(model, modelVisibility)
+        || filter === 'new' && isNewModel(model, now)
+        || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)])
+        || filter === 'deprecated' && model.deprecated))
+    if (sortMode === 'default') return filtered
+    if (sortMode === 'context') {
+      return [...filtered].sort((a, b) => {
+        const ca = draft[modelSettingsKey(a)]?.contextWindow ?? a.contextWindow ?? 0
+        const cb = draft[modelSettingsKey(b)]?.contextWindow ?? b.contextWindow ?? 0
+        return cb - ca
+      })
+    }
+    if (sortMode === 'release') {
+      return [...filtered].sort((a, b) => (b.releaseDate ?? '').localeCompare(a.releaseDate ?? ''))
+    }
+    const rateOf = (entry: GoModel): number => {
+      const est = estimateModelQuota({ model: entry, plan, nowMs: now })
+      if (!est) return Number.POSITIVE_INFINITY
+      return est.kind === 'free' ? 0 : est.quotaMultiplier
+    }
+    return [...filtered].sort((a, b) => rateOf(a) - rateOf(b))
+  }, [all, normalized, filter, sortMode, now, draft, modelVisibility, plan])
   const toggleable = useMemo(() => entries.filter(entry => !entry.configurationMissing), [entries])
-  const canEnableAll = toggleable.some(entry => !isModelEnabled(entry, modelVisibility))
-  const canDisableAll = toggleable.some(entry => isModelEnabled(entry, modelVisibility))
+  const enableTargets = useMemo(() => toggleable.filter(entry => !isModelEnabled(entry, modelVisibility)), [toggleable, modelVisibility])
+  const disableTargets = useMemo(() => toggleable.filter(entry => isModelEnabled(entry, modelVisibility)), [toggleable, modelVisibility])
+  const canEnableAll = enableTargets.length > 0
+  const canDisableAll = disableTargets.length > 0
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
   const listRef = useRef<HTMLDivElement | null>(null)
   const detailsRef = useRef<HTMLElement | null>(null)
@@ -623,13 +680,13 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
     if (listRef.current && listRef.current.scrollTop > 0) {
       listRef.current.scrollTop = 0
     }
-  }, [filter, normalized])
+  }, [filter, sortMode, normalized])
   useEffect(() => {
     if (detailsRef.current && detailsRef.current.scrollTop > 0) {
       detailsRef.current.scrollTop = 0
     }
   }, [selectedModelId])
-  const selectedEstimate = useMemo(
+  const selectedBaseEstimate = useMemo(
     () => model ? estimateModelQuota({ model, plan, nowMs: now }) : undefined,
     [model, plan, now],
   )
@@ -649,6 +706,13 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
         <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
         <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
           placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
+        <select className={css.sortSelect} aria-label={t('modelSortLabel')} value={sortMode}
+          onChange={event => { setSortMode(event.target.value as ModelSortMode) }}>
+          <option value="default">{t('modelSortDefault')}</option>
+          {source === 'go' ? <option value="multiplier">{t('modelSortMultiplier')}</option> : null}
+          <option value="context">{t('modelSortContext')}</option>
+          <option value="release">{t('modelSortRelease')}</option>
+        </select>
         <div className={css.filters} role="group" aria-label={t('filterLabel')}>
           {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
             aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
@@ -657,12 +721,35 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
       <div className={css.modelSubbar}>
         <p className={css.modelHelp}>{t('visibilityHint')}</p>
         <div className={css.modelBatchActions}>
-          <Button variant="outline" size="sm" disabled={visibilityDisabled || !canEnableAll}
-            onClick={() => { onModelEnabled(toggleable.map(modelSettingsKey), true) }}>{t('modelsEnableAll')}</Button>
-          <Button variant="outline" size="sm" disabled={visibilityDisabled || !canDisableAll}
-            onClick={() => { onModelEnabled(toggleable.map(modelSettingsKey), false) }}>{t('modelsDisableAll')}</Button>
+          <Button variant="outline" size="sm" aria-label={t('modelsEnableAll')} disabled={visibilityDisabled || !canEnableAll}
+            onClick={() => {
+              const changed = enableTargets.map(modelSettingsKey)
+              onModelEnabled(toggleable.map(modelSettingsKey), true)
+              if (changed.length > 0) setBatchUndo({ keys: changed, restoreTo: false, action: 'enable', count: changed.length })
+            }}>
+            {t('modelsEnableAll')}{enableTargets.length > 0 ? <span className={css.batchCount} aria-hidden="true"> ({enableTargets.length})</span> : null}
+          </Button>
+          <Button variant="outline" size="sm" aria-label={t('modelsDisableAll')} disabled={visibilityDisabled || !canDisableAll}
+            onClick={() => {
+              const changed = disableTargets.map(modelSettingsKey)
+              onModelEnabled(toggleable.map(modelSettingsKey), false)
+              if (changed.length > 0) setBatchUndo({ keys: changed, restoreTo: true, action: 'disable', count: changed.length })
+            }}>
+            {t('modelsDisableAll')}{disableTargets.length > 0 ? <span className={css.batchCount} aria-hidden="true"> ({disableTargets.length})</span> : null}
+          </Button>
         </div>
       </div>
+      {batchUndo ? <div className={css.batchUndo} role="status">
+        <span>{t(batchUndo.action === 'enable' ? 'modelsBatchEnabled' : 'modelsBatchDisabled', { count: batchUndo.count })}</span>
+        <div className={css.batchUndoActions}>
+          <button type="button" className={css.batchUndoBtn} disabled={visibilityDisabled}
+            onClick={() => { onModelEnabled(batchUndo.keys, batchUndo.restoreTo); setBatchUndo(null) }}>
+            {t('modelsBatchUndo')}
+          </button>
+          <button type="button" className={css.batchDismissBtn} aria-label={t('modelsBatchDismiss')}
+            onClick={() => { setBatchUndo(null) }}>×</button>
+        </div>
+      </div> : null}
       {model ? (
         <div className={css.modelLayout}>
           {/* A group, not a <nav>: the model picker is not navigation, and any
@@ -684,8 +771,10 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                       ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
                       : null}
                   </span>{' '}
-                  {multiplierBadge ? <span className={css.modelMultiplier} data-tone={multiplierBadge.tone}
-                    title={multiplierBadge.title}>{multiplierBadge.text}</span> : null}
+                  {multiplierBadge ? <Tooltip label={multiplierBadge.title} side="left" maxWidth={280}>
+                    <span className={css.modelMultiplier} data-tone={multiplierBadge.tone}
+                      title={multiplierBadge.title}>{multiplierBadge.text}</span>
+                  </Tooltip> : null}
                 </button>
                 <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
                   checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
@@ -715,9 +804,9 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                   <span className={css.statLabel}>{t('modalityLabel')}</span>
                   <Modalities model={model} t={t} />
                 </div>
-                {selectedEstimate?.kind === 'go' ? <div className={css.stat}>
+                {selectedBaseEstimate?.kind === 'go' ? <div className={css.stat}>
                   <span className={css.statLabel}>{t('quotaEstimateLabel')}</span>
-                  <QuotaEstimateDetails estimate={selectedEstimate} t={t} locale={locale} />
+                  <QuotaEstimateDetails model={model} plan={plan} now={now} t={t} locale={locale} />
                 </div> : null}
                 <div className={css.stat}>
                   <span className={css.statLabel}>{t('priceLabel')}</span>
@@ -747,17 +836,31 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
 }
 
 /**
- * Declared input modalities as chips, in catalog order. An undeclared modality
- * stays visible but dashed: the model simply does not accept that input.
+ * Declared input modalities as chips, in catalog order:
+ * - Forwarded by this plugin (`text`, `image`): solid surface
+ * - Declared upstream but not forwarded (`audio`, `video`, `pdf`): muted warning style + tooltip
+ * - Undeclared: dashed neutral chip
  */
 function Modalities({ model, t }: { model: GoModel; t: ModelTranslate }) {
   const declared = model.inputModalities
   if (declared === undefined || declared.length === 0) return <span className={css.hint}>{t('modalityUnknown')}</span>
   return <span className={css.modalities}>
-    {INPUT_MODALITIES.map(modality => <span key={modality}
-      className={declared.includes(modality) ? css.modality : css.modalityOff}>
-      {t(MODALITY_COPY[modality])}
-    </span>)}
+    {INPUT_MODALITIES.map(modality => {
+      const supported = declared.includes(modality)
+      const forwarded = modality === 'text' || modality === 'image'
+      if (supported && !forwarded) {
+        return <Tooltip key={modality} label={t('modalityUpstreamHint')} side="bottom" maxWidth={260}>
+          <span className={css.modalityUpstream} data-state="upstream" tabIndex={0}>
+            {t(MODALITY_COPY[modality])}
+          </span>
+        </Tooltip>
+      }
+      return <span key={modality}
+        className={supported ? css.modality : css.modalityOff}
+        data-state={supported ? 'forwarded' : 'unsupported'}>
+        {t(MODALITY_COPY[modality])}
+      </span>
+    })}
   </span>
 }
 
@@ -780,17 +883,32 @@ function formatUsdCap(amount: number, locale?: string): string {
   return Number.isInteger(amount) ? `$${formatTokenCount(amount, locale)}` : formatTokenPrice(amount, locale)
 }
 
-/** Full-capacity 5h / weekly / monthly estimated request specs in the parameter card. */
-function QuotaEstimateDetails({ estimate, t, locale }: {
-  estimate: Extract<ModelQuotaEstimate, { kind: 'go' }>
+/** Full-capacity 5h / weekly / monthly estimated request specs with workload & plan comparison. */
+function QuotaEstimateDetails({ model, plan, now, t, locale }: {
+  model: GoModel
+  plan: GoPlan
+  now: number
   t: ModelTranslate
   locale?: string
 }) {
+  const [workload, setWorkload] = useState<QuotaWorkloadProfile>('coding')
+  const [previewPlan, setPreviewPlan] = useState<GoPlan | null>(null)
+  const effectivePlan = previewPlan ?? plan
+  const estimate = useMemo(
+    () => estimateModelQuota({ model, plan: effectivePlan, nowMs: now, profile: workload }),
+    [model, effectivePlan, now, workload],
+  )
+  if (!estimate || estimate.kind !== 'go') return null
   const windows = [
     ['usage_rolling', estimate.fullRequests.rolling],
     ['usage_weekly', estimate.fullRequests.weekly],
     ['usage_monthly', estimate.fullRequests.monthly],
   ] as const
+  const basisNote = workload === 'chat'
+    ? t('quotaBasisNote_chat')
+    : workload === 'agent'
+      ? t('quotaBasisNote_agent')
+      : t('quotaBasisNote')
   return <div className={css.quotaCard}>
     <div className={css.quotaLead}>
       <span className={css.quotaSecondary}>
@@ -799,6 +917,20 @@ function QuotaEstimateDetails({ estimate, t, locale }: {
           monthly: formatUsdCap(estimate.monthlyUsd, locale),
         })}
       </span>
+      <div className={css.quotaPlanBar} role="group" aria-label={t('quotaPlanPreviewLabel')}>
+        {GO_PLANS.map(option => <button key={option} type="button" className={css.quotaChip}
+          aria-pressed={effectivePlan === option}
+          onClick={() => { setPreviewPlan(option === plan ? null : option) }}>
+          {t(`goPlan_${option}`)}
+        </button>)}
+      </div>
+    </div>
+    <div className={css.quotaProfileRow} role="group" aria-label={t('quotaProfileLabel')}>
+      {QUOTA_WORKLOAD_PROFILES.map(profile => <button key={profile} type="button" className={css.quotaProfileBtn}
+        aria-pressed={workload === profile}
+        onClick={() => { setWorkload(profile) }}>
+        {t(`quotaProfile_${profile}`)}
+      </button>)}
     </div>
     <div className={css.quotaGrid}>
       {windows.map(([labelKey, count]) => (
@@ -817,7 +949,7 @@ function QuotaEstimateDetails({ estimate, t, locale }: {
           : t('quotaPeakFactorNote', { factor: estimate.peakFactor })}
       </span>
     ) : null}
-    <span className={css.priceNote}>{t('quotaBasisNote')}</span>
+    <span className={css.priceNote}>{basisNote}</span>
   </div>
 }
 
@@ -860,6 +992,8 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   const savedText = saved == null ? '' : String(saved)
   const [text, setText] = useState(savedText)
   const [editing, setEditing] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Adopt the saved value (or the newly shown model's value) unless the reader
   // is mid-edit: a stale buffer on a focused field would eat their next keystroke.
   const syncKey = `${model.id}:${field}:${savedText}`
@@ -869,6 +1003,17 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     synced.current = syncKey
     setText(savedText)
   }, [editing, syncKey, savedText])
+  useEffect(() => {
+    setSavedFlash(false)
+    return () => {
+      if (flashTimer.current !== undefined) clearTimeout(flashTimer.current)
+    }
+  }, [model.id, field])
+  const flashSaved = (): void => {
+    setSavedFlash(true)
+    if (flashTimer.current !== undefined) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => { setSavedFlash(false) }, 1_800)
+  }
   const invalid = text.trim() !== '' && !(Number.isSafeInteger(Number(text)) && Number(text) > 0)
   /** Write what the field holds, if it is writable; never throws the text away. */
   const commit = (): void => {
@@ -877,13 +1022,17 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     if (raw === '') {
       // Empty means "inherit the catalog value": it only writes when an override
       // is saved, so clearing an already empty field changes nothing.
-      if (saved != null) onChange(modelSettingsKey(model), field, undefined)
+      if (saved != null) {
+        onChange(modelSettingsKey(model), field, undefined)
+        flashSaved()
+      }
       return
     }
     const value = Number(raw)
     if (!Number.isSafeInteger(value) || value <= 0) return
     if (value === saved) { setText(String(value)); return }
     onChange(modelSettingsKey(model), field, value)
+    flashSaved()
   }
   // A pause in typing is a commit too: nothing else on this card blurs the field
   // for the reader, and the value must land without a Save gesture.
@@ -893,7 +1042,10 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     return () => { clearTimeout(timer) }
   }, [editing, text])
   return <div className={css.stat}>
-    <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
+    <div className={css.statLabelRow}>
+      <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
+      {savedFlash ? <span className={css.savedBadge} role="status">✓ {t('capacitySaved')}</span> : null}
+    </div>
     <input id={id} className={css.input} type="number" min={1} max={field === 'maxTokens' ? model.maxTokens : undefined} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
       aria-describedby={`${id}-default`} value={text}
@@ -910,6 +1062,14 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     </span>
   </div>
 }
+
+const QUICK_BUDGET_PRESETS = [
+  { tokens: 2048, label: '2K' },
+  { tokens: 4096, label: '4K' },
+  { tokens: 8192, label: '8K' },
+  { tokens: 16384, label: '16K' },
+  { tokens: 32768, label: '32K' },
+] as const
 
 function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
   model: GoModel
@@ -928,10 +1088,23 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
   const values = limit?.thinkingBudgets ?? []
   const tokens = Number(text)
   const valid = text.trim() !== '' && Number.isSafeInteger(tokens) && tokens >= range.min && tokens <= max
+  const quickChoices = QUICK_BUDGET_PRESETS.filter(item => item.tokens >= range.min && item.tokens <= max)
   const id = `opencode-go-thinking-budget-${encodeURIComponent(model.id)}`
   return <details className={css.budgetEditor}>
     <summary>{t('thinkingBudgets')}</summary>
     <p className={css.hint}>{t('thinkingBudgetsHint', { min: range.min.toLocaleString(locale), max: max.toLocaleString(locale) })}</p>
+    {quickChoices.length > 0 ? <div className={css.budgetQuickRow} role="group" aria-label={t('thinkingBudgetQuickLabel')}>
+      <span className={css.budgetQuickLabel}>{t('thinkingBudgetQuickLabel')}</span>
+      {quickChoices.map(item => {
+        const added = values.includes(item.tokens)
+        return <button key={item.tokens} type="button" className={css.budgetQuickChip}
+          aria-pressed={added}
+          disabled={disabled || added || values.length >= 16}
+          onClick={() => { onChange([...values, item.tokens].sort((a, b) => a - b)) }}>
+          +{item.label}
+        </button>
+      })}
+    </div> : null}
     <label className={css.statLabel} htmlFor={id}>{t('thinkingBudgetAddLabel', { name: model.name ?? model.id })}</label>
     <div className={css.budgetInput}>
       <input id={id} className={css.input} type="number" step={1} min={range.min} max={max} inputMode="numeric"
@@ -987,6 +1160,108 @@ export type { OpencodeGoSectionState } from './controller.ts'
 /** Section copy lookup, including the optional `{name}` template params. */
 type SectionTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string
 
+/** Default advanced values mirrored from `src/config.ts` for browser-side default hints. */
+const ADVANCED_FIELD_DEFAULTS: Record<typeof ADVANCED_FIELDS[number], string> = {
+  baseURL: DEFAULT_BASE_URL,
+  freeBaseURL: DEFAULT_FREE_BASE_URL,
+  proxyURL: '',
+  refreshMinutes: '60',
+  streamIdleTimeoutMs: '300000',
+  requestPreparationTimeoutMs: '60000',
+  requestTimeoutMs: '1800000',
+  retryMode: DEFAULT_RETRY_MODE,
+  retryMaxRetries: String(DEFAULT_RETRY_MAX_RETRIES),
+  retryMaxDelayMs: String(DEFAULT_RETRY_MAX_DELAY_MS),
+  maxImages: '',
+  maxRequestImageBytes: String(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
+  requestImagePixelBudget: String(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
+  requestImageMaxBytes: String(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
+}
+
+function formatCompactNum(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '')
+}
+
+function formatAdvancedUnit(
+  field: typeof ADVANCED_FIELDS[number],
+  raw: string,
+  t: SectionTranslate,
+  locale?: string,
+): string | undefined {
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  if (field === 'refreshMinutes') {
+    if (n < 60) return t('advancedUnitMinutes', { value: formatCompactNum(n) })
+    if (n < 1440) return t('advancedUnitHours', { value: formatCompactNum(n / 60) })
+    return t('advancedUnitDays', { value: formatCompactNum(n / 1440) })
+  }
+  if (field === 'streamIdleTimeoutMs' || field === 'requestPreparationTimeoutMs'
+    || field === 'requestTimeoutMs' || field === 'retryMaxDelayMs') {
+    if (n < 1000) return undefined
+    if (n < 60_000) return t('advancedUnitSeconds', { value: formatCompactNum(n / 1000) })
+    if (n < 3_600_000) return t('advancedUnitMinutes', { value: formatCompactNum(n / 60_000) })
+    return t('advancedUnitHours', { value: formatCompactNum(n / 3_600_000) })
+  }
+  if (field === 'maxRequestImageBytes' || field === 'requestImageMaxBytes') {
+    if (n < 1024) return undefined
+    if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / 1_048_576).toFixed(1)} MB`
+  }
+  if (field === 'requestImagePixelBudget') {
+    if (n < 1_000_000) return `${formatTokenCount(Math.round(n), locale)} px`
+    const side = Math.round(Math.sqrt(n))
+    const mp = `${(n / 1_000_000).toFixed(1)} MP`
+    return side * side === n ? `${mp} (${side}×${side})` : mp
+  }
+  return undefined
+}
+
+function formatAdvancedDefault(
+  field: typeof ADVANCED_FIELDS[number],
+  t: SectionTranslate,
+  locale?: string,
+): string {
+  const raw = ADVANCED_FIELD_DEFAULTS[field]
+  if (!raw) return t('advancedDefaultEmpty')
+  if (field === 'retryMode') return t('advancedDefaultValue', { value: t(`retryMode_${DEFAULT_RETRY_MODE}`) })
+  if (field === 'baseURL' || field === 'freeBaseURL') return t('advancedDefaultValue', { value: raw })
+  const formatted = formatTokenCount(Number(raw), locale)
+  const unit = formatAdvancedUnit(field, raw, t, locale)
+  return t('advancedDefaultValue', { value: unit ? `${formatted} (${unit})` : formatted })
+}
+
+function invalidDetailFor(
+  field: typeof ADVANCED_FIELDS[number],
+  t: SectionTranslate,
+  locale?: string,
+): string | undefined {
+  if (field === 'proxyURL' || field === 'retryMode') return undefined
+  if (field === 'baseURL' || field === 'freeBaseURL') return t('invalidUrlDetail')
+  const limit = NUMERIC_FIELD_LIMITS[field]
+  if (!limit) return undefined
+  if (field === 'retryMaxDelayMs') {
+    return t('invalidRetryMaxDelayDetail', {
+      min: formatTokenCount(DEFAULT_RETRY_INITIAL_DELAY_MS, locale),
+      max: formatTokenCount(limit.max!, locale),
+    })
+  }
+  if (limit.integer) {
+    if (limit.max !== undefined && limit.max < Number.MAX_SAFE_INTEGER) {
+      return t('invalidIntRangeDetail', {
+        min: formatTokenCount(limit.min, locale),
+        max: formatTokenCount(limit.max, locale),
+      })
+    }
+    return t('invalidIntMinDetail', { min: formatTokenCount(limit.min, locale) })
+  }
+  return t('invalidNumberRangeDetail', {
+    min: '> 0',
+    max: formatTokenCount(limit.max!, locale),
+  })
+}
+
 /** Injected dependencies of {@link OpencodeGoSection} (slot `inject`). */
 export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
   /** Section copy. */
@@ -998,6 +1273,8 @@ export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
    * never register the page simply leave the secondary button out.
    */
   openPage?: () => void
+  /** Safely probes gateway reachability from the Host without exposing credentials. */
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
 }
 
 /** Props delivered by the slot outlet: the inject face spread flat. */
@@ -1009,6 +1286,12 @@ interface ValueFieldProps {
   hint: string
   field: OpencodeGoSectionState['baseURL']
   invalidLabel: string
+  invalidDetail?: string
+  unitHint?: string
+  defaultHint?: string
+  resetLabel?: string
+  resetAriaLabel?: string
+  onReset?: () => void
   disabled: boolean
   numeric?: boolean
   /** Browser-side bounds mirrored from the Host schema; only used for number inputs. */
@@ -1035,70 +1318,87 @@ function ValueField(props: ValueFieldProps) {
   // is invalid: the alert announces the failure once, and this keeps the specific
   // sentence available on every later focus.
   const describedBy = props.field.invalid ? `${errorId} ${hintId}` : hintId
+  const hasMeta = Boolean(props.unitHint || props.defaultHint || props.onReset)
   return (
     <div className={css.row}>
       <div className={css.rowLabel}>
         {options
           ? <span id={labelId} className={css.rowTitle}>{props.label}</span>
           : <label htmlFor={props.id} className={css.rowTitle}>{props.label}</label>}
+        {props.field.overridden && props.defaultHint
+          ? <span className={css.rowOverrideDot} aria-hidden="true" /> : null}
         <HintMark hint={props.hint} />
       </div>
-      <div className={css.rowControl}>
-        {options ? (
-          <div
-            className={css.seg}
-            role="radiogroup"
-            aria-labelledby={labelId}
+      <div className={css.rowControlCol}>
+        <div className={css.rowControl}>
+          {options ? (
+            <div
+              className={css.seg}
+              role="radiogroup"
+              aria-labelledby={labelId}
+              aria-describedby={describedBy}
+              data-count={options.length}
+              data-index={selected < 0 ? 0 : selected}
+              {...props.field.invalid ? { 'aria-invalid': true } : {}}
+              onKeyDown={event => {
+                const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+                if (step === 0) return
+                event.preventDefault()
+                const next = (Math.max(0, selected) + step + options.length) % options.length
+                props.onEdit(options[next].value)
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
+              }}
+            >
+              <span className={css.segThumb} aria-hidden="true" />
+              {options.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={option.value === props.field.text}
+                  tabIndex={option.value === props.field.text ? 0 : -1}
+                  className={css.segOption}
+                  disabled={props.disabled}
+                  onClick={() => { props.onEdit(option.value) }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : <input
+            id={props.id}
+            name={props.id}
+            autoComplete="off"
+            placeholder={props.placeholder}
             aria-describedby={describedBy}
-            data-count={options.length}
-            data-index={selected < 0 ? 0 : selected}
+            className={props.field.invalid ? css.inputInvalid : css.input}
+            type={props.numeric === true ? 'number' : 'text'}
+            {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
+            {...props.numeric === true && props.min !== undefined ? { min: props.min } : {}}
+            {...props.numeric === true && props.max !== undefined ? { max: props.max } : {}}
+            {...props.numeric === true && props.step !== undefined ? { step: props.step } : {}}
             {...props.field.invalid ? { 'aria-invalid': true } : {}}
-            onKeyDown={event => {
-              const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
-                : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
-              if (step === 0) return
-              event.preventDefault()
-              const next = (Math.max(0, selected) + step + options.length) % options.length
-              props.onEdit(options[next].value)
-              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
-            }}
-          >
-            <span className={css.segThumb} aria-hidden="true" />
-            {options.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={option.value === props.field.text}
-                tabIndex={option.value === props.field.text ? 0 : -1}
-                className={css.segOption}
-                disabled={props.disabled}
-                onClick={() => { props.onEdit(option.value) }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ) : <input
-          id={props.id}
-          name={props.id}
-          autoComplete="off"
-          placeholder={props.placeholder}
-          aria-describedby={describedBy}
-          className={props.field.invalid ? css.inputInvalid : css.input}
-          type={props.numeric === true ? 'number' : 'text'}
-          {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
-          {...props.numeric === true && props.min !== undefined ? { min: props.min } : {}}
-          {...props.numeric === true && props.max !== undefined ? { max: props.max } : {}}
-          {...props.numeric === true && props.step !== undefined ? { step: props.step } : {}}
-          {...props.field.invalid ? { 'aria-invalid': true } : {}}
-          value={props.field.text}
-          disabled={props.disabled}
-          onChange={(event) => { props.onEdit(event.target.value) }}
-        />}
+            value={props.field.text}
+            disabled={props.disabled}
+            onChange={(event) => { props.onEdit(event.target.value) }}
+          />}
+        </div>
+        {hasMeta ? <div className={css.rowMeta}>
+          {props.unitHint ? <span className={css.rowUnit}>{props.unitHint}</span> : null}
+          {props.defaultHint ? <span className={css.rowDefault}>{props.defaultHint}</span> : null}
+          {props.onReset ? <button type="button" className={css.rowReset} disabled={props.disabled}
+            aria-label={props.resetAriaLabel} onClick={props.onReset}>
+            {props.resetLabel}
+          </button> : null}
+        </div> : null}
       </div>
       <HintText id={hintId} hint={props.hint} />
-      {props.field.invalid ? <p id={errorId} className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
+      {props.field.invalid ? <p id={errorId} className={css.rowInvalid} role="alert">
+        {props.invalidDetail
+          ? <><span>{props.invalidLabel}</span><span className={css.rowInvalidDetail}> — {props.invalidDetail}</span></>
+          : props.invalidLabel}
+      </p> : null}
     </div>
   )
 }
@@ -1325,24 +1625,80 @@ export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetFi
   </section>
 }
 
+function ProbeRow({ label, result, t }: { label: string; result: ProbeEndpointResult; t: SectionTranslate }) {
+  return <div className={css.probeRow} data-ok={result.ok ? 'true' : 'false'}>
+    <span className={css.probeDot} aria-hidden="true" />
+    <span className={css.probeName}>{label}</span>
+    <span className={css.probeDetail}>
+      {result.ok
+        ? t('probeOk', { latency: result.latencyMs, count: result.modelCount ?? 0 })
+        : t('probeFailed', { error: result.error ?? `HTTP ${result.status ?? '?'}` })}
+    </span>
+  </div>
+}
+
 /**
  * The Advanced tab's card: connection overrides, cache/timeout tuning and the
  * image budget, closed by the reset-all row. Extracted from `Loaded` unchanged
  * so the full page can carry the same fields.
  */
-export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edit, resetField, surface = 'settings' }: {
+export function AdvancedSettings({ state, t, locale, disabled, saving, invalidLabel, edit, resetField, probeConnection, surface = 'settings' }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
+  locale?: string
   disabled: boolean
   saving: boolean
   invalidLabel: string
   edit: (field: TextField, text: string) => void
   resetField: (field: EditableField) => void
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
   surface?: 'settings' | 'page'
 }) {
+  const [probing, setProbing] = useState(false)
+  const [probeResult, setProbeResult] = useState<ConnectionProbeResult | null>(null)
+  const [probeError, setProbeError] = useState<string | null>(null)
+  const probeEpoch = useRef(0)
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
   const canReset = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  const connectionInvalid = state.baseURL.invalid || state.freeBaseURL.invalid || state.proxyURL.invalid
+  const runProbe = async (): Promise<void> => {
+    if (!probeConnection || probing || connectionInvalid) return
+    const epoch = ++probeEpoch.current
+    setProbing(true)
+    setProbeError(null)
+    try {
+      const result = await probeConnection({
+        baseURL: state.baseURL.text,
+        freeBaseURL: state.freeBaseURL.text,
+        proxyURL: state.proxyURL.text,
+        includeFree: state.freeEnabled?.text === 'true',
+      })
+      if (epoch !== probeEpoch.current) return
+      setProbeResult(result)
+    } catch (error) {
+      if (epoch !== probeEpoch.current) return
+      setProbeResult(null)
+      setProbeError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (epoch === probeEpoch.current) setProbing(false)
+    }
+  }
+  const metaFor = (field: typeof ADVANCED_FIELDS[number], label: string) => {
+    const fieldState = state[field]
+    const liveUnit = !fieldState.invalid ? formatAdvancedUnit(field, fieldState.text, t, locale) : undefined
+    const detail = invalidDetailFor(field, t, locale)
+    return {
+      ...(liveUnit ? { unitHint: t('advancedUnitApprox', { value: liveUnit }) } : {}),
+      defaultHint: formatAdvancedDefault(field, t, locale),
+      ...(detail ? { invalidDetail: detail } : {}),
+      ...(fieldState.overridden || fieldState.invalid ? {
+        resetLabel: t('reset'),
+        resetAriaLabel: t('advancedResetField', { label }),
+        onReset: () => { resetField(field) },
+      } : {}),
+    }
+  }
   return <section className={surface === 'page' ? css.cardPage : css.card}>
     <div className={css.cardBody}>
       {/* The one card with a Save gesture says so up front: every other surface
@@ -1356,6 +1712,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           hint={t('baseURLHint')}
           field={state.baseURL}
           invalidLabel={invalidLabel}
+          {...metaFor('baseURL', t('baseURLLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('baseURL', text) }}
         />
@@ -1365,6 +1722,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           hint={t('freeBaseURLHint')}
           field={state.freeBaseURL}
           invalidLabel={invalidLabel}
+          {...metaFor('freeBaseURL', t('freeBaseURLLabel'))}
           disabled={disabled}
           onEdit={text => { edit('freeBaseURL', text) }}
         />
@@ -1375,9 +1733,24 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           placeholder="http://127.0.0.1:7890"
           field={state.proxyURL}
           invalidLabel={t('proxyURLInvalid')}
+          {...metaFor('proxyURL', t('proxyURLLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('proxyURL', text) }}
         />
+        {probeConnection ? <div className={css.probeBox}>
+          <div className={css.probeHead}>
+            <span className={css.hint}>{t('probeHint')}</span>
+            <Button variant="outline" size="sm" disabled={probing || connectionInvalid}
+              onClick={() => { void runProbe() }}>
+              {t(probing ? 'probeTesting' : 'probeConnection')}
+            </Button>
+          </div>
+          {probeError ? <p className={css.failedNote} role="alert">{t('probeFailed', { error: probeError })}</p> : null}
+          {probeResult ? <div className={css.probeResults} role="status">
+            <ProbeRow label={t('probeGoLabel')} result={probeResult.go} t={t} />
+            {probeResult.free ? <ProbeRow label={t('probeFreeLabel')} result={probeResult.free} t={t} /> : null}
+          </div> : null}
+        </div> : null}
         <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
         <ValueField
           id="opencode-go-refresh-minutes"
@@ -1386,6 +1759,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.refreshMinutes}
           {...numericBounds('refreshMinutes')}
           invalidLabel={invalidLabel}
+          {...metaFor('refreshMinutes', t('refreshMinutesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('refreshMinutes', text) }}
         />
@@ -1396,6 +1770,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.streamIdleTimeoutMs}
           {...numericBounds('streamIdleTimeoutMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('streamIdleTimeoutMs', t('streamIdleTimeoutMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('streamIdleTimeoutMs', text) }}
         />
@@ -1406,6 +1781,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestPreparationTimeoutMs}
           {...numericBounds('requestPreparationTimeoutMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestPreparationTimeoutMs', t('requestPreparationTimeoutMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestPreparationTimeoutMs', text) }}
         />
@@ -1416,6 +1792,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestTimeoutMs}
           {...numericBounds('requestTimeoutMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestTimeoutMs', t('requestTimeoutMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestTimeoutMs', text) }}
         />
@@ -1427,6 +1804,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.retryMode}
           options={RETRY_MODES.map(value => ({ value, label: t(`retryMode_${value}`) }))}
           invalidLabel={invalidLabel}
+          {...metaFor('retryMode', t('retryModeLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('retryMode', text) }}
         />
@@ -1437,6 +1815,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.retryMaxRetries}
           {...numericBounds('retryMaxRetries')}
           invalidLabel={invalidLabel}
+          {...metaFor('retryMaxRetries', t('retryMaxRetriesLabel'))}
           disabled={disabled || state.retryMode.text === 'always'}
           onEdit={(text) => { edit('retryMaxRetries', text) }}
         />
@@ -1447,6 +1826,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.retryMaxDelayMs}
           {...numericBounds('retryMaxDelayMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('retryMaxDelayMs', t('retryMaxDelayMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('retryMaxDelayMs', text) }}
         />
@@ -1458,6 +1838,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.maxImages}
           {...numericBounds('maxImages')}
           invalidLabel={invalidLabel}
+          {...metaFor('maxImages', t('maxImagesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('maxImages', text) }}
         />
@@ -1468,6 +1849,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.maxRequestImageBytes}
           {...numericBounds('maxRequestImageBytes')}
           invalidLabel={invalidLabel}
+          {...metaFor('maxRequestImageBytes', t('maxRequestImageBytesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('maxRequestImageBytes', text) }}
         />
@@ -1478,6 +1860,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestImagePixelBudget}
           {...numericBounds('requestImagePixelBudget')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestImagePixelBudget', t('requestImagePixelBudgetLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestImagePixelBudget', text) }}
         />
@@ -1488,6 +1871,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestImageMaxBytes}
           {...numericBounds('requestImageMaxBytes')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestImageMaxBytes', t('requestImageMaxBytesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestImageMaxBytes', text) }}
         />
@@ -1515,7 +1899,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
  * capacity editor. The selected source is local (as it was in `Loaded`), so the
  * page and the section behave the same on remount.
  */
-export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, surface = 'settings' }: {
+export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, onEnableFree, surface = 'settings' }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
   locale?: string
@@ -1523,20 +1907,35 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
   onEdit: (value: OpencodeGoModelLimits) => void
   setModelEnabled: (id: string | readonly string[], next: boolean) => void
   loadModels: () => void
+  onEnableFree?: () => void
   surface?: 'settings' | 'page'
 }) {
   const [modelSource, setModelSource] = useState<ModelSource>('go')
   const goModels = useMemo(() => modelsForSource(state.models, 'go'), [state.models])
   const freeModels = useMemo(() => modelsForSource(state.models, 'free'), [state.models])
   const models = modelSource === 'go' ? goModels : freeModels
+  const freeEnabled = state.freeEnabled?.text === 'true'
+  const prevFreeEnabled = useRef(freeEnabled)
+  useEffect(() => {
+    const turnedOn = !prevFreeEnabled.current && freeEnabled
+    prevFreeEnabled.current = freeEnabled
+    if (turnedOn && modelSource === 'free') loadModels()
+  }, [freeEnabled, modelSource, loadModels])
   const activeRef = state.accounts.activeRef
   const activeAccount = state.accounts.entries.find(entry => entry.apiKeyEnv === activeRef) ?? state.accounts.entries[0]
   const fallbackPlan: GoPlan = (GO_PLANS as readonly string[]).includes(state.goPlan?.text ?? '')
     ? (state.goPlan.text as GoPlan) : DEFAULT_GO_PLAN
   const plan = accountPlanOf(activeAccount, fallbackPlan)
+  const showFreeDisabledGuide = modelSource === 'free'
+    && !freeEnabled
+    && models.status === 'ready'
+    && models.count === 0
+    && !models.stale
+    && models.sources?.free?.updatedAt === undefined
+    && !models.sources?.free?.error
 
   // The model tab carries the listing's own diagnostics and a refused switch write.
-  const modelNotices = (
+  const modelNotices = showFreeDisabledGuide ? null : (
     <>
       <ModelsBody models={models} source={modelSource} t={t} />
       {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
@@ -1579,14 +1978,23 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
         {state.writeFailed === 'modelLimits'
           ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
         {modelNotices}
-        {/* Capacity edits write immediately, so an in-flight write must not
-            disable the field being typed in: only the document's writability
-            locks the editor. Visibility switches keep the pending-write lock. */}
-        <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
-          modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-          plan={plan}
-          onModelEnabled={setModelEnabled}
-          onEdit={onEdit} />
+        {showFreeDisabledGuide ? <div className={css.freeGuideCard} data-free-disabled-guide="">
+          <h3 className={css.freeGuideTitle}>{t('modelsFreeDisabledTitle')}</h3>
+          <p className={css.freeGuideBody}>{t('modelsFreeDisabledBody')}</p>
+          {onEnableFree ? <div className={css.freeGuideActions}>
+            <Button variant="primary" size="sm" disabled={disabled || state.saving}
+              onClick={onEnableFree}>{t('modelsFreeEnableAction')}</Button>
+          </div> : null}
+        </div> : (
+          /* Capacity edits write immediately, so an in-flight write must not
+             disable the field being typed in: only the document's writability
+             locks the editor. Visibility switches keep the pending-write lock. */
+          <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
+            modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+            plan={plan}
+            onModelEnabled={setModelEnabled}
+            onEdit={onEdit} />
+        )}
       </div>
     </div>
   </section>
@@ -1620,6 +2028,7 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       setSidebarEntry={setSidebarEntry}
       setModelEnabled={setModelEnabled}
       openPage={props.openPage}
+      probeConnection={props.probeConnection}
       accountActions={{
         loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
         resetAddition: props.resetAddition, removeAccount: props.removeAccount, selectAccount: props.selectAccount,
@@ -1647,6 +2056,7 @@ function Loaded(props: {
   setModelEnabled: (id: string | readonly string[], next: boolean) => void
   /** Opens the full sidebar page; absent on hosts that have not registered it. */
   openPage?: () => void
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
@@ -1787,15 +2197,16 @@ function Loaded(props: {
       </div> : null}
       {tab === 'models' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-models" aria-labelledby="opencode-go-tab-models">
       <ModelsSettings state={state} t={t} locale={props.locale} disabled={disabled}
-        onEdit={props.editModelLimits} setModelEnabled={props.setModelEnabled} loadModels={loadModels} />
+        onEdit={props.editModelLimits} setModelEnabled={props.setModelEnabled} loadModels={loadModels}
+        onEnableFree={() => { props.edit('freeEnabled', 'true') }} />
       </div> : null}
       {tab === 'appearance' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-appearance" aria-labelledby="opencode-go-tab-appearance">
       <AppearanceSettings state={state} t={t} disabled={disabled} saving={state.saving}
         onEdit={props.edit} resetField={props.resetField} />
       </div> : null}
       {tab === 'advanced' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-advanced" aria-labelledby="opencode-go-tab-advanced">
-      <AdvancedSettings state={state} t={t} disabled={disabled} saving={state.saving} invalidLabel={t('invalidValue')}
-        edit={props.edit} resetField={props.resetField} />
+      <AdvancedSettings state={state} t={t} locale={props.locale} disabled={disabled} saving={state.saving} invalidLabel={t('invalidValue')}
+        edit={props.edit} resetField={props.resetField} probeConnection={props.probeConnection} />
       </div> : null}
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>

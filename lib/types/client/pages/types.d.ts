@@ -4,7 +4,7 @@
  * every page agree on a single injected shape.
  */
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots';
-import type { AnalyticsExport, AnalyticsQuery, AnalyticsReport, GoUsage } from '../../contracts.ts';
+import type { AnalyticsExport, AnalyticsQuery, AnalyticsReport, ConnectionProbeInput, ConnectionProbeResult, GoUsage } from '../../contracts.ts';
 import type { OpencodeGoSectionFace, OpencodeGoSectionState } from '../controller.ts';
 import type { en } from '../presentation.ts';
 import type { OpencodeGoSectionInjected } from '../Section.tsx';
@@ -42,6 +42,7 @@ export interface PageActions extends Omit<OpencodeGoSectionFace, 'hooks'> {
     getLocale?: () => string;
     readers?: PageReaders;
     openPage?: (tab?: PageTab) => void;
+    probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>;
 }
 /** Props every sub-page receives from the shell. */
 export interface PageViewProps {
