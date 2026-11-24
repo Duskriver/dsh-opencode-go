@@ -209,7 +209,9 @@ describe("conversation usage", () => {
     expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).getAttribute('value')).toBe('7')
     expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).classList.contains(css.progressMonthly)).toBe(true)
     expect(sidebarQuota().getAttribute('aria-label')).toContain(`${en.usage_monthly} 7%`)
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: new RegExp(en.sidebarNextAccount) })).toBeNull()
+    expect(screen.queryByRole('button', { name: en.sidebarAnalytics })).toBeNull()
+    expect(screen.getByRole('button', { name: en.usageRefresh })).toBeTruthy()
     expect(sidebarQuota().tabIndex).toBe(-1)
     expect(sidebarQuota().hasAttribute('aria-haspopup')).toBe(false)
     expect(sidebarQuota().hasAttribute('aria-expanded')).toBe(false)
@@ -335,7 +337,8 @@ describe("conversation usage", () => {
     expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
     await act(async () => { host.publish({ value: { ...host.form.getSnapshot().value, accounts: [threeAccounts[2]!], apiKeyEnv: 'ACCOUNT_C' } }) })
     expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
-    expect(within(sidebarQuota()).queryByRole('button')).toBeNull()
+    expect(within(sidebarQuota()).queryByRole('button', { name: new RegExp(en.sidebarNextAccount) })).toBeNull()
+    expect(within(sidebarQuota()).getByRole('button', { name: en.usageRefresh })).toBeTruthy()
     const calls = readAccountUsage.mock.calls.length
     fireEvent.click(sidebarQuota())
     expect(readAccountUsage).toHaveBeenCalledTimes(calls)
@@ -349,7 +352,68 @@ describe("conversation usage", () => {
     await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} t={t} />) })
     await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
     expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(within(sidebarQuota()).getByText(en.sidebarPreviewTag)).toBeTruthy()
     expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_B')
+  })
+
+  it('surfaces monthly quota alerts on the input pill and shows per-account quotas in the switcher drill-down', async () => {
+    const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    host.publish({ writable: true, value: { ...host.form.getSnapshot().value, usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' } })
+    const highMonthly: GoUsage = {
+      ...usage,
+      rolling: { ...usageWindow, percent: 5 },
+      weekly: { ...usageWindow, percent: 20 },
+      monthly: { ...usageWindow, percent: 92 },
+    }
+    const backupUsage: GoUsage = {
+      ...usage,
+      source: 'ACCOUNT_B',
+      rolling: { ...usageWindow, percent: 15 },
+      weekly: { ...usageWindow, percent: 40 },
+      monthly: { ...usageWindow, percent: 35 },
+    }
+    const readAccountUsage = vi.fn(async (ref: string) => (ref === 'ACCOUNT_B' ? backupUsage : highMonthly))
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(highMonthly)}
+        readAccountUsage={readAccountUsage}
+        selectAccount={vi.fn(async () => true)}
+        t={t} />)
+    })
+    expect(trigger().textContent).toContain(`${en.usageMonthShort} 92%`)
+    expect(trigger().querySelector(`.${css.monthAlert}[data-level="high"]`)).not.toBeNull()
+
+    showDetails()
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: new RegExp(en.accountSwitchAction) }))
+    })
+    const options = within(screen.getByRole('dialog')).getAllByRole('option')
+    expect(options[1]?.textContent).toContain('Backup')
+    expect(options[1]?.textContent).toContain(`${en.usageRollingShort} 15%`)
+    expect(options[1]?.textContent).toContain(`${en.usageWeekShort} 40%`)
+  })
+
+  it('lets the sidebar quota preview switch the active account and manually refresh', async () => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    host.publish({ writable: true, value: { ...host.form.getSnapshot().value, showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' } })
+    const selectAccount = vi.fn(async () => true)
+    const readAccountUsage = vi.fn(async () => usage)
+    await act(async () => {
+      render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} selectAccount={selectAccount} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) }))
+    })
+    expect(within(sidebarQuota()).getByText(en.sidebarPreviewTag)).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(within(sidebarQuota()).getByRole('button', { name: en.sidebarUseAccount }))
+    })
+    expect(selectAccount).toHaveBeenCalledWith('ACCOUNT_B')
+    const callsBefore = readAccountUsage.mock.calls.length
+    await act(async () => {
+      fireEvent.click(within(sidebarQuota()).getByRole('button', { name: en.usageRefresh }))
+    })
+    expect(readAccountUsage.mock.calls.length).toBeGreaterThan(callsBefore)
   })
 
   it('stops sidebar polling on disable and restarts it after live settings and credential changes', async () => {
@@ -928,6 +992,20 @@ describe("conversation usage", () => {
     fireEvent.mouseDown(document.body)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(trigger())
+    // Clicking another focusable control (e.g. composer textarea) closes the panel
+    // without stealing focus back to the quota trigger.
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    try {
+      showDetails()
+      expect(openPanel()).toBeTruthy()
+      composer.focus()
+      fireEvent.mouseDown(composer)
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(document.activeElement).toBe(composer)
+    } finally {
+      composer.remove()
+    }
   })
 
   it('focuses the current account when the drill-down opens and restores the trigger from its back button', async () => {

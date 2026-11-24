@@ -1,8 +1,8 @@
-/** Overview tab: the numbers a reader checks first, plus shortcuts into the other tabs. */
+/** Overview tab: live KPIs, current account with inline switcher, cold-start guide and interactive 7-day chart. */
 import css from './OverviewPage.module.css'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Switch, Tag } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AnalyticsReport, GoUsage } from '../../contracts.ts'
+import { isModelEnabled, type AnalyticsReport, type GoUsage } from '../../contracts.ts'
 import { historyMoney, historyNumber } from '../AnalyticsDialog.tsx'
 import { formatDateTime, type en } from '../presentation.ts'
 import type { PageTranslate, PageViewProps } from './types.ts'
@@ -63,50 +63,10 @@ function Kpi({ label, value, foot, title }: {
   </div>
 }
 
-function ChartGlyph(): ReactNode {
-  return <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor"
-    strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-    <path d="M3.5 16.5v-13m0 13h13" />
-    <path d="M6.5 13v-3m3.5 3V6.5m3.5 6.5V8.5" />
-  </svg>
-}
-
-function AccountsGlyph(): ReactNode {
-  return <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor"
-    strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-    <circle cx="10" cy="7" r="2.6" />
-    <path d="M4.6 16.2c.7-2.7 2.9-4.2 5.4-4.2s4.7 1.5 5.4 4.2" />
-  </svg>
-}
-
-function ModelsGlyph(): ReactNode {
-  return <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor"
-    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="m10 3 6 3v8l-6 3-6-3V6z" />
-    <path d="m4 6 6 3 6-3M10 9v8" />
-  </svg>
-}
-
-/** One shortcut into a sibling tab: icon, label and the one-line promise. */
-function QuickLink({ label, detail, onClick, children }: {
-  label: string
-  detail: string
-  onClick: () => void
-  children: ReactNode
-}): ReactNode {
-  return <button type="button" className={css.quickButton} onClick={onClick}>
-    <span className={css.quickIcon} aria-hidden="true">{children}</span>
-    <span className={css.quickText}>
-      <span className={css.quickTitle}>{label}</span>
-      <span className={css.quickSub}>{detail}</span>
-    </span>
-  </button>
-}
-
 /**
  * Render the Overview tab.
  * @param props - the snapshot, the business face, the locale and the tab switcher.
- * @returns the KPI row, the current-account card, the status stack and shortcuts.
+ * @returns the KPI row, current-account / cold-start card, provider & workspace stack and interactive 7-day chart.
  */
 export function OverviewPage({ state, actions, locale, go }: PageViewProps): ReactNode {
   const t = actions.t
@@ -118,8 +78,11 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   const [report, setReport] = useState<AnalyticsReport | null>(null)
   const [reportFailed, setReportFailed] = useState(false)
   const [reportLoading, setReportLoading] = useState(false)
-  const [quota, setQuota] = useState<GoUsage | null>(null)
+  const [quota, setQuota] = useState<{ value: GoUsage; updatedAt: number } | null>(null)
   const [quotaFailed, setQuotaFailed] = useState(false)
+  const [quotaRevision, setQuotaRevision] = useState(0)
+  const [hoveredDay, setHoveredDay] = useState<string | null>(null)
+  const [pinnedDay, setPinnedDay] = useState<string | null>(null)
   // The injected face is rebuilt on some host events (a locale change, for one),
   // so the readers travel through a ref and only the identity of the data being
   // read may restart these requests.
@@ -133,6 +96,8 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
       setReport(null)
       setReportFailed(false)
       setReportLoading(false)
+      setHoveredDay(null)
+      setPinnedDay(null)
       return
     }
     const controller = new AbortController()
@@ -140,6 +105,8 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
     setReport(null)
     setReportFailed(false)
     setReportLoading(true)
+    setHoveredDay(null)
+    setPinnedDay(null)
     void read({ accountRef, range: '7d' }, controller.signal).then(next => {
       if (stopped) return
       // A report naming another identity cannot describe this card.
@@ -154,14 +121,17 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
     return () => { stopped = true; controller.abort() }
   }, [accountRef, analyticsReady])
   useEffect(() => {
-    setQuota(null)
+    if (quotaRevision === 0) setQuota(null)
     setQuotaFailed(false)
     const read = readers.current.readUsage
     if (read === undefined) return
     let stopped = false
-    void read().then(next => { if (!stopped) setQuota(next) }, () => { if (!stopped) setQuotaFailed(true) })
+    void (quotaRevision > 0 ? read(true) : read()).then(
+      next => { if (!stopped) setQuota({ value: next, updatedAt: Date.now() }) },
+      () => { if (!stopped) setQuotaFailed(true) },
+    )
     return () => { stopped = true }
-  }, [accountRef, usageReady])
+  }, [accountRef, usageReady, quotaRevision])
   const loadAccounts = useRef(actions.loadAccounts)
   loadAccounts.current = actions.loadAccounts
   // The overview is the landing tab, so it seeds the account rows the other tabs
@@ -178,9 +148,19 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   const fallbackOrder = accounts.length === 0
     ? t('accountsSummaryEmpty')
     : accounts.map(entry => entry.name || t('accountDefault')).join(' → ')
-  // The gateway answers for the profile's current account; the loaded row is the
-  // fallback when that one read is unavailable, so the bars still show last data.
-  const usage = quota ?? active?.usage ?? null
+  const switchDisabled = state.accounts.busy || state.accounts.blocked || !state.writable
+  // Prefer whichever reading (the refreshed account row or the direct active-quota
+  // read) is newer, so clicking "Refresh quota" always updates the bars as well as
+  // the timestamp.
+  const activeUpdatedAt = active?.updatedAt ?? 0
+  const usage = active?.usage && (!quota || activeUpdatedAt >= quota.updatedAt)
+    ? active.usage
+    : quota?.value ?? active?.usage ?? null
+  const usageUpdatedAt = Math.max(activeUpdatedAt, quota?.updatedAt ?? 0)
+  const refreshQuota = (): void => {
+    setQuotaRevision(value => value + 1)
+    actions.loadAccounts()
+  }
   const usageNote = readUsage === undefined || quotaFailed ? t('usageUnavailable') : t('usageLoading')
   const totals = report?.totals
   // The overview fetches a 7-day report once to power both the sparkline and
@@ -198,12 +178,16 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
   const cacheRate = percentOf(cacheRead, cacheTotal)
   const recent = report === null ? [] : report.byDay.slice(-7)
   const maximum = recent.reduce((max, day) => { const tokens = BigInt(day.tokens); return tokens > max ? tokens : max }, 0n)
+  const activeDayKey = hoveredDay ?? pinnedDay
+  const inspectedDay = activeDayKey === null ? undefined : recent.find(row => row.day === activeDayKey)
   // First, middle and last day label the axis; a 2-day range repeats the middle
   // sample, so the Set keeps one span per day (a duplicate React key otherwise).
   const axis = recent.length === 0 ? [] : [...new Set([
     recent[0].day, recent[Math.floor((recent.length - 1) / 2)].day, recent[recent.length - 1].day,
   ])]
   const reportNote = reportLoading ? t('overviewLoading') : reportFailed ? t('analyticsFailed') : t('overviewNoReport')
+  const modelEntries = state.models.status === 'ready' ? state.models.entries : undefined
+  const enabledModels = modelEntries ? modelEntries.filter(model => isModelEnabled(model, state.modelVisibility)).length : 0
   return <div className={css.overview}>
     <section className={css.kpis} aria-busy={reportLoading}>
       <Kpi label={t('overviewTodayRequests')}
@@ -231,9 +215,31 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
       <section className={css.card}>
         <div className={css.cardHead}>
           <h2 className={css.cardTitle}>{t('overviewCurrentAccount')}</h2>
-          <Button variant="outline" size="sm" onClick={() => { go('accounts') }}>{t('overviewManageAccounts')}</Button>
+          <div className={css.cardHeadActions}>
+            {accounts.length > 1 ? <select className={css.accountSelect}
+              aria-label={t('overviewSwitchAccount')}
+              value={accountRef}
+              disabled={switchDisabled}
+              onChange={event => { void actions.selectAccount(event.target.value) }}>
+              {accounts.map(entry => <option key={entry.id} value={entry.apiKeyEnv}>
+                {entry.name || t('accountDefault')}
+              </option>)}
+            </select> : null}
+            <Button variant="outline" size="sm" onClick={() => { go('accounts') }}>{t('overviewManageAccounts')}</Button>
+          </div>
         </div>
-        {active === undefined ? <p className={css.note}>{t('accountsEmpty')}</p> : <>
+        {active === undefined ? <div className={css.onboard} data-overview-onboarding="">
+          <h3 className={css.onboardTitle}>{t('overviewOnboardTitle')}</h3>
+          <p className={css.onboardSub}>{t('overviewOnboardSub')}</p>
+          <ol className={css.onboardSteps}>
+            <li><span className={css.stepNum}>1</span><span>{t('overviewOnboardStep1')}</span></li>
+            <li><span className={css.stepNum}>2</span><span>{t('overviewOnboardStep2')}</span></li>
+            <li><span className={css.stepNum}>3</span><span>{t('overviewOnboardStep3')}</span></li>
+          </ol>
+          <div className={css.onboardActions}>
+            <Button variant="primary" size="sm" onClick={() => { go('accounts') }}>{t('overviewOnboardCta')}</Button>
+          </div>
+        </div> : <>
           <div className={css.accountHead}>
             <span className={css.avatar} aria-hidden="true">
               {(active.name || t('accountDefault')).trim().charAt(0).toUpperCase()}
@@ -268,6 +274,10 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
               </div>
             })}
           </div>}
+          {accounts.length > 1 ? <div className={css.fallbackChain}>
+            <span className={css.fallbackLabel}>{t('overviewFallbackOrder')}</span>
+            <span className={css.fallbackValue} title={fallbackOrder}>{fallbackOrder}</span>
+          </div> : null}
         </>}
         <div className={css.divider} />
         <div className={css.switchRow}>
@@ -277,15 +287,15 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
           </div>
           <Switch checked={state.accounts.autoSwitch} label={t('accountAutoSwitch')}
             title={t('accountAutoSwitchHint')}
-            disabled={state.accounts.busy || state.accounts.blocked || !state.writable}
+            disabled={switchDisabled}
             onChange={next => { void actions.setAutoSwitch(next) }} />
         </div>
         <div className={css.cardActions}>
-          {active?.updatedAt === undefined ? null : <span className={css.stamp}>
-            {t('usageLastUpdated')} {formatDateTime(active.updatedAt, locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          {usageUpdatedAt === 0 ? null : <span className={css.stamp}>
+            {t('usageLastUpdated')} {formatDateTime(usageUpdatedAt, locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>}
           <Button variant="outline" size="sm" disabled={state.accounts.refreshing}
-            onClick={actions.loadAccounts}>{t(state.accounts.refreshing ? 'usageRefreshing' : 'usageRefresh')}</Button>
+            onClick={refreshQuota}>{t(state.accounts.refreshing ? 'usageRefreshing' : 'usageRefresh')}</Button>
           <Button variant="primary" size="sm" onClick={() => { go('usage') }}>{t('overviewOpenUsage')}</Button>
         </div>
       </section>
@@ -293,7 +303,6 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
         <section className={css.card}>
           <div className={css.cardHead}>
             <h2 className={css.cardTitle}>{t('overviewProviderStatus')}</h2>
-            <Tag tone={state.enabled ? 'success' : 'quiet'}>{t(state.enabled ? 'pageStatusOn' : 'pageStatusOff')}</Tag>
           </div>
           <div className={css.switchRow}>
             <div className={css.switchText}>
@@ -322,22 +331,25 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
         </section>
         <section className={css.card}>
           <div className={css.cardHead}>
-            <h2 className={css.cardTitle}>{t('overviewAccountSummary')}</h2>
-            <Tag className={css.headTag} tone="neutral">
-              {accounts.length === 0 ? t('accountsSummaryEmpty') : t('accountsSummary', { count: accounts.length, name: currentName })}
-            </Tag>
+            <h2 className={css.cardTitle}>{t('overviewWorkspaceTitle')}</h2>
           </div>
           <div className={css.statRow}>
-            <span className={css.statLabel}>{t('overviewAvailableAccounts')}</span>
-            <span className={css.statValue}>{availability}</span>
+            <span className={css.statLabel}>{t('overviewWorkspaceModels')}</span>
+            <span className={css.statValue}>
+              {modelEntries ? t('overviewWorkspaceModelsCount', { enabled: enabledModels, total: modelEntries.length }) : t('aboutNa')}
+            </span>
           </div>
           <div className={css.statRow}>
-            <span className={css.statLabel}>{t('overviewCurrentAccount')}</span>
-            <span className={css.statValue}>{currentName || t('accountsSummaryEmpty')}</span>
+            <span className={css.statLabel}>{t('overviewWorkspaceTheme')}</span>
+            <span className={css.statValue}>{t(`appearanceTheme_${state.appliedAppearanceTheme}`)}</span>
           </div>
           <div className={css.statRow}>
-            <span className={css.statLabel}>{t('overviewFallbackOrder')}</span>
-            <span className={css.statValue} title={fallbackOrder}>{fallbackOrder}</span>
+            <span className={css.statLabel}>{t('usageDisplayLabel')}</span>
+            <span className={css.statValue}>{t(`usageDisplay_${state.usageDisplay.text as 'auto' | 'always' | 'off'}`)}</span>
+          </div>
+          <div className={css.cardActions}>
+            <Button variant="outline" size="sm" onClick={() => { go('models') }}>{t('overviewOpenModels')}</Button>
+            <Button variant="outline" size="sm" onClick={() => { go('appearance') }}>{t('overviewOpenAppearance')}</Button>
           </div>
         </section>
       </div>
@@ -348,35 +360,69 @@ export function OverviewPage({ state, actions, locale, go }: PageViewProps): Rea
           <h2 className={css.cardTitle}>{t('overviewRecent')}</h2>
           <p className={css.cardSub}>{t('overviewRecentSub')}</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => { go('usage') }}>
-          {t('overviewDetails')}
-        </Button>
+        <div className={css.recentHeadRight}>
+          {recent.length > 0 && maximum > 0n
+            ? <span className={css.sparkPeak}>{t('overviewRecentPeak', { tokens: historyNumber(String(maximum), locale, true) })}</span>
+            : null}
+          <Button variant="ghost" size="sm" onClick={() => { go('usage') }}>
+            {t('overviewDetails')}
+          </Button>
+        </div>
       </div>
       {recent.length === 0 ? <p className={css.note}>{reportNote}</p> : <>
-        <div className={css.spark} role="img" aria-label={t('overviewRecent') + ' · ' + t('overviewRecentSub')}>
-          {recent.map(day => {
+        <p className={css.sparkReadout} role="status" aria-live="polite">
+          {inspectedDay
+            ? t('overviewRecentReadout', {
+              day: dayText(inspectedDay.day, locale),
+              tokens: historyNumber(inspectedDay.tokens, locale, true),
+              requests: historyNumber(inspectedDay.requests, locale),
+              spend: historyMoney(inspectedDay.costMicroCents, locale),
+            })
+            : t('overviewRecentSelectHint')}
+        </p>
+        <div className={css.spark} role="group" aria-label={t('overviewRecent') + ' · ' + t('overviewRecentSub')}
+          onMouseLeave={() => { setHoveredDay(null) }}>
+          {recent.map((day, index) => {
             const tokens = BigInt(day.tokens)
-            return <div key={day.day} className={css.sparkBar}
+            const empty = tokens === 0n
+            const heightPct = empty || maximum === 0n ? 0 : Math.max(4, percentOf(tokens, maximum))
+            const selected = activeDayKey === day.day
+            const label = t('overviewRecentReadout', {
+              day: dayText(day.day, locale),
+              tokens: historyNumber(day.tokens, locale, true),
+              requests: historyNumber(day.requests, locale),
+              spend: historyMoney(day.costMicroCents, locale),
+            })
+            return <button key={day.day} type="button" className={css.sparkBarBtn}
+              aria-label={label}
+              aria-pressed={pinnedDay === day.day}
               data-hi={tokens === maximum && maximum > 0n ? 'true' : undefined}
-              style={{ height: (maximum === 0n ? 0 : percentOf(tokens, maximum)) + '%' }}
-              title={dayText(day.day, locale) + ' · ' + historyNumber(day.tokens, locale) + ' ' + t('analyticsTokens')} />
+              data-selected={selected ? 'true' : undefined}
+              data-empty={empty ? 'true' : undefined}
+              onMouseEnter={() => { setHoveredDay(day.day) }}
+              onFocus={() => { setHoveredDay(day.day) }}
+              onBlur={() => { setHoveredDay(current => current === day.day ? null : current) }}
+              onClick={() => { setPinnedDay(current => current === day.day ? null : day.day) }}
+              onKeyDown={event => {
+                if (event.key === 'Escape') { setPinnedDay(null); setHoveredDay(null); return }
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                event.preventDefault()
+                const next = (index + (event.key === 'ArrowRight' ? 1 : recent.length - 1)) % recent.length
+                const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button')
+                buttons?.[next]?.focus()
+              }}>
+              <span className={css.sparkBarTrack} aria-hidden="true">
+                {empty
+                  ? <span className={css.sparkZeroDot} />
+                  : <span className={css.sparkBarFill} style={{ height: `${heightPct}%` }} />}
+              </span>
+            </button>
           })}
         </div>
         <div className={css.sparkAxis} aria-hidden="true">
           {axis.map(day => <span key={day}>{dayText(day, locale)}</span>)}
         </div>
       </>}
-    </section>
-    <section className={css.quick} aria-label={t('overviewQuickLinks')}>
-      <QuickLink label={t('tabUsage')} detail={t('overviewQuickUsageSub')} onClick={() => { go('usage') }}>
-        <ChartGlyph />
-      </QuickLink>
-      <QuickLink label={t('tabAccounts')} detail={t('overviewQuickAccountsSub')} onClick={() => { go('accounts') }}>
-        <AccountsGlyph />
-      </QuickLink>
-      <QuickLink label={t('tabModels')} detail={t('overviewQuickModelsSub')} onClick={() => { go('models') }}>
-        <ModelsGlyph />
-      </QuickLink>
     </section>
     <p className={css.footnote}>{t('pageDataNote')}</p>
   </div>

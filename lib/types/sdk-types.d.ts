@@ -1673,6 +1673,27 @@ interface GoModelCatalog {
         readonly free: GoCatalogSourceStatus;
     };
 }
+/** Input to the safe keyless gateway connectivity probe. */
+interface ConnectionProbeInput {
+    baseURL?: string;
+    freeBaseURL?: string;
+    proxyURL?: string;
+    includeFree?: boolean;
+}
+/** Sanitized connectivity probe outcome for one gateway endpoint (never carries credentials). */
+interface ProbeEndpointResult {
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly status?: number;
+    readonly latencyMs: number;
+    readonly modelCount?: number;
+    readonly error?: string;
+}
+/** Connectivity probe outcomes for Go and optionally Free gateways. */
+interface ConnectionProbeResult {
+    readonly go: ProbeEndpointResult;
+    readonly free?: ProbeEndpointResult;
+}
 interface UsageWindow {
     status: 'ok' | 'rate-limited';
     percent: number;
@@ -1691,6 +1712,7 @@ type AccountCommand = {
     id: string;
     name: string;
     key: string;
+    plan?: GoPlan;
 } | {
     kind: 'remove';
     ref: string;
@@ -1767,6 +1789,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     interface TypertRemoteNamespaceMap {
         opencodeGoModels: {
             read(): Promise<RemoteResult<GoModelCatalog>>;
+            probe(input: ConnectionProbeInput): Promise<RemoteResult<ConnectionProbeResult>>;
         };
     }
 }

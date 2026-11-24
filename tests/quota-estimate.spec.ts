@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  QUOTA_WORKLOAD_TOKENS,
   STANDARD_QUOTA_SHARE,
   effectiveUsageRemainingRatio,
   estimateModelQuota,
@@ -161,5 +162,34 @@ describe('estimateModelQuota', () => {
     expect(formatQuotaMultiplier(9.996)).toBe('10.0×')
     expect(formatQuotaMultiplier(42.14)).toBe('42.1×')
     expect(formatQuotaMultiplier(99.96)).toBe('100×')
+  })
+
+  it('supports chat, coding and agent workload profiles and applies context tiers when crossed', () => {
+    const offPeak = Date.parse('2026-11-16T05:00:00Z')
+    const chatEst = estimateModelQuota({ model: deepseekPro, plan: 'go', nowMs: offPeak, profile: 'chat' })!
+    const codingEst = estimateModelQuota({ model: deepseekPro, plan: 'go', nowMs: offPeak, profile: 'coding' })!
+    const agentEst = estimateModelQuota({ model: deepseekPro, plan: 'go', nowMs: offPeak, profile: 'agent' })!
+    if (chatEst.kind !== 'go' || codingEst.kind !== 'go' || agentEst.kind !== 'go') throw new Error('expected go')
+    expect(chatEst.fullRequests.monthly).toBeGreaterThan(codingEst.fullRequests.monthly)
+    expect(codingEst.fullRequests.monthly).toBeGreaterThan(agentEst.fullRequests.monthly)
+
+    const tieredModel: GoModel = {
+      id: 'tiered-agent',
+      source: 'go',
+      price: {
+        input: 2,
+        output: 10,
+        cacheRead: 0.2,
+        cacheWrite: 0,
+        tiers: [{ inputTokensAbove: 100_000, input: 4, output: 20, cacheRead: 0.4, cacheWrite: 0 }],
+      },
+      goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+    }
+    const expectedAgentUsd = (
+      QUOTA_WORKLOAD_TOKENS.agent.input * 4
+      + QUOTA_WORKLOAD_TOKENS.agent.cacheRead * 0.4
+      + QUOTA_WORKLOAD_TOKENS.agent.output * 20
+    ) / 1_000_000
+    expect(estimateRequestCostUsd(tieredModel.price, 'agent')).toBeCloseTo(expectedAgentUsd, 10)
   })
 })

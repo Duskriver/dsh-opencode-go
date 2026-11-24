@@ -3,6 +3,7 @@ import css from './Page.module.css'
 import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { themeStyle, useGoThemeTokens } from '../presentation.ts'
+import { GoRowIcon } from '../GoMark.tsx'
 import { setPageTab, usePageTab } from './nav.ts'
 import {
   PAGE_TABS,
@@ -102,6 +103,7 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     t: seats.t,
     getLocale: seats.getLocale,
     readers: seats.readers,
+    probeConnection: seats.probeConnection,
     // The host panel is already open when a sub-page calls this, so switching the
     // tab is the whole navigation; the sidebar row keeps owning the open axis.
     openPage: next => { setPageTab(next ?? 'overview') },
@@ -113,9 +115,12 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     <div className={css.scroller} ref={scroller}>
       <div className={css.page}>
         <header className={css.head}>
-          <div className={css.headMain}>
-            <h1 className={css.title}>{seats.t('pageTitle')}</h1>
-            <p className={css.sub}>{seats.t('pageSubtitle')}</p>
+          <div className={css.headLead}>
+            <span className={css.brandBadge} aria-hidden="true"><GoRowIcon size={22} /></span>
+            <div className={css.headMain}>
+              <h1 className={css.title}>{seats.t('pageTitle')}</h1>
+              <p className={css.sub}>{seats.t('pageSubtitle')}</p>
+            </div>
           </div>
           <div className={css.headActions}>
             <span className={css.statusChip} data-on={state.enabled ? 'true' : 'false'} title={statusText}>
@@ -140,6 +145,9 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
               document.getElementById(tabId(next))?.focus()
             }}>
             {seats.t(TAB_COPY[item])}
+            {item === 'advanced' && state.dirty
+              ? <span className={css.tabDot} title={seats.t('tabUnsaved')} aria-hidden="true" />
+              : null}
           </button>)}
         </div> : null}
         {state.status === 'loading' ? <p className={css.statusNote} role="status">{seats.t('pageLoading')}</p> : null}

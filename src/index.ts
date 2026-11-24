@@ -216,6 +216,8 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
       const config = current()
       return config.freeEnabled ? catalogs.forConfig(config, 'free') : undefined
     },
+    config: current,
+    transport,
     onRefresh: refreshPickers,
   })
   ctx.plugin(GoAnalyticsService, {

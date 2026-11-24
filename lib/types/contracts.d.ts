@@ -321,10 +321,34 @@ export declare function isNewModel(model: GoModel, now?: number): boolean;
 export declare function sortModels(models: readonly GoModel[], now?: number): GoModel[];
 export declare function parseGoModels(value: unknown): GoModel[];
 export declare function parseGoModelCatalog(value: unknown): GoModelCatalog;
+/** Input to the safe keyless gateway connectivity probe. */
+export interface ConnectionProbeInput {
+    baseURL?: string;
+    freeBaseURL?: string;
+    proxyURL?: string;
+    includeFree?: boolean;
+}
+/** Sanitized connectivity probe outcome for one gateway endpoint (never carries credentials). */
+export interface ProbeEndpointResult {
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly status?: number;
+    readonly latencyMs: number;
+    readonly modelCount?: number;
+    readonly error?: string;
+}
+/** Connectivity probe outcomes for Go and optionally Free gateways. */
+export interface ConnectionProbeResult {
+    readonly go: ProbeEndpointResult;
+    readonly free?: ProbeEndpointResult;
+}
+export declare function parseConnectionProbeInput(value: unknown): ConnectionProbeInput;
+export declare function parseConnectionProbeResult(value: unknown): ConnectionProbeResult;
 declare module '@deepseek-ai/dsh-typert-protocol' {
     interface TypertRemoteNamespaceMap {
         opencodeGoModels: {
             read(): Promise<RemoteResult<GoModelCatalog>>;
+            probe(input: ConnectionProbeInput): Promise<RemoteResult<ConnectionProbeResult>>;
         };
     }
 }
@@ -367,6 +391,7 @@ export type AccountCommand = {
     id: string;
     name: string;
     key: string;
+    plan?: GoPlan;
 } | {
     kind: 'remove';
     ref: string;

@@ -18,15 +18,30 @@ export const GO_MONTHLY_SHARE = 1.0
  */
 export const STANDARD_QUOTA_SHARE = 1 / 50_000
 
+/** Selectable workload profiles for per-model quota request estimation. */
+export const QUOTA_WORKLOAD_PROFILES = ['chat', 'coding', 'agent'] as const
+
+export type QuotaWorkloadProfile = typeof QUOTA_WORKLOAD_PROFILES[number]
+
+/**
+ * Representative per-call token profiles (input / cacheRead / output) used to
+ * convert per-model dollar allowances into estimated request counts.
+ */
+export const QUOTA_WORKLOAD_TOKENS: Record<QuotaWorkloadProfile, {
+  readonly input: number
+  readonly cacheRead: number
+  readonly output: number
+}> = {
+  chat: { input: 800, cacheRead: 4_000, output: 350 },
+  coding: { input: 1_000, cacheRead: 44_000, output: 450 },
+  agent: { input: 2_000, cacheRead: 120_000, output: 900 },
+}
+
 /**
  * Typical OpenCode Go coding-agent request profile (per call) used to convert
  * per-model dollar allowances into estimated request counts.
  */
-export const TYPICAL_REQUEST_TOKENS = {
-  input: 1_000,
-  cacheRead: 44_000,
-  output: 450,
-} as const
+export const TYPICAL_REQUEST_TOKENS = QUOTA_WORKLOAD_TOKENS.coding
 
 export type QuotaWindowKey = 'rolling' | 'weekly' | 'monthly'
 
@@ -129,16 +144,28 @@ export function effectiveUsageRemainingRatio(usage: GoUsage): EffectiveRemaining
 }
 
 /**
- * Dollar cost of one typical cached coding request at base 1× rates.
+ * Dollar cost of one representative cached request at base 1× rates.
  * Models without a published cache-read tariff fall back to their input rate for cached tokens.
+ * Context tiers apply automatically when the profile's total input exceeds a published threshold.
  */
-export function estimateRequestCostUsd(price: GoModelPrice | undefined): number | undefined {
+export function estimateRequestCostUsd(
+  price: GoModelPrice | undefined,
+  profile: QuotaWorkloadProfile = 'coding',
+): number | undefined {
   if (!price) return undefined
-  const cacheReadRate = price.cacheRead > 0 ? price.cacheRead : price.input
+  const tokens = QUOTA_WORKLOAD_TOKENS[profile]
+  const totalInput = tokens.input + tokens.cacheRead
+  let rates: Pick<GoModelPrice, 'input' | 'output' | 'cacheRead'> = price
+  if (price.tiers && price.tiers.length > 0) {
+    for (const tier of price.tiers) {
+      if (totalInput > tier.inputTokensAbove) rates = tier
+    }
+  }
+  const cacheReadRate = rates.cacheRead > 0 ? rates.cacheRead : rates.input
   const usd = (
-    TYPICAL_REQUEST_TOKENS.input * price.input
-    + TYPICAL_REQUEST_TOKENS.cacheRead * cacheReadRate
-    + TYPICAL_REQUEST_TOKENS.output * price.output
+    tokens.input * rates.input
+    + tokens.cacheRead * cacheReadRate
+    + tokens.output * rates.output
   ) / 1_000_000
   if (!Number.isFinite(usd) || usd <= 0) return undefined
   return usd
@@ -158,12 +185,13 @@ export function estimateModelQuota(input: {
   plan: GoPlan
   usage?: GoUsage
   nowMs?: number
+  profile?: QuotaWorkloadProfile
 }): ModelQuotaEstimate | undefined {
-  const { model, plan, usage, nowMs = Date.now() } = input
+  const { model, plan, usage, nowMs = Date.now(), profile = 'coding' } = input
   if (isFreePrice(model.price) || model.source === 'free') return { kind: 'free' }
   const monthlyUsd = model.goMonthlyUsage?.[plan]
   if (monthlyUsd === undefined || !Number.isFinite(monthlyUsd) || monthlyUsd <= 0) return undefined
-  const requestUsd = estimateRequestCostUsd(model.price)
+  const requestUsd = estimateRequestCostUsd(model.price, profile)
   if (requestUsd === undefined) return undefined
 
   const breakdown = evaluateMultiplierBreakdown(model.pricingMultipliers, nowMs)

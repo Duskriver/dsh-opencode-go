@@ -7,7 +7,7 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import {
   GoModelsService, GoCatalogManager, discoverSettingsModels, OpencodeGoCatalog,
   discoverCatalogModels, readLiveModelIds, readModelDirectory, reasoningChoices, modelBaseURL,
-  reasoningBudgetRange, reasoningIntent,
+  reasoningBudgetRange, reasoningIntent, probeGatewayEndpoint,
   catalogCachePath, catalogETag, readCatalogCache, writeCatalogCache, MODEL_LISTING_MAX_BYTES,
 } from '../src/catalog.ts'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
@@ -650,5 +650,43 @@ describe('settings RPC and lifecycle', () => {
   })
   it('defaults the two gateway URLs independently', () => {
     expect(PlainConfig({})).toMatchObject({ baseURL: DEFAULT_BASE_URL, freeBaseURL: DEFAULT_FREE_BASE_URL })
+  })
+  it('probes Go and optional Free endpoints safely without leaking proxy credentials', async () => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ alpha: modelEntry(), beta: modelEntry() }) })
+    const ok = await probeGatewayEndpoint(gateway.url, 'go')
+    expect(ok).toMatchObject({ ok: true, status: 200, modelCount: 2 })
+    expect(ok.latencyMs).toBeGreaterThanOrEqual(0)
+
+    const badStatus = await mockGateway({ status: 502, body: { error: 'bad gateway' } })
+    const failed = await probeGatewayEndpoint(badStatus.url, 'go')
+    expect(failed).toMatchObject({ ok: false, status: 502, error: 'HTTP 502' })
+
+    const ctx = context()
+    await mountRemotes(ctx)
+    const transport = new ProxyTransport()
+    const config = configOf(gateway.url, { freeBaseURL: gateway.url, freeEnabled: true })
+    await ctx.plugin(GoModelsService, {
+      catalog: () => catalog(gateway.url),
+      config: () => config,
+      transport,
+    })
+    const both = await invokeRemote(ctx, {
+      namespace: 'opencodeGoModels',
+      method: 'probe',
+      args: { input: { baseURL: gateway.url, freeBaseURL: gateway.url, includeFree: true } },
+    }) as { go: { ok: boolean; modelCount?: number }; free?: { ok: boolean } }
+    expect(both.go.ok).toBe(true)
+    expect(both.go.modelCount).toBe(2)
+    expect(both.free?.ok).toBe(true)
+
+    const badProxy = await invokeRemote(ctx, {
+      namespace: 'opencodeGoModels',
+      method: 'probe',
+      args: { input: { baseURL: gateway.url, proxyURL: 'ftp://secretUser:secretPass@proxy.test:8080' } },
+    }) as { go: { ok: boolean; error?: string } }
+    expect(badProxy.go.ok).toBe(false)
+    expect(badProxy.go.error).not.toContain('secretUser')
+    expect(badProxy.go.error).not.toContain('secretPass')
+    await transport.dispose()
   })
 })

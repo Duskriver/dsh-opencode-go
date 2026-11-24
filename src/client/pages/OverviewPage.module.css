@@ -1,4 +1,5 @@
-/* Overview tab: four KPI cards, the account-and-quota card and its side stack. */
+/* Overview tab: four KPI cards, current-account card with inline switcher,
+   provider/workspace stack and interactive 7-day bar chart. */
 
 .kpis {
   display: grid;
@@ -47,7 +48,7 @@
 
 .note { margin: 12px 0 0; color: var(--go-muted); font-size: 12px; line-height: 1.6; }
 
-/* 1.45fr keeps the quota bars readable while the two-card status/account stack matches height. */
+/* 1.45fr keeps the quota bars readable while the two-card provider/workspace stack matches height. */
 .mainGrid {
   display: grid;
   grid-template-columns: 1.45fr 1fr;
@@ -70,9 +71,25 @@
   box-shadow: var(--go-card-shadow);
 }
 
-.cardHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.cardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.cardHeadActions { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cardTitle { margin: 0; font-size: 13.5px; line-height: 20px; font-weight: 600; color: var(--go-text); }
 .cardSub { margin: 2px 0 0; color: var(--go-muted-soft); font-size: 11.5px; line-height: 1.5; }
+
+.accountSelect {
+  height: 28px;
+  max-width: 170px;
+  padding: 0 8px;
+  border: 1px solid var(--go-border-strong);
+  border-radius: var(--go-radius-control);
+  background: var(--go-surface-sunken);
+  color: var(--go-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.accountSelect:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+.accountSelect:disabled { opacity: .55; cursor: default; }
 
 .accountHead { display: flex; align-items: center; gap: 10px; }
 
@@ -104,6 +121,46 @@
   color: var(--go-text);
 }
 .accountMeta { color: var(--go-muted); font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; }
+
+/* 0-account cold-start onboarding card inside Current account. */
+.onboard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--go-border-subtle);
+  border-radius: var(--go-radius-control);
+  background: var(--go-surface-sunken);
+}
+.onboardTitle { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--go-text); }
+.onboardSub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--go-muted); }
+.onboardSteps {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--go-text);
+}
+.onboardSteps li { display: flex; align-items: baseline; gap: 8px; }
+.stepNum {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--go-accent-soft);
+  color: var(--go-accent);
+  font-family: var(--go-number-font);
+  font-size: 11px;
+  font-weight: 600;
+}
+.onboardActions { margin-top: 4px; }
 
 .quotas { display: flex; flex-direction: column; gap: 13px; margin-top: 14px; }
 .quotaMeta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; font-size: 12px; }
@@ -137,6 +194,21 @@
 .bar[data-level='high'] .barFill { background: var(--go-warning); }
 .bar[data-level='limited'] .barFill { background: var(--go-danger); }
 
+.fallbackChain {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--go-border-subtle);
+  border-radius: var(--go-radius-option);
+  background: var(--go-surface-sunken);
+  font-size: 11.5px;
+}
+.fallbackLabel { flex: none; color: var(--go-muted); }
+.fallbackValue { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); text-align: right; }
+
 .divider { height: 1px; background: var(--go-border-subtle); margin: 14px 0; }
 
 .switchRow { display: flex; align-items: flex-start; gap: 12px; }
@@ -148,25 +220,66 @@
 .failed { margin: 8px 0 0; color: var(--go-danger); font-size: 12px; line-height: 1.5; }
 
 .cardActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.mainGrid > .card .cardActions { margin-top: auto; padding-top: 12px; }
+.mainGrid > .card .cardActions,
+.stack > .card:last-child .cardActions { margin-top: auto; padding-top: 12px; }
 .stamp { flex: 1 1 auto; min-width: 0; color: var(--go-muted-soft); font-size: 11px; line-height: 1.5; }
 
-/* The sparkline spans the full overview width below mainGrid, scaling each UTC day bar cleanly. */
+/* Interactive 7-day bar chart with live day readout and explicit 0-token baseline dot. */
 .recentCard { margin-top: 12px; }
-.spark { display: flex; align-items: flex-end; gap: 3px; height: 56px; margin-top: 10px; }
-.recentCard .spark { height: 76px; gap: 8px; }
-.sparkBar {
+.recentHeadRight { display: inline-flex; align-items: center; gap: 10px; }
+.sparkPeak { font-family: var(--go-number-font); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--go-muted); }
+.sparkReadout {
+  margin: 0 0 8px;
+  min-height: 18px;
+  font-family: var(--go-number-font);
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  color: var(--go-muted);
+}
+.spark { display: flex; align-items: stretch; gap: 8px; height: 84px; padding-top: 4px; border-bottom: 1px solid var(--go-border-subtle); }
+.sparkBarBtn {
   flex: 1;
-  min-width: 2px;
-  min-height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: color-mix(in srgb, var(--go-accent) 42%, var(--go-surface-2));
+  min-width: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--go-radius-small);
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: stretch;
+}
+.sparkBarBtn:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+.sparkBarTrack {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  padding-bottom: 3px;
+}
+.sparkBarFill {
+  display: block;
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in srgb, var(--go-accent) 46%, var(--go-surface-2));
   transition: background 120ms ease;
 }
-.recentCard .sparkBar { border-radius: 4px 4px 0 0; }
-.sparkBar:hover,
-.sparkBar[data-hi='true'] { background: color-mix(in srgb, var(--go-accent) 88%, var(--go-surface)); }
-.sparkAxis { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; color: var(--go-muted-soft); font-size: 10px; }
+.sparkBarBtn[data-hi='true'] .sparkBarFill { background: color-mix(in srgb, var(--go-accent) 78%, var(--go-surface)); }
+.sparkBarBtn:hover .sparkBarFill,
+.sparkBarBtn[data-selected='true'] .sparkBarFill { background: var(--go-accent); }
+.sparkZeroDot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--go-border-strong);
+  opacity: .55;
+  transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+}
+.sparkBarBtn:hover .sparkZeroDot,
+.sparkBarBtn[data-selected='true'] .sparkZeroDot { background: var(--go-accent); opacity: 1; transform: scale(1.25); }
+.sparkAxis { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; color: var(--go-muted-soft); font-size: 10.5px; }
 
 .statRow {
   display: flex;
@@ -185,59 +298,12 @@
   text-align: right;
   color: var(--go-text);
 }
-.headTag { max-width: 55%; overflow: hidden; }
-
-.quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
-.quickButton {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 0;
-  padding: 13px 14px;
-  border: 1px solid var(--go-border);
-  border-radius: var(--go-radius-card);
-  background: var(--go-surface-panel);
-  color: var(--go-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-.quickButton:hover {
-  background: var(--go-surface-elevated);
-  border-color: var(--go-border-elevated);
-}
-.quickButton:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
-
-.quickIcon {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--go-border);
-  border-radius: var(--go-radius-control);
-  background: var(--go-surface-2);
-  color: var(--go-accent);
-}
-.quickText { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.quickTitle { font-size: 12.5px; font-weight: 600; line-height: 1.5; }
-.quickSub {
-  color: var(--go-muted-soft);
-  font-size: 11px;
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .footnote { margin: 16px 0 0; color: var(--go-muted-soft); font-size: 11px; line-height: 1.6; }
 
 @media (max-width: 1080px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mainGrid { grid-template-columns: 1fr; }
-  .quick { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {

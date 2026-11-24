@@ -102,9 +102,26 @@ export function startSettingsNavStandIn(resolveLabel: () => string): () => void 
   doc.head.appendChild(style)
   let disposed = false
   let scheduled = false
+  const navObservers = new Map<Element, MutationObserver>()
+  const syncNavObservers = (): void => {
+    const activeNavs = new Set(doc.querySelectorAll('[role="dialog"] nav'))
+    for (const [nav, navObserver] of navObservers) {
+      if (!activeNavs.has(nav)) {
+        navObserver.disconnect()
+        navObservers.delete(nav)
+      }
+    }
+    for (const nav of activeNavs) {
+      if (navObservers.has(nav)) continue
+      const navObserver = new MutationObserver(schedule)
+      navObserver.observe(nav, { childList: true, subtree: true, characterData: true })
+      navObservers.set(nav, navObserver)
+    }
+  }
   const sync = (): void => {
     scheduled = false
     if (disposed) return
+    syncNavObservers()
     const wanted = resolveLabel()
     for (const row of doc.querySelectorAll<HTMLElement>(SETTINGS_NAV_ROW_SELECTOR)) {
       if (isOwnSettingsNavRow(row.textContent, wanted)) row.setAttribute(SETTINGS_NAV_MARKER, '')
@@ -117,13 +134,30 @@ export function startSettingsNavStandIn(resolveLabel: () => string): () => void 
     scheduled = true
     queueMicrotask(sync)
   }
+  const touchesDialog = (records: readonly MutationRecord[]): boolean => {
+    for (const record of records) {
+      if (record.target instanceof Element && record.target.closest('[role="dialog"]')) return true
+      for (const node of [...record.addedNodes, ...record.removedNodes]) {
+        if (!(node instanceof Element)) continue
+        if (node.matches('[role="dialog"], [role="dialog"] *') || node.querySelector('[role="dialog"]')) return true
+      }
+    }
+    return false
+  }
   sync()
-  const observer = new MutationObserver(schedule)
-  observer.observe(doc.body, { childList: true, subtree: true, characterData: true })
+  // Only watch childList on document.body (never characterData) so LLM token
+  // streaming never triggers settings-dialog scans; characterData is watched
+  // only inside an open `[role="dialog"] nav`.
+  const observer = new MutationObserver(records => {
+    if (touchesDialog(records)) schedule()
+  })
+  observer.observe(doc.body, { childList: true, subtree: true })
   return () => {
     if (disposed) return
     disposed = true
     observer.disconnect()
+    for (const navObserver of navObservers.values()) navObserver.disconnect()
+    navObservers.clear()
     for (const row of doc.querySelectorAll<HTMLElement>('[' + SETTINGS_NAV_MARKER + ']')) row.removeAttribute(SETTINGS_NAV_MARKER)
     style.remove()
   }
