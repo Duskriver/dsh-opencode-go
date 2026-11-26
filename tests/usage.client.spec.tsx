@@ -1076,6 +1076,7 @@ describe("conversation usage", () => {
     { reason: 'quota' as const, copy: en.accountFallbackQuota },
     { reason: 'rate-limit' as const, copy: en.accountFallbackRateLimit },
     { reason: 'credential' as const, copy: en.accountFallbackCredential },
+    { reason: 'region' as const, copy: en.accountFallbackRegion },
   ])('renders distinct fallback status copy for $reason account switches', async ({ reason, copy }) => {
     const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
     const read = vi.fn().mockResolvedValue({

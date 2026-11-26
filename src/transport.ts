@@ -259,6 +259,16 @@ interface GatewayContextBudget {
   estimatedContextTokens?: number
 }
 
+/**
+ * The account's privacy region does not include where a model is hosted. The
+ * text is OpenCode's own refusal ("This OpenCode Go model is hosted outside
+ * Europe and the United States. Select Global at ..."); the request itself is
+ * valid, so another account with a wider region can still serve it.
+ */
+export function isRegionRestrictedError(message: string): boolean {
+  return /model is hosted outside[^.]{0,80}(?:europe|united states|your region)|select (?:the )?global (?:region|at\b)/i.test(message)
+}
+
 /** Gateway status codes cover several domains; model permissions do not reject a key. */
 export function classifyGatewayError(status: number, body: string, fallback: string, budget: GatewayContextBudget = {}): string {
   let error: { type?: unknown; code?: unknown; message?: unknown } | undefined
@@ -278,6 +288,9 @@ export function classifyGatewayError(status: number, body: string, fallback: str
   if (types.some(type => ['regionerror', 'datapolicyerror', 'permissionerror', 'permissiondenied'].includes(type))) return 'PERMISSION_DENIED'
   if (types.some(type => ['ratelimiterror', 'ratelimitexceeded'].includes(type))) return 'RATE_LIMIT'
   const message = typeof error?.message === 'string' ? error.message : body
+  // The account's privacy region excludes a model: the account, not the request,
+  // is unusable for it, so another account may still serve the same model.
+  if (isRegionRestrictedError(message)) return 'REGION_RESTRICTED'
   // Legacy gateways report subscription limits as untyped 401/402/403/429.
   // A proxy's 5xx diagnostic may quote an earlier quota failure; it cannot
   // authorize switching accounts without structured evidence.

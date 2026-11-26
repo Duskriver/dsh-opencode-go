@@ -77,9 +77,10 @@ The settings UI uses a single Save gesture: only the **Advanced settings** tab s
 
 ### Account fallback and cooldowns
 
-Account commands and automatic primary-account promotion share one in-memory serial queue. Credential, quota and rate-limit failures can try the next account only before output or positive token usage:
+Account commands and automatic primary-account promotion share one in-memory serial queue. Credential, quota, rate-limit and region failures can try the next account only before output or positive token usage, and balancing counts as allowing that fallback:
 
-- **`QUOTA` / `AUTH` / `INVALID_CREDENTIAL`**: cools down the rejected key for 5 minutes (`REJECTED_KEY_TTL_MS`) and promotes the serving backup account to the first position when `autoSwitch` is enabled.
+- **`AUTH` / `INVALID_CREDENTIAL`**: cools down the rejected key for 5 minutes (`REJECTED_KEY_TTL_MS`) and promotes the serving backup account to the first position when `autoSwitch` is enabled.
+- **`QUOTA` / `REGION_RESTRICTED`**: cools down the account for an hour (`UNAVAILABLE_KEY_TTL_MS`), so a month-long quota or a model outside the account's privacy region is not retried every few minutes; the serving backup is promoted in the same way.
 - **`RATE_LIMIT` (transient HTTP 429)**: cools down the key for upstream `providerRetryAfterMs` (defaulting to 15 seconds, bounded to `[1s, 5m]`) and borrows the backup account without rewriting the saved account order.
 
 ## Distribution and publishing

@@ -841,7 +841,8 @@ function ActiveUsage({ readUsage, readAccountUsage, readModels, catalog, readAna
         {switchFailed ? <p className={css.warning} role="alert">{t('accountSwitchFailed')}</p> : null}
         {notice ? <p className={css.warning} role="status">
           {t(notice.reason === 'quota' ? 'accountFallbackQuota'
-            : notice.reason === 'rate-limit' ? 'accountFallbackRateLimit' : 'accountFallbackCredential')}{' '}
+            : notice.reason === 'rate-limit' ? 'accountFallbackRateLimit'
+              : notice.reason === 'region' ? 'accountFallbackRegion' : 'accountFallbackCredential')}{' '}
           {accounts.find(account => account.apiKeyEnv === notice.toRef)?.name || t('accountDefault')}
           {' · '}{panelDateTime(notice.at, getLocale?.())}
         </p> : null}

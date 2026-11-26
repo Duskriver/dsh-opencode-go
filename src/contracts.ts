@@ -201,7 +201,7 @@ export function assertAccounts(accounts: readonly GoAccount[] | null | undefined
 export interface GoAccountSwitch {
   fromRef: string
   toRef: string
-  reason: 'quota' | 'rate-limit' | 'credential'
+  reason: 'quota' | 'rate-limit' | 'credential' | 'region'
   at: number
 }
 
@@ -785,7 +785,8 @@ export function parseAccountSwitch(value: unknown): GoAccountSwitch {
   const notice = value as Partial<GoAccountSwitch> | null
   if (!notice || typeof notice.fromRef !== 'string' || typeof notice.toRef !== 'string'
     || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(notice.fromRef) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(notice.toRef)
-    || (notice.reason !== 'quota' && notice.reason !== 'rate-limit' && notice.reason !== 'credential')
+    || (notice.reason !== 'quota' && notice.reason !== 'rate-limit' && notice.reason !== 'credential'
+      && notice.reason !== 'region')
     || typeof notice.at !== 'number' || !Number.isSafeInteger(notice.at) || notice.at < 0
     || notice.at > 8_640_000_000_000_000) throw new Error('Invalid account switch notice')
   return { fromRef: notice.fromRef, toRef: notice.toRef, reason: notice.reason, at: notice.at }

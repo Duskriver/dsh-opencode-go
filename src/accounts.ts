@@ -58,6 +58,7 @@ export function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reaso
   switch (outcome.failure?.code) {
     case 'RATE_LIMIT': return 'rate-limit'
     case 'QUOTA': return 'quota'
+    case 'REGION_RESTRICTED': return 'region'
     case 'AUTH':
     case 'MISSING_CREDENTIAL':
     case 'INVALID_CREDENTIAL': return 'credential'
@@ -65,8 +66,15 @@ export function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reaso
   }
 }
 
-/** Default key cooldown (5 minutes) for quota exhaustion and rejected credentials. */
+/** Default key cooldown (5 minutes) for rejected credentials. */
 export const REJECTED_KEY_TTL_MS = 5 * 60_000
+
+/**
+ * Cooldown for an account that cannot serve requests at all: exhausted quota or
+ * a privacy region that excludes the model. An hour keeps a month-long quota
+ * from being retried every few minutes while still recovering on its own.
+ */
+export const UNAVAILABLE_KEY_TTL_MS = 60 * 60_000
 
 /** Default key cooldown (15 seconds) for transient HTTP 429 rate limits without a Retry-After header. */
 export const DEFAULT_RATE_LIMIT_KEY_TTL_MS = 15_000
@@ -74,19 +82,24 @@ export const DEFAULT_RATE_LIMIT_KEY_TTL_MS = 15_000
 /** Minimum key cooldown for transient HTTP 429 rate limits. */
 export const MIN_RATE_LIMIT_KEY_TTL_MS = 1_000
 
-/** Only credential, rate and quota failures cool down a key; PERMISSION_DENIED is model-scoped. */
+/**
+ * Credential, rate, quota and region failures cool down an account reference;
+ * PERMISSION_DENIED stays model-scoped and never sidelines the account.
+ */
 export function isGatewayKeyRejection(failure: { code: string }): boolean {
-  return ['INVALID_CREDENTIAL', 'AUTH', 'RATE_LIMIT', 'QUOTA'].includes(failure.code)
+  return ['INVALID_CREDENTIAL', 'AUTH', 'RATE_LIMIT', 'QUOTA', 'REGION_RESTRICTED'].includes(failure.code)
 }
 
 /**
- * Compute how long a gateway-rejected key should be cooled down before being
- * retried. Credential and quota rejections use the 5-minute window; transient
+ * Compute how long a rejected account reference should be cooled down before
+ * being retried. Quota exhaustion and region restrictions use the one-hour
+ * window; credential rejections use the five-minute window; transient
  * `RATE_LIMIT` failures honor `providerRetryAfterMs` (defaulting to 15s, bounded
  * to `[1s, 5m]`).
  */
 export function gatewayKeyRejectionTtlMs(failure: { code: string; providerRetryAfterMs?: number }): number | undefined {
   if (!isGatewayKeyRejection(failure)) return undefined
+  if (failure.code === 'QUOTA' || failure.code === 'REGION_RESTRICTED') return UNAVAILABLE_KEY_TTL_MS
   if (failure.code === 'RATE_LIMIT') {
     const raw = failure.providerRetryAfterMs
     const delay = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
@@ -317,8 +330,9 @@ export class GoAccountManager {
     this.latestSeq = event.seq
     this.notice = event.notice
     // Transient 429 rate limits borrow the backup during the short key cooldown
-    // without rewriting saved account order; quota exhaustion and credential
-    // rejections promote the working backup to the first position.
+    // without rewriting saved account order; quota exhaustion, region
+    // restrictions and credential rejections promote the working backup to the
+    // first position. Balancing alone never writes selection back.
     if (!event.notice || event.notice.reason === 'rate-limit' || !event.config.enabled || !event.config.autoSwitch) return
     void this.enqueue(async () => {
       const connection = this.connection

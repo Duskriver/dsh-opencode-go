@@ -447,6 +447,8 @@ describe("HTTP classification", () => {
     [400, { error: { code: 'context_length_exceeded', message: 'Limit reached' } }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
     [422, { error: { type: 'context_window_exceeded', message: 'Limit reached' } }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
     [400, { message: 'Prompt exceeds the model context window' }, 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED'],
+    [400, { type: 'invalid_request_error', message: 'This OpenCode Go model is hosted outside Europe and the United States. Select Global at https://opencode.ai/console/org_01M8BSM559G6KTKDNCM1X8WPHR/settings/privacy#regions to use it.' }, 'INVALID_REQUEST', 'REGION_RESTRICTED'],
+    [400, { error: { message: 'Invalid region parameter' } }, 'INVALID_REQUEST', 'INVALID_REQUEST'],
     [413, 'request body too large', 'INVALID_REQUEST', 'INVALID_REQUEST'],
     [400, { model: 'deepseek-v4.1-flash' }, 'INVALID_REQUEST', 'INVALID_REQUEST'],
     [502, { error: { message: 'previous request: context_length_exceeded' } }, 'CONTEXT_WINDOW_EXCEEDED', 'SERVER'],

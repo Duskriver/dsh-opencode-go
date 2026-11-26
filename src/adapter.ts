@@ -835,6 +835,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
     // are spent at once. It only reorders this dispatch: the saved order and the
     // current account it names are never rewritten.
     const balanced = this.source === 'go' && snapshot.config.balanceAccounts === true && refs.length > 1
+    // Failover during one request: the explicit auto-switch setting, or balancing,
+    // which already spreads requests over every account. Balancing still writes
+    // nothing back, so a fallback never reorders the saved list or the current
+    // account on its own.
+    const failover = snapshot.config.autoSwitch === true || balanced
     const base = this.source === 'free' ? refs
       : balanced ? refs
       : snapshot.config.autoSwitch ? [...new Set([preferred, ...refs])] : [preferred]
@@ -887,12 +892,12 @@ export class OpencodeGoAdapter extends LlmAdapter {
       let retry = false
       const retryFailure = async (failure: { code: string; providerRetryAfterMs?: number } | undefined): Promise<boolean> => {
         const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
-          aborted: options.signal?.aborted === true, hasNext: snapshot.config.autoSwitch === true || this.source === 'free' })
+          aborted: options.signal?.aborted === true, hasNext: failover || this.source === 'free' })
         const rejectionTtlMs = failure ? gatewayKeyRejectionTtlMs(failure) : undefined
         if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && rejectionTtlMs !== undefined
           && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway, rejectionTtlMs)
         if (!reason || !failure) return false
-        if (snapshot.config.autoSwitch) {
+        if (failover) {
           const next = await candidates.next()
           if (!next.done) {
             switchReason ??= reason

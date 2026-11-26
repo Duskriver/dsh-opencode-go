@@ -37,6 +37,13 @@ interface GatewayContextBudget {
     maxTokens?: number;
     estimatedContextTokens?: number;
 }
+/**
+ * The account's privacy region does not include where a model is hosted. The
+ * text is OpenCode's own refusal ("This OpenCode Go model is hosted outside
+ * Europe and the United States. Select Global at ..."); the request itself is
+ * valid, so another account with a wider region can still serve it.
+ */
+export declare function isRegionRestrictedError(message: string): boolean;
 /** Gateway status codes cover several domains; model permissions do not reject a key. */
 export declare function classifyGatewayError(status: number, body: string, fallback: string, budget?: GatewayContextBudget): string;
 export declare class GatewayDiagnostics {

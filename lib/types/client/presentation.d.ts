@@ -42,6 +42,7 @@ export declare const en: {
     accountFallbackQuota: string;
     accountFallbackRateLimit: string;
     accountFallbackCredential: string;
+    accountFallbackRegion: string;
     accountsSummary: string;
     accountsSummaryEmpty: string;
     accountsAvailability: string;

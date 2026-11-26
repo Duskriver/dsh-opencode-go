@@ -91,7 +91,7 @@ export declare function assertAccounts(accounts: readonly GoAccount[] | null | u
 export interface GoAccountSwitch {
     fromRef: string;
     toRef: string;
-    reason: 'quota' | 'rate-limit' | 'credential';
+    reason: 'quota' | 'rate-limit' | 'credential' | 'region';
     at: number;
 }
 export declare const SETTINGS_NAMESPACE = "llm-opencode-go";

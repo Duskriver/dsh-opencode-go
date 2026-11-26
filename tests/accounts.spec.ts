@@ -134,6 +134,35 @@ describe("seamless account fallback", () => {
   })
 
   it.each([
+    { status: 429, message: 'Monthly usage limit exceeded', reason: 'quota' },
+    { status: 400, message: 'This OpenCode Go model is hosted outside Europe and the United States. Select Global at https://opencode.ai/console/org_fixture/settings/privacy#regions to use it.', reason: 'region' },
+  ] as const)('continues a balanced request on the next account after a $reason failure without writing selection back', async failure => {
+    const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
+    gateway.pushCompletions({ status: failure.status, body: JSON.stringify({ error: { message: failure.message } }) })
+    gateway.pushCompletions({ events: textEvents })
+    const host = accountHarness({ baseURL: gateway.url, accounts, apiKeyEnv: 'ACCOUNT_A', balanceAccounts: true, autoSwitch: false })
+    const switched = vi.fn()
+    const adapter = new OpencodeGoAdapter({ config: host.value, resolveApiKey: async config => `${config.apiKeyEnv}-secret`,
+      accountGeneration: () => host.manager.capture(), onAccountSettled: event => host.manager.settle(event), onAccountSwitch: switched })
+    try {
+      const chunks = await drain(adapter.stream(request('balanced-failover')))
+      expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join('')).toBe('hello')
+      expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'stop' } })
+      expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization))
+        .toEqual(['Bearer ACCOUNT_A-secret', 'Bearer ACCOUNT_B-secret'])
+      await vi.waitFor(() => { expect(switched.mock.calls[0]?.[0]).toMatchObject({ fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason: failure.reason }) })
+      // Balancing alone never rewrites the saved order or the current account.
+      expect(host.value().apiKeyEnv).toBe('ACCOUNT_A')
+      expect(host.value().accounts).toEqual(accounts)
+      expect(host.settings.mutate).not.toHaveBeenCalled()
+      // The conversation follows the account that served it instead of flipping back.
+      gateway.pushCompletions({ events: textEvents })
+      await drain(adapter.stream(request('balanced-failover')))
+      expect(gateway.headers.at(-1)?.authorization).toBe('Bearer ACCOUNT_B-secret')
+    } finally { await adapter.dispose() }
+  })
+
+  it.each([
     { status: 401, message: 'Invalid API key', reason: 'credential' },
     { status: 429, message: 'Too many requests', reason: 'rate-limit' },
     { status: 429, message: 'Monthly usage limit exceeded', reason: 'quota' },
@@ -723,7 +752,8 @@ describe('serialized account commands and primary selection', () => {
     { status: 403, message: 'invalid API key', promote: true, reason: 'credential' },
     { status: 429, message: 'rate limit reached', promote: false, reason: 'rate-limit' },
     { status: 403, message: 'Monthly usage limit exceeded', promote: true, reason: 'quota' },
-  ])('handles backup promotion after HTTP $status $message before output (promote=$promote)', async failure => {
+    { status: 400, message: 'This OpenCode Go model is hosted outside Europe and the United States. Select Global at https://opencode.ai/console/org_fixture/settings/privacy#regions to use it.', promote: true, reason: 'region' },
+  ])('handles backup promotion after HTTP $status ($reason) before output (promote=$promote)', async failure => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
     gateway.pushCompletions({ status: failure.status, body: JSON.stringify({ error: { message: failure.message } }) })
     gateway.pushCompletions({ events: textEvents })
@@ -751,7 +781,8 @@ describe('serialized account commands and primary selection', () => {
   it.each([
     { status: 401, message: 'rejected', ttlMs: 5 * 60_000 },
     { status: 403, message: 'invalid API key', ttlMs: 5 * 60_000 },
-    { status: 429, message: 'Monthly usage limit exceeded', ttlMs: 5 * 60_000 },
+    { status: 429, message: 'Monthly usage limit exceeded', ttlMs: 60 * 60_000 },
+    { status: 400, message: 'This OpenCode Go model is hosted outside Europe and the United States. Select Global at https://opencode.ai/console/org_fixture/settings/privacy#regions to use it.', ttlMs: 60 * 60_000 },
     { status: 429, message: 'Too many requests', ttlMs: 15_000 },
     { status: 429, message: 'Too many requests', headers: { 'retry-after': '8' }, ttlMs: 8_000 },
   ])('expires the cooldown ($ttlMs ms) for HTTP $status ($message) without replaying a rejected key during the window', async ({ status, message, headers, ttlMs }) => {
@@ -762,7 +793,9 @@ describe('serialized account commands and primary selection', () => {
     try {
       expect(gatewayKeyRejectionTtlMs({ code: 'RATE_LIMIT', providerRetryAfterMs: 8_000 })).toBe(8_000)
       expect(gatewayKeyRejectionTtlMs({ code: 'RATE_LIMIT' })).toBe(15_000)
-      expect(gatewayKeyRejectionTtlMs({ code: 'QUOTA', providerRetryAfterMs: 8_000 })).toBe(5 * 60_000)
+      expect(gatewayKeyRejectionTtlMs({ code: 'QUOTA', providerRetryAfterMs: 8_000 })).toBe(60 * 60_000)
+      expect(gatewayKeyRejectionTtlMs({ code: 'REGION_RESTRICTED' })).toBe(60 * 60_000)
+      expect(gatewayKeyRejectionTtlMs({ code: 'AUTH' })).toBe(5 * 60_000)
       gateway.pushCompletions({ status, ...(headers ? { headers } : {}), body: JSON.stringify({ error: { message } }) })
       gateway.pushCompletions({ events: textEvents }); await drain(adapter.stream(requestOf()))
       clock.mockReturnValue(now + ttlMs - 1)

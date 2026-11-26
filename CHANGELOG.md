@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-26
+
+### Added
+
+- 新增 `REGION_RESTRICTED` 错误码：识别网关返回的「This OpenCode Go model is hosted outside Europe and the United States. Select Global at …」区域限制 400，与额度耗尽一样换到下一个账号，并在用量胶囊中提示「当前账号所在区域不支持该模型，已自动切换为：…」。
+
+### Changed
+
+- 打开多账号轮询（`balanceAccounts`）时视同允许故障切换：额度耗尽、限流、Key 失效或区域限制会在当前请求内换到下一个账号；轮询仍不写回列表顺序和当前账号。
+- 额度耗尽与区域限制的账号冷却由 5 分钟延长到 1 小时（新增 `UNAVAILABLE_KEY_TTL_MS`），避免对整月额度已用光或区域不支持的账号每 5 分钟重试；凭证失效仍冷却 5 分钟，限流仍按 Retry-After（默认 15 秒，1 秒–5 分钟）。
+
 ## [0.7.0] - 2026-11-26
 
 ### Added
