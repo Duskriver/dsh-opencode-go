@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-26
+
 ### Fixed
 
 - 修复 Go 通道在 SOCKS5 代理地址为 IPv6 字面量（如 `socks5://user:pass@[2001:db8::1]:1080`）时全部请求失败（`network error (ENOTFOUND)`）的问题（#121）：`URL.hostname` 会保留 IPv6 地址的方括号，undici 的 `Socks5ProxyAgent` 将其原样交给连接器，Linux/macOS 的解析器因此拒绝解析。插件现在在连接代理前去掉方括号；Free 通道不受影响。
@@ -14,6 +16,7 @@
 ### Changed
 
 - 插件包图标放大：`go` 标记由 22px 居中缩小改为直接铺满 36 单位画布，在 DSH 插件列表中与相邻插件大小一致。
+- 预打包发布归档更新为 `dsh-opencode-go-0.5.1.tgz`。
 
 ## [0.5.0] - 2026-11-24
 
