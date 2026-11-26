@@ -14,4 +14,4 @@
  `npm run check:dist` (and `prepack`) rebuilds into a temporary directory and asserts byte-for-byte parity with committed `lib/` files.
 - `npm run check:pack` asserts that all required runtime, type, license and documentation files are included in the package and that the single tracked root `dsh-opencode-go-<version>.tgz` archive matches the workspace byte-for-byte.
 - See [development](development.md) for commands, module layout and verification gates.
-- The fork's current release line is `0.6.0`: it merges upstream 0.4.5 on top of the fork's multi-account request balancing (per-session affinity) and its opt-in local privacy guard.
+- The fork's current release line is `0.7.0`: it merges upstream 0.4.6 → 0.5.1 on top of the fork's multi-account request balancing (per-session affinity) and its opt-in local privacy guard.
