@@ -1,6 +1,6 @@
 /** Proxy and HTTP transport, cancellation, bounded reads and redacted errors. */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { ProxyAgent, Socks5ProxyAgent, type Dispatcher } from 'undici'
+import { ProxyAgent, Socks5ProxyAgent, buildConnector, type Dispatcher } from 'undici'
 import { assertProxyURL } from './contracts.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Readable, Writable } from 'node:stream'
@@ -23,6 +23,20 @@ export function waitWithSignal<T>(work: () => PromiseLike<T>, signal?: AbortSign
   })
 }
 
+/**
+ * Give a connector the proxy host without the brackets `URL.hostname` keeps
+ * around IPv6 literals. They are URL syntax: the resolver rejects `[::1]` as a
+ * name (`ENOTFOUND` on Linux and macOS).
+ */
+export function bareHostConnector(connector: buildConnector.connector): buildConnector.connector {
+  const bare = (host: string) => host.replace(/^\[|\]$/g, '')
+  return (options, callback) => connector({ ...options, hostname: bare(options.hostname), host: options.host && bare(options.host) }, callback)
+}
+
+// undici's Socks5ProxyAgent hands its proxy URL's bracketed hostname to this
+// connector. Keep it until the pinned undici includes nodejs/undici#6243.
+const socksProxyConnector = bareHostConnector(buildConnector({ timeout: 10_000 }))
+
 /** Per-mount transport. Fetch closures retain their address across settings changes. */
 export class ProxyTransport {
   private current: { address: string; dispatcher: Dispatcher } | undefined
@@ -36,7 +50,7 @@ export class ProxyTransport {
       if (this.disposed) return Promise.reject(new Error('OpenCode Go proxy transport is disposed'))
       if (this.current?.address !== address) {
         const url = new URL(address)
-        const dispatcher = url.protocol === 'socks5:' ? new Socks5ProxyAgent(url) : new ProxyAgent(address)
+        const dispatcher = url.protocol === 'socks5:' ? new Socks5ProxyAgent(url, { connect: socksProxyConnector }) : new ProxyAgent(address)
         this.retire()
         this.current = { address, dispatcher }
       }

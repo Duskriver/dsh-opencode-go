@@ -1,5 +1,12 @@
+import { buildConnector } from 'undici';
 /** Cancel a wait even when an external service does not observe its signal. */
 export declare function waitWithSignal<T>(work: () => PromiseLike<T>, signal?: AbortSignal): Promise<T>;
+/**
+ * Give a connector the proxy host without the brackets `URL.hostname` keeps
+ * around IPv6 literals. They are URL syntax: the resolver rejects `[::1]` as a
+ * name (`ENOTFOUND` on Linux and macOS).
+ */
+export declare function bareHostConnector(connector: buildConnector.connector): buildConnector.connector;
 /** Per-mount transport. Fetch closures retain their address across settings changes. */
 export declare class ProxyTransport {
     private current;

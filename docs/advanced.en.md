@@ -87,9 +87,12 @@ Open **Settings → OpenCode Go → Advanced settings → Proxy address**, enter
 ```text
 http://127.0.0.1:7890
 socks5://127.0.0.1:1080
+socks5://user:pass@[2001:db8::1]:1080
 ```
 
-HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported. Subsequent conversations, catalog updates, and usage queries use the saved proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
+HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported; an IPv6 literal address must be written with brackets. Subsequent conversations, catalog updates, and usage queries use the saved proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
+
+Known limitation: on the Go route through a SOCKS5 proxy, requests fail when the Go gateway address itself has an IPv6 literal host (for example `http://[::1]:8080/v1`). Point `baseURL` at a hostname or an IPv4 address, or use the Free route.
 
 ### Dual routes and manual configuration
 

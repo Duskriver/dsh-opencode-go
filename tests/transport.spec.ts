@@ -1,9 +1,11 @@
 import { gzipSync } from 'node:zlib'
 import { createServer, type RequestListener } from 'node:http'
 import { once } from 'node:events'
+import { Socket } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  bareHostConnector,
   diagnosticURL,
   fetchJsonResponse,
   readJsonResponse,
@@ -539,6 +541,24 @@ describe("proxy dispatch", () => {
     })
   })
 
+  describe('SOCKS5 proxy connector', () => {
+    // Windows' resolver accepts "[::1]", so only the Linux runners watched the
+    // proxy test below fail before the fix. This pins the connector everywhere.
+    it('hands the proxy connector IPv6 literals without their URL brackets', () => {
+      const seen: { hostname: string; host?: string }[] = []
+      const socket = new Socket()
+      const connector = bareHostConnector((options, callback) => { seen.push(options); callback(null, socket) })
+      connector({ hostname: '[::1]', host: '[::1]', port: 1080, protocol: 'http:' }, () => {})
+      connector({ hostname: '[2001:db8::1]', port: 1080, protocol: 'http:' }, () => {})
+      connector({ hostname: '127.0.0.1', port: 1080, protocol: 'http:' }, () => {})
+      expect(seen).toEqual([
+        { hostname: '::1', host: '::1', port: 1080, protocol: 'http:' },
+        { hostname: '2001:db8::1', host: undefined, port: 1080, protocol: 'http:' },
+        { hostname: '127.0.0.1', host: undefined, port: 1080, protocol: 'http:' },
+      ])
+    })
+  })
+
   describe.each(['http', 'socks5'] as const)('%s proxy', protocol => {
 
     it.each([
@@ -606,6 +626,17 @@ describe("proxy dispatch", () => {
       const second = await service.read()
       expect(second.source).not.toBe(first.source)
       expect(secondProxy.destinations).toContain('gateway.invalid:4321')
+    })
+
+    it('reaches a proxy whose address is an IPv6 literal', async () => {
+      const gateway = await mockGateway({ status: 200, body: listingBody(['future']) })
+      const proxy = await mockProxy(protocol, { host: '::1', target: gateway.url })
+      cleanups.push(proxy.close)
+      expect(new URL(proxy.url).hostname).toBe('[::1]')
+      const transport = new ProxyTransport()
+      cleanups.push(() => transport.dispose())
+      await (await transport.forProxy(proxy.url)('http://gateway.invalid:4321/models')).json()
+      expect(proxy.destinations).toEqual(['gateway.invalid:4321'])
     })
 
     it('does not fall back to a direct connection when the proxy is unavailable', async () => {

@@ -45,7 +45,7 @@ Vitest tests are organized by domain:
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |
 | `usage.spec.ts`, `usage.client.spec.tsx` | Official quota reads, current-account selection, 5 input pill styles + border toggle, active-model remaining call estimates, fallback notices and accessibility |
 | `analytics.spec.ts`, `analytics.client.spec.tsx` | Official daily CSV parsing/aggregation, UTC ranges (including UTC Today), provider/model grouping, account isolation, 30s cache, charts and CSV export |
-| `transport.spec.ts` | Bounded JSON/gzip, classified/redacted HTTP errors, real CONNECT/SOCKS5 proxies and SDK bridge matching |
+| `transport.spec.ts` | Bounded JSON/gzip, classified/redacted HTTP errors, real CONNECT/SOCKS5 proxies (including IPv6-literal proxy addresses) and SDK bridge matching |
 | `settings.client.spec.tsx`, `accounts-models.client.spec.tsx` | Page configuration, single-save-gesture immediate vs staged writes, batch model switches, per-account plan selection, live model multipliers and drag/keyboard ordering |
 
 All test imports target current modules directly. `tests/setup.ts` gives each test a temporary `DSH_HOME`, provides synthetic `/models` entries, allows loopback HTTP fixtures and explicit `.invalid` destinations, and rejects external network requests.
@@ -99,3 +99,14 @@ Alongside npm releases (`npm publish`), the repository synchronously tracks **ex
 
 - An image inherits neither `currentColor` nor the Host theme, so every colour in the file is baked in. The drawing maps the sidebar mark's 24-unit canvas (`GO_ROW_GEOMETRY` in `client/GoMark.tsx`) directly to the 36-unit box (`scale(1.5)`) so it relies on the Host's frame padding instead of double-shrinking, styled after the Host's built-in plugin artwork: one blue gradient (`#69B9FF → #324DE2`) for the `g` outline and the hollow stone, a green-to-teal gradient (`#45E7A4 → #05909D`) for the filled stone, and slightly heavier strokes (`2.3` / `2.15`) than the 16px row icon.
 - `tests/icon.client.spec.tsx` pins the file to that geometry and palette, so moving `GO_ROW_GEOMETRY` means editing `assets/icon.svg` in the same change. `check:pack` requires the manifest `icon` path to be one of the required packed files.
+
+## Upstream dependency workarounds
+
+### SOCKS5 proxies on IPv6 literals
+
+`ProxyTransport` builds its SOCKS5 route on `undici`'s `Socks5ProxyAgent`, which in every published line as of `7.30.2` and `8.13.1` forwards the proxy URL's bracketed IPv6 hostname (`[2001:db8::1]`) to `net.connect`. The resolver rejects that name on Linux and macOS, so every Go request failed with `network error (ENOTFOUND)` (#121). The plugin strips the brackets in its own connector, `bareHostConnector` in `src/transport.ts`; the Free route was never affected because `src/free-socks-tunnel.ts` dials the proxy itself.
+
+The complete fix is upstream: [nodejs/undici#6243](https://github.com/nodejs/undici/pull/6243) (merged 2026-11-22) handles bracketed proxy and target hosts. No release contained it when 0.5.1 shipped, so this workaround carries the release.
+
+- **Follow-up once a released `undici` includes the fix:** raise the exact `undici` pin in `package.json` (the plugin loads the copy installed for its own pin, not the Host's), delete `bareHostConnector` and its unit test, and keep the IPv6-literal proxy tests as the regression guard. If that means the 8.x line, check the dispatcher against Node 22.19's bundled `fetch` first; CI covers both Node lines.
+- **Still broken until then:** on the Go route through a SOCKS5 proxy, a gateway whose `baseURL` host is an IPv6 literal (`http://[::1]:8080/v1`) is sent to the proxy as a domain name and fails on every platform (`UND_ERR_SOCKS5_REPLY_*`). Users can point `baseURL` at a hostname or an IPv4 address, or use the Free route.
