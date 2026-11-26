@@ -138,12 +138,11 @@ describe('package icon', () => {
     expect(Buffer.byteLength(source, 'utf8')).toBeLessThanOrEqual(256 * 1024)
   })
 
-  it('is the sidebar mark at 22px, centred in the box the Host frames', () => {
+  it('maps the 24-unit sidebar mark across the 36-unit image canvas without double padding', () => {
     expect(root.getAttribute('viewBox')).toBe('0 0 36 36')
     const placed = /translate\(([\d.]+) ([\d.]+)\) scale\(([\d.]+)\)/.exec(mark?.getAttribute('transform') ?? '')?.slice(1).map(Number)
-    const centre = (36 - 22) / 2
-    expect(placed?.slice(0, 2)).toEqual([centre, centre])
-    expect(placed?.[2]).toBeCloseTo(22 / GO_ROW_GEOMETRY.viewBox, 4)
+    expect(placed?.slice(0, 2)).toEqual([0, 0])
+    expect(placed?.[2]).toBeCloseTo(36 / GO_ROW_GEOMETRY.viewBox, 4)
     expect(attrs(mark)).toMatchObject({ fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })
   })
 
@@ -158,11 +157,11 @@ describe('package icon', () => {
   })
 
   it('wears the Host palette: blue outline and hollow stone, green-to-teal filled stone', () => {
-    // Heavier strokes than the 16px row icon, as the built-in line artwork is bold.
-    expect(attrs(outline)).toMatchObject({ 'stroke-width': '2.75' })
+    // Slightly heavier than the 16px row icon (2.05/1.95) so the 1.5x scaled strokes match the bold built-in artwork.
+    expect(attrs(outline)).toMatchObject({ 'stroke-width': '2.3' })
     expect(outline?.parentElement?.getAttribute('stroke')).toBe('url(#a)')
     expect(attrs(stone)).toMatchObject({ fill: 'url(#b)', stroke: 'none' })
-    expect(attrs(hollow)).toMatchObject({ 'stroke-width': '2.6' })
+    expect(attrs(hollow)).toMatchObject({ 'stroke-width': '2.15' })
     expect(hollow?.parentElement?.getAttribute('stroke')).toBe('url(#a)')
     // The hollow stone must not also be painted solid.
     expect(hollow?.getAttribute('fill')).toBeNull()
@@ -173,7 +172,7 @@ describe('package icon', () => {
     expect(stops('b')).toEqual(['#45E7A4', '#05909D'])
     // Both run top to bottom over the whole mark, so its parts shade alike.
     for (const id of ['a', 'b']) {
-      expect(attrs(gradient(id))).toMatchObject({ gradientUnits: 'userSpaceOnUse', x1: '18.002', x2: '18.002', y1: '9.525', y2: '26.410' })
+      expect(attrs(gradient(id))).toMatchObject({ gradientUnits: 'userSpaceOnUse', x1: '18.004', x2: '18.004', y1: '4.473', y2: '31.425' })
     }
   })
 

@@ -1,5 +1,5 @@
 import { createServer as httpServer } from 'node:http'
-import { connect, createServer as tcpServer } from 'node:net'
+import { connect, createServer as tcpServer, isIP } from 'node:net'
 import type { Socket } from 'node:net'
 
 /** Real loopback proxies; a mapped target lets tests use an otherwise unreachable hostname. */
@@ -7,6 +7,8 @@ export async function mockProxy(protocol: 'http' | 'socks5', options: {
   target?: string
   username?: string
   password?: string
+  /** Interface to bind; an IPv6 literal is advertised in brackets, as in a saved proxy URL. */
+  host?: string
 } = {}) {
   const destinations: string[] = []
   const authorizations: string[] = []
@@ -85,11 +87,12 @@ export async function mockProxy(protocol: 'http' | 'socks5', options: {
       client.on('data', read)
     })
   }
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const host = options.host ?? '127.0.0.1'
+  await new Promise<void>(resolve => server.listen(0, host, resolve))
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('missing proxy address')
   return {
-    url: `${protocol}://127.0.0.1:${address.port}`,
+    url: `${protocol}://${isIP(host) === 6 ? `[${host}]` : host}:${address.port}`,
     destinations, authorizations,
     close: async () => {
       for (const socket of sockets) socket.destroy()
