@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="420" viewBox="0 0 1200 420"
+     role="img" aria-labelledby="title desc">
+  <title id="title">dsh-opencode-go 架构与出词前无感容灾流程</title>
+  <desc id="desc">展示 DSH 客户端、Cordis 宿主插件与 OpenCode Go / Free 双路由之间的数据流与出词前自动容灾机制。</desc>
+
+  <defs>
+    <linearGradient id="go-cobalt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4D6BFE"/>
+      <stop offset="100%" stop-color="#7AAAFF"/>
+    </linearGradient>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#7AAAFF"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#4ED17E"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1 L 9 5 L 1 9 z" fill="#F7AD31"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="420" rx="24" fill="#0F0F0F"/>
+  <rect x="1" y="1" width="1198" height="418" rx="23" fill="none" stroke="#2B2B2E" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <g transform="translate(48 44)">
+    <text x="0" y="0" fill="#7AAAFF" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="600" letter-spacing="1.2">ARCHITECTURE · CORDIS TYPERT RPC</text>
+    <text x="0" y="38" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="30" font-weight="700">双路由协议转换与出词前无感容灾</text>
+  </g>
+
+  <!-- Column 1: DSH Client -->
+  <g transform="translate(48 112)">
+    <rect width="310" height="260" rx="16" fill="#18181B" stroke="#3C3C3D" stroke-width="1.5"/>
+    <text x="24" y="38" fill="#A2A4A6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="600">01 · DSH CLIENT</text>
+
+    <rect x="20" y="56" width="270" height="58" rx="12" fill="#212123" stroke="#3C3C3D"/>
+    <text x="36" y="83" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="20" font-weight="600">输入栏胶囊 · 5 种形态</text>
+    <text x="36" y="105" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">剩余调用次数实时估算</text>
+
+    <rect x="20" y="126" width="270" height="58" rx="12" fill="#212123" stroke="#3C3C3D"/>
+    <text x="36" y="153" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="20" font-weight="600">侧边栏 7 子页控制台</text>
+    <text x="36" y="175" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">概览 / 用量 / 账号 / 模型</text>
+
+    <rect x="20" y="196" width="270" height="46" rx="10" fill="#1C2B45" stroke="#4D6BFE" stroke-opacity="0.55"/>
+    <text x="36" y="225" fill="#7AAAFF" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="600">x-opencode-session</text>
+  </g>
+
+  <!-- Connector 1 -> 2 -->
+  <line x1="364" y1="242" x2="424" y2="242" stroke="#7AAAFF" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <text x="394" y="226" text-anchor="middle" fill="#A2A4A6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">RPC</text>
+
+  <!-- Column 2: Cordis Host Plugin -->
+  <g transform="translate(432 112)">
+    <rect width="360" height="260" rx="16" fill="#18181B" stroke="#4D6BFE" stroke-opacity="0.7" stroke-width="1.5"/>
+    <text x="24" y="38" fill="#7AAAFF" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="600">02 · CORDIS HOST PLUGIN</text>
+
+    <rect x="20" y="56" width="320" height="92" rx="12" fill="#212123" stroke="#4ED17E" stroke-opacity="0.6"/>
+    <text x="36" y="84" fill="#4ED17E" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="20" font-weight="700">出词前自动容灾 (adapter.ts)</text>
+    <text x="36" y="110" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">401/403 · 429 · 耗尽 → 切备用号</text>
+    <text x="36" y="134" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">5 分钟冷却队列 · 成功出词自动扶正</text>
+
+    <rect x="20" y="162" width="154" height="80" rx="12" fill="#212123" stroke="#3C3C3D"/>
+    <text x="34" y="192" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="20" font-weight="600">凭据托管</text>
+    <text x="34" y="218" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">最多 20 账号</text>
+
+    <rect x="186" y="162" width="154" height="80" rx="12" fill="#212123" stroke="#3C3C3D"/>
+    <text x="200" y="192" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="20" font-weight="600">单价与预算</text>
+    <text x="200" y="218" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">三窗口实时换算</text>
+  </g>
+
+  <!-- Connectors 2 -> 3 -->
+  <path d="M 798 182 L 858 182" stroke="#4ED17E" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <path d="M 798 308 L 858 308" stroke="#F7AD31" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arrow-amber)"/>
+
+  <!-- Column 3: Upstream Gateways -->
+  <g transform="translate(866 112)">
+    <!-- Go Route -->
+    <rect width="286" height="122" rx="16" fill="#18181B" stroke="#4ED17E" stroke-opacity="0.7" stroke-width="1.5"/>
+    <circle cx="28" cy="34" r="6" fill="#4ED17E"/>
+    <text x="44" y="40" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="22" font-weight="700">OpenCode Go 网关</text>
+    <text x="24" y="74" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">动态 /models · 三档实时额度</text>
+    <text x="24" y="100" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">Console 每日 CSV 看板</text>
+
+    <!-- Free Route -->
+    <rect y="138" width="286" height="122" rx="16" fill="#18181B" stroke="#F7AD31" stroke-opacity="0.65" stroke-width="1.5"/>
+    <circle cx="28" cy="172" r="6" fill="#F7AD31"/>
+    <text x="44" y="178" fill="#F5F5F5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="22" font-weight="700">Free 通道 (opt-in)</text>
+    <text x="24" y="212" fill="#A2A4A6" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">独立 Bun HTTP Worker</text>
+    <text x="24" y="238" fill="#F7AD31" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="18">遵循 Retry-After · 不触发换号</text>
+  </g>
+</svg>

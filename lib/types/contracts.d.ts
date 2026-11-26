@@ -1,5 +1,7 @@
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol';
+import { validReleaseDate, type PriceMultiplier } from './pricing.ts';
+export { validReleaseDate, type PriceMultiplier };
 /** Public DSH route and the private SDK transport have separate identities. */
 export declare const PROVIDER_ID = "dsh-opencode-go";
 export declare const DISPLAY_NAME = "Default";
@@ -29,6 +31,8 @@ export declare const USAGE_PILL_STYLES: readonly ["badge", "concentric", "fill",
 export type UsagePillStyle = typeof USAGE_PILL_STYLES[number];
 export declare const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle;
 export declare const DEFAULT_USAGE_PILL_BORDER = true;
+/** Default visibility of per-model quota multipliers in the conversation model selector. */
+export declare const DEFAULT_SHOW_MODEL_MULTIPLIER = true;
 /** Accepted in profiles saved before 0.4.5 and mapped to `badge` without a border. */
 export declare const LEGACY_USAGE_PILL_STYLE: "plain";
 /** Resolve stored pill style and border flag, migrating legacy `'plain'` to borderless `'badge'`. */
@@ -40,12 +44,21 @@ export declare function resolveUsagePillAppearance(style: unknown, border: unkno
 export declare const OPENCODE_GO_THEMES: readonly ["native", "classic"];
 export type OpencodeGoTheme = typeof OPENCODE_GO_THEMES[number];
 export declare const DEFAULT_OPENCODE_GO_THEME: OpencodeGoTheme;
+/** OpenCode Go subscription tiers used to translate shared quota percentages into per-model limits. */
+export declare const GO_PLANS: readonly ["go", "go-plus", "go-teams"];
+export type GoPlan = typeof GO_PLANS[number];
+export declare const DEFAULT_GO_PLAN: GoPlan;
+export type GoMonthlyUsage = Record<GoPlan, number>;
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
     id: string;
     name: string;
     apiKeyEnv: string;
+    /** Optional display-only subscription tier used to convert quota percentages into call/token estimates. */
+    plan?: GoPlan;
 };
+/** Resolve one account's display-only Go tier, falling back to the profile default. */
+export declare function accountPlanOf(account: Pick<GoAccount, 'plan'> | undefined, fallback?: GoPlan): GoPlan;
 export declare const MAX_ACCOUNTS = 20;
 /**
  * Upper bound for one configured thinking budget, in tokens. Shared with the
@@ -64,6 +77,7 @@ export interface AccountSettings {
     autoSwitch?: boolean;
     /** Start each request on the next saved account, spending every subscription at once. */
     balanceAccounts?: boolean;
+    goPlan?: GoPlan;
 }
 export declare function accountRefOf(settings: AccountSettings): string;
 /** Promote one account while preserving every other account's relative order. */
@@ -77,7 +91,7 @@ export declare function assertAccounts(accounts: readonly GoAccount[] | null | u
 export interface GoAccountSwitch {
     fromRef: string;
     toRef: string;
-    reason: 'quota' | 'credential';
+    reason: 'quota' | 'rate-limit' | 'credential';
     at: number;
 }
 export declare const SETTINGS_NAMESPACE = "llm-opencode-go";
@@ -112,6 +126,49 @@ export interface OpencodeGoModelLimit {
 }
 /** Per-model capacities; a null entry selects both original catalog values. */
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>;
+/** Browser-safe retry-policy vocabulary mirroring `@deepseek-ai/dsh-llm`. */
+export declare const RETRY_MODES: readonly ["normal", "always"];
+export type RetryMode = typeof RETRY_MODES[number];
+export declare const DEFAULT_RETRY_MODE: RetryMode;
+export declare const DEFAULT_RETRY_MAX_RETRIES = 5;
+export declare const DEFAULT_RETRY_INITIAL_DELAY_MS = 500;
+/** Accommodate OpenCode Go 429 Retry-After headers (typically 15–18s) out of the box. */
+export declare const DEFAULT_RETRY_MAX_DELAY_MS = 30000;
+export declare const DEFAULT_RETRY_JITTER_RATIO = 0.1;
+export declare const DEFAULT_RETRYABLE_CODES: readonly ["EMPTY_RESPONSE", "RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT"];
+export interface GoRetryBackoffConfig {
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    jitterRatio?: number;
+}
+export type GoRetryPolicyConfig = {
+    mode: 'normal';
+    maxRetries?: number;
+    retryableCodes?: string[];
+    backoff?: GoRetryBackoffConfig;
+} | {
+    mode: 'always';
+    backoff?: GoRetryBackoffConfig;
+};
+/** Fresh default Go route retry policy safe for configuration defaults and mutations. */
+export declare function defaultGoRetryPolicy(): GoRetryPolicyConfig;
+export interface ResolvedGoRetryFields {
+    mode: RetryMode;
+    maxRetries: number;
+    initialDelayMs: number;
+    maxDelayMs: number;
+    jitterRatio: number;
+    retryableCodes: string[];
+}
+/** Resolve UI-friendly scalar fields from a stored or omitted retry policy. */
+export declare function resolveGoRetryFields(policy?: GoRetryPolicyConfig): ResolvedGoRetryFields;
+/** Build a valid `GoRetryPolicyConfig` by patching mode, maxRetries, retryableCodes and/or maxDelayMs onto an existing policy. */
+export declare function mergeGoRetryPolicy(base: GoRetryPolicyConfig | undefined, patch: {
+    mode?: RetryMode;
+    maxRetries?: number;
+    maxDelayMs?: number;
+    retryableCodes?: readonly string[];
+}): GoRetryPolicyConfig;
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
     /**
@@ -139,12 +196,16 @@ export interface OpencodeGoConfig {
     usageDisplay: UsageDisplayMode;
     /** Show quota in the sidebar independently of the selected conversation model. */
     showSidebarQuota: boolean;
+    /** Show per-model quota consumption multipliers in the conversation model picker. */
+    showModelMultiplier: boolean;
     /** Appearance of the conversation input's quota trigger. */
     usagePillStyle: UsagePillStyle;
     /** Draw an outer border and background frame around the conversation input's quota trigger. */
     usagePillBorder: boolean;
     /** Global plugin appearance theme. */
     appearanceTheme: OpencodeGoTheme;
+    /** Active OpenCode Go subscription tier for per-model remaining quota estimation. */
+    goPlan: GoPlan;
     /** Per-model picker switches; absent entries default to enabled unless deprecated. */
     modelVisibility?: Record<string, boolean>;
     /** Legacy credential reference, kept in sync with the first/current account. */
@@ -169,6 +230,8 @@ export interface OpencodeGoConfig {
     requestPreparationTimeoutMs?: number;
     /** Whole dispatch deadline, including discovery and account fallback. */
     requestTimeoutMs?: number;
+    /** Host-executed request retry policy for the Go route (`dsh-llm-retry`). */
+    retryPolicy?: GoRetryPolicyConfig;
     /** Optional retained image occurrence cap per request; omission or null leaves the count unlimited. */
     maxImages?: number | null;
     /** Request-level bound on base64-encoded image payload, in bytes. */
@@ -202,13 +265,40 @@ export interface GoModel {
     releaseDate?: string;
     /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
     inputModalities?: readonly InputModality[];
+    /** The text tariff the gateway publishes; absent when it declares none. */
+    price?: GoModelPrice;
+    /** Per-plan monthly dollar allowance declared under `/models`'s `go.monthly_usage`. */
+    goMonthlyUsage?: GoMonthlyUsage;
+    /** Time/date multiplier schedule declared under `/models`'s `cost.multipliers`. */
+    pricingMultipliers?: readonly PriceMultiplier[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
+}
+/** A published text tariff in US dollars per million tokens. */
+export interface GoModelPrice {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    /** Rates that replace the base ones above a context threshold, in ascending order. */
+    tiers?: readonly GoModelPriceTier[];
+    /** The gateway prices some periods by a multiplier; the rates here are the base ones. */
+    multipliers?: boolean;
+}
+/** One context-tier tariff; `inputTokensAbove` is the last context still on the previous tier. */
+export interface GoModelPriceTier {
+    inputTokensAbove: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
 }
 export interface ThinkingBudgetRange {
     min: number;
     max: number;
 }
+/** Validate per-plan monthly dollar limits (`go`, `go-plus`, `go-teams`); malformed fields drop cleanly. */
+export declare function parseGoMonthlyUsage(value: unknown): GoMonthlyUsage | undefined;
 /**
  * Input modalities this page can name; MIME types are normalized to these tokens.
  */
@@ -240,16 +330,39 @@ export interface GoModelCatalog {
 }
 /** Missing configuration cannot be enabled; configured models follow explicit switches or lifecycle defaults. */
 export declare function isModelEnabled(model: Pick<GoModel, 'id' | 'source' | 'deprecated' | 'configurationMissing'>, modelVisibility?: Readonly<Record<string, boolean>>): boolean;
-export declare function validReleaseDate(value: unknown): value is string;
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export declare function isNewModel(model: GoModel, now?: number): boolean;
 export declare function sortModels(models: readonly GoModel[], now?: number): GoModel[];
 export declare function parseGoModels(value: unknown): GoModel[];
 export declare function parseGoModelCatalog(value: unknown): GoModelCatalog;
+/** Input to the safe keyless gateway connectivity probe. */
+export interface ConnectionProbeInput {
+    baseURL?: string;
+    freeBaseURL?: string;
+    proxyURL?: string;
+    includeFree?: boolean;
+}
+/** Sanitized connectivity probe outcome for one gateway endpoint (never carries credentials). */
+export interface ProbeEndpointResult {
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly status?: number;
+    readonly latencyMs: number;
+    readonly modelCount?: number;
+    readonly error?: string;
+}
+/** Connectivity probe outcomes for Go and optionally Free gateways. */
+export interface ConnectionProbeResult {
+    readonly go: ProbeEndpointResult;
+    readonly free?: ProbeEndpointResult;
+}
+export declare function parseConnectionProbeInput(value: unknown): ConnectionProbeInput;
+export declare function parseConnectionProbeResult(value: unknown): ConnectionProbeResult;
 declare module '@deepseek-ai/dsh-typert-protocol' {
     interface TypertRemoteNamespaceMap {
         opencodeGoModels: {
             read(): Promise<RemoteResult<GoModelCatalog>>;
+            probe(input: ConnectionProbeInput): Promise<RemoteResult<ConnectionProbeResult>>;
         };
     }
 }
@@ -292,6 +405,7 @@ export type AccountCommand = {
     id: string;
     name: string;
     key: string;
+    plan?: GoPlan;
 } | {
     kind: 'remove';
     ref: string;
@@ -316,6 +430,10 @@ export type AccountCommand = {
 } | {
     kind: 'balance';
     value: boolean;
+} | {
+    kind: 'set-plan';
+    ref: string;
+    plan: GoPlan;
 };
 export declare function parseAccountCommand(value: unknown): AccountCommand;
 declare module '@deepseek-ai/dsh-typert-protocol' {

@@ -3,7 +3,8 @@ import type { ReactElement } from 'react';
 /**
  * The hand-drawn `go` mark: a curly `g` outline (with its descender) around a
  * filled stone, plus the hollow stone that reads as the `o`. Kept as data so the
- * React row icon and the settings-navigation CSS mask cannot drift apart.
+ * React row icon, the settings-navigation CSS mask and the package icon
+ * (`assets/icon.svg`, pinned by `tests/icon.client.spec.tsx`) cannot drift apart.
  */
 export declare const GO_ROW_GEOMETRY: {
     readonly viewBox: 24;

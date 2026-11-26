@@ -14,7 +14,7 @@ import { createUserMessage, LlmError, type GenerateOptions, type StreamChunk } f
 import { Context } from '@deepseek-ai/cordis'
 import { Config, PlainConfig, type LiveConfig, type OpencodeGoConfig } from '../src/config.ts'
 import { OpencodeGoAdapter, OpencodeGoRequestExecutor } from '../src/adapter.ts'
-import { accountFallback, isGatewayKeyRejection } from '../src/accounts.ts'
+import { accountFallback, gatewayKeyRejectionTtlMs, isGatewayKeyRejection } from '../src/accounts.ts'
 import { apply } from '../src/index.ts'
 import { mockGateway, listingBody, textEvents, closeMockGateways } from './support/gateway.ts'
 
@@ -135,6 +135,7 @@ describe("seamless account fallback", () => {
 
   it.each([
     { status: 401, message: 'Invalid API key', reason: 'credential' },
+    { status: 429, message: 'Too many requests', reason: 'rate-limit' },
     { status: 429, message: 'Monthly usage limit exceeded', reason: 'quota' },
   ])('tries the next account before output after $message, preserving model, transcript and session identity', async failure => {
     const gateway = await mockGateway({ status: 200, body: listingBody([request().model]) })
@@ -558,8 +559,34 @@ describe('serialized account commands and primary selection', () => {
     { kind: 'auto-switch', value: 'yes' },
     { kind: 'balance', value: 'yes' },
     { kind: 'remove', ref: 'A', key: 'unexpected' },
+    { kind: 'set-plan', ref: 'A', plan: 'enterprise' },
   ])('rejects malformed commands before any side effect: %j', command => {
     expect(() => parseAccountCommand(command)).toThrow()
+  })
+
+  it('stores per-account display plans and falls back to goPlan for legacy profiles', async () => {
+    const legacy = accountHarness({ apiKeyEnv: 'OPENCODE_API_KEY' })
+    expect(await legacy.manager.execute({ kind: 'set-plan', ref: 'OPENCODE_API_KEY', plan: 'go-plus' })).toBe('applied')
+    expect(legacy.value().goPlan).toBe('go-plus')
+
+    const multi = accountHarness({
+      apiKeyEnv: 'ACCOUNT_A',
+      accounts: [
+        { id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A' },
+        { id: 'b', name: 'Backup', apiKeyEnv: 'ACCOUNT_B' },
+      ],
+    })
+    expect(await multi.manager.execute({ kind: 'set-plan', ref: 'ACCOUNT_B', plan: 'go-teams' })).toBe('applied')
+    expect(multi.value().accounts?.find(a => a.apiKeyEnv === 'ACCOUNT_B')?.plan).toBe('go-teams')
+    expect(await multi.manager.execute({ kind: 'set-plan', ref: 'ACCOUNT_A', plan: 'go-plus' })).toBe('applied')
+    expect(multi.value().goPlan).toBe('go-plus')
+    // Switching to an account with no explicit plan resets goPlan to default instead of leaking go-plus.
+    expect(await multi.manager.execute({ kind: 'add', id: 'c'.repeat(32), name: 'Third', key: 'synthetic-key-c' })).toBe('applied')
+    const thirdRef = multi.value().accounts?.find(a => a.id === 'c'.repeat(32))?.apiKeyEnv
+    expect(thirdRef).toBeTruthy()
+    expect(await multi.manager.execute({ kind: 'select', ref: thirdRef! })).toBe('applied')
+    expect(multi.value().goPlan).toBe('go')
+    expect(await multi.manager.execute({ kind: 'set-plan', ref: 'MISSING', plan: 'go' })).toBe('rejected')
   })
 
   it('serializes actual storage writes while callers add accounts concurrently', async () => {
@@ -692,11 +719,11 @@ describe('serialized account commands and primary selection', () => {
   })
 
   it.each([
-    { status: 401, message: 'unauthorized' },
-    { status: 403, message: 'invalid API key' },
-    { status: 429, message: 'rate limit reached' },
-    { status: 403, message: 'Monthly usage limit exceeded' },
-  ])('promotes the backup after HTTP $status $message before output', async failure => {
+    { status: 401, message: 'unauthorized', promote: true, reason: 'credential' },
+    { status: 403, message: 'invalid API key', promote: true, reason: 'credential' },
+    { status: 429, message: 'rate limit reached', promote: false, reason: 'rate-limit' },
+    { status: 403, message: 'Monthly usage limit exceeded', promote: true, reason: 'quota' },
+  ])('handles backup promotion after HTTP $status $message before output (promote=$promote)', async failure => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
     gateway.pushCompletions({ status: failure.status, body: JSON.stringify({ error: { message: failure.message } }) })
     gateway.pushCompletions({ events: textEvents })
@@ -709,22 +736,39 @@ describe('serialized account commands and primary selection', () => {
       const chunks = await drain(adapter.stream(requestOf()))
       expect(chunks.filter(chunk => chunk.type === 'text-delta').map(chunk => chunk.text).join('')).toBe('hello')
       expect(chunks.at(-1)).toMatchObject({ reason: { kind: 'stop' } })
-      await vi.waitFor(() => { expect(host.value().apiKeyEnv).toBe(backup.apiKeyEnv) })
+      if (failure.promote) {
+        await vi.waitFor(() => { expect(host.value().apiKeyEnv).toBe(backup.apiKeyEnv) })
+      } else {
+        await Promise.resolve()
+        expect(host.value().apiKeyEnv).toBe(primary.apiKeyEnv)
+        expect(host.settings.mutate).not.toHaveBeenCalled()
+      }
+      expect(host.manager.lastSwitch()).toMatchObject({ fromRef: primary.apiKeyEnv, toRef: backup.apiKeyEnv, reason: failure.reason })
       expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual(['Bearer PRIMARY_KEY', 'Bearer BACKUP_KEY'])
     } finally { await adapter.dispose() }
   })
 
-  it.each([401, 403, 429])('expires the five-minute cooldown for HTTP %s without replaying a rejected key during the window', async status => {
+  it.each([
+    { status: 401, message: 'rejected', ttlMs: 5 * 60_000 },
+    { status: 403, message: 'invalid API key', ttlMs: 5 * 60_000 },
+    { status: 429, message: 'Monthly usage limit exceeded', ttlMs: 5 * 60_000 },
+    { status: 429, message: 'Too many requests', ttlMs: 15_000 },
+    { status: 429, message: 'Too many requests', headers: { 'retry-after': '8' }, ttlMs: 8_000 },
+  ])('expires the cooldown ($ttlMs ms) for HTTP $status ($message) without replaying a rejected key during the window', async ({ status, message, headers, ttlMs }) => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['deepseek-v4.1-flash']) })
     const now = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(now)
     const config = configOf(gateway.url, { accounts: [primary, backup], apiKeyEnv: primary.apiKeyEnv, autoSwitch: true })
     const adapter = new OpencodeGoAdapter({ config: () => config, resolveApiKey: async config => config.apiKeyEnv })
     try {
-      gateway.pushCompletions({ status, body: JSON.stringify({ error: { message: status === 403 ? 'invalid API key' : 'rejected' } }) })
+      expect(gatewayKeyRejectionTtlMs({ code: 'RATE_LIMIT', providerRetryAfterMs: 8_000 })).toBe(8_000)
+      expect(gatewayKeyRejectionTtlMs({ code: 'RATE_LIMIT' })).toBe(15_000)
+      expect(gatewayKeyRejectionTtlMs({ code: 'QUOTA', providerRetryAfterMs: 8_000 })).toBe(5 * 60_000)
+      gateway.pushCompletions({ status, ...(headers ? { headers } : {}), body: JSON.stringify({ error: { message } }) })
       gateway.pushCompletions({ events: textEvents }); await drain(adapter.stream(requestOf()))
+      clock.mockReturnValue(now + ttlMs - 1)
       gateway.pushCompletions({ events: textEvents }); await drain(adapter.stream(requestOf()))
       expect(gateway.headers.filter(header => header.authorization).map(header => header.authorization)).toEqual(['Bearer PRIMARY_KEY', 'Bearer BACKUP_KEY', 'Bearer BACKUP_KEY'])
-      clock.mockReturnValue(now + 5 * 60_000 + 1)
+      clock.mockReturnValue(now + ttlMs + 1)
       gateway.pushCompletions({ events: textEvents }); await drain(adapter.stream(requestOf()))
       expect(gateway.headers.at(-1)?.authorization).toBe('Bearer PRIMARY_KEY')
     } finally { await adapter.dispose() }

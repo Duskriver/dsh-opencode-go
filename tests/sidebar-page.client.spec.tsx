@@ -15,6 +15,7 @@ import { pageTabStore, resetPageTab, setPageTab } from '../src/client/pages/nav.
 import { PAGE_TABS, TAB_COPY } from '../src/client/pages/types.ts'
 import { CLIENT_BUILD_INFO } from '../src/client/build-info.ts'
 import { en, GO_THEME_TOKENS } from '../src/client/presentation.ts'
+import { createAnalyticsReport } from './support/analytics.ts'
 import {
   accountsStateOf,
   field,
@@ -144,7 +145,7 @@ describe('console page shell', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: en.tabUsage }))
     expect(pageTabStore.getSnapshot()).toBe('usage')
-    expect(screen.getByRole('heading', { level: 1, name: en.analyticsTitle })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: en.analyticsTitle })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('tab', { name: en.tabOverview }))
     expect(screen.getByRole('heading', { level: 2, name: en.overviewCurrentAccount })).toBeTruthy()
@@ -332,16 +333,59 @@ describe('console page shell', () => {
 })
 
 describe('console sub-pages', () => {
-  it('shows the overview KPIs and the three quota windows from the readers', async () => {
-    const props = pagePropsOf({ state: { accounts: accountsStateOf([ACCOUNT]) } })
+  it('shows today UTC KPIs instead of 7-day totals and the three quota windows from the readers', async () => {
+    const zeroDay = {
+      requests: '0', inputTokens: '0', outputTokens: '0', cacheReadTokens: '0',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '0', costMicroCents: '0',
+    }
+    const todayCounts = {
+      requests: '22', inputTokens: '1000', outputTokens: '500', cacheReadTokens: '3000',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '4500', costMicroCents: '3845705',
+    }
+    const priorCounts = {
+      requests: '2527', inputTokens: '99000', outputTokens: '19500', cacheReadTokens: '297000',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '415500', costMicroCents: '913749114',
+    }
+    const sevenDayTotals = {
+      requests: '2549', inputTokens: '100000', outputTokens: '20000', cacheReadTokens: '300000',
+      cacheWrite5mTokens: '0', cacheWrite1hTokens: '0', cacheWriteTokens: '0',
+      tokens: '420000', costMicroCents: '917594819',
+    }
+    const props = pagePropsOf({
+      state: { accounts: accountsStateOf([ACCOUNT]) },
+      readers: {
+        readAnalytics: vi.fn(async query => createAnalyticsReport(query, {
+          generatedAt: Date.UTC(2026, 10, 18, 2, 0),
+          totals: sevenDayTotals,
+          byDay: [
+            { day: '2026-11-12', ...priorCounts },
+            { day: '2026-11-13', ...zeroDay },
+            { day: '2026-11-14', ...zeroDay },
+            { day: '2026-11-15', ...zeroDay },
+            { day: '2026-11-16', ...zeroDay },
+            { day: '2026-11-17', ...zeroDay },
+            { day: '2026-11-18', ...todayCounts },
+          ],
+        })),
+      },
+    })
     render(<OverviewPage {...props} />)
-    await waitFor(() => { expect(screen.getByTitle('12')).toBeTruthy() })
-    expect(screen.getByTitle('12').textContent).toBe('12')
-    expect(screen.getByTitle('6,500').textContent).toBe('6.5K')
-    expect(screen.getByText('66.7')).toBeTruthy()
-    expect(screen.getByText('$1.23')).toBeTruthy()
-    expect(screen.getByText('6 per day on average')).toBeTruthy()
-    expect(screen.getByText('Input 1K · Output 2K')).toBeTruthy()
+    await waitFor(() => { expect(screen.getByTitle('22')).toBeTruthy() })
+    expect(screen.getByTitle('22').textContent).toBe('22')
+    expect(screen.getByTitle('4,500').textContent).toBe('4.5K')
+    // Today cache rate = 3000 / (3000 + 1000 + 0) = 75.0%.
+    expect(screen.getByText('75.0')).toBeTruthy()
+    expect(screen.getByText('$0.0385')).toBeTruthy()
+    expect(screen.getByText('Nov 18 · 7d avg 364')).toBeTruthy()
+    expect(screen.getByText('Input 1K · Output 500')).toBeTruthy()
+    expect(screen.getByText('3K cached tokens')).toBeTruthy()
+    // 7-day aggregate numbers must not appear as today's KPI values.
+    expect(screen.queryByTitle('2,549')).toBeNull()
+    expect(screen.queryByTitle('420,000')).toBeNull()
+    expect(screen.queryByText('$9.18')).toBeNull()
     expect(props.actions.readers!.readAnalytics).toHaveBeenCalledWith(
       { accountRef: 'OPENCODE_API_KEY', range: '7d' },
       expect.any(AbortSignal),
@@ -352,21 +396,76 @@ describe('console sub-pages', () => {
     expect(screen.getByRole('progressbar', { name: en.usage_rolling + ' 0%' }).getAttribute('aria-valuenow')).toBe('0')
     expect(screen.getByRole('progressbar', { name: en.usage_weekly + ' 18%' }).getAttribute('aria-valuenow')).toBe('18')
     expect(screen.getByRole('progressbar', { name: en.usage_monthly + ' 21%' }).getAttribute('aria-valuenow')).toBe('21')
-    expect(screen.getByText(en.pageStatusOn)).toBeTruthy()
+    // Provider status card no longer duplicates the header's Service enabled pill.
+    expect(screen.queryByText(en.pageStatusOn)).toBeNull()
   })
 
-  it('routes the overview shortcuts into the sibling tabs', () => {
+  it('shows zero KPIs when UTC today has no usage yet even when earlier days in the 7d window do', async () => {
+    const props = pagePropsOf({ state: { accounts: accountsStateOf([ACCOUNT]) } })
+    render(<OverviewPage {...props} />)
+    await waitFor(() => { expect(screen.getAllByTitle('0')).toHaveLength(2) })
+    expect(screen.getByText('0.0')).toBeTruthy()
+    expect(screen.getByText('$0.0000')).toBeTruthy()
+    expect(screen.getByText('Nov 6 · 7d avg 6')).toBeTruthy()
+    expect(screen.getByText('Input 0 · Output 0')).toBeTruthy()
+    expect(screen.queryByTitle('12')).toBeNull()
+    expect(screen.queryByText('$1.23')).toBeNull()
+  })
+
+  it('routes the overview actions into the sibling tabs without redundant quick-link cards', () => {
     const go = vi.fn()
     render(<OverviewPage {...pagePropsOf({ state: { accounts: accountsStateOf([ACCOUNT]) }, go })} />)
-    const quick = screen.getByRole('region', { name: en.overviewQuickLinks })
-    expect(within(quick).getAllByRole('button')).toHaveLength(3)
-    fireEvent.click(within(quick).getByRole('button', { name: new RegExp('^' + en.tabUsage) }))
-    fireEvent.click(within(quick).getByRole('button', { name: new RegExp('^' + en.tabAccounts) }))
-    fireEvent.click(within(quick).getByRole('button', { name: new RegExp('^' + en.tabModels) }))
+    expect(screen.queryByRole('region', { name: en.overviewQuickLinks })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: en.overviewManageAccounts }))
     fireEvent.click(screen.getByRole('button', { name: en.overviewOpenUsage }))
+    fireEvent.click(screen.getByRole('button', { name: en.overviewOpenModels }))
+    fireEvent.click(screen.getByRole('button', { name: en.overviewOpenAppearance }))
     fireEvent.click(screen.getByRole('button', { name: en.overviewDetails }))
-    expect(go.mock.calls.map(call => call[0])).toEqual(['usage', 'accounts', 'models', 'accounts', 'usage', 'usage'])
+    expect(go.mock.calls.map(call => call[0])).toEqual(['accounts', 'usage', 'models', 'appearance', 'usage'])
+  })
+
+  it('supports inline account switching, fallback chain display, 0-account onboarding and interactive 7-day bars', async () => {
+    const go = vi.fn()
+    const multiProps = pagePropsOf({
+      state: { accounts: accountsStateOf([ACCOUNT, RESEARCH]) },
+      go,
+    })
+    const { unmount } = render(<OverviewPage {...multiProps} />)
+    const switcher = screen.getByLabelText<HTMLSelectElement>(en.overviewSwitchAccount)
+    fireEvent.change(switcher, { target: { value: RESEARCH.apiKeyEnv } })
+    expect(multiProps.actions.selectAccount).toHaveBeenCalledWith(RESEARCH.apiKeyEnv)
+    expect(screen.getByText('Primary → Research')).toBeTruthy()
+
+    // Interactive 7-day bars support click pinning and zero-value baseline marking
+    await waitFor(() => {
+      expect(screen.getByRole('group', { name: en.overviewRecent + ' · ' + en.overviewRecentSub })).toBeTruthy()
+    })
+    const chart = screen.getByRole('group', { name: en.overviewRecent + ' · ' + en.overviewRecentSub })
+    const bars = within(chart).getAllByRole('button')
+    expect(bars.length).toBeGreaterThan(0)
+    fireEvent.click(bars[0]!)
+    expect(bars[0]!.getAttribute('aria-pressed')).toBe('true')
+    expect(bars.some(bar => bar.getAttribute('data-empty') === 'true')).toBe(true)
+    unmount()
+
+    // 0-account cold-start onboarding card with direct CTA to Accounts
+    render(<OverviewPage {...pagePropsOf({ state: { accounts: accountsStateOf([]) }, go })} />)
+    expect(screen.getByText(en.overviewOnboardTitle)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en.overviewOnboardCta }))
+    expect(go).toHaveBeenCalledWith('accounts')
+  })
+
+  it('renders 3 appearance groups, live pill sandbox and causal inactive styling when usageDisplay is off', () => {
+    const props = pagePropsOf({
+      state: { usageDisplay: field('off'), usagePillStyle: field('concentric') },
+    })
+    const { container } = render(<AppearancePage {...props} />)
+    expect(screen.getByText(en.appearanceGroupTheme)).toBeTruthy()
+    expect(screen.getByText(en.appearanceGroupComposer)).toBeTruthy()
+    expect(screen.getByText(en.appearanceGroupWorkspace)).toBeTruthy()
+    expect(container.querySelector('[data-appearance-sandbox]')).not.toBeNull()
+    expect(screen.getByText(en.usageDisplayOffNote)).toBeTruthy()
+    expect(container.querySelector('[data-inactive="true"]')).not.toBeNull()
   })
 
   it('wires the provider, free-channel and fallback switches', () => {
@@ -388,14 +487,14 @@ describe('console sub-pages', () => {
     expect(screen.queryByRole('progressbar')).toBeNull()
   })
 
-  it('renders the account rows with the page surface opened', () => {
+  it('renders the account rows with the page surface permanently open', () => {
     const props = pagePropsOf({
       state: { accounts: accountsStateOf([{ ...ACCOUNT, configured: true }, { ...RESEARCH, configured: false }]) },
     })
     render(<AccountsPage {...props} />)
     expect(screen.getByText(en.accountsTitle)).toBeTruthy()
-    const trigger = screen.getByRole('button', { name: new RegExp('^' + en.accountsTitle) })
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    // The dedicated Accounts sub-page stays open and does not collapse on header click.
+    expect(screen.queryByRole('button', { name: new RegExp('^' + en.accountsTitle) })).toBeNull()
     expect(screen.getByText('Primary')).toBeTruthy()
     expect(screen.getByText('Research')).toBeTruthy()
     expect(screen.getByText(en.accountsPageHint)).toBeTruthy()
@@ -431,6 +530,30 @@ describe('console sub-pages', () => {
     expect(props.actions.setModelEnabled).toHaveBeenCalledWith(GO_MODEL.id, false)
     fireEvent.click(screen.getByRole('button', { name: en.modelsDisableAll }))
     expect(props.actions.setModelEnabled).toHaveBeenCalledWith([GO_MODEL.id], false)
+  })
+
+  it('renders a large model catalog and resets detail and list scroll positions appropriately', () => {
+    const catalog = Array.from({ length: 35 }, (_, index) => ({
+      id: `model-${index + 1}`,
+      name: `Model ${index + 1}`,
+      contextWindow: 128_000,
+      maxTokens: 16_384,
+    }))
+    const props = pagePropsOf({ state: { models: modelsOf(catalog) } })
+    render(<ModelsPage {...props} />)
+    const list = screen.getByRole('group', { name: en.modelsLabel })
+    expect(within(list).getAllByRole('switch')).toHaveLength(35)
+    const details = screen.getByRole('region', { name: en.modelDetails })
+    details.scrollTop = 180
+    expect(details.scrollTop).toBe(180)
+    fireEvent.click(within(list).getByRole('button', { name: 'Model 25' }))
+    expect(within(details).getByRole('heading', { level: 3, name: 'Model 25' })).toBeTruthy()
+    expect(details.scrollTop).toBe(0)
+
+    list.scrollTop = 240
+    expect(list.scrollTop).toBe(240)
+    fireEvent.change(screen.getByLabelText(en.limitsFilterLabel), { target: { value: 'Model 3' } })
+    expect(list.scrollTop).toBe(0)
   })
 
   it('renders only the appearance controls with their live actions', () => {
@@ -515,7 +638,7 @@ describe('console sub-pages', () => {
     expect(screen.getByRole('link', { name: en.aboutRepo }).getAttribute('href'))
       .toBe('https://github.com/Duskriver/dsh-opencode-go')
     expect(screen.getByRole('link', { name: en.aboutDocs }).getAttribute('href'))
-      .toBe('https://github.com/Duskriver/dsh-opencode-go/blob/main/docs/development.md')
+      .toBe('https://github.com/Duskriver/dsh-opencode-go/blob/main/docs/advanced.md')
     expect(screen.getByRole('link', { name: en.aboutChangelog }).getAttribute('href'))
       .toBe('https://github.com/Duskriver/dsh-opencode-go/blob/main/CHANGELOG.md')
     expect(screen.getByText(en.pageStatusOn)).toBeTruthy()
@@ -534,12 +657,73 @@ describe('console sub-pages', () => {
     expect(screen.queryByText(en.pageStatusOn)).toBeNull()
   })
 
+  it('auto-loads the model catalog when ModelsPage opens while models are idle', () => {
+    const props = pagePropsOf({ state: { models: { status: 'idle' } } })
+    render(<ModelsPage {...props} />)
+    expect(props.actions.loadModels).toHaveBeenCalledTimes(1)
+  })
+
+  it('updates quota progress bars when Refresh quota is clicked on OverviewPage', async () => {
+    const readUsage = vi.fn()
+      .mockResolvedValueOnce({
+        rolling: { percent: 12, status: 'ok', resetsAt: '2026-11-13T08:00:00Z' },
+        weekly: { percent: 34, status: 'ok', resetsAt: '2026-11-16T00:00:00Z' },
+        monthly: { percent: 56, status: 'ok', resetsAt: '2026-12-01T00:00:00Z' },
+      })
+      .mockResolvedValueOnce({
+        rolling: { percent: 45, status: 'ok', resetsAt: '2026-11-13T08:00:00Z' },
+        weekly: { percent: 60, status: 'ok', resetsAt: '2026-11-16T00:00:00Z' },
+        monthly: { percent: 72, status: 'ok', resetsAt: '2026-12-01T00:00:00Z' },
+      })
+    const props = pagePropsOf({
+      state: { accounts: accountsStateOf([ACCOUNT]) },
+      readers: { readUsage },
+    })
+    render(<OverviewPage {...props} />)
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: en.usage_rolling + ' 12%' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: en.usageRefresh }))
+    expect(props.actions.loadAccounts).toHaveBeenCalledTimes(2)
+    await waitFor(() => {
+      expect(screen.getByRole('progressbar', { name: en.usage_rolling + ' 45%' })).toBeTruthy()
+    })
+    expect(readUsage).toHaveBeenLastCalledWith(true)
+  })
+
+  it('copies a credential-free Markdown diagnostics summary from AboutPage and preserves base rowValue styles on mono cells', async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const props = pagePropsOf({
+      state: {
+        accounts: accountsStateOf([{ ...ACCOUNT, configured: true }]),
+        baseURL: field('https://opencode.ai/inference/go/v1'),
+        proxyURL: field('socks5://user:secret@127.0.0.1:7890'),
+        sidebarEntry: true,
+      },
+    })
+    const { container } = render(<AboutPage {...props} />)
+    const dds = Array.from(container.querySelectorAll('dd'))
+    expect(dds.some(dd => dd.className.split(/\s+/).length >= 2)).toBe(true)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: en.aboutCopyDiagnostics }))
+    })
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const copied = String(writeText.mock.calls[0]?.[0] ?? '')
+    expect(copied).toContain('### dsh-opencode-go diagnostics')
+    expect(copied).toContain('proxy=socks5://<redacted>')
+    expect(copied).not.toContain('secret')
+    expect(copied).not.toContain('7890')
+    expect(screen.getByRole('button', { name: en.aboutCopiedDiagnostics })).toBeTruthy()
+  })
+
   it('mounts the usage dashboard inside the shell tab', async () => {
     const readers = readersOf()
     const shell = pageShellOf({ state: { accounts: accountsStateOf([ACCOUNT]) }, readers })
     render(<GoPage {...shell} />)
     fireEvent.click(screen.getByRole('tab', { name: en.tabUsage }))
-    expect(screen.getByRole('heading', { level: 1, name: en.analyticsTitle })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: en.analyticsTitle })).toBeTruthy()
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     await waitFor(() => {
       expect(readers.readAnalytics).toHaveBeenCalledWith(
         expect.objectContaining({ accountRef: 'OPENCODE_API_KEY', range: '30d' }),

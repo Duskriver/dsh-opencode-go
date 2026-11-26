@@ -18,7 +18,7 @@ import {
   type TextField,
 } from '../src/client/controller.ts'
 import { en, zh, type OpencodeGoKey } from '../src/client/presentation.ts'
-import { MAX_THINKING_BUDGET_TOKENS, type AnalyticsQuery } from '../src/contracts.ts'
+import { DEFAULT_BASE_URL, DEFAULT_FREE_BASE_URL, MAX_THINKING_BUDGET_TOKENS, type AnalyticsQuery } from '../src/contracts.ts'
 import { createAnalyticsReport } from './support/analytics.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -46,7 +46,8 @@ describe("settings page and typed capacity editing", () => {
 
   type SectionField = 'baseURL' | 'freeBaseURL' | 'proxyURL' | 'refreshMinutes' | 'streamIdleTimeoutMs'
     | 'requestPreparationTimeoutMs' | 'requestTimeoutMs'
-    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'showSidebarQuota' | 'freeEnabled'
+    | 'retryMode' | 'retryMaxRetries' | 'retryMaxDelayMs'
+    | 'usageDisplay' | 'usagePillStyle' | 'usagePillBorder' | 'appearanceTheme' | 'goPlan' | 'showSidebarQuota' | 'showModelMultiplier' | 'freeEnabled'
     | 'maxImages'
     | 'maxRequestImageBytes' | 'requestImagePixelBudget' | 'requestImageMaxBytes' | 'models'
     | 'modelLimits' | 'modelLimitDraft'
@@ -87,7 +88,9 @@ describe("settings page and typed capacity editing", () => {
       usagePillStyle: field('badge'),
       usagePillBorder: field('true'),
       appearanceTheme: field('native'),
+      goPlan: field('go'),
       showSidebarQuota: field('false'),
+      showModelMultiplier: field('true'),
       freeEnabled: field('false'),
       freeBaseURL: field('https://opencode.ai/inference/v1'),
       baseURL: field('https://opencode.ai/zen/go/v1'),
@@ -96,6 +99,9 @@ describe("settings page and typed capacity editing", () => {
       streamIdleTimeoutMs: field('300000'),
       requestPreparationTimeoutMs: field('60000'),
       requestTimeoutMs: field('1800000'),
+      retryMode: field('normal'),
+      retryMaxRetries: field('5'),
+      retryMaxDelayMs: field('30000'),
       maxImages: field(''),
       maxRequestImageBytes: field('20971520'),
       requestImagePixelBudget: field('4194304'),
@@ -171,6 +177,16 @@ describe("settings page and typed capacity editing", () => {
   }
 
   describe('OpencodeGoSection', () => {
+    it('resets the section scroll body to the top when switching settings tabs', () => {
+      renderSection(stateOf(), actions(), { foldedModels: true })
+      const pageBody = document.getElementById('opencode-go-tab-overview')?.closest('[class*="pageBody"]') as HTMLElement
+      expect(pageBody).toBeTruthy()
+      pageBody.scrollTop = 220
+      expect(pageBody.scrollTop).toBe(220)
+      selectTab('appearance')
+      expect(pageBody.scrollTop).toBe(0)
+    })
+
     it('keeps appearance on its own tab and applies all four edits immediately', () => {
       const reading = actions()
       renderSection(stateOf(), reading, { foldedModels: true })
@@ -201,6 +217,10 @@ describe("settings page and typed capacity editing", () => {
       expect(borderToggle.getAttribute('aria-checked')).toBe('true')
       fireEvent.click(borderToggle)
       expect(reading.edit).toHaveBeenLastCalledWith('usagePillBorder', 'false')
+      const multiplierToggle = screen.getByRole('switch', { name: en.showModelMultiplierLabel })
+      expect(multiplierToggle.getAttribute('aria-checked')).toBe('true')
+      fireEvent.click(multiplierToggle)
+      expect(reading.edit).toHaveBeenLastCalledWith('showModelMultiplier', 'false')
       expect(reading.save).not.toHaveBeenCalled()
     })
 
@@ -1079,6 +1099,8 @@ describe("settings page and typed capacity editing", () => {
         [en.streamIdleTimeoutMsLabel, 'streamIdleTimeoutMs'],
         [en.requestPreparationTimeoutMsLabel, 'requestPreparationTimeoutMs'],
         [en.requestTimeoutMsLabel, 'requestTimeoutMs'],
+        [en.retryMaxRetriesLabel, 'retryMaxRetries'],
+        [en.retryMaxDelayMsLabel, 'retryMaxDelayMs'],
         [en.maxImagesLabel, 'maxImages'],
         [en.maxRequestImageBytesLabel, 'maxRequestImageBytes'],
         [en.requestImagePixelBudgetLabel, 'requestImagePixelBudget'],
@@ -1112,6 +1134,15 @@ describe("settings page and typed capacity editing", () => {
       fireEvent.click(screen.getByRole('button', { name: en.usageAppearanceReset }))
       expect(edits.resetField.mock.calls.map(call => call[0]).sort())
         .toEqual(['baseURL', 'showSidebarQuota', 'usageDisplay', 'usagePillBorder', 'usagePillStyle'])
+    })
+
+    it('disables retryMaxRetries in the Advanced UI when retryMode is always', () => {
+      renderSection(stateOf({ retryMode: field('always') }))
+      openAdvanced()
+      const maxRetries = screen.getByLabelText(en.retryMaxRetriesLabel) as HTMLInputElement
+      const maxDelay = screen.getByLabelText(en.retryMaxDelayMsLabel) as HTMLInputElement
+      expect(maxRetries.disabled).toBe(true)
+      expect(maxDelay.disabled).toBe(false)
     })
 
     it('keeps the card reset out of reach while every row inherits its value', () => {
@@ -1492,6 +1523,65 @@ describe("advanced settings reset", () => {
       expect(host.form.getSnapshot().user).toEqual({})
     } finally { controller.dispose() }
   })
+
+  it('shows human-readable unit conversions, per-field reset, specific invalid details and runs the connection probe', async () => {
+    const t = translator()
+    const probe = vi.fn().mockResolvedValue({
+      go: { ok: true, status: 200, latencyMs: 128, modelCount: 9 },
+      free: { ok: false, status: 503, latencyMs: 40, error: 'HTTP 503' },
+    })
+    const host = createConfigForm<OpencodeGoSettings>()
+    acceptFormWrites(host)
+    const base: Partial<OpencodeGoSettings> = {
+      baseURL: DEFAULT_BASE_URL,
+      freeBaseURL: DEFAULT_FREE_BASE_URL,
+      proxyURL: '',
+      refreshMinutes: 60,
+      streamIdleTimeoutMs: 300_000,
+      maxRequestImageBytes: 20 * 1024 * 1024,
+      requestImagePixelBudget: 2048 * 2048,
+      freeEnabled: false,
+    }
+    const user: Partial<OpencodeGoSettings> = { refreshMinutes: 120, freeEnabled: true }
+    host.publish({ status: 'ready', writable: true, value: { ...base, ...user }, base, user })
+    const controller = new OpencodeGoSectionController(host.form, { remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }) },
+      opencodeGoModels: { read: async () => ({ ok: true, value: { models: [], stale: false } }) },
+    } } as never)
+    try {
+      const injected = controller.inject()
+      render(<OpencodeGoSection {...injected} useOpencodeGo={bindSnapshotSelector(injected.hooks.opencodeGo)} t={t} probeConnection={probe} />)
+      await act(async () => { await Promise.resolve() })
+      fireEvent.click(screen.getByRole('tab', { name: en.settingsTabAdvanced }))
+
+      // Human-readable unit conversions
+      expect(screen.getByText('≈ 2 h')).toBeTruthy()
+      expect(screen.getByText('≈ 5 min')).toBeTruthy()
+      expect(screen.getByText('≈ 20.0 MB')).toBeTruthy()
+      expect(screen.getByText('≈ 4.2 MP (2048×2048)')).toBeTruthy()
+
+      // Per-field reset only resets that single field
+      const resetRefresh = screen.getByRole('button', { name: t('advancedResetField', { label: en.refreshMinutesLabel }) })
+      fireEvent.click(resetRefresh)
+      expect(screen.getByLabelText<HTMLInputElement>(en.refreshMinutesLabel).value).toBe('60')
+
+      // Specific validation detail for invalid numeric field
+      fireEvent.change(screen.getByLabelText(en.refreshMinutesLabel), { target: { value: '0' } })
+      expect(screen.getByText(en.invalidValue)).toBeTruthy()
+      expect(screen.getByRole('alert').textContent).toContain('1')
+
+      // Connection probe sends live draft connection fields and renders Go + Free statuses
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.probeConnection })) })
+      expect(probe).toHaveBeenCalledWith({
+        baseURL: DEFAULT_BASE_URL,
+        freeBaseURL: DEFAULT_FREE_BASE_URL,
+        proxyURL: '',
+        includeFree: true,
+      })
+      expect(screen.getByText(t('probeOk', { latency: 128, count: 9 }))).toBeTruthy()
+      expect(screen.getByText(t('probeFailed', { error: 'HTTP 503' }))).toBeTruthy()
+    } finally { controller.dispose() }
+  })
 })
 
 describe("installed Host localization", () => {
@@ -1690,7 +1780,9 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['usagePillStyle', 'concentric', 'concentric'],
     ['usagePillBorder', 'false', false],
     ['appearanceTheme', 'classic', 'classic'],
+    ['goPlan', 'go-plus', 'go-plus'],
     ['showSidebarQuota', 'true', true],
+    ['showModelMultiplier', 'false', false],
     ['freeEnabled', 'true', true],
   ]
 
@@ -1703,6 +1795,9 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['streamIdleTimeoutMs', '2000'],
     ['requestPreparationTimeoutMs', '3000'],
     ['requestTimeoutMs', '4000'],
+    ['retryMode', 'normal'],
+    ['retryMaxRetries', '8'],
+    ['retryMaxDelayMs', '45000'],
     ['maxImages', '5'],
     ['maxRequestImageBytes', '1024'],
     ['requestImagePixelBudget', '4096'],
@@ -1739,18 +1834,27 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     expect(host.mutate).not.toHaveBeenCalled()
     expect(snapshot()).toMatchObject({ dirty: true, invalid: false })
     await controller.save()
-    const values: Record<StagedTextField, string | number> = {
+    const directValues = {
       baseURL: 'https://gateway.example/v1', freeBaseURL: 'https://free.example/v1',
       proxyURL: 'socks5://localhost:1080', refreshMinutes: 30, streamIdleTimeoutMs: 2000,
       requestPreparationTimeoutMs: 3000, requestTimeoutMs: 4000, maxImages: 5,
       maxRequestImageBytes: 1024, requestImagePixelBudget: 4096, requestImageMaxBytes: 512,
     }
+    const retryPolicy = {
+      mode: 'normal',
+      maxRetries: 8,
+      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+      backoff: { initialDelayMs: 500, maxDelayMs: 45000, jitterRatio: 0.1 },
+    }
     expect(host.mutate).toHaveBeenCalledExactlyOnceWith(
-      stagedFields.map(([field]) => ({ op: 'set' as const, path: [field], value: values[field] })),
+      [
+        ...Object.entries(directValues).map(([field, value]) => ({ op: 'set' as const, path: [field], value })),
+        { op: 'set' as const, path: ['retryPolicy'], value: retryPolicy },
+      ],
       0,
     )
     expect(snapshot()).toMatchObject({ dirty: false, invalid: false })
-    expect(host.form.getSnapshot().user).toEqual(values)
+    expect(host.form.getSnapshot().user).toEqual({ ...directValues, retryPolicy })
   })
 
   it.each([
@@ -1759,6 +1863,7 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['usagePillStyle', 'neon'],
     ['usagePillBorder', 'maybe'],
     ['appearanceTheme', 'system'],
+    ['goPlan', 'enterprise'],
     ['showSidebarQuota', '1'],
   ] as const)('refuses the invalid immediate %s=%s without a draft or a write', async (field, text) => {
     const { host, controller, actions, snapshot } = setup()
@@ -1884,12 +1989,12 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
 
   it('resets immediate fields immediately and stages advanced clears for Save', async () => {
     const value = { apiKeyEnv: 'ACCOUNT_A', freeEnabled: true, usageDisplay: 'always' as const,
-      showSidebarQuota: true, usagePillStyle: 'concentric' as const, usagePillBorder: false, appearanceTheme: 'classic' as const }
+      showSidebarQuota: true, usagePillStyle: 'concentric' as const, usagePillBorder: false, appearanceTheme: 'classic' as const, goPlan: 'go-plus' as const }
     const { host, controller, actions, snapshot } = setup(value)
     const base = { freeEnabled: false, usageDisplay: 'auto' as const, showSidebarQuota: false,
-      usagePillStyle: 'badge' as const, usagePillBorder: true, appearanceTheme: 'native' as const }
+      usagePillStyle: 'badge' as const, usagePillBorder: true, appearanceTheme: 'native' as const, goPlan: 'go' as const }
     host.publish({ base, user: value })
-    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme'] as const) {
+    for (const field of ['freeEnabled', 'usageDisplay', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'goPlan'] as const) {
       actions.resetField(field)
       expect(host.unset).toHaveBeenLastCalledWith(field)
     }
@@ -1992,6 +2097,8 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     ['requestPreparationTimeoutMs', '0'], ['requestPreparationTimeoutMs', '-1'], ['requestPreparationTimeoutMs', '1.5'],
     ['requestPreparationTimeoutMs', '2147483648'],
     ['requestTimeoutMs', '0'], ['requestTimeoutMs', '-1'], ['requestTimeoutMs', '1.5'], ['requestTimeoutMs', '2147483648'],
+    ['retryMaxRetries', '-1'], ['retryMaxRetries', '1.5'], ['retryMaxRetries', '9007199254740992'], ['retryMaxRetries', 'abc'],
+    ['retryMaxDelayMs', '0'], ['retryMaxDelayMs', '499'], ['retryMaxDelayMs', '-1'], ['retryMaxDelayMs', '2147483648'], ['retryMaxDelayMs', 'Infinity'],
     ['maxImages', '0'], ['maxImages', '-1'], ['maxImages', '1.5'], ['maxImages', '9007199254740992'],
     ['maxRequestImageBytes', '0'], ['maxRequestImageBytes', '1.5'],
     ['requestImagePixelBudget', '0'], ['requestImagePixelBudget', '1.5'],
@@ -2023,6 +2130,50 @@ describe('typed ConfigForm immediate writes and advanced drafts', () => {
     expect(snapshot()[field].invalid).toBe(false)
     await controller.save()
     expect(host.form.getSnapshot().value?.[field]).toBe(expected)
+  })
+
+  it('edits, preserves custom backoff metadata, supports always mode, and unsets retryPolicy on reset', async () => {
+    const { host, controller, actions, snapshot } = setup({
+      ...defaultClientSettings,
+      retryPolicy: {
+        mode: 'normal',
+        maxRetries: 5,
+        retryableCodes: ['RATE_LIMIT', 'TIMEOUT'],
+        backoff: { initialDelayMs: 250, maxDelayMs: 30_000, jitterRatio: 0.25 },
+      },
+    })
+    // Lower initialDelayMs allows setting retryMaxDelayMs down to 250ms while preserving custom fields.
+    actions.edit('retryMaxDelayMs', '250')
+    expect(snapshot().retryMaxDelayMs).toMatchObject({ invalid: false, overridden: true })
+    await controller.save()
+    expect(host.form.getSnapshot().user?.retryPolicy).toEqual({
+      mode: 'normal',
+      maxRetries: 5,
+      retryableCodes: ['RATE_LIMIT', 'TIMEOUT'],
+      backoff: { initialDelayMs: 250, maxDelayMs: 250, jitterRatio: 0.25 },
+    })
+
+    // Switching to always mode discards any invalid retryMaxRetries draft and writes an AlwaysRetryPolicyConfig.
+    actions.edit('retryMaxRetries', 'abc')
+    expect(snapshot().retryMaxRetries.invalid).toBe(true)
+    actions.edit('retryMode', 'always')
+    expect(snapshot().retryMaxRetries).toMatchObject({ text: '5', invalid: false })
+    actions.edit('retryMode', 'normal')
+    expect(snapshot().retryMaxRetries).toMatchObject({ text: '5', invalid: false })
+    actions.edit('retryMode', 'always')
+    actions.edit('retryMaxDelayMs', '60000')
+    await controller.save()
+    expect(host.form.getSnapshot().user?.retryPolicy).toEqual({
+      mode: 'always',
+      backoff: { initialDelayMs: 250, maxDelayMs: 60_000, jitterRatio: 0.25 },
+    })
+
+    // Resetting the modified retry fields unsets user.retryPolicy when returning to base.
+    actions.resetField('retryMode')
+    actions.resetField('retryMaxDelayMs')
+    await controller.save()
+    expect(host.mutate).toHaveBeenLastCalledWith([{ op: 'unset', path: ['retryPolicy'] }], 2)
+    expect(host.form.getSnapshot().user?.retryPolicy).toBeUndefined()
   })
 
   it('projects the Host namespace status through loading, ready and unavailable', () => {
@@ -2165,9 +2316,9 @@ describe('client registration and remote lifecycle', () => {
     expect(registration.inject!().getLocale()).toBe('en')
     expect(component).toBe(OpencodeGoSection)
     expect(harness.listeners.size).toBe(1)
-    // The typed form has two readers: the section controller and the opt-in gate
-    // that registers the sidebar row/page pair only while sidebarEntry is on.
-    expect(harness.settings.listenerCount()).toBe(2)
+    // The typed form has three readers: the section controller, the opt-in
+    // sidebar gate, and the composer model-label slot registration.
+    expect(harness.settings.listenerCount()).toBe(3)
     await harness.dispose()
     expect(harness.listeners.size).toBe(0)
     expect(harness.settings.listenerCount()).toBe(0)

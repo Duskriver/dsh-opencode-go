@@ -24,7 +24,7 @@ const REQUIRED_FILES = [
   'SECURITY.md',
   'THIRD_PARTY_NOTICES.md',
   'cordis.patch.yml',
-  'assets/icon.png',
+  'assets/icon.svg',
   'lib/index.js',
   'lib/client.js',
   'lib/free-http-worker.js',
@@ -103,6 +103,10 @@ function readTarEntries(tgzBuffer) {
   }
   return files
 }
+
+// The Host only reads the icon from inside the installed package, so the file the
+// manifest points at has to be one of the files asserted below.
+assert.ok(REQUIRED_FILES.includes(pkg.icon), `package.json "icon" (${pkg.icon}) is not a required packed file`)
 
 const args = ['pack', '--dry-run', '--json', '--ignore-scripts']
 // npm's own CLI path is the most portable invocation under `npm run`; the

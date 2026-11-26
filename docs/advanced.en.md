@@ -4,12 +4,12 @@
 
 ## Manual installation and offline updates (.tgz)
 
-Each repository release synchronously tracks **one** prebuilt tarball at the repository root (currently `dsh-opencode-go-0.4.5.tgz`), containing the compiled `lib/` artifacts, manifest, `cordis.patch.yml`, and license notices. No local `git` binary or build step is required. Use this method whenever the npm registry lags behind the repository (for example, npm staying on `0.4.0` while `#94` and `0.4.1`–`0.4.5` are already merged), in DS Bot / Desktop hosts, or in offline environments.
+Each repository release synchronously tracks **one** prebuilt tarball at the repository root (currently `dsh-opencode-go-0.4.7.tgz`), containing the compiled `lib/` artifacts, manifest, `cordis.patch.yml`, and license notices. No local `git` binary or build step is required. Use this method whenever the npm registry lags behind the repository (for example, npm staying on `0.4.0` while `#94` and `0.4.1`–`0.4.7` are already merged), in DS Bot / Desktop hosts, or in offline environments.
 
 ### 1. Download locally and choose a clean path
 
-- Open [`dsh-opencode-go-0.4.5.tgz`](../dsh-opencode-go-0.4.5.tgz) at the repository root on GitHub and click **Download raw file** (or fetch the [raw URL](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.5.tgz)).
-- Save it in a path without spaces or special characters (e.g. `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.5.tgz` on Windows, or `~/Downloads/dsh-opencode-go-0.4.5.tgz` on macOS/Linux).
+- Open [`dsh-opencode-go-0.4.7.tgz`](../dsh-opencode-go-0.4.7.tgz) at the repository root on GitHub and click **Download raw file** (or fetch the [raw URL](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.7.tgz)).
+- Save it in a path without spaces or special characters (e.g. `C:\Users\<user>\Downloads\dsh-opencode-go-0.4.7.tgz` on Windows, or `~/Downloads/dsh-opencode-go-0.4.7.tgz` on macOS/Linux).
 
 ### 2. Install or upgrade via UI (DSH Web / DSH Desktop / DS Bot)
 
@@ -18,7 +18,7 @@ Each repository release synchronously tracks **one** prebuilt tarball at the rep
 3. Enter the **full local filesystem path** to the downloaded `.tgz` file (if the path contains spaces, move the file to a space-free folder or prefix it as a `file:` URL).
 4. Click **Install**, then click **Enable now**.
 5. **Restart the host completely**: quit DS Bot / DSH Desktop (including tray/background processes) and reopen it, or restart `dsh web` and hard-refresh the browser tab.
-6. Verify the installed version (`0.4.5`) in **Settings → OpenCode Go** (or the console **About** tab when the sidebar entry is enabled).
+6. Verify the installed version (`0.4.7`) in **Settings → OpenCode Go** (or the console **About** tab when the sidebar entry is enabled).
 
 ### 3. Install or upgrade via CLI (per-profile)
 
@@ -26,15 +26,15 @@ Web and Headless keep independent DSH profiles and must be updated separately:
 
 ```sh
 # Install into the web profile using the local .tgz path
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.7.tgz
 
 # Upgrade cleanly from an older npm or URL install (preserves keys/settings)
 dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.7.tgz
 
 # Same for the headless profile
 dsh plugin --profile headless remove dsh-opencode-go
-dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.7.tgz
 ```
 
 > **Why prefer a local `.tgz` path over a remote `.tgz` URL?**
@@ -43,7 +43,7 @@ dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
 ### 4. Troubleshooting installation issues
 
 - **`ERR_PNPM_MISSING_TARBALL_INTEGRITY`**: stop using the remote tarball URL; run `dsh plugin --profile <profile> remove dsh-opencode-go` and reinstall from the downloaded local `.tgz` file path.
-- **UI or layout fixes do not appear after upgrading (e.g. DS Bot still shows a collapsed settings panel)**: verify all DS Bot / DSH background processes were quit and restarted, and inspect `node_modules/dsh-opencode-go/package.json` inside the active profile to confirm `version` is `0.4.5`.
+- **UI or layout fixes do not appear after upgrading (e.g. DS Bot still shows a collapsed settings panel)**: verify all DS Bot / DSH background processes were quit and restarted, and inspect `node_modules/dsh-opencode-go/package.json` inside the active profile to confirm `version` is `0.4.7`.
 - **`MISSING_BUN_RUNTIME` in the Free channel**: ensure installation did not pass `--omit=optional`. The plugin declares `@oven/bun-*` optional platform packages directly without install scripts, so no build-script approval is required. The Go channel is unaffected.
 - **Installing runtime dependencies behind a proxy**: installing a `.tgz` still resolves external runtime dependencies (`openai`, `@anthropic-ai/sdk`, `undici`, and optional `@oven/bun-*` binaries) from your configured npm registry/mirror; configure proxy or registry settings for pnpm/npm if direct access is restricted.
 
@@ -55,7 +55,7 @@ Install the plugin (use the local `.tgz` path if npm is behind the repository):
 
 ```sh
 # Install from the local .tgz (recommended for the latest repository build)
-dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.7.tgz
 
 # Or install from npm when synced
 dsh plugin --profile headless add dsh-opencode-go
@@ -87,9 +87,12 @@ Open **Settings → OpenCode Go → Advanced settings → Proxy address**, enter
 ```text
 http://127.0.0.1:7890
 socks5://127.0.0.1:1080
+socks5://user:pass@[2001:db8::1]:1080
 ```
 
-HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported. Subsequent conversations, catalog updates, and usage queries use the saved proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
+HTTP, HTTPS, SOCKS5, and URLs containing a username and password are supported; an IPv6 literal address must be written with brackets. Subsequent conversations, catalog updates, and usage queries use the saved proxy. Connections originate from the machine running DSH; on a remote deployment, `127.0.0.1` refers to that server.
+
+Known limitation: on the Go route through a SOCKS5 proxy, requests fail when the Go gateway address itself has an IPv6 literal host (for example `http://[::1]:8080/v1`). Point `baseURL` at a hostname or an IPv4 address, or use the Free route.
 
 ### Dual routes and manual configuration
 
@@ -166,6 +169,7 @@ Keep the options you need and supply the corresponding keys through DSH credenti
 | `balanceAccounts` | Keep a conversation on one account and give each new conversation the next account, so several subscriptions are spent at once; defaults to `false`. Pair it with `autoSwitch` to continue on another account |
 | `requestPreparationTimeoutMs` | Deadline for discovery and each attempt's credential/image preparation; defaults to 60000 milliseconds |
 | `requestTimeoutMs` | Whole dispatch deadline, including discovery, account fallback and streaming; defaults to 1800000 milliseconds. Prepared calls start this timer at dispatch |
+| `retryPolicy` | Host-executed retry policy for the Go route (`mode`, `maxRetries`, `retryableCodes`, `backoff`); defaults to `mode: normal`, `maxRetries: 5`, `backoff.maxDelayMs: 30000`. Mode, max retries, and max delay can also be tuned under Advanced settings with live reload |
 
 Profiles that never set `freeEnabled` keep the default `false`: after upgrading, the Free route stays off until it is enabled under **Settings → OpenCode Go → Overview** (applied immediately). Sessions that selected a `DSH OpenCode Free` model before the upgrade need to select a Go model or enable Free first.
 

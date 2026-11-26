@@ -7,7 +7,7 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import {
   GoModelsService, GoCatalogManager, discoverSettingsModels, OpencodeGoCatalog,
   discoverCatalogModels, readLiveModelIds, readModelDirectory, reasoningChoices, modelBaseURL,
-  reasoningBudgetRange, reasoningIntent,
+  reasoningBudgetRange, reasoningIntent, probeGatewayEndpoint,
   catalogCachePath, catalogETag, readCatalogCache, writeCatalogCache, MODEL_LISTING_MAX_BYTES,
 } from '../src/catalog.ts'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
@@ -15,7 +15,7 @@ import { ProxyTransport } from '../src/transport.ts'
 import { PlainConfig, validateGoConfig } from '../src/config.ts'
 import { DEFAULT_BASE_URL, DEFAULT_FREE_BASE_URL, isModelEnabled, isNewModel, sortModels, parseGoModelCatalog, modelSettingsKey } from '../src/contracts.ts'
 import { listingBody, mockGateway, textEvents } from './support/gateway.ts'
-import { modelsDocument, modelEntry, protocolEntry, zeroCost } from './support/data.ts'
+import { modelsDocument, modelEntry, peakMultipliers, protocolEntry, zeroCost } from './support/data.ts'
 import { configOf, context, mountRemotes, invokeRemote } from './support/host.ts'
 
 const catalog = (url: string, options: { fetcher?: typeof fetch; source?: 'go' | 'free'; onRefresh?: () => void; onFallback?: ReturnType<typeof vi.fn>; onWarning?: ReturnType<typeof vi.fn> } = {}) =>
@@ -119,6 +119,21 @@ describe('gateway directory parsing', () => {
     }, status: 'deprecated', release_date: '2026-11-01' }) }), url)
     expect(result.details.get('mime')).toEqual({ deprecated: true, releaseDate: '2026-11-01', inputModalities: ['text', 'image', 'audio', 'video', 'pdf'] })
     expect(result.models.get('mime')?.input).toEqual(['text', 'image'])
+  })
+  it('publishes the gateway tariff to the settings listing, tiers and multipliers included', async () => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({
+      priced: modelEntry({ cost: {
+        text: { input: { price: 1, cache: { read: 0.1, write: 1.25 } }, output: { price: 4, overrides: [{ when: { context: { gt: 200000 } }, price: 8 }] } },
+        multipliers: peakMultipliers,
+      } }),
+      unpriced: modelEntry({ cost: undefined }),
+    }) })
+    const result = await discoverSettingsModels(catalog(gateway.url))
+    expect(result.models).toContainEqual(expect.objectContaining({ id: 'priced', price: {
+      input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25, multipliers: true,
+      tiers: [{ inputTokensAbove: 200000, input: 1, output: 8, cacheRead: 0.1, cacheWrite: 1.25 }],
+    } }))
+    expect(result.models.find(entry => entry.id === 'unpriced')).not.toHaveProperty('price')
   })
   it('takes official protocol URLs from the listing and keeps custom prefixes', () => {
     const entry = modelEntry({ api: protocolEntry('messages', { base_url: 'https://opencode.ai/new/anthropic/v1/' }) })
@@ -561,6 +576,30 @@ describe('settings RPC and lifecycle', () => {
     for (const updatedAt of [-1, NaN, Infinity, 1.5, '1', 8_640_000_000_000_001]) expect(() => parseGoModelCatalog({ ...value, sources: { go: { updatedAt }, free: {} } })).toThrow(/timestamp/)
     expect(() => parseGoModelCatalog({ ...value, models: [{ id: 'same', source: 'other' }] })).toThrow(/source/)
     expect(() => parseGoModelCatalog({ ...value, sources: { go: { warning: 3 }, free: {} } })).toThrow(/warning/)
+    const price = { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25, multipliers: true,
+      tiers: [{ inputTokensAbove: 200000, input: 2, output: 8, cacheRead: 0.1, cacheWrite: 1.25 }] }
+    expect(parseGoModelCatalog({ ...value, models: [{ id: 'same', price }] }).models[0]?.price).toEqual(price)
+    // A malformed tariff is display-only: the model stays, its price does not.
+    for (const broken of [{ ...price, input: -1 }, { ...price, output: '4' }, { ...price, cacheRead: Number.NaN }]) {
+      expect(parseGoModelCatalog({ ...value, models: [{ id: 'same', price: broken }] }).models[0]?.price).toBeUndefined()
+    }
+    for (const tiers of [[{ ...price.tiers[0], inputTokensAbove: 0 }], [{ ...price.tiers[0], cacheWrite: -1 }], 'free']) {
+      expect(parseGoModelCatalog({ ...value, models: [{ id: 'same', price: { ...price, tiers } }] }).models[0]?.price)
+        .toEqual({ input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25, multipliers: true })
+    }
+    const goMonthlyUsage = { go: 15, 'go-plus': 60, 'go-teams': 20 }
+    const parsedQuota = parseGoModelCatalog({ ...value, models: [{
+      id: 'same', goMonthlyUsage, pricingMultipliers: peakMultipliers,
+    }] }).models[0]!
+    expect(parsedQuota.goMonthlyUsage).toEqual(goMonthlyUsage)
+    expect(parsedQuota.pricingMultipliers).toEqual(peakMultipliers)
+    // Malformed display-only quota/multiplier metadata drops without losing the model.
+    const brokenQuota = parseGoModelCatalog({ ...value, models: [{
+      id: 'same', goMonthlyUsage: { go: 0, 'go-plus': 60, 'go-teams': 20 }, pricingMultipliers: [{ factor: -1, when: {} }],
+    }] }).models[0]!
+    expect(brokenQuota.id).toBe('same')
+    expect(brokenQuota.goMonthlyUsage).toBeUndefined()
+    expect(brokenQuota.pricingMultipliers).toBeUndefined()
   })
   it('keeps original Go keys and separate Free keys for picker visibility and capacities', async () => {
     const gateway = await mockGateway({ status: 200, body: listingBody(['beam-free']) })
@@ -611,5 +650,43 @@ describe('settings RPC and lifecycle', () => {
   })
   it('defaults the two gateway URLs independently', () => {
     expect(PlainConfig({})).toMatchObject({ baseURL: DEFAULT_BASE_URL, freeBaseURL: DEFAULT_FREE_BASE_URL })
+  })
+  it('probes Go and optional Free endpoints safely without leaking proxy credentials', async () => {
+    const gateway = await mockGateway({ status: 200, body: modelsDocument({ alpha: modelEntry(), beta: modelEntry() }) })
+    const ok = await probeGatewayEndpoint(gateway.url, 'go')
+    expect(ok).toMatchObject({ ok: true, status: 200, modelCount: 2 })
+    expect(ok.latencyMs).toBeGreaterThanOrEqual(0)
+
+    const badStatus = await mockGateway({ status: 502, body: { error: 'bad gateway' } })
+    const failed = await probeGatewayEndpoint(badStatus.url, 'go')
+    expect(failed).toMatchObject({ ok: false, status: 502, error: 'HTTP 502' })
+
+    const ctx = context()
+    await mountRemotes(ctx)
+    const transport = new ProxyTransport()
+    const config = configOf(gateway.url, { freeBaseURL: gateway.url, freeEnabled: true })
+    await ctx.plugin(GoModelsService, {
+      catalog: () => catalog(gateway.url),
+      config: () => config,
+      transport,
+    })
+    const both = await invokeRemote(ctx, {
+      namespace: 'opencodeGoModels',
+      method: 'probe',
+      args: { input: { baseURL: gateway.url, freeBaseURL: gateway.url, includeFree: true } },
+    }) as { go: { ok: boolean; modelCount?: number }; free?: { ok: boolean } }
+    expect(both.go.ok).toBe(true)
+    expect(both.go.modelCount).toBe(2)
+    expect(both.free?.ok).toBe(true)
+
+    const badProxy = await invokeRemote(ctx, {
+      namespace: 'opencodeGoModels',
+      method: 'probe',
+      args: { input: { baseURL: gateway.url, proxyURL: 'ftp://secretUser:secretPass@proxy.test:8080' } },
+    }) as { go: { ok: boolean; error?: string } }
+    expect(badProxy.go.ok).toBe(false)
+    expect(badProxy.go.error).not.toContain('secretUser')
+    expect(badProxy.go.error).not.toContain('secretPass')
+    await transport.dispose()
   })
 })

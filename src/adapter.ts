@@ -10,6 +10,7 @@ import {
   FREE_PROVIDER_ID,
   FREE_DISPLAY_NAME,
   modelSettingsKey,
+  defaultGoRetryPolicy,
 } from './contracts.ts'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import { estimateContextTokens } from 'opencode-go-pi-ai/utils/estimate'
@@ -17,6 +18,8 @@ import {
   LlmError,
   attributionHeaders,
   contentHasImage,
+  resolveRetryPolicy,
+  type ResolvedRetryPolicy,
   type GenerateOptions,
   type ImageAttachmentAccess,
   type StreamChunk,
@@ -34,7 +37,14 @@ import {
   assertBaseURL,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from './config.ts'
-import { toPiContext, toStreamChunks, piContextUsageKey, requestImageTargetFor, type PiImageRequestContext } from './conversion.ts'
+import {
+  toPiContext,
+  toStreamChunks,
+  piContextUsageKey,
+  requestImageTargetFor,
+  type CompatibleImageRequestTarget,
+  type PiImageRequestContext,
+} from './conversion.ts'
 import { createMaskState, restoreChunks, type PrivacyMaskClient } from './privacy.ts'
 import { GatewayDiagnostics, waitWithSignal, ProxyTransport } from './transport.ts'
 import {
@@ -48,7 +58,11 @@ import {
   GoCatalogManager,
 } from './catalog.ts'
 import { createHash, randomUUID } from 'node:crypto'
-import { accountFallback, isGatewayKeyRejection } from './accounts.ts'
+import {
+  accountFallback,
+  gatewayKeyRejectionTtlMs,
+  REJECTED_KEY_TTL_MS,
+} from './accounts.ts'
 import { FreeBunTransport, OPENCODE_FREE_USER_AGENT } from './free-transport.ts'
 import { FreeChannelState } from './free-channel.ts'
 
@@ -451,9 +465,6 @@ export class OpencodeGoRequestExecutor {
   }
 }
 
-/** Recheck a gateway-rejected key after a bounded window. */
-const REJECTED_KEY_TTL_MS = 5 * 60_000
-
 /** Apply one request's capacities without changing the shared catalog or its fallbacks. */
 function withModelLimit(model: Model<Api>, limits: OpencodeGoModelLimits): Model<Api> {
   const limit = limits[modelSettingsKey(model)]
@@ -650,19 +661,36 @@ export class OpencodeGoAdapter extends LlmAdapter {
   }
 
   /**
+   * Expose the Go route's configured retry policy so `@deepseek-ai/dsh-llm-retry`
+   * honors longer upstream `Retry-After` delays instead of falling back to the
+   * 10s host default. Free keeps its passive cooldown semantics.
+   */
+  override providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined {
+    if (this.source !== 'go') return undefined
+    const config = this.options.config()
+    return resolveRetryPolicy(config.retryPolicy ?? defaultGoRetryPolicy(), 'llm-opencode-go.retryPolicy')
+  }
+
+  /**
    * Report the exact request-image projection this route serializes: the
    * configured pixel budget decides the dimensions and the configured
    * encoded-byte target caps the bytes, matching conversion.ts's per-request
    * target. The token meter must price what is sent, not the normalized source.
    * Synchronous by contract; the live configuration is readable without I/O.
    */
-  override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget {
+  override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): CompatibleImageRequestTarget {
     const config = this.options.config()
     const target = requestImageTargetFor(image, {
       maxPixels: config.requestImagePixelBudget,
       maxBytes: config.requestImageMaxBytes,
     })
-    return { width: target.width, height: target.height, maxBytes: target.maxBytes }
+    return {
+      width: target.width,
+      height: target.height,
+      maxBytes: target.maxBytes,
+      maxImageBytes: target.maxImageBytes,
+      imageTargetBytes: target.imageTargetBytes,
+    }
   }
 
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
@@ -857,11 +885,12 @@ export class OpencodeGoAdapter extends LlmAdapter {
       let emitted = false
       let usage: Extract<StreamChunk, { type: 'usage' }> | undefined
       let retry = false
-      const retryFailure = async (failure: { code: string } | undefined): Promise<boolean> => {
+      const retryFailure = async (failure: { code: string; providerRetryAfterMs?: number } | undefined): Promise<boolean> => {
         const reason = accountFallback({ failure, emitted, totalTokens: usage?.usage.totalTokens ?? 0,
           aborted: options.signal?.aborted === true, hasNext: snapshot.config.autoSwitch === true || this.source === 'free' })
-        if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && failure && isGatewayKeyRejection(failure)
-          && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway)
+        const rejectionTtlMs = failure ? gatewayKeyRejectionTtlMs(failure) : undefined
+        if (!emitted && !options.signal?.aborted && !usage?.usage.totalTokens && rejectionTtlMs !== undefined
+          && credentialVersion === (this.credentialVersions.get(ref) ?? 0)) this.rememberRejectedKey(ref, gateway, rejectionTtlMs)
         if (!reason || !failure) return false
         if (snapshot.config.autoSwitch) {
           const next = await candidates.next()
@@ -970,11 +999,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
     }
   }
 
-  private rememberRejectedKey(ref: string, gateway: string): void {
+  private rememberRejectedKey(ref: string, gateway: string, ttlMs = REJECTED_KEY_TTL_MS): void {
     const now = Date.now()
     this.pruneRejectedKeys(now)
     const rejected = this.rejectedKeys.get(ref) ?? new Map<string, number>()
-    rejected.set(gateway, now + REJECTED_KEY_TTL_MS)
+    rejected.set(gateway, now + ttlMs)
     this.rejectedKeys.set(ref, rejected)
     // Defensive cap: only account references are attempted, so this can only
     // evict under artificial reference churn. Expired entries were pruned first,

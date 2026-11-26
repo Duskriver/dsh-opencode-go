@@ -15,7 +15,8 @@
   font-size: 13.5px;
   line-height: 1.55;
   overflow: hidden;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 /* The host hands the page a bare flex column, so this element is the scrollport:
@@ -25,19 +26,29 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  scroll-padding-block: 6px;
   padding: calc(26px + var(--dsh-frame-top-clearance, 0px)) 0 56px;
+  --scrollbar-thumb: var(--go-border-strong);
+  --scrollbar-track: transparent;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--go-border) transparent;
+  scrollbar-width: auto;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-.scroller::-webkit-scrollbar { width: 10px; height: 10px; }
-.scroller::-webkit-scrollbar-track { background: transparent; }
-.scroller::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: var(--go-border);
-  background-clip: content-box;
+.scroller:hover {
+  --scrollbar-thumb: var(--go-muted);
+}
+
+@supports not (scrollbar-color: auto) {
+  .scroller::-webkit-scrollbar { width: 12px; height: 12px; }
+  .scroller::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .scroller::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    background-clip: content-box;
+  }
 }
 
 /* 980px is the Host's own settings-page measure. The percentage padding keeps the
@@ -57,6 +68,20 @@
   margin-bottom: 16px;
 }
 
+.headLead { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brandBadge {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--go-accent) 28%, var(--go-border));
+  border-radius: var(--go-radius-card);
+  background: color-mix(in srgb, var(--go-accent) 12%, var(--go-surface));
+  color: var(--go-accent);
+  box-shadow: var(--go-tile-shadow);
+}
 .headMain { min-width: 0; display: flex; flex-direction: column; }
 
 .title {
@@ -116,6 +141,7 @@
   padding: 0 2px;
   border-bottom: 1px solid var(--go-border-subtle);
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
 
@@ -123,6 +149,9 @@
 
 .tab {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 38px;
   padding: 0 11px;
   border: 0;
@@ -134,6 +163,14 @@
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.tabDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--go-accent);
+  flex: none;
 }
 
 .tab:hover { color: var(--go-text); background: var(--go-surface-panel); }

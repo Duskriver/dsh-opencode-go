@@ -217,6 +217,138 @@ describe("model availability and picker visibility", () => {
       expect(screen.queryByRole('button', { name: en.discard })).toBeNull()
     })
 
+    it('keeps the model list clean and shows each model\'s gateway tariff in the parameter card', async () => {
+      const money = (rate: number): string => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD',
+        currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(rate)
+      const tier = { inputTokensAbove: 200000, input: 2, output: 8, cacheRead: 0.2, cacheWrite: 0 }
+      const priced: GoModel = { id: 'priced', name: 'Priced', price: {
+        input: 1, output: 4, cacheRead: 0.1, cacheWrite: 0, multipliers: true, tiers: [tier] } }
+      const free: GoModel = { id: 'free-model', name: 'Free Model', source: 'free',
+        price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }
+      await mountOpen({ catalog: { models: [priced, free, { id: 'bare', name: 'Bare' }], stale: false } })
+
+      const list = screen.getByRole('group', { name: en.modelsLabel })
+      expect(within(list).getByRole('button', { name: /^Priced$/ }).textContent).not.toContain('$')
+      expect(within(list).getByRole('button', { name: /^Bare$/ }).textContent).not.toContain('$')
+      const card = within(screen.getByRole('region', { name: en.modelDetails }))
+      expect(card.getByText(`${t('priceInput')} ${money(1)} · ${t('priceOutput')} ${money(4)} · ${t('priceCacheRead')} ${money(0.1)}`)).toBeTruthy()
+      expect(card.getByText(t('priceTier', { context: new Intl.NumberFormat(undefined).format(tier.inputTokensAbove),
+        rates: `${t('priceInput')} ${money(2)} · ${t('priceOutput')} ${money(8)} · ${t('priceCacheRead')} ${money(0.2)}` }))).toBeTruthy()
+      expect(card.getByText(en.priceMultiplier)).toBeTruthy()
+
+      // A model the gateway does not price says so instead of claiming a rate.
+      await act(async () => { fireEvent.click(within(list).getByRole('button', { name: /^Bare$/ })) })
+      expect(card.getByText(en.priceUnpublished)).toBeTruthy()
+
+      await act(async () => { fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab })) })
+      const freeList = screen.getByRole('group', { name: en.modelsLabel })
+      expect(within(freeList).queryByText(en.priceFree)).toBeNull()
+      const freeCard = within(screen.getByRole('region', { name: en.modelDetails }))
+      expect(freeCard.getByText(en.priceFree)).toBeTruthy()
+    })
+
+    it('renders 5h/weekly/monthly full-capacity request estimates, peak-hour note and active account plan in model details', async () => {
+      const deepseek: GoModel = {
+        id: 'deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro',
+        source: 'go',
+        price: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0, multipliers: true },
+        goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+        pricingMultipliers: [{
+          when: { utc_days: { in: ['mon'] }, utc_hours: { gte: '01:00', lt: '04:00' } },
+          factor: 2,
+        }],
+      }
+      const { host } = await mountOpen({
+        value: {
+          apiKeyEnv: 'ACCOUNT_A',
+          accounts: [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A', plan: 'go' }],
+        },
+        catalog: { models: [deepseek], stale: false },
+      })
+      const list = screen.getByRole('group', { name: en.modelsLabel })
+      const rowButton = within(list).getByRole('button', { name: /^DeepSeek V4 Pro\b/ })
+      expect(rowButton.textContent).toContain('8.40×')
+
+      const card = within(screen.getByRole('region', { name: en.modelDetails }))
+      expect(card.getByText(en.quotaEstimateLabel)).toBeTruthy()
+      expect(card.getByText(t('quotaPlanCap', { plan: en['goPlan_go'], monthly: '$15' }))).toBeTruthy()
+      expect(card.getByText(en.usage_rolling)).toBeTruthy()
+      expect(card.getByText(en.usage_weekly)).toBeTruthy()
+      expect(card.getByText(en.usage_monthly)).toBeTruthy()
+      expect(card.getByText('~1,190')).toBeTruthy()
+      expect(card.getByText('~2,977')).toBeTruthy()
+      expect(card.getByText('~5,954')).toBeTruthy()
+      expect(card.getByText(en.quotaPeakDoubleNote)).toBeTruthy()
+      expect(card.getByText(en.quotaBasisNote)).toBeTruthy()
+      // Subscription tier selection belongs in AccountsCard, not the Models tab.
+      expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
+
+      // Updating the active account's plan reflects immediately in the Models tab and list multiplier.
+      await act(async () => {
+        host.publish({
+          value: {
+            apiKeyEnv: 'ACCOUNT_A',
+            accounts: [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A', plan: 'go-plus' }],
+          },
+        })
+      })
+      expect(rowButton.textContent).toContain('2.10×')
+      expect(card.getByText(t('quotaPlanCap', { plan: en['goPlan_go-plus'], monthly: '$60' }))).toBeTruthy()
+      expect(card.getByText('~4,763')).toBeTruthy()
+      expect(card.getByText('~11,909')).toBeTruthy()
+      expect(card.getByText('~23,818')).toBeTruthy()
+    })
+
+    it('shows Free badge in Go catalog, hides missing monthly_usage, and refreshes peak transitions in the list', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(Date.parse('2026-11-16T00:59:30Z')) // 30s before Monday 01:00 UTC peak
+        const paidPeak: GoModel = {
+          id: 'deepseek-v4-pro',
+          name: 'DeepSeek V4 Pro',
+          source: 'go',
+          price: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0, multipliers: true },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+          pricingMultipliers: [{
+            when: { utc_days: { in: ['mon'] }, utc_hours: { gte: '01:00', lt: '04:00' } },
+            factor: 2,
+          }],
+        }
+        const goFree: GoModel = {
+          id: 'beam-free',
+          name: 'Beam Free',
+          source: 'go',
+          price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        }
+        const noUsage: GoModel = {
+          id: 'unmetered',
+          name: 'Unmetered',
+          source: 'go',
+          price: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+        }
+        await mountOpen({ catalog: { models: [paidPeak, goFree, noUsage], stale: false } })
+        const list = screen.getByRole('group', { name: en.modelsLabel })
+        const proBtn = within(list).getByRole('button', { name: /^DeepSeek V4 Pro\b/ })
+        expect(proBtn.textContent).toContain('8.40×')
+        expect(proBtn.querySelector('[data-tone="normal"]')).toBeTruthy()
+
+        const freeBtn = within(list).getByRole('button', { name: /^Beam Free\b/ })
+        expect(freeBtn.textContent).toContain(en.modelMultiplierFreeBadge)
+        expect(freeBtn.querySelector('[data-tone="free"]')).toBeTruthy()
+
+        // Missing goMonthlyUsage renders no multiplier at all.
+        expect(within(list).getByRole('button', { name: /^Unmetered$/ })).toBeTruthy()
+
+        // Crossing 01:00 UTC updates the row immediately to peak (16.8×, amber tone).
+        await act(async () => { await vi.advanceTimersByTimeAsync(31_000) })
+        expect(proBtn.textContent).toContain('16.8×')
+        expect(proBtn.querySelector('[data-tone="peak"]')).toBeTruthy()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('preserves unrelated advanced drafts and committed switch values when a write fails', async () => {
       const { host, snapshot } = await mountOpen()
       await openAdvanced()
@@ -449,6 +581,85 @@ describe("model availability and picker visibility", () => {
       await act(async () => { next.host.publish({ writable: false }) })
       expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsEnableAll }).disabled).toBe(true)
       expect(screen.getByRole<HTMLButtonElement>('button', { name: en.modelsDisableAll }).disabled).toBe(true)
+    })
+
+    it('renders the Free disabled guidance card and enables + refreshes in one click', async () => {
+      const { host, read } = await mountOpen({
+        value: { freeEnabled: false },
+        catalog: { models, stale: false, sources: { go: { updatedAt: Date.now() }, free: {} } },
+      })
+      fireEvent.click(screen.getByRole('tab', { name: en.modelsFreeTab }))
+      expect(screen.getByText(en.modelsFreeDisabledTitle)).toBeTruthy()
+      expect(screen.queryByText(en.modelsEmpty)).toBeNull()
+      read.mockResolvedValueOnce({
+        ok: true,
+        value: {
+          models: [...models, { id: 'free-chat', name: 'Free Chat', source: 'free' }],
+          stale: false,
+          sources: { go: { updatedAt: Date.now() }, free: { updatedAt: Date.now() } },
+        },
+      })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsFreeEnableAction })) })
+      expect(host.set).toHaveBeenCalledWith('freeEnabled', true)
+      expect(screen.getByRole('switch', { name: t('modelVisibleLabel', { name: 'Free Chat' }) })).toBeTruthy()
+    })
+
+    it('supports enabled/disabled filters, sorting, undo for batch toggles, upstream modality states, workload/plan estimate switchers and quick budget chips', async () => {
+      const richModels: GoModel[] = [
+        {
+          id: 'small-fast', name: 'Small Fast', contextWindow: 64_000, maxTokens: 16_384, releaseDate: '2026-09-01',
+          inputModalities: ['text', 'image', 'pdf'],
+          price: { input: 0.5, output: 1.5, cacheRead: 0.05, cacheWrite: 0 },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+          reasoningBudget: { min: 1024, max: 16384 },
+        },
+        {
+          id: 'big-pro', name: 'Big Pro', contextWindow: 256_000, maxTokens: 32_768, releaseDate: '2026-10-01',
+          price: { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+        },
+        { id: 'old', name: 'Old', deprecated: true, contextWindow: 32_000, releaseDate: '2025-01-01' },
+      ]
+      const { host } = await mountOpen({ catalog: { models: richModels, stale: false } })
+
+      // Enabled/Disabled filter buttons
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterDisabled + ' 1') }))
+      expect(within(screen.getByRole('group', { name: en.modelsLabel })).getAllByRole('button').map(b => b.textContent)).toEqual([expect.stringContaining('Old')])
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(en.filterAll + ' 3') }))
+
+      // Sort by context window descending puts Big Pro first
+      fireEvent.change(screen.getByLabelText(en.modelSortLabel), { target: { value: 'context' } })
+      const sortedNames = within(screen.getByRole('group', { name: en.modelsLabel })).getAllByRole('button').map(b => b.textContent)
+      expect(sortedNames[0]).toContain('Big Pro')
+
+      // Batch Enable all enables only Old (1 changed), and Undo restores Old back to disabled
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsEnableAll })) })
+      expect(screen.getByText(t('modelsBatchEnabled', { count: 1 }))).toBeTruthy()
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.modelsBatchUndo })) })
+      expect(host.set).toHaveBeenLastCalledWith('modelVisibility', { 'small-fast': true, 'big-pro': true, old: false })
+
+      // Select Small Fast to check 3-state modalities, workload/plan estimate switchers and quick budget chips
+      fireEvent.click(within(screen.getByRole('group', { name: en.modelsLabel })).getByRole('button', { name: /Small Fast/ }))
+      const details = screen.getByRole('region', { name: en.modelDetails })
+      expect(details.querySelector('[data-state="upstream"]')?.textContent).toBe(en.modalityPdf)
+      expect(details.querySelectorAll('[data-state="forwarded"]').length).toBe(2)
+
+      // Switch workload profile to Light Q&A and preview plan to Go Plus
+      fireEvent.click(within(details).getByRole('button', { name: en.quotaProfile_chat }))
+      expect(within(details).getByText(en.quotaBasisNote_chat)).toBeTruthy()
+      fireEvent.click(within(details).getByRole('button', { name: en['goPlan_go-plus'] }))
+      expect(details.textContent).toContain('$60/mo cap')
+
+      // Quick budget preset chip adds 4096 in one click
+      fireEvent.click(within(details).getByRole('button', { name: '+4K' }))
+      await act(async () => { await Promise.resolve() })
+      expect(host.set).toHaveBeenLastCalledWith('modelLimits', { 'small-fast': { thinkingBudgets: [4096] } })
+
+      // Capacity commit flashes ✓ Saved
+      const ctxInput = within(details).getByRole('spinbutton', { name: t('limitsContextLabel', { name: 'Small Fast' }) })
+      fireEvent.change(ctxInput, { target: { value: '128000' } })
+      fireEvent.blur(ctxInput)
+      expect(within(details).getByText(`✓ ${en.capacitySaved}`)).toBeTruthy()
     })
 
   })
@@ -958,6 +1169,108 @@ describe("account cards, quota rows and ordering", () => {
     expect(await fixture.actions.replaceAccountKey('ACCOUNT_A', 'new-key')).toBe(false)
     expect(fixture.execute).not.toHaveBeenCalled()
     expect(fixture.secrets.get('ACCOUNT_A')).toBe('secret-a')
+  })
+
+  it('lets the user configure each account subscription tier inside its own account detail panel', async () => {
+    const fixture = setup()
+    await fixture.controller.refreshAccounts()
+    render(<AccountsCard state={fixture.controller.accountState()} actions={fixture.actions} writable t={t} />)
+    await act(async () => { await Promise.resolve() })
+    const readsAfterMount = fixture.read.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(en.accountsTitle) }))
+
+    // Plan selector lives inside each account row, never as a stray row outside the account list.
+    expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
+
+    const primaryRow = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Primary' }) }).closest('[data-account-row]') as HTMLElement
+    expect(within(primaryRow).getByText(en['goPlan_go'])).toBeTruthy()
+    fireEvent.click(within(primaryRow).getByRole('button', { name: t('accountsDetails', { name: 'Primary' }) }))
+    const activeGroup = within(primaryRow).getByRole('group', { name: en.goPlanLabel })
+    await act(async () => {
+      fireEvent.click(within(activeGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
+    })
+    expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_A', plan: 'go-plus' })
+    expect(fixture.read.mock.calls.length).toBe(readsAfterMount)
+
+    // Backup accounts also expose per-account tier selection inside their expanded detail strip.
+    const backupRow = screen.getByRole('button', { name: t('accountDragHandle', { name: 'Backup' }) }).closest('[data-account-row]') as HTMLElement
+    expect(within(backupRow).getByText(en['goPlan_go'])).toBeTruthy()
+    fireEvent.click(within(backupRow).getByRole('button', { name: t('accountsDetails', { name: 'Backup' }) }))
+    const backupGroup = within(backupRow).getByRole('group', { name: en.goPlanLabel })
+    await act(async () => {
+      fireEvent.click(within(backupGroup).getByRole('button', { name: en['goPlan_go-teams'] }))
+    })
+    expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_B', plan: 'go-teams' })
+    expect(fixture.read.mock.calls.length).toBe(readsAfterMount)
+    fixture.controller.dispose()
+  })
+
+  it('exposes the subscription tier inside the single account row as well', async () => {
+    const fixture = setup({
+      apiKeyEnv: 'ACCOUNT_A',
+      accounts: [{ id: 'a', name: 'Solo', apiKeyEnv: 'ACCOUNT_A' }],
+    })
+    await fixture.controller.refreshAccounts()
+    render(<AccountsCard state={fixture.controller.accountState()} actions={fixture.actions} writable defaultOpen t={t} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByRole('group', { name: en.goPlanLabel })).toBeNull()
+    const soloRow = document.querySelector('[data-account-row="ACCOUNT_A"]') as HTMLElement
+    expect(within(soloRow).getByText(en['goPlan_go'])).toBeTruthy()
+    fireEvent.click(within(soloRow).getByRole('button', { name: t('accountsDetails', { name: 'Solo' }) }))
+    const soloGroup = within(soloRow).getByRole('group', { name: en.goPlanLabel })
+    await act(async () => {
+      fireEvent.click(within(soloGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
+    })
+    expect(fixture.execute).toHaveBeenLastCalledWith({ kind: 'set-plan', ref: 'ACCOUNT_A', plan: 'go-plus' })
+    fixture.controller.dispose()
+  })
+
+  it('expands accounts on whole-row click, supports comparing multiple expanded rows and offers one-click Set as current on backups', async () => {
+    const fixture = setup()
+    await fixture.controller.refreshAccounts()
+    const selectAccount = vi.fn(async () => true)
+    render(<AccountsCard state={fixture.controller.accountState()} actions={{ ...fixture.actions, selectAccount }} writable defaultOpen t={t} />)
+    const primaryRow = document.querySelector('[data-account-row="ACCOUNT_A"]') as HTMLElement
+    const backupRow = document.querySelector('[data-account-row="ACCOUNT_B"]') as HTMLElement
+
+    // Clicking the row header itself expands both rows simultaneously for side-by-side comparison.
+    fireEvent.click(primaryRow.querySelector('[data-account-main]') as HTMLElement)
+    fireEvent.click(backupRow.querySelector('[data-account-main]') as HTMLElement)
+    expect(primaryRow.getAttribute('data-open')).toBe('true')
+    expect(backupRow.getAttribute('data-open')).toBe('true')
+
+    // Primary has no Set as current button; Backup exposes it and calls selectAccount.
+    expect(within(primaryRow).queryByRole('button', { name: en.accountSetPrimary })).toBeNull()
+    const setPrimaryBtn = within(backupRow).getByRole('button', { name: en.accountSetPrimary })
+    await act(async () => { fireEvent.click(setPrimaryBtn) })
+    expect(selectAccount).toHaveBeenCalledWith('ACCOUNT_B')
+    fixture.controller.dispose()
+  })
+
+  it('lets the user choose a subscription plan and toggle API key visibility when adding an account', async () => {
+    const fixture = setup()
+    const addAccount = vi.fn(async () => true)
+    render(<AccountsCard state={fixture.controller.accountState()} actions={{ ...fixture.actions, addAccount }} writable defaultOpen t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: en.accountAdd }))
+
+    // Only the name field receives autoFocus (never both name and key).
+    const nameInput = screen.getByLabelText(en.accountName) as HTMLInputElement
+    const keyInput = screen.getByLabelText(en.keyLabel) as HTMLInputElement
+    expect(document.activeElement).toBe(nameInput)
+    expect(keyInput.type).toBe('password')
+
+    fireEvent.click(screen.getByRole('button', { name: en.accountKeyShow }))
+    expect(keyInput.type).toBe('text')
+    fireEvent.click(screen.getByRole('button', { name: en.accountKeyHide }))
+    expect(keyInput.type).toBe('password')
+
+    fireEvent.change(nameInput, { target: { value: 'Team Plus' } })
+    fireEvent.change(keyInput, { target: { value: 'sk-team-plus' } })
+    const planGroup = screen.getByRole('group', { name: en.goPlanLabel })
+    fireEvent.click(within(planGroup).getByRole('button', { name: en['goPlan_go-plus'] }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.accountConfirm })) })
+    expect(addAccount).toHaveBeenCalledWith('Team Plus', 'sk-team-plus', 'go-plus')
+    fixture.controller.dispose()
   })
 
 })

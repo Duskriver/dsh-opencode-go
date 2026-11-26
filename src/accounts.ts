@@ -6,12 +6,14 @@ import {
   ACCOUNT_REF_PREFIX,
   accountRefOf,
   accountsOf,
+  DEFAULT_GO_PLAN,
   MAX_ACCOUNTS,
   moveAccountFirst,
   type AccountSettings,
   type GoAccount,
   parseAccountCommand,
   type AccountCommand,
+  type GoPlan,
   parseGoUsage,
   type GoUsage,
   assertProxyURL,
@@ -54,7 +56,7 @@ export interface AttemptOutcome {
 export function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reason'] | undefined {
   if (outcome.emitted || outcome.totalTokens > 0 || outcome.aborted || !outcome.hasNext) return undefined
   switch (outcome.failure?.code) {
-    case 'RATE_LIMIT':
+    case 'RATE_LIMIT': return 'rate-limit'
     case 'QUOTA': return 'quota'
     case 'AUTH':
     case 'MISSING_CREDENTIAL':
@@ -63,9 +65,36 @@ export function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reaso
   }
 }
 
+/** Default key cooldown (5 minutes) for quota exhaustion and rejected credentials. */
+export const REJECTED_KEY_TTL_MS = 5 * 60_000
+
+/** Default key cooldown (15 seconds) for transient HTTP 429 rate limits without a Retry-After header. */
+export const DEFAULT_RATE_LIMIT_KEY_TTL_MS = 15_000
+
+/** Minimum key cooldown for transient HTTP 429 rate limits. */
+export const MIN_RATE_LIMIT_KEY_TTL_MS = 1_000
+
 /** Only credential, rate and quota failures cool down a key; PERMISSION_DENIED is model-scoped. */
 export function isGatewayKeyRejection(failure: { code: string }): boolean {
   return ['INVALID_CREDENTIAL', 'AUTH', 'RATE_LIMIT', 'QUOTA'].includes(failure.code)
+}
+
+/**
+ * Compute how long a gateway-rejected key should be cooled down before being
+ * retried. Credential and quota rejections use the 5-minute window; transient
+ * `RATE_LIMIT` failures honor `providerRetryAfterMs` (defaulting to 15s, bounded
+ * to `[1s, 5m]`).
+ */
+export function gatewayKeyRejectionTtlMs(failure: { code: string; providerRetryAfterMs?: number }): number | undefined {
+  if (!isGatewayKeyRejection(failure)) return undefined
+  if (failure.code === 'RATE_LIMIT') {
+    const raw = failure.providerRetryAfterMs
+    const delay = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+      ? Math.ceil(raw)
+      : DEFAULT_RATE_LIMIT_KEY_TTL_MS
+    return Math.min(Math.max(delay, MIN_RATE_LIMIT_KEY_TTL_MS), REJECTED_KEY_TTL_MS)
+  }
+  return REJECTED_KEY_TTL_MS
 }
 
 type AccountCredentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>
@@ -74,6 +103,11 @@ type Connection = { settings: AccountSettingsWriter; credentials: AccountCredent
 
 function accountIdentity(config: OpencodeGoConfig): string {
   return JSON.stringify([config.enabled, accountRefOf(config), config.accounts, config.autoSwitch, config.baseURL, config.proxyURL, config.freeBaseURL])
+}
+
+function syncedPlanPatch(accounts: readonly GoAccount[], previousPlan: GoPlan | undefined): { goPlan: GoPlan } | Record<string, never> {
+  const nextPlan = accounts[0]?.plan ?? (previousPlan && previousPlan !== DEFAULT_GO_PLAN ? DEFAULT_GO_PLAN : undefined)
+  return nextPlan ? { goPlan: nextPlan } : {}
 }
 
 function ownsAccountCredential(account: GoAccount): boolean {
@@ -164,10 +198,19 @@ export class GoAccountManager {
         if (retained.length >= MAX_ACCOUNTS || retained.some(account => account.id === command.id || account.apiKeyEnv === ref)) {
           throw new Error('Account list changed while storing the credential')
         }
-        const added = { id: command.id, name: command.name.trim(), apiKeyEnv: ref }
+        const added: GoAccount = {
+          id: command.id,
+          name: command.name.trim(),
+          apiKeyEnv: ref,
+          ...(command.plan ? { plan: command.plan } : {}),
+        }
         const selected = accountRefOf(value) === previousRef && configured.every(info => !info.configured) ? ref : accountRefOf(value)
         const next = [...moveAccountFirst([...retained, added], selected)]
-        return await this.write(connection, { accounts: next, apiKeyEnv: next[0]!.apiKeyEnv })
+        return await this.write(connection, {
+          accounts: next,
+          apiKeyEnv: next[0]!.apiKeyEnv,
+          ...(command.plan ? syncedPlanPatch(next, value.goPlan) : {}),
+        })
       } catch (error) {
         // A refused metadata write must not leave the new secret behind.
         await credentials.unset(credentialRef(ref)).catch(() => {
@@ -197,7 +240,11 @@ export class GoAccountManager {
       try {
         value = this.read(connection).value
         const accounts = accountsOf(value).filter(entry => entry.apiKeyEnv !== command.ref)
-        return await this.write(connection, { accounts: [...accounts], apiKeyEnv: accounts[0]?.apiKeyEnv ?? accountRefOf(value) })
+        return await this.write(connection, {
+          accounts: [...accounts],
+          apiKeyEnv: accounts[0]?.apiKeyEnv ?? accountRefOf(value),
+          ...(accounts.length > 0 ? syncedPlanPatch(accounts, value.goPlan) : {}),
+        })
       } catch (error) {
         if (previous && this.connection === connection && accountsOf(this.read(connection).value).some(entry => entry.id === account.id && entry.apiKeyEnv === command.ref)) await credentials.set(credentialRef(command.ref), previous.value).catch(() => {
           this.logger.warn('llm-opencode-go: could not restore an account credential after a refused removal')
@@ -209,16 +256,36 @@ export class GoAccountManager {
     if (command.kind === 'rename') return this.write(connection, {
       accounts: accounts.map(account => account.apiKeyEnv === command.ref ? { ...account, name: command.name.trim() } : account),
     })
+    if (command.kind === 'set-plan') {
+      if (value.accounts?.some(entry => entry.apiKeyEnv === command.ref)) {
+        return this.write(connection, {
+          accounts: accounts.map(entry => entry.apiKeyEnv === command.ref ? { ...entry, plan: command.plan } : entry),
+          ...(command.ref === accountRefOf(value) ? { goPlan: command.plan } : {}),
+        })
+      }
+      if (value.accounts == null && command.ref === accountRefOf(value)) {
+        return this.write(connection, { goPlan: command.plan })
+      }
+      return 'rejected'
+    }
     if (command.kind === 'select') {
       const next = [...moveAccountFirst(accounts, command.ref)]
-      return this.write(connection, { accounts: next, apiKeyEnv: command.ref })
+      return this.write(connection, {
+        accounts: next,
+        apiKeyEnv: command.ref,
+        ...syncedPlanPatch(next, value.goPlan),
+      })
     }
     const from = accounts.findIndex(account => account.apiKeyEnv === command.ref)
     if (from < 0 || command.toIndex >= accounts.length) return 'rejected'
     if (from === command.toIndex) return 'applied'
     const [moved] = accounts.splice(from, 1)
     accounts.splice(command.toIndex, 0, moved!)
-    return this.write(connection, { accounts, apiKeyEnv: accounts[0]!.apiKeyEnv })
+    return this.write(connection, {
+      accounts,
+      apiKeyEnv: accounts[0]!.apiKeyEnv,
+      ...syncedPlanPatch(accounts, value.goPlan),
+    })
   }
 
   /**
@@ -249,13 +316,17 @@ export class GoAccountManager {
       || !accountsOf(this.config()).some(account => account.apiKeyEnv === event.ref)) return
     this.latestSeq = event.seq
     this.notice = event.notice
-    if (!event.notice || !event.config.enabled || !event.config.autoSwitch) return
+    // Transient 429 rate limits borrow the backup during the short key cooldown
+    // without rewriting saved account order; quota exhaustion and credential
+    // rejections promote the working backup to the first position.
+    if (!event.notice || event.notice.reason === 'rate-limit' || !event.config.enabled || !event.config.autoSwitch) return
     void this.enqueue(async () => {
       const connection = this.connection
       if (!connection || event.generation !== this.capture() || event.seq !== this.latestSeq) return
       try {
-        const accounts = [...moveAccountFirst(accountsOf(this.read(connection).value), event.ref)]
-        await this.write(connection, { accounts, apiKeyEnv: event.ref })
+        const current = this.read(connection).value
+        const accounts = [...moveAccountFirst(accountsOf(current), event.ref)]
+        await this.write(connection, { accounts, apiKeyEnv: event.ref, ...syncedPlanPatch(accounts, current.goPlan) })
         this.capture()
         if (this.connection === connection && event.seq === this.latestSeq && accountRefOf(this.config()) === event.ref) this.notice = event.notice
       } catch {

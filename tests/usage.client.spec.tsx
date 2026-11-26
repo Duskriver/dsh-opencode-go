@@ -209,7 +209,9 @@ describe("conversation usage", () => {
     expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).getAttribute('value')).toBe('7')
     expect(within(sidebarQuota()).getByRole('progressbar', { name: en.usage_monthly }).classList.contains(css.progressMonthly)).toBe(true)
     expect(sidebarQuota().getAttribute('aria-label')).toContain(`${en.usage_monthly} 7%`)
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: new RegExp(en.sidebarNextAccount) })).toBeNull()
+    expect(screen.queryByRole('button', { name: en.sidebarAnalytics })).toBeNull()
+    expect(screen.getByRole('button', { name: en.usageRefresh })).toBeTruthy()
     expect(sidebarQuota().tabIndex).toBe(-1)
     expect(sidebarQuota().hasAttribute('aria-haspopup')).toBe(false)
     expect(sidebarQuota().hasAttribute('aria-expanded')).toBe(false)
@@ -335,7 +337,8 @@ describe("conversation usage", () => {
     expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
     await act(async () => { host.publish({ value: { ...host.form.getSnapshot().value, accounts: [threeAccounts[2]!], apiKeyEnv: 'ACCOUNT_C' } }) })
     expect(within(sidebarQuota()).getByText('Travel')).toBeTruthy()
-    expect(within(sidebarQuota()).queryByRole('button')).toBeNull()
+    expect(within(sidebarQuota()).queryByRole('button', { name: new RegExp(en.sidebarNextAccount) })).toBeNull()
+    expect(within(sidebarQuota()).getByRole('button', { name: en.usageRefresh })).toBeTruthy()
     const calls = readAccountUsage.mock.calls.length
     fireEvent.click(sidebarQuota())
     expect(readAccountUsage).toHaveBeenCalledTimes(calls)
@@ -349,7 +352,68 @@ describe("conversation usage", () => {
     await act(async () => { render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} t={t} />) })
     await act(async () => { fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) })) })
     expect(within(sidebarQuota()).getByText('Backup')).toBeTruthy()
+    expect(within(sidebarQuota()).getByText(en.sidebarPreviewTag)).toBeTruthy()
     expect(readAccountUsage).toHaveBeenLastCalledWith('ACCOUNT_B')
+  })
+
+  it('surfaces monthly quota alerts on the input pill and shows per-account quotas in the switcher drill-down', async () => {
+    const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    host.publish({ writable: true, value: { ...host.form.getSnapshot().value, usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' } })
+    const highMonthly: GoUsage = {
+      ...usage,
+      rolling: { ...usageWindow, percent: 5 },
+      weekly: { ...usageWindow, percent: 20 },
+      monthly: { ...usageWindow, percent: 92 },
+    }
+    const backupUsage: GoUsage = {
+      ...usage,
+      source: 'ACCOUNT_B',
+      rolling: { ...usageWindow, percent: 15 },
+      weekly: { ...usageWindow, percent: 40 },
+      monthly: { ...usageWindow, percent: 35 },
+    }
+    const readAccountUsage = vi.fn(async (ref: string) => (ref === 'ACCOUNT_B' ? backupUsage : highMonthly))
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(highMonthly)}
+        readAccountUsage={readAccountUsage}
+        selectAccount={vi.fn(async () => true)}
+        t={t} />)
+    })
+    expect(trigger().textContent).toContain(`${en.usageMonthShort} 92%`)
+    expect(trigger().querySelector(`.${css.monthAlert}[data-level="high"]`)).not.toBeNull()
+
+    showDetails()
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: new RegExp(en.accountSwitchAction) }))
+    })
+    const options = within(screen.getByRole('dialog')).getAllByRole('option')
+    expect(options[1]?.textContent).toContain('Backup')
+    expect(options[1]?.textContent).toContain(`${en.usageRollingShort} 15%`)
+    expect(options[1]?.textContent).toContain(`${en.usageWeekShort} 40%`)
+  })
+
+  it('lets the sidebar quota preview switch the active account and manually refresh', async () => {
+    const host = usageSettings({ showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' })
+    host.publish({ writable: true, value: { ...host.form.getSnapshot().value, showSidebarQuota: true, accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_A' } })
+    const selectAccount = vi.fn(async () => true)
+    const readAccountUsage = vi.fn(async () => usage)
+    await act(async () => {
+      render(<SidebarQuota wide settings={host.form} readUsage={vi.fn()} readAccountUsage={readAccountUsage} selectAccount={selectAccount} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(within(sidebarQuota()).getByRole('button', { name: new RegExp(en.sidebarNextAccount) }))
+    })
+    expect(within(sidebarQuota()).getByText(en.sidebarPreviewTag)).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(within(sidebarQuota()).getByRole('button', { name: en.sidebarUseAccount }))
+    })
+    expect(selectAccount).toHaveBeenCalledWith('ACCOUNT_B')
+    const callsBefore = readAccountUsage.mock.calls.length
+    await act(async () => {
+      fireEvent.click(within(sidebarQuota()).getByRole('button', { name: en.usageRefresh }))
+    })
+    expect(readAccountUsage.mock.calls.length).toBeGreaterThan(callsBefore)
   })
 
   it('stops sidebar polling on disable and restarts it after live settings and credential changes', async () => {
@@ -928,6 +992,20 @@ describe("conversation usage", () => {
     fireEvent.mouseDown(document.body)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(trigger())
+    // Clicking another focusable control (e.g. composer textarea) closes the panel
+    // without stealing focus back to the quota trigger.
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    try {
+      showDetails()
+      expect(openPanel()).toBeTruthy()
+      composer.focus()
+      fireEvent.mouseDown(composer)
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(document.activeElement).toBe(composer)
+    } finally {
+      composer.remove()
+    }
   })
 
   it('focuses the current account when the drill-down opens and restores the trigger from its back button', async () => {
@@ -992,6 +1070,25 @@ describe("conversation usage", () => {
     expect(openUsagePage).toHaveBeenCalledOnce()
     expect(screen.queryByRole('dialog', { name: en.analyticsTitle })).toBeNull()
     expect(analytics).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { reason: 'quota' as const, copy: en.accountFallbackQuota },
+    { reason: 'rate-limit' as const, copy: en.accountFallbackRateLimit },
+    { reason: 'credential' as const, copy: en.accountFallbackCredential },
+  ])('renders distinct fallback status copy for $reason account switches', async ({ reason, copy }) => {
+    const host = usageSettings({ usageDisplay: 'always', accounts: twoAccounts, apiKeyEnv: 'ACCOUNT_B' })
+    const read = vi.fn().mockResolvedValue({
+      ...usage,
+      lastSwitch: { fromRef: 'ACCOUNT_A', toRef: 'ACCOUNT_B', reason, at: 1_760_000_000_000 },
+    })
+    await act(async () => {
+      render(<UsagePill settings={host.form} directory={directory('dsh-opencode-go')} readUsage={read} t={t} />)
+    })
+    showDetails()
+    const status = within(openPanel()).getByRole('status')
+    expect(status.textContent).toContain(copy)
+    expect(status.textContent).toContain('Backup')
   })
 
   it('falls back to the in-place dialog when the console page reports it is unavailable', async () => {
@@ -1069,6 +1166,75 @@ describe("conversation usage", () => {
     expect(root.style.getPropertyValue('--go-display-font')).toContain('Anthropic Serif')
     showDetails()
     expect(openPanel()).toBeTruthy()
+  })
+
+  it('shows remaining estimated calls only for the currently selected Go model and halves during 2x peak hours', async () => {
+    vi.setSystemTime(Date.parse('2026-11-16T05:00:00Z'))
+    const readModels = vi.fn().mockResolvedValue({
+      stale: false,
+      models: [
+        {
+          id: 'kimi-k3', name: 'Kimi K3', source: 'go',
+          price: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+        },
+        {
+          id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', source: 'go',
+          price: { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0 },
+          goMonthlyUsage: { go: 15, 'go-plus': 60, 'go-teams': 20 },
+          pricingMultipliers: [{
+            when: { utc_days: { in: ['mon'] }, utc_hours: { gte: '01:00', lt: '04:00' } },
+            factor: 2,
+          }],
+        },
+      ],
+    })
+    await act(async () => {
+      render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(usage)} readModels={readModels} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(trigger())
+      await Promise.resolve()
+    })
+    expect(readModels).toHaveBeenCalledOnce()
+    expect(screen.getByText('DeepSeek V4 Pro')).toBeTruthy()
+    expect(screen.queryByText('Kimi K3')).toBeNull()
+    const offPeakBadge = screen.getByText('Off-peak')
+    expect(offPeakBadge.getAttribute('title')).toBe('Off-peak hours (1× standard usage).')
+    expect(screen.getByText('~1,190 calls left')).toBeTruthy()
+
+    cleanup()
+    vi.setSystemTime(Date.parse('2026-11-16T02:00:00Z')) // Monday 02:00 UTC -> peak 2x active
+    await act(async () => {
+      render(<UsagePill settings={settings} directory={directory('dsh-opencode-go')}
+        readUsage={vi.fn().mockResolvedValue(usage)} readModels={readModels} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(trigger())
+      await Promise.resolve()
+    })
+    const peakBadge = screen.getByText('Peak')
+    expect(peakBadge.getAttribute('title')).toBe('Peak hours (2× usage): estimated remaining calls are reduced accordingly.')
+    expect(screen.getByText('~595 calls left')).toBeTruthy()
+
+    // Flat-rate model without peak multipliers shows neither Peak nor Off-peak.
+    cleanup()
+    const flatDirectory = createSnapshotStore<ModelDirectoryState>({
+      current: { provider: 'dsh-opencode-go', model: 'kimi-k3' }, routable: true,
+      groups: [], failures: [], status: 'ready', error: null,
+    })
+    await act(async () => {
+      render(<UsagePill settings={settings} directory={flatDirectory}
+        readUsage={vi.fn().mockResolvedValue(usage)} readModels={readModels} t={t} />)
+    })
+    await act(async () => {
+      fireEvent.click(trigger())
+      await Promise.resolve()
+    })
+    expect(screen.getByText('Kimi K3')).toBeTruthy()
+    expect(screen.queryByText('Peak')).toBeNull()
+    expect(screen.queryByText('Off-peak')).toBeNull()
   })
 })
 
