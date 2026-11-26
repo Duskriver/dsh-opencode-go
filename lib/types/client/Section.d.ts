@@ -1,6 +1,6 @@
 import { type en } from './presentation.ts';
 import type { GoAccountsActions, GoAccountsState, OpencodeGoModelLimit, OpencodeGoModelLimits, OpencodeGoModels, TextField, EditableField, OpencodeGoSectionFace, OpencodeGoSectionState } from './controller.ts';
-import { type ModelSource } from '../contracts.ts';
+import { type ConnectionProbeInput, type ConnectionProbeResult, type ModelSource, type GoPlan } from '../contracts.ts';
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots';
 export declare function HintMark(props: {
     hint: string;
@@ -10,20 +10,13 @@ export declare function HintText(props: {
     hint: string;
 }): import("react").JSX.Element;
 type AccountTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string;
-/**
- * The account card: a folded header that summarizes the set, and one row per
- * account inside. Rows keep the identity, key state, rolling quota and its reset
- * countdown; everything else opens under the row. The handle is the drag source —
- * dragging it, or the arrow keys on it, reorders the list, and the first row is
- * the preferred account. Every row is read in the same pass, so the one refresh
- * stamp belongs to the card and sits in its header.
- */
-export declare function AccountsCard({ state, actions, writable, t, locale, addRequest, defaultOpen, surface }: {
+export declare function AccountsCard({ state, actions, writable, t, locale, fallbackPlan, addRequest, defaultOpen, surface }: {
     state: GoAccountsState;
     actions: GoAccountsActions;
     writable: boolean;
     t: AccountTranslate;
     locale?: string;
+    fallbackPlan?: GoPlan;
     /**
      * Rising counter from a page-level "Add account" action. The page owns the
      * button, the card owns the editor: asking through a counter keeps one add
@@ -39,7 +32,7 @@ type ModelTranslate = (key: keyof typeof en, params?: Record<string, unknown>) =
 export declare function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefined): boolean;
 /** Every control here applies immediately; the editor only stages what the
  *  reader is still typing (Capacity commits a settled value). */
-export declare function ModelEditor({ source, models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
+export declare function ModelEditor({ source, models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled, plan }: {
     source?: ModelSource;
     models: OpencodeGoModels;
     draft: OpencodeGoModelLimits;
@@ -50,6 +43,7 @@ export declare function ModelEditor({ source, models, draft, modelVisibility, t,
     visibilitySaving: boolean;
     onEdit: (next: OpencodeGoModelLimits) => void;
     onModelEnabled: (id: string | readonly string[], enabled: boolean) => void;
+    plan?: GoPlan;
 }): import("react").JSX.Element;
 export type { OpencodeGoSectionState } from './controller.ts';
 /** Section copy lookup, including the optional `{name}` template params. */
@@ -65,13 +59,16 @@ export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
      * never register the page simply leave the secondary button out.
      */
     openPage?: () => void;
+    /** Safely probes gateway reachability from the Host without exposing credentials. */
+    probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>;
 }
 /** Props delivered by the slot outlet: the inject face spread flat. */
 export type OpencodeGoSectionProps = Partial<InjectFace<OpencodeGoSectionInjected>>;
 /**
- * The Appearance tab's card. Extracted from `Loaded` so the sidebar page and the
- * settings section render one implementation; the classes and children are the
- * ones the settings tests already read.
+ * The Appearance tab's card, organized into three clear domains:
+ * 1) Global interface theme (with miniature Bento previews),
+ * 2) Conversation input bar (display mode + causal muted 3×2 style/sandbox grid + border),
+ * 3) Sidebar & model picker toggles.
  */
 export declare function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface }: {
     state: OpencodeGoSectionState;
@@ -87,14 +84,16 @@ export declare function AppearanceSettings({ state, t, disabled, saving, onEdit,
  * image budget, closed by the reset-all row. Extracted from `Loaded` unchanged
  * so the full page can carry the same fields.
  */
-export declare function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edit, resetField, surface }: {
+export declare function AdvancedSettings({ state, t, locale, disabled, saving, invalidLabel, edit, resetField, probeConnection, surface }: {
     state: OpencodeGoSectionState;
     t: SectionTranslate;
+    locale?: string;
     disabled: boolean;
     saving: boolean;
     invalidLabel: string;
     edit: (field: TextField, text: string) => void;
     resetField: (field: EditableField) => void;
+    probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>;
     surface?: 'settings' | 'page';
 }): import("react").JSX.Element;
 /**
@@ -102,7 +101,7 @@ export declare function AdvancedSettings({ state, t, disabled, saving, invalidLa
  * capacity editor. The selected source is local (as it was in `Loaded`), so the
  * page and the section behave the same on remount.
  */
-export declare function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, surface }: {
+export declare function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, onEnableFree, surface }: {
     state: OpencodeGoSectionState;
     t: SectionTranslate;
     locale?: string;
@@ -110,6 +109,7 @@ export declare function ModelsSettings({ state, t, locale, disabled, onEdit, set
     onEdit: (value: OpencodeGoModelLimits) => void;
     setModelEnabled: (id: string | readonly string[], next: boolean) => void;
     loadModels: () => void;
+    onEnableFree?: () => void;
     surface?: 'settings' | 'page';
 }): import("react").JSX.Element;
 /**

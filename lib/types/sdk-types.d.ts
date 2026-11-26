@@ -1596,11 +1596,15 @@ interface PriceMultiplier {
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 
 type ModelSource = 'go' | 'free';
+/** OpenCode Go subscription tiers used to translate shared quota percentages into per-model limits. */
+declare const GO_PLANS: readonly ["go", "go-plus", "go-teams"];
+type GoPlan = typeof GO_PLANS[number];
+type GoMonthlyUsage = Record<GoPlan, number>;
 /** Safe UI notice for a successful request using a fallback account. */
 interface GoAccountSwitch {
     fromRef: string;
     toRef: string;
-    reason: 'quota' | 'credential';
+    reason: 'quota' | 'rate-limit' | 'credential';
     at: number;
 }
 interface GoModel {
@@ -1615,8 +1619,33 @@ interface GoModel {
     releaseDate?: string;
     /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
     inputModalities?: readonly InputModality[];
+    /** The text tariff the gateway publishes; absent when it declares none. */
+    price?: GoModelPrice;
+    /** Per-plan monthly dollar allowance declared under `/models`'s `go.monthly_usage`. */
+    goMonthlyUsage?: GoMonthlyUsage;
+    /** Time/date multiplier schedule declared under `/models`'s `cost.multipliers`. */
+    pricingMultipliers?: readonly PriceMultiplier[];
     /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
     configurationMissing?: boolean;
+}
+/** A published text tariff in US dollars per million tokens. */
+interface GoModelPrice {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    /** Rates that replace the base ones above a context threshold, in ascending order. */
+    tiers?: readonly GoModelPriceTier[];
+    /** The gateway prices some periods by a multiplier; the rates here are the base ones. */
+    multipliers?: boolean;
+}
+/** One context-tier tariff; `inputTokensAbove` is the last context still on the previous tier. */
+interface GoModelPriceTier {
+    inputTokensAbove: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
 }
 interface ThinkingBudgetRange {
     min: number;
@@ -1644,6 +1673,27 @@ interface GoModelCatalog {
         readonly free: GoCatalogSourceStatus;
     };
 }
+/** Input to the safe keyless gateway connectivity probe. */
+interface ConnectionProbeInput {
+    baseURL?: string;
+    freeBaseURL?: string;
+    proxyURL?: string;
+    includeFree?: boolean;
+}
+/** Sanitized connectivity probe outcome for one gateway endpoint (never carries credentials). */
+interface ProbeEndpointResult {
+    readonly ok: boolean;
+    readonly url?: string;
+    readonly status?: number;
+    readonly latencyMs: number;
+    readonly modelCount?: number;
+    readonly error?: string;
+}
+/** Connectivity probe outcomes for Go and optionally Free gateways. */
+interface ConnectionProbeResult {
+    readonly go: ProbeEndpointResult;
+    readonly free?: ProbeEndpointResult;
+}
 interface UsageWindow {
     status: 'ok' | 'rate-limited';
     percent: number;
@@ -1662,6 +1712,7 @@ type AccountCommand = {
     id: string;
     name: string;
     key: string;
+    plan?: GoPlan;
 } | {
     kind: 'remove';
     ref: string;
@@ -1686,6 +1737,10 @@ type AccountCommand = {
 } | {
     kind: 'balance';
     value: boolean;
+} | {
+    kind: 'set-plan';
+    ref: string;
+    plan: GoPlan;
 };
 type SettingsWriteResult = 'applied' | 'rejected' | 'unknown';
 type AnalyticsRange = 'today' | '7d' | '30d' | '90d';
@@ -1737,6 +1792,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     interface TypertRemoteNamespaceMap {
         opencodeGoModels: {
             read(): Promise<RemoteResult<GoModelCatalog>>;
+            probe(input: ConnectionProbeInput): Promise<RemoteResult<ConnectionProbeResult>>;
         };
     }
 }

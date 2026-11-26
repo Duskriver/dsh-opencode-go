@@ -18,6 +18,8 @@ import {
   normalizeInputModalities,
   validReleaseDate,
   type GoModel,
+  type GoModelPrice,
+  parseGoMonthlyUsage,
   DEFAULT_BASE_URL,
   type OpencodeGoConfig,
   DEFAULT_FREE_BASE_URL,
@@ -31,6 +33,9 @@ import {
   SDK_PROVIDER_ID,
   MAX_THINKING_BUDGET_TOKENS,
   assertProxyURL,
+  type ConnectionProbeInput,
+  type ConnectionProbeResult,
+  type ProbeEndpointResult,
 } from './contracts.ts'
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -234,7 +239,8 @@ export function reasoningRequest(intent: ReasoningIntent): {
   }
 }
 
-export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities'> & { readonly costKnown?: false }
+export type ModelDetails = Pick<GoModel, 'deprecated' | 'releaseDate' | 'inputModalities' | 'goMonthlyUsage' | 'pricingMultipliers'>
+  & { readonly costKnown?: false }
 
 export interface ModelDirectory {
   readonly models: ReadonlyMap<string, Model<Api>>
@@ -373,10 +379,13 @@ export function readModelDirectory(body: unknown, baseURL: string, source: Model
     if (source === 'free' && !pricing?.free) continue
     if (details.has(id)) continue
     const input = normalizeInputModalities(record(data.modalities).input)
+    const goMonthlyUsage = source === 'go' ? parseGoMonthlyUsage(record(data.go).monthly_usage) : undefined
     details.set(id, { deprecated: data.status === 'deprecated' || data.deprecated === true,
       ...validReleaseDate(data.release_date) ? { releaseDate: data.release_date } : {},
       ...input === undefined ? {} : { inputModalities: input },
       ...pricing === undefined ? { costKnown: false } : {},
+      ...goMonthlyUsage === undefined ? {} : { goMonthlyUsage },
+      ...pricing?.multipliers?.length ? { pricingMultipliers: pricing.multipliers } : {},
     })
     try {
       const declaration = record(data.api)
@@ -611,10 +620,30 @@ function listingError(snapshot: CatalogSnapshot): LlmError {
 
 function describeCatalog(snapshot: CatalogSnapshot): GoModel[] {
   return sortModels([
-    ...[...snapshot.models.values()].map(model => ({ id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
-      ...reasoningBudgetRange(model) === undefined ? {} : { reasoningBudget: reasoningBudgetRange(model) } })),
+    ...[...snapshot.models.values()].map(model => {
+      const budget = reasoningBudgetRange(model), price = publishedPrice(model, snapshot.details.get(model.id))
+      return { id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
+        ...budget === undefined ? {} : { reasoningBudget: budget },
+        ...price === undefined ? {} : { price } }
+    }),
     ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
   ].map(model => ({ ...model, source: snapshot.source, ...snapshot.details.get(model.id) })))
+}
+
+/**
+ * Hand the client the tariff the gateway declared, as the capacity editor's
+ * price reference. Models without a usable declaration stay unpriced.
+ * @param model - the parsed directory entry.
+ * @param details - the listing details carrying the tariff verdict.
+ * @returns the display tariff, or undefined when none was published.
+ */
+function publishedPrice(model: Model<Api>, details: ModelDetails | undefined): GoModelPrice | undefined {
+  if (details?.costKnown === false) return undefined
+  const { input, output, cacheRead, cacheWrite, tiers } = model.cost
+  return { input, output, cacheRead, cacheWrite,
+    ...tiers === undefined || tiers.length === 0 ? {} : { tiers: tiers.map(tier => ({ inputTokensAbove: tier.inputTokensAbove,
+      input: tier.input, output: tier.output, cacheRead: tier.cacheRead, cacheWrite: tier.cacheWrite })) },
+    ...model.multipliers === undefined ? {} : { multipliers: true } }
 }
 
 /**
@@ -668,16 +697,93 @@ export class GoCatalogManager {
   }
 }
 
+const PROBE_TIMEOUT_MS = 10_000
+
+/**
+ * Safely test reachability of one gateway's keyless `/models` listing using
+ * the same URL validation, redirect policy and failure redaction as discovery.
+ */
+export async function probeGatewayEndpoint(
+  rawBaseURL: string,
+  source: ModelSource,
+  fetcher?: typeof globalThis.fetch,
+): Promise<ProbeEndpointResult> {
+  const started = Date.now()
+  let baseURL: string
+  try {
+    baseURL = assertBaseURL(rawBaseURL, source === 'go' ? 'baseURL' : 'freeBaseURL')
+  } catch (error) {
+    return { ok: false, latencyMs: 0, error: error instanceof Error ? error.message : String(error) }
+  }
+  const url = `${baseURL}/models`
+  const safeUrl = diagnosticURL(url)
+  try {
+    const { response, body } = await fetchJsonResponse(url, {
+      method: 'GET',
+      cache: 'no-cache',
+      headers: { ...attributionHeaders(), accept: 'application/json' },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      redirect: 'error',
+    }, MODEL_LISTING_MAX_BYTES, 'gzip', fetcher)
+    const latencyMs = Math.max(0, Date.now() - started)
+    if (!response.ok) {
+      return { ok: false, url: safeUrl, status: response.status, latencyMs, error: `HTTP ${response.status}` }
+    }
+    try {
+      const directory = readModelDirectory(body, baseURL, source)
+      return { ok: true, url: safeUrl, status: response.status, latencyMs, modelCount: directory.models.size }
+    } catch (error) {
+      return {
+        ok: false,
+        url: safeUrl,
+        status: response.status,
+        latencyMs,
+        error: `invalid model listing: ${error instanceof Error ? error.message : 'invalid data'}`,
+      }
+    }
+  } catch (error) {
+    const latencyMs = Math.max(0, Date.now() - started)
+    const detail = error instanceof LlmError ? error.message
+      : error instanceof SyntaxError ? 'invalid JSON response'
+      : error instanceof RangeError ? `response exceeds the ${MODEL_LISTING_MAX_BYTES} byte limit`
+      : transportFailure(error)
+    return { ok: false, url: safeUrl, latencyMs, error: detail }
+  }
+}
+
 export class GoModelsService extends TypertRemoteService {
   constructor(ctx: Context, private readonly options: {
     catalog: () => OpencodeGoCatalog
     /** Absent while the Free channel is disabled; the directory then omits Free models. */
     freeCatalog?: () => OpencodeGoCatalog | undefined
+    config?: () => OpencodeGoConfig
+    transport?: ProxyTransport
     onRefresh?: () => void
   }) { super(ctx, 'opencodeGoModels') }
 
   async read(): Promise<GoModelCatalog> {
     try { return await discoverSettingsModels(this.options.catalog(), this.options.freeCatalog?.()) }
     finally { this.options.onRefresh?.() }
+  }
+
+  async probe(input: ConnectionProbeInput = {}): Promise<ConnectionProbeResult> {
+    const live = this.options.config?.()
+    const rawProxy = input.proxyURL !== undefined ? input.proxyURL.trim() : (live?.proxyURL ?? '')
+    let fetcher: typeof globalThis.fetch | undefined
+    try {
+      const proxy = assertProxyURL(rawProxy)
+      fetcher = this.options.transport?.forProxy(proxy)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { go: { ok: false, latencyMs: 0, error: message } }
+    }
+    const goBase = input.baseURL?.trim() || live?.baseURL || DEFAULT_BASE_URL
+    const freeBase = input.freeBaseURL?.trim() || live?.freeBaseURL || DEFAULT_FREE_BASE_URL
+    const includeFree = input.includeFree ?? (live?.freeEnabled === true)
+    const [go, free] = await Promise.all([
+      probeGatewayEndpoint(goBase, 'go', fetcher),
+      includeFree ? probeGatewayEndpoint(freeBase, 'free', fetcher) : Promise.resolve(undefined),
+    ])
+    return free === undefined ? { go } : { go, free }
   }
 }

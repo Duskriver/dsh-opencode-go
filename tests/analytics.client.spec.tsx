@@ -32,13 +32,18 @@ describe('official history dashboard', () => {
     expect(document.body.textContent).not.toMatch(/Scanning|unsettled|unpriced|session coverage/i)
   })
 
-  it('keeps the UTC date and time in each quota reset tooltip', async () => {
+  it('shows local and UTC date and time in each quota reset tooltip', async () => {
     const resetsAt = '2026-11-07T13:45:30Z'
     const timed: GoUsage = { ...quota, rolling: { ...quota.rolling, resetsAt } }
     render(<AnalyticsDialog {...props({ readQuota: async () => timed })} />)
-    const expected = `${en.usageResets} ${new Date(resetsAt).toLocaleString('en', { timeZone: 'UTC' })} UTC`
-    await waitFor(() => { expect(document.querySelector(`[title="${expected}"]`)).not.toBeNull() })
-    expect(expected).toMatch(/1:45:30/)
+    const utcStr = `${new Date(resetsAt).toLocaleString('en', { timeZone: 'UTC' })} UTC`
+    const localStr = new Date(resetsAt).toLocaleString('en')
+    await waitFor(() => {
+      const node = document.querySelector(`.${css.quotaWindow}`)
+      expect(node?.getAttribute('title')).toContain(utcStr)
+      expect(node?.getAttribute('title')).toContain(localStr)
+    })
+    expect(utcStr).toMatch(/1:45:30/)
   })
 
   it('uses Native by default and applies Classic to the same dashboard when selected', async () => {
@@ -249,9 +254,51 @@ describe('official history dashboard', () => {
     await screen.findAllByText('deepseek-v4.1-flash')
     fireEvent.click(screen.getByRole('button', { name: en.analyticsExport }))
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: en.analyticsExported })).toBeTruthy()
     expect(exporter).toHaveBeenCalledWith({ accountRef: 'ACCOUNT_A', range: '30d' }, expect.any(AbortSignal))
     expect(createUrl).toHaveBeenCalledWith(expect.any(Blob))
     await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:fixture'), { timeout: 2000 })
+  })
+
+  it('supports usage-amount trend mode, interactive legend filtering, cache-hit table column and distribution cross-highlighting', async () => {
+    const read = vi.fn(async query => createAnalyticsReport(query, {
+      byModel: [
+        { ...analyticsCounts, model: 'alpha-model', provider: 'opencode-go', inputTokens: '100', cacheReadTokens: '900', cacheWriteTokens: '0' },
+        { ...analyticsCounts, model: 'beta-model', provider: 'opencode', inputTokens: '900', cacheReadTokens: '100', cacheWriteTokens: '0' },
+      ],
+    }))
+    render(<AnalyticsDialog {...props({ readAnalytics: read })} />)
+    await screen.findAllByText('alpha-model')
+
+    // Interactive token breakdown legend toggles cache read off and rescales Y-axis
+    const yAxisBefore = document.querySelector(`.${css.yAxis}`)?.textContent
+    const legend = document.querySelector(`.${css.legend}`) as HTMLElement
+    const cacheReadBtn = within(legend).getByRole('button', { name: en.analyticsCacheRead })
+    fireEvent.click(cacheReadBtn)
+    expect(cacheReadBtn.getAttribute('aria-pressed')).toBe('false')
+    expect(document.querySelector(`.${css.yAxis}`)?.textContent).not.toBe(yAxisBefore)
+    // Re-enable cache read
+    fireEvent.click(cacheReadBtn)
+    expect(cacheReadBtn.getAttribute('aria-pressed')).toBe('true')
+
+    // 3rd trend mode: Usage amount formats Y-axis in USD
+    const trend = screen.getByRole('group', { name: en.analyticsByDay })
+    fireEvent.click(within(trend).getByRole('button', { name: en.analyticsSpendMode }))
+    expect(within(trend).getByRole('button', { name: en.analyticsSpendMode }).getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector(`.${css.yAxis}`)?.textContent).toContain('$')
+
+    // Model details table uses semantic scope headers and includes Cache hit rate column
+    const table = screen.getByRole('table')
+    expect(within(table).getByRole('columnheader', { name: en.analyticsCacheHit })).toBeTruthy()
+    expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(2)
+    expect(within(table).getByText('90.0%')).toBeTruthy()
+    expect(within(table).getByText('10.0%')).toBeTruthy()
+
+    // Clicking a distribution ranking row cross-highlights its matching table row
+    const rankButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(`.${css.rankRow}`))
+    fireEvent.click(rankButtons[0]!)
+    expect(rankButtons[0]!.getAttribute('aria-pressed')).toBe('true')
+    expect(table.querySelectorAll('tbody tr[data-highlighted="true"]')).toHaveLength(1)
   })
 
   it('clears a removed account and resets identity when credentials change while remaining open', async () => {

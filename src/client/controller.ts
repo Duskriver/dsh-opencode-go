@@ -14,12 +14,21 @@ import {
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_BORDER,
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   LEGACY_USAGE_PILL_STYLE,
   type UsagePillStyle,
   DEFAULT_OPENCODE_GO_THEME,
   OPENCODE_GO_THEMES,
   type OpencodeGoTheme,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
+  type GoPlan,
   SETTINGS_NAMESPACE,
+  RETRY_MODES,
+  DEFAULT_RETRY_INITIAL_DELAY_MS,
+  resolveGoRetryFields,
+  mergeGoRetryPolicy,
+  type RetryMode,
   type OpencodeGoConfig,
   type OpencodeGoSettings,
   type OpencodeGoModelLimit,
@@ -43,14 +52,23 @@ export const OPENCODE_GO_NS = SETTINGS_NAMESPACE
  * Fields that apply the moment they change. Every non-advanced surface is
  * immediate, so the form has exactly one save gesture: the Advanced tab.
  */
-export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'showSidebarQuota', 'freeEnabled'] as const
+export const IMMEDIATE_TEXT_FIELDS = ['usageDisplay', 'usagePillStyle', 'usagePillBorder', 'appearanceTheme', 'goPlan', 'showSidebarQuota', 'showModelMultiplier', 'freeEnabled'] as const
 
 export type ImmediateTextField = typeof IMMEDIATE_TEXT_FIELDS[number]
 
 /** Fields the Advanced tab keeps behind Save/Discard. */
 export const STAGED_TEXT_FIELDS = ['baseURL', 'freeBaseURL', 'proxyURL', 'refreshMinutes',
-  'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs', 'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget',
-  'requestImageMaxBytes'] as const
+  'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs',
+  'retryMode', 'retryMaxRetries', 'retryMaxDelayMs',
+  'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes'] as const
+
+const RETRY_UI_FIELDS = ['retryMode', 'retryMaxRetries', 'retryMaxDelayMs'] as const
+
+type RetryUiField = typeof RETRY_UI_FIELDS[number]
+
+function isRetryUiField(field: EditableField): field is RetryUiField {
+  return (RETRY_UI_FIELDS as readonly string[]).includes(field)
+}
 
 export type StagedTextField = typeof STAGED_TEXT_FIELDS[number]
 
@@ -91,7 +109,7 @@ type Draft = { kind: 'text'; text: string } | { kind: 'limits'; value: OpencodeG
 
 interface PlannedWrite { field: EditableField; draft: Draft; write: FieldWrite | undefined }
 
-type FieldWrite = { kind: 'set'; value: OpencodeGoConfig[EditableField] } | { kind: 'clear' }
+type FieldWrite = { kind: 'set'; value: unknown } | { kind: 'clear' }
 
 /**
  * Numeric bounds mirrored from the Host settings schema (`src/config.ts`), so an
@@ -105,6 +123,8 @@ export const NUMERIC_FIELD_LIMITS: Partial<Record<TextField, NumericFieldLimit>>
   streamIdleTimeoutMs: { integer: false, min: Number.MIN_VALUE, max: MAX_TIMER_DELAY_MS },
   requestPreparationTimeoutMs: { integer: true, min: 1, max: MAX_TIMER_DELAY_MS },
   requestTimeoutMs: { integer: true, min: 1, max: MAX_TIMER_DELAY_MS },
+  retryMaxRetries: { integer: true, min: 0, max: Number.MAX_SAFE_INTEGER },
+  retryMaxDelayMs: { integer: false, min: 1, max: MAX_TIMER_DELAY_MS },
   maxImages: { integer: true, min: 1, max: Number.MAX_SAFE_INTEGER },
   maxRequestImageBytes: { integer: true, min: 1 },
   requestImagePixelBudget: { integer: true, min: 1 },
@@ -118,17 +138,21 @@ function formatField(field: TextField, value: unknown): string {
       ? value : DEFAULT_USAGE_PILL_STYLE
   }
   if (field === 'usagePillBorder') return String(typeof value === 'boolean' ? value : DEFAULT_USAGE_PILL_BORDER)
+  if (field === 'showModelMultiplier') return String(typeof value === 'boolean' ? value : DEFAULT_SHOW_MODEL_MULTIPLIER)
   if (field === 'appearanceTheme') return typeof value === 'string' ? value : DEFAULT_OPENCODE_GO_THEME
+  if (field === 'goPlan') return typeof value === 'string' && (GO_PLANS as readonly string[]).includes(value) ? value : DEFAULT_GO_PLAN
   if (field === 'showSidebarQuota' || field === 'freeEnabled') return String(value === true)
   return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
 }
 
-function parseField(field: TextField, text: string): FieldWrite | undefined {
+function parseField(field: TextField, text: string, retryInitialDelayMs = DEFAULT_RETRY_INITIAL_DELAY_MS): FieldWrite | undefined {
   if (field === 'usageDisplay') return USAGE_DISPLAY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as OpencodeGoConfig['usageDisplay'] } : undefined
   if (field === 'usagePillStyle') return USAGE_PILL_STYLES.some(style => style === text) ? { kind: 'set', value: text as UsagePillStyle } : undefined
   if (field === 'usagePillBorder') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
   if (field === 'appearanceTheme') return OPENCODE_GO_THEMES.some(theme => theme === text) ? { kind: 'set', value: text as OpencodeGoTheme } : undefined
-  if (field === 'showSidebarQuota' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
+  if (field === 'goPlan') return GO_PLANS.some(plan => plan === text) ? { kind: 'set', value: text as GoPlan } : undefined
+  if (field === 'showSidebarQuota' || field === 'showModelMultiplier' || field === 'freeEnabled') return text === 'true' || text === 'false' ? { kind: 'set', value: text === 'true' } : undefined
+  if (field === 'retryMode') return RETRY_MODES.some(mode => mode === text) ? { kind: 'set', value: text as RetryMode } : undefined
   const trimmed = text.trim()
   if (field === 'proxyURL') {
     try { assertProxyURL(trimmed); return { kind: 'set', value: trimmed } }
@@ -149,6 +173,7 @@ function parseField(field: TextField, text: string): FieldWrite | undefined {
   const value = Number(trimmed)
   if (!Number.isFinite(value) || limit.integer && !Number.isSafeInteger(value)
     || value < limit.min || limit.max !== undefined && value > limit.max) return undefined
+  if (field === 'retryMaxDelayMs' && value < retryInitialDelayMs) return undefined
   return { kind: 'set', value }
 }
 
@@ -229,7 +254,7 @@ function operationId(): string {
 
 export interface GoAccountsActions {
   loadAccounts: () => void
-  addAccount: (name: string, key: string) => Promise<boolean>
+  addAccount: (name: string, key: string, plan?: GoPlan) => Promise<boolean>
   /** A newly opened addition form owns a fresh ID; retries keep its existing ID. */
   resetAddition?: () => void
   renameAccount: (ref: string, name: string) => Promise<boolean>
@@ -240,6 +265,8 @@ export interface GoAccountsActions {
   replaceAccountKey: (ref: string, key: string) => Promise<boolean>
   /** Move one account to a new position; the first row becomes the preferred account. */
   moveAccount: (ref: string, toIndex: number) => Promise<boolean>
+  /** Display-only subscription tier for translating this account's quota percentages into calls/tokens. */
+  setAccountPlan?: (ref: string, plan: GoPlan) => Promise<boolean>
 }
 
 export interface OpencodeGoSectionState extends FormShell {
@@ -253,10 +280,12 @@ export interface OpencodeGoSectionState extends FormShell {
   writeFailed?: ImmediateField
   usageDisplay: FieldState
   showSidebarQuota: FieldState
+  showModelMultiplier: FieldState
   freeEnabled: FieldState
   usagePillStyle: FieldState
   usagePillBorder: FieldState
   appearanceTheme: FieldState
+  goPlan: FieldState
   /** Last saved theme; text drafts preview without switching the applied interface. */
   appliedAppearanceTheme: OpencodeGoTheme
   modelVisibility: Readonly<Record<string, boolean>>
@@ -271,6 +300,9 @@ export interface OpencodeGoSectionState extends FormShell {
   streamIdleTimeoutMs: FieldState
   requestPreparationTimeoutMs: FieldState
   requestTimeoutMs: FieldState
+  retryMode: FieldState
+  retryMaxRetries: FieldState
+  retryMaxDelayMs: FieldState
   maxImages: FieldState
   maxRequestImageBytes: FieldState
   requestImagePixelBudget: FieldState
@@ -356,7 +388,7 @@ export class OpencodeGoSectionController {
 
   private publish(): void { if (!this.disposed) this.store.set(this.projection()) }
   private blocked(): boolean { return this.saving || this.pickerSaving }
-  private stored(field: EditableField): boolean {
+  private stored(field: keyof OpencodeGoSettings): boolean {
     const user = this.scope.getSnapshot().user
     return !!user && Object.hasOwn(user, field)
   }
@@ -365,10 +397,141 @@ export class OpencodeGoSectionController {
     const draft = this.drafts.get(field)
     if (draft?.kind === 'limits') return draft.value
     const snapshot = this.scope.getSnapshot()
+    if (isRetryUiField(field)) {
+      const policy = draft?.kind === 'clear'
+        ? (snapshot.base as OpencodeGoSettings | undefined)?.retryPolicy
+        : snapshot.value?.retryPolicy
+      const fields = resolveGoRetryFields(policy)
+      if (field === 'retryMode') return fields.mode
+      if (field === 'retryMaxRetries') return String(fields.maxRetries)
+      return String(fields.maxDelayMs)
+    }
     return draft?.kind === 'clear' ? (snapshot.base as OpencodeGoSettings | undefined)?.[field] : snapshot.value?.[field]
   }
 
+  private retrySnapshotPlan(): {
+    fields: Record<RetryUiField, FieldState>
+    dirty: boolean
+    invalid: boolean
+    op?: SettingsPathOpView
+    draftEntries: Array<readonly [RetryUiField, Draft]>
+  } {
+    const snapshot = this.scope.getSnapshot()
+    const currentPolicy = snapshot.value?.retryPolicy
+    const basePolicy = (snapshot.base as OpencodeGoSettings | undefined)?.retryPolicy
+    const currentFields = resolveGoRetryFields(currentPolicy)
+    const baseFields = resolveGoRetryFields(basePolicy)
+    const stored = this.stored('retryPolicy')
+
+    const readText = (field: RetryUiField, source: 'current' | 'base'): string => {
+      const fields = source === 'base' ? baseFields : currentFields
+      if (field === 'retryMode') return fields.mode
+      if (field === 'retryMaxRetries') return String(fields.maxRetries)
+      return String(fields.maxDelayMs)
+    }
+
+    const modeDraft = this.drafts.get('retryMode')
+    const modeText = modeDraft?.kind === 'text' ? modeDraft.text : readText('retryMode', modeDraft?.kind === 'clear' ? 'base' : 'current')
+    const modeWrite = modeDraft?.kind === 'clear' ? { kind: 'clear' as const } : parseField('retryMode', modeText, currentFields.initialDelayMs)
+    const modeInvalid = !!modeDraft && !modeWrite
+    const effectiveMode: RetryMode = modeWrite?.kind === 'set'
+      ? modeWrite.value as RetryMode
+      : modeDraft?.kind === 'clear' ? baseFields.mode : currentFields.mode
+
+    const maxRetriesDraft = this.drafts.get('retryMaxRetries')
+    const maxRetriesText = maxRetriesDraft?.kind === 'text'
+      ? maxRetriesDraft.text
+      : readText('retryMaxRetries', maxRetriesDraft?.kind === 'clear' ? 'base' : 'current')
+    const maxRetriesWrite = maxRetriesDraft?.kind === 'clear'
+      ? { kind: 'clear' as const }
+      : parseField('retryMaxRetries', maxRetriesText, currentFields.initialDelayMs)
+    const maxRetriesInvalid = effectiveMode === 'normal' && !!maxRetriesDraft && !maxRetriesWrite
+    const effectiveMaxRetries = maxRetriesWrite?.kind === 'set'
+      ? maxRetriesWrite.value as number
+      : maxRetriesWrite?.kind === 'clear' ? baseFields.maxRetries : currentFields.maxRetries
+
+    const maxDelayDraft = this.drafts.get('retryMaxDelayMs')
+    const maxDelayText = maxDelayDraft?.kind === 'text'
+      ? maxDelayDraft.text
+      : readText('retryMaxDelayMs', maxDelayDraft?.kind === 'clear' ? 'base' : 'current')
+    const maxDelayWrite = maxDelayDraft?.kind === 'clear'
+      ? { kind: 'clear' as const }
+      : parseField('retryMaxDelayMs', maxDelayText, currentFields.initialDelayMs)
+    const maxDelayInvalid = !!maxDelayDraft && !maxDelayWrite
+    const effectiveMaxDelayMs = maxDelayWrite?.kind === 'set'
+      ? maxDelayWrite.value as number
+      : maxDelayWrite?.kind === 'clear' ? baseFields.maxDelayMs : currentFields.maxDelayMs
+
+    const modeChanged = modeDraft?.kind === 'text' && modeText !== readText('retryMode', 'current')
+    const maxRetriesChanged = maxRetriesDraft?.kind === 'text' && maxRetriesText !== readText('retryMaxRetries', 'current')
+    const maxDelayChanged = maxDelayDraft?.kind === 'text' && maxDelayText !== readText('retryMaxDelayMs', 'current')
+
+    const fields: Record<RetryUiField, FieldState> = {
+      retryMode: {
+        text: modeText,
+        overridden: modeDraft?.kind === 'clear' ? false : modeChanged ? modeWrite?.kind === 'set' : stored && currentFields.mode !== baseFields.mode,
+        invalid: modeInvalid,
+      },
+      retryMaxRetries: {
+        text: maxRetriesText,
+        overridden: maxRetriesDraft?.kind === 'clear'
+          ? false
+          : maxRetriesChanged
+            ? effectiveMode === 'normal' && maxRetriesWrite?.kind === 'set'
+            : stored && currentFields.mode === 'normal' && (baseFields.mode !== 'normal' || currentFields.maxRetries !== baseFields.maxRetries),
+        invalid: maxRetriesInvalid,
+      },
+      retryMaxDelayMs: {
+        text: maxDelayText,
+        overridden: maxDelayDraft?.kind === 'clear'
+          ? false
+          : maxDelayChanged
+            ? maxDelayWrite?.kind === 'set'
+            : stored && currentFields.maxDelayMs !== baseFields.maxDelayMs,
+        invalid: maxDelayInvalid,
+      },
+    }
+
+    const draftEntries = RETRY_UI_FIELDS.flatMap(field => {
+      const draft = this.drafts.get(field)
+      return draft === undefined ? [] : [[field, draft] as const]
+    })
+    const invalid = modeInvalid || maxRetriesInvalid || maxDelayInvalid
+    if (draftEntries.length === 0) return { fields, dirty: false, invalid: false, draftEntries }
+    if (invalid) return { fields, dirty: true, invalid: true, draftEntries }
+
+    const preservedRetryableCodes = currentPolicy?.mode === 'normal'
+      ? currentFields.retryableCodes
+      : baseFields.retryableCodes
+
+    const matchesBase = effectiveMode === baseFields.mode
+      && effectiveMaxDelayMs === baseFields.maxDelayMs
+      && (effectiveMode === 'always' || effectiveMaxRetries === baseFields.maxRetries)
+      && currentFields.initialDelayMs === baseFields.initialDelayMs
+      && currentFields.jitterRatio === baseFields.jitterRatio
+      && sameValue(preservedRetryableCodes, baseFields.retryableCodes)
+    const matchesCurrent = currentPolicy !== undefined
+      && effectiveMode === currentFields.mode
+      && effectiveMaxDelayMs === currentFields.maxDelayMs
+      && (effectiveMode === 'always' || effectiveMaxRetries === currentFields.maxRetries)
+
+    let op: SettingsPathOpView | undefined
+    if (matchesBase) {
+      if (stored) op = { op: 'unset', path: ['retryPolicy'] }
+    } else if (!matchesCurrent) {
+      const nextPolicy = mergeGoRetryPolicy(currentPolicy, {
+        mode: effectiveMode,
+        maxRetries: effectiveMaxRetries,
+        maxDelayMs: effectiveMaxDelayMs,
+        retryableCodes: preservedRetryableCodes,
+      })
+      op = { op: 'set', path: ['retryPolicy'], value: nextPolicy as unknown as Extract<SettingsPathOpView, { op: 'set' }>['value'] }
+    }
+    return { fields, dirty: op !== undefined, invalid: false, ...(op === undefined ? {} : { op }), draftEntries }
+  }
+
   private field(field: TextField): FieldState {
+    if (isRetryUiField(field)) return this.retrySnapshotPlan().fields[field]
     const draft = this.drafts.get(field)
     const snapshot = this.scope.getSnapshot()
     const legacyPlainBorder = field === 'usagePillBorder' && !draft && !this.stored('usagePillBorder')
@@ -383,6 +546,7 @@ export class OpencodeGoSectionController {
   private plan() {
     const value = this.scope.getSnapshot().value
     return [...this.drafts].flatMap<PlannedWrite>(([field, draft]) => {
+      if (isRetryUiField(field)) return []
       if (draft.kind === 'clear') return this.stored(field) ? [{ field, draft, write: { kind: 'clear' as const } as FieldWrite | undefined }] : []
       if (draft.kind === 'limits') return sameValue(draft.value, value?.modelLimits) ? []
         : [{ field, draft, write: { kind: 'set' as const, value: draft.value } as FieldWrite | undefined }]
@@ -394,14 +558,15 @@ export class OpencodeGoSectionController {
   private projection(): OpencodeGoSectionState {
     const snapshot = this.scope.getSnapshot()
     const plan = this.plan()
+    const retry = this.retrySnapshotPlan()
     return {
       status: snapshot.status, writable: snapshot.writable,
-      dirty: plan.length > 0, invalid: plan.some(item => !item.write),
+      dirty: plan.length > 0 || retry.dirty, invalid: plan.some(item => !item.write) || retry.invalid,
       saving: this.saving || this.accountBusy || this.immediateSaving > 0, failed: this.failed,
       accounts: this.accountState(), enabled: snapshot.value?.enabled ?? true,
       sidebarEntry: snapshot.value?.sidebarEntry === true, sidebarEntryFailed: this.sidebarEntryFailed,
       ...this.writeFailed === undefined ? {} : { writeFailed: this.writeFailed },
-      ...Object.fromEntries(TEXT_FIELDS.map(field => [field, this.field(field)])) as Record<TextField, FieldState>,
+      ...Object.fromEntries(TEXT_FIELDS.map(field => [field, isRetryUiField(field) ? retry.fields[field] : this.field(field)])) as Record<TextField, FieldState>,
       appliedAppearanceTheme: snapshot.value?.appearanceTheme ?? DEFAULT_OPENCODE_GO_THEME,
       modelVisibility: snapshot.value?.modelVisibility ?? {}, pickerSaving: this.pickerSaving, pickerFailed: this.pickerFailed,
       enabledFailed: this.enabledFailed,
@@ -434,6 +599,12 @@ export class OpencodeGoSectionController {
   /** Keep a draft the Advanced tab saves on its own gesture. */
   private editStaged(field: EditableField, draft: Draft): void {
     this.drafts.set(field, draft)
+    if (field === 'retryMode' && draft.kind === 'text' && draft.text === 'always') {
+      const maxRetriesDraft = this.drafts.get('retryMaxRetries')
+      if (maxRetriesDraft?.kind === 'text' && !parseField('retryMaxRetries', maxRetriesDraft.text)) {
+        this.drafts.delete('retryMaxRetries')
+      }
+    }
     this.failed = false
     this.publish()
   }
@@ -454,7 +625,7 @@ export class OpencodeGoSectionController {
     try {
       const accepted = write.kind === 'clear'
         ? await this.scope.unset(field)
-        : await this.scope.set(field, write.value)
+        : await this.scope.set(field, write.value as OpencodeGoConfig[ImmediateField])
       if (!accepted) this.writeFailed = field
     } catch {
       this.writeFailed = field
@@ -488,18 +659,23 @@ export class OpencodeGoSectionController {
 
   async save(): Promise<void> {
     const plan = this.plan()
-    if (!plan.length || this.blocked() || this.accountBusy || !this.scope.getSnapshot().writable || plan.some(item => !item.write)) return
+    const retry = this.retrySnapshotPlan()
+    if ((!plan.length && !retry.dirty) || this.blocked() || this.accountBusy || !this.scope.getSnapshot().writable || plan.some(item => !item.write) || retry.invalid) return
     const revision = this.scope.getSnapshot().revision
     this.saving = true
     this.failed = false
     this.publish()
     try {
-      const ops = plan.map(({ field, write }): SettingsPathOpView => write!.kind === 'clear'
+      const ops: SettingsPathOpView[] = plan.map(({ field, write }) => write!.kind === 'clear'
         ? { op: 'unset', path: [field] }
         : { op: 'set', path: [field], value: write!.value as Extract<SettingsPathOpView, { op: 'set' }>['value'] })
+      if (retry.op) ops.push(retry.op)
       const accepted = await this.scope.mutate(ops, revision)
       this.failed = !accepted
-      if (accepted) for (const { field, draft } of plan) if (this.drafts.get(field) === draft) this.drafts.delete(field)
+      if (accepted) {
+        for (const { field, draft } of plan) if (this.drafts.get(field) === draft) this.drafts.delete(field)
+        for (const [field, draft] of retry.draftEntries) if (this.drafts.get(field) === draft) this.drafts.delete(field)
+      }
     } catch { this.failed = true }
     finally { this.saving = false; this.publish() }
   }
@@ -707,10 +883,10 @@ export class OpencodeGoSectionController {
     return {
       loadAccounts: () => { void this.refreshAccounts() },
       resetAddition: () => { this.addition = undefined },
-      addAccount: (name, key) => this.runAccountAction(async () => {
+      addAccount: (name, key, plan) => this.runAccountAction(async () => {
         if (!name.trim() || name.trim().length > 80 || !key.trim()) return false
         if (this.addition?.name !== name.trim()) this.addition = { name: name.trim(), id: operationId() }
-        const accepted = await command({ kind: 'add', id: this.addition.id, name, key })
+        const accepted = await command({ kind: 'add', id: this.addition.id, name, key, ...(plan ? { plan } : {}) })
         if (accepted) this.addition = undefined
         return accepted
       }),
@@ -730,6 +906,7 @@ export class OpencodeGoSectionController {
         return accepted
       }, false),
       moveAccount: (ref, toIndex) => this.runAccountAction(() => command({ kind: 'move', ref, toIndex })),
+      setAccountPlan: (ref, plan) => this.runAccountAction(() => command({ kind: 'set-plan', ref, plan })),
     }
   }
 

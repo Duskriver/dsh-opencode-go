@@ -637,6 +637,19 @@ export interface PiImageRequestBudget {
 }
 
 /**
+ * Request-image target carrying both the legacy `maxBytes` field (DSH 0.2.1/0.2.2)
+ * and the `maxImageBytes` / `imageTargetBytes` fields required by DSH 0.2.3+.
+ */
+export type CompatibleImageRequestTarget = ImageRequestTarget & {
+  /** Legacy encoded-byte cap retained for DSH 0.2.1/0.2.2 hosts. */
+  maxBytes: number
+  /** Hard encoded-byte limit required by DSH 0.2.3+ hosts. */
+  maxImageBytes: number
+  /** Preferred encoded-byte target for DSH 0.2.3+ hosts, never exceeding maxImageBytes. */
+  imageTargetBytes: number
+}
+
+/**
  * Deterministic request target for one source under the route budgets.
  *
  * The single projection both request serialization and the adapter's
@@ -647,11 +660,16 @@ export interface PiImageRequestBudget {
  * @param budget - route pixel and encoded-byte budgets.
  * @returns the target width, height and encoded-byte cap, plus the budgets.
  */
-export function requestImageTargetFor(ref: ImageAttachmentRef, budget: PiImageRequestBudget): ImageRequestTarget & PiImageRequestBudget {
+export function requestImageTargetFor(
+  ref: ImageAttachmentRef,
+  budget: PiImageRequestBudget,
+): CompatibleImageRequestTarget & PiImageRequestBudget {
   return {
     ...requestImageDimensions(ref.width, ref.height, budget.maxPixels),
     maxPixels: budget.maxPixels,
     maxBytes: budget.maxBytes,
+    maxImageBytes: budget.maxBytes,
+    imageTargetBytes: budget.maxBytes,
   }
 }
 

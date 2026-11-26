@@ -6,7 +6,11 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Context as ClientContext, Context } from '@deepseek-ai/cordis'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   PROFILE_ENTRY_ID,
+  type ConnectionProbeInput,
+  type ConnectionProbeResult,
+  type GoModelCatalog,
   type GoUsage,
   type AnalyticsQuery,
   type AnalyticsReport,
@@ -22,6 +26,9 @@ import { setPageTab } from './pages/nav.ts'
 import type { PageInjected, PageReaders, PageTab } from './pages/types.ts'
 import { PAGE_PANEL_ID, PAGE_SIDEBAR_ORDER, SETTINGS_SECTION_ID, type GoLayoutService } from './host-slots.ts'
 import { installSettingsNavIcon } from './settings-nav-icon.tsx'
+import { ModelLabel } from './ModelLabel.tsx'
+import { createSharedModelCatalog, type SharedModelCatalog } from './model-catalog-store.ts'
+import { createSharedUsageStore, type SharedUsageStore } from './usage-store.ts'
 import {
   OpencodeGoSectionController,
   type OpencodeGoSettings,
@@ -87,9 +94,13 @@ export function apply(ctx: ClientContext): void {
 
 function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>, modelsReady: Promise<unknown>): void {
   const executeAccountCommand = accountCommands(ctx)
+  const endpointKey = (): string => {
+    const value = scope.getSnapshot().value
+    return JSON.stringify([value?.baseURL ?? '', value?.freeBaseURL ?? '', value?.proxyURL ?? ''])
+  }
   // One reader set feeds every surface: the composer pill, the sidebar quota
   // card and the console page must agree on definitions and error shapes.
-  const readers = createPageReaders(ctx)
+  const { readers, usageStore } = createPageReaders(ctx, endpointKey)
   // The layout service arrives with the shell plugin; the page's navigation is
   // a no-op until it does (and on hosts that never compose a sidebar).
   let layout: GoLayoutService | undefined
@@ -104,19 +115,44 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
       // page's slot is still declaring). The tab choice is kept for the next open.
     }
   }
-  const selectAccount = async (ref: string): Promise<boolean> =>
-    (await executeAccountCommand({ kind: 'select', ref })) === 'applied'
+  const selectAccount = async (ref: string): Promise<boolean> => {
+    const applied = (await executeAccountCommand({ kind: 'select', ref })) === 'applied'
+    if (applied) usageStore()?.invalidate()
+    return applied
+  }
   let readAccount: ((ref: string) => Promise<GoUsage>) | undefined
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     readAccount = async ref => {
+      const shared = usageStore()
+      if (shared) return shared.readAccount(ref, true)
       const result = await (ready as ClientContext).remote.opencodeGoUsage.readAccount(ref)
       if (!result.ok) throw result.error
       return result.value
     }
   })
+  const readModelsCatalog = async (): Promise<GoModelCatalog> => {
+    await modelsReady
+    const result = await ctx.remote.opencodeGoModels.read()
+    if (!result.ok) throw result.error
+    sharedCatalog.publish(result.value, endpointKey())
+    return result.value
+  }
+  const probeConnection = async (input: ConnectionProbeInput): Promise<ConnectionProbeResult> => {
+    await modelsReady
+    const probe = (ctx.remote.opencodeGoModels as {
+      probe?: (arg: ConnectionProbeInput) => Promise<import('@deepseek-ai/dsh-typert-protocol').RemoteResult<ConnectionProbeResult>>
+    }).probe
+    if (typeof probe !== 'function') throw new Error('Connection probe is unavailable in this session')
+    const result = await probe(input)
+    if (!result.ok) throw result.error
+    return result.value
+  }
+  const sharedCatalog = createSharedModelCatalog(readModelsCatalog)
   const controller = new OpencodeGoSectionController(scope, ctx, async () => {
     await modelsReady
-    return ctx.remote.opencodeGoModels.read()
+    const result = await ctx.remote.opencodeGoModels.read()
+    if (result.ok) sharedCatalog.publish(result.value, endpointKey())
+    return result
   }, async ref => {
     await modelsReady
     // A session without the usage namespace cannot read a quota; say so instead
@@ -130,23 +166,27 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
   // The settings dialog's nav row: the host icon seat when this host has one
   // (DSH 0.2.2+), the DOM stand-in for older shells. Both read the same label.
   installSettingsNavIcon(ctx, () => t('nav'))
+  registerModelLabel(ctx, scope, sharedCatalog, localeOf, t)
   // The page's own slot face always offers navigation: it only mounts while the
   // host already shows the page.
-  const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage })
+  const pageInjected = (): PageInjected => ({ ...controller.inject(), t, getLocale: localeOf, readers, openPage, probeConnection })
   // The settings dialog keeps its full section; the extra openPage seat lets it
   // hand the user to the console page without coupling Section to the layout.
   // It is only offered while the opt-in sidebar entry is registered, so the
   // button and every other shortcut disappear together with the entry.
   let pageRegistered: () => boolean = () => false
   const injected = (): OpencodeGoSectionInjected => ({
-    ...controller.inject(), t, getLocale: localeOf,
+    ...controller.inject(), t, getLocale: localeOf, probeConnection,
     ...(pageRegistered() ? { openPage } : {}),
   })
   pageRegistered = registerSidebarPage(ctx, pageInjected, () => layout, scope)
-  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered)
+  registerUsagePill(ctx, scope, selectAccount, readers, openPage, pageRegistered, readModelsCatalog, sharedCatalog)
 
   ctx.effect(() => {
-    const refresh = (ref: string): void => { controller.refreshCredential(ref) }
+    const refresh = (ref: string): void => {
+      usageStore()?.invalidate(ref)
+      controller.refreshCredential(ref)
+    }
     const dispose = ctx.remote.$on('credentials/reference-updated', refresh)
     /* v8 ignore next -- fiber teardown never runs in unit tests */
     return () => { dispose() }
@@ -168,20 +208,30 @@ function mountSettings(ctx: ClientContext, scope: ConfigForm<OpencodeGoSettings>
  * @param ctx - client root context.
  * @returns the mutable reader set (filled when the namespaces mount).
  */
-function createPageReaders(ctx: ClientContext): PageReaders {
+function createPageReaders(
+  ctx: ClientContext,
+  endpointKey?: () => string,
+): { readers: PageReaders; usageStore: () => SharedUsageStore | undefined } {
   const readers: PageReaders = {}
+  let sharedUsage: SharedUsageStore | undefined
   ctx.inject(['remote.opencodeGoUsage'], usageScope => {
     const remote = (usageScope as ClientContext).remote
-    readers.readUsage = async () => {
-      const result = await remote.opencodeGoUsage.read()
-      if (!result.ok) throw result.error
-      return result.value
-    }
-    readers.readAccountUsage = async (ref: string) => {
-      const result = await remote.opencodeGoUsage.readAccount(ref)
-      if (!result.ok) throw result.error
-      return result.value
-    }
+    const store = createSharedUsageStore({
+      readActive: async () => {
+        const result = await remote.opencodeGoUsage.read()
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      readAccount: async (ref: string) => {
+        const result = await remote.opencodeGoUsage.readAccount(ref)
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      ...(endpointKey ? { endpointKey } : {}),
+    })
+    sharedUsage = store
+    readers.readUsage = (force?: boolean) => store.readActive(force)
+    readers.readAccountUsage = (ref: string, force?: boolean) => store.readAccount(ref, force)
     usageScope.inject(['remote.opencodeGoAnalytics'], analyticsScope => {
       readers.readAnalytics = async (query: AnalyticsQuery, signal?: AbortSignal) => {
         const result = await (analyticsScope as ClientContext).remote.opencodeGoAnalytics.read(query, signal)
@@ -195,7 +245,7 @@ function createPageReaders(ctx: ClientContext): PageReaders {
       }
     })
   })
-  return readers
+  return { readers, usageStore: () => sharedUsage }
 }
 
 /**
@@ -269,6 +319,90 @@ function registerSidebarPage(
   return () => disposePair !== undefined
 }
 
+const MODEL_LABEL_SLOT_PRIORITY = 137
+const MODEL_LABEL_SLOT_MAX_ATTEMPTS = 8
+
+function isSlotPriorityCollision(error: unknown): boolean {
+  return error instanceof Error && /already has a registration/i.test(error.message)
+}
+
+function warnModelLabel(ctx: ClientContext, message: string, error?: unknown): void {
+  const logger = (ctx as { logger?: { warn?: (...args: unknown[]) => void } }).logger
+  const prefix = `[dsh-opencode-go] ${message}`
+  if (typeof logger?.warn === 'function') {
+    if (error !== undefined) logger.warn(prefix, error)
+    else logger.warn(prefix)
+    return
+  }
+  if (error !== undefined) console.warn(prefix, error)
+  else console.warn(prefix)
+}
+
+/**
+ * Register the composer model-label slot at a yielding priority while the
+ * feature is enabled, vacating the single-occupant slot immediately when turned off.
+ */
+function registerModelLabel(
+  ctx: ClientContext,
+  settings: ConfigForm<OpencodeGoSettings>,
+  catalog: SharedModelCatalog,
+  getLocale: () => string,
+  t: OpencodeGoSectionInjected['t'],
+): void {
+  let slotReady = false
+  let disposeLabel: (() => void) | undefined
+  const teardown = (): void => {
+    const dispose = disposeLabel
+    disposeLabel = undefined
+    if (dispose !== undefined) dispose()
+  }
+  const sync = (): void => {
+    const value = settings.getSnapshot().value
+    const active = value?.enabled !== false && (value?.showModelMultiplier ?? DEFAULT_SHOW_MODEL_MULTIPLIER)
+    if (!active) { teardown(); return }
+    if (!slotReady || disposeLabel !== undefined) return
+    let lastError: unknown
+    for (let attempt = 0; attempt < MODEL_LABEL_SLOT_MAX_ATTEMPTS; attempt += 1) {
+      const priority = MODEL_LABEL_SLOT_PRIORITY + attempt
+      try {
+        const dispose = ctx.slots.register({
+          name: 'conversation.input.model.label',
+          priority,
+          inject: () => ({ settings, catalog, getLocale, t }),
+        }, ModelLabel)
+        disposeLabel = typeof dispose === 'function' ? dispose : () => {}
+        if (attempt > 0) {
+          warnModelLabel(
+            ctx,
+            `conversation.input.model.label priority ${MODEL_LABEL_SLOT_PRIORITY} already taken; registered at yielding priority ${priority}`,
+          )
+        }
+        return
+      } catch (error) {
+        lastError = error
+        if (isSlotPriorityCollision(error) && attempt + 1 < MODEL_LABEL_SLOT_MAX_ATTEMPTS) continue
+        break
+      }
+    }
+    disposeLabel = undefined
+    warnModelLabel(
+      ctx,
+      'failed to register conversation.input.model.label; model multiplier badge disabled:',
+      lastError,
+    )
+  }
+  ctx.effect(() => ctx.slots.inject('conversation.input.model.label', () => {
+    slotReady = true
+    sync()
+    return () => { slotReady = false; teardown() }
+  }), 'llm-opencode-go: model label slot')
+  ctx.effect(() => {
+    const unsubscribe = settings.subscribe(sync)
+    sync()
+    return () => { unsubscribe(); teardown() }
+  }, 'llm-opencode-go: model label opt-in')
+}
+
 export function accountCommands(ctx: Context): ExecuteAccountCommand {
   const unavailable: ExecuteAccountCommand = async () => 'unknown'
   let execute = unavailable
@@ -301,6 +435,8 @@ export function registerUsagePill(
   readers?: PageReaders,
   openPage?: (tab?: PageTab) => void,
   canOpenPage: () => boolean = () => false,
+  readModels?: () => Promise<GoModelCatalog>,
+  catalog?: SharedModelCatalog,
 ): void {
   ctx.inject(['remote.opencodeGoUsage'], ready => {
     const credentialChanges = createSnapshotStore(0)
@@ -342,6 +478,8 @@ export function registerUsagePill(
       },
       readUsage: readers?.readUsage ?? fallbackUsage,
       readAccountUsage,
+      ...(readModels ? { readModels } : {}),
+      ...(catalog ? { catalog } : {}),
       readAnalytics: readers?.readAnalytics ?? unavailableAnalytics,
       exportAnalytics: readers?.exportAnalytics ?? unavailableExport,
       // The page may have been withdrawn since this face was built: report the
@@ -354,7 +492,7 @@ export function registerUsagePill(
         },
       } : {}),
       getLocale: () => ready.locale.getLocale().active,
-      t: (key: string) => translate(key as OpencodeGoKey),
+      t: (key: string, params?: Record<string, unknown>) => translate(key as OpencodeGoKey, params),
     })
     ready.slots.inject('sidebar.footer.action', () => ready.slots.register({
       name: 'sidebar.footer.action', id: 'opencode-go-sidebar-quota', order: 1000,

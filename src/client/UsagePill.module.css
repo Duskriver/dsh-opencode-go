@@ -17,6 +17,9 @@
 .unit { color: var(--go-muted); }
 .sep { color: var(--go-muted); }
 .stale, .fallback { color: var(--go-warning); font-size: 11px; }
+.monthAlert { flex: none; font-family: var(--go-number-font); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: 500; }
+.monthAlert[data-level='high'] { color: var(--go-warning); }
+.monthAlert[data-level='limited'] { color: var(--go-danger); }
 .account { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--go-muted); }
 .limitMark { margin-left: 2px; font-weight: 600; color: var(--go-danger); }
 
@@ -91,7 +94,8 @@
 .panel:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
 .material { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--go-surface); pointer-events: none; }
 .body { display: flex; flex: 1; flex-direction: column; gap: 0; min-height: 0; box-sizing: border-box;
-  padding: 10px 16px 14px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--go-border) transparent; }
+  padding: 10px 16px 14px; overflow-y: auto; overscroll-behavior: contain; --scrollbar-thumb: var(--go-border-strong); --scrollbar-track: transparent; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+.body:hover { --scrollbar-thumb: var(--go-muted); }
 .panelHead { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0;
   color: var(--go-text); }
 .panelHead strong { font-family: var(--go-display-font); font-size: 15px; font-weight: 600; letter-spacing: 0; line-height: 21px; color: var(--go-text); }
@@ -132,6 +136,16 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .progressRolling, .progressWeekly, .progressMonthly { --go-progress: var(--go-accent); }
 .limitedText { font-size: 10px; line-height: 14px; color: var(--go-danger); }
 
+.modelSection { flex: none; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--go-border); }
+.modelEstimateRow { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; line-height: 16px; }
+.modelEstimateName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--go-text); }
+.modelEstimateRow[data-active] .modelEstimateName { color: var(--go-accent); font-weight: 500; }
+.modelEstimatePeak, .modelEstimateOffPeak { flex: none; padding: 0 4px; border-radius: var(--go-radius-small); font-size: 10px; font-weight: 500; cursor: help; }
+.modelEstimatePeak { background: color-mix(in srgb, var(--go-warning) 14%, transparent); color: var(--go-warning); }
+.modelEstimateOffPeak { background: color-mix(in srgb, var(--go-success) 14%, transparent); color: var(--go-success); }
+.modelEstimateVal { flex: none; font-family: var(--go-number-font); font-variant-numeric: tabular-nums; color: var(--go-muted); }
+.modelBottleneck { margin-top: 3px; font-size: 10.5px; line-height: 1.4; color: var(--go-muted); text-align: right; }
+
 .actions { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 8px;
   font-size: 11px; line-height: 17px; color: var(--go-muted); }
 .actions .hist { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: -4px; padding: 2px 4px;
@@ -161,6 +175,10 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .option:disabled { opacity: .5; cursor: default; }
 .option:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: -2px; }
 .optionName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.optionQuota { flex: none; font-family: var(--go-number-font); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--go-muted); white-space: nowrap; }
+.optionQuota[data-level='high'] { color: var(--go-warning); }
+.optionQuota[data-level='limited'] { color: var(--go-danger); font-weight: 500; }
+.optionQuotaFailed { flex: none; font-size: 10.5px; color: var(--go-muted); opacity: .75; white-space: nowrap; }
 .option[data-selected] .optionName { font-weight: 500; }
 .hint { margin: 10px 0 4px; color: var(--go-muted); font-size: 12px; line-height: 18px; }
 .warning { margin: 8px 0; padding: 8px 10px; border-left: 2px solid var(--go-warning); border-radius: 0 var(--go-radius-small) var(--go-radius-small) 0;
@@ -178,11 +196,25 @@ button.accChip:disabled { opacity: .5; cursor: default; }
 .sidebarCard { display: flex; flex-direction: column; align-items: stretch; gap: 11px; width: 100%; min-width: 0; padding: 14px 12px 6px; border-radius: var(--go-radius-card); text-align: left; }
 .sidebarHead { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 1px; }
 .sidebarHead > strong { flex: none; font-family: var(--go-display-font); font-size: 15px; font-weight: var(--go-display-weight); white-space: nowrap; letter-spacing: var(--go-display-tracking); }
-.sidebarBadge { min-width: 0; margin-left: auto; padding: 1px 5px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small);
+.sidebarHeadRight { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+.sidebarBadge { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 1px 5px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small);
   background: transparent; color: var(--go-muted); font-size: 11px; line-height: 1.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebarBadgeText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cycleIcon { flex: none; width: 11px; height: 11px; opacity: .75; }
 .sidebarAccountButton { font-family: inherit; cursor: pointer; }
 .sidebarAccountButton:hover { color: var(--go-accent); border-color: var(--go-accent); }
 .sidebarAccountButton:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 2px; }
+.sidebarRefresh { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--go-radius-small); background: transparent; color: var(--go-muted); cursor: pointer; }
+.sidebarRefresh:hover:not(:disabled) { color: var(--go-text); background: var(--go-surface-2); }
+.sidebarRefresh:disabled { opacity: .45; cursor: default; }
+.sidebarRefresh:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 1px; }
+.sidebarRefresh .icon { width: 12px; height: 12px; }
+.sidebarPreviewRow { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: -4px; font-size: 10.5px; }
+.sidebarPreviewTag { padding: 1px 5px; border-radius: var(--go-radius-small); background: color-mix(in srgb, var(--go-warning) 14%, transparent); color: var(--go-warning); font-weight: 500; }
+.sidebarUseBtn { padding: 1px 6px; border: 1px solid var(--go-border); border-radius: var(--go-radius-small); background: transparent; color: var(--go-accent); font: inherit; font-size: 10.5px; cursor: pointer; }
+.sidebarUseBtn:hover:not(:disabled) { border-color: var(--go-accent); background: var(--go-accent-soft); }
+.sidebarUseBtn:disabled { opacity: .5; cursor: default; }
+.sidebarUseBtn:focus-visible { outline: var(--go-focus-width) solid var(--go-accent); outline-offset: 1px; }
 .sidebarWindow { display: grid; grid-template-columns: 44px minmax(0, 1fr) 36px; align-items: center; gap: 7px; font-size: 11px; line-height: 1.5; }
 .sidebarWindow > span { color: var(--go-muted); white-space: nowrap; }
 .sidebarWindow > strong { text-align: right; font-family: var(--go-number-font); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }

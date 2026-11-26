@@ -35,10 +35,26 @@ export interface AttemptOutcome {
 }
 /** Switching accounts must never replay output, charged work or model permission failures. */
 export declare function accountFallback(outcome: AttemptOutcome): GoAccountSwitch['reason'] | undefined;
+/** Default key cooldown (5 minutes) for quota exhaustion and rejected credentials. */
+export declare const REJECTED_KEY_TTL_MS: number;
+/** Default key cooldown (15 seconds) for transient HTTP 429 rate limits without a Retry-After header. */
+export declare const DEFAULT_RATE_LIMIT_KEY_TTL_MS = 15000;
+/** Minimum key cooldown for transient HTTP 429 rate limits. */
+export declare const MIN_RATE_LIMIT_KEY_TTL_MS = 1000;
 /** Only credential, rate and quota failures cool down a key; PERMISSION_DENIED is model-scoped. */
 export declare function isGatewayKeyRejection(failure: {
     code: string;
 }): boolean;
+/**
+ * Compute how long a gateway-rejected key should be cooled down before being
+ * retried. Credential and quota rejections use the 5-minute window; transient
+ * `RATE_LIMIT` failures honor `providerRetryAfterMs` (defaulting to 15s, bounded
+ * to `[1s, 5m]`).
+ */
+export declare function gatewayKeyRejectionTtlMs(failure: {
+    code: string;
+    providerRetryAfterMs?: number;
+}): number | undefined;
 type AccountCredentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>;
 /** One mount serializes account edits, credential writes and fallback promotion in memory. */
 export declare class GoAccountManager {

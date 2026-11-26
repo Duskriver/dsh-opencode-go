@@ -1,6 +1,7 @@
 /** Live profile configuration, validation and settings presentation. */
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-settings'
+import { RetryPolicySchema, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import {
   DEFAULT_MAX_REQUEST_IMAGE_BYTES,
@@ -14,15 +15,19 @@ import {
   DEFAULT_USAGE_PILL_STYLE,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_BORDER,
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   LEGACY_USAGE_PILL_STYLE,
   resolveUsagePillAppearance,
   type UsagePillStyle,
   DEFAULT_OPENCODE_GO_THEME,
   OPENCODE_GO_THEMES,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
   ACCOUNT_REF_PATTERN,
   DEFAULT_ACCOUNT_REF,
   MAX_ACCOUNTS,
   MAX_THINKING_BUDGET_TOKENS,
+  defaultGoRetryPolicy,
   type OpencodeGoConfig,
   PROFILE_ENTRY_ID,
   assertProxyURL,
@@ -56,10 +61,12 @@ const fields = {
   sidebarEntry: z.boolean().default(false),
   usageDisplay: z.union(USAGE_DISPLAY_MODES.map(mode => z.const(mode))).default(DEFAULT_USAGE_DISPLAY),
   showSidebarQuota: z.boolean().default(false),
+  showModelMultiplier: z.boolean().default(DEFAULT_SHOW_MODEL_MULTIPLIER),
   usagePillStyle: z.union([...USAGE_PILL_STYLES, LEGACY_USAGE_PILL_STYLE].map(style => z.const(style)))
     .default(DEFAULT_USAGE_PILL_STYLE) as unknown as z<UsagePillStyle>,
   usagePillBorder: z.boolean().default(DEFAULT_USAGE_PILL_BORDER),
   appearanceTheme: z.union(OPENCODE_GO_THEMES.map(theme => z.const(theme))).default(DEFAULT_OPENCODE_GO_THEME),
+  goPlan: z.union(GO_PLANS.map(plan => z.const(plan))).default(DEFAULT_GO_PLAN),
   modelVisibility: z.dict(z.boolean().required()).default({}),
   // A bare environment variable name: an empty string would otherwise pass the
   // schema, then never match any account (accountRefOf normalizes it away) and
@@ -68,6 +75,7 @@ const fields = {
   accounts: z.union([z.const(null), z.array(z.object({
     id: z.string().required(), name: z.string().required(),
     apiKeyEnv: z.string().role('credential-ref').pattern(ACCOUNT_REF_PATTERN).required(),
+    plan: z.union(GO_PLANS.map(plan => z.const(plan))),
   })).max(MAX_ACCOUNTS)]).default(null),
   autoSwitch: z.boolean().default(false),
   balanceAccounts: z.boolean().default(false),
@@ -80,6 +88,7 @@ const fields = {
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   requestPreparationTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_REQUEST_PREPARATION_TIMEOUT_MS),
   requestTimeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(DEFAULT_REQUEST_TIMEOUT_MS),
+  retryPolicy: RetryPolicySchema.default(defaultGoRetryPolicy()),
   maxImages: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
   // The image defaults are the generic pi-ai adapter's: one normalized
   // request image fits the budget, and fifteen of them fit the payload cap.
@@ -220,6 +229,9 @@ export function validateGoConfig(value: OpencodeGoConfig): void {
   // Pure endpoint/path validation only: no filesystem read, and an empty key
   // path keeps its home-relative default.
   if (value.privacyEnabled === true) assertPrivacyEndpoint(value.privacyEndpoint ?? DEFAULT_PRIVACY_ENDPOINT)
+  if (value.retryPolicy !== undefined) {
+    resolveRetryPolicy(value.retryPolicy, 'llm-opencode-go.retryPolicy')
+  }
 }
 
 /** DSH profile forms edit the plugin's live Config fields directly. */

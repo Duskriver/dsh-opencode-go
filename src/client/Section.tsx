@@ -13,6 +13,8 @@ import {
 import {
   type en,
   formatDateTime,
+  formatTokenCount,
+  formatTokenPrice,
   GO_THEME_TOKENS,
   useGoThemeTokens,
   useHostScheme,
@@ -33,23 +35,50 @@ import type {
 } from './controller.ts'
 import { modelsForSource, NUMERIC_FIELD_LIMITS } from './controller.ts'
 import {
+  DEFAULT_BASE_URL,
+  DEFAULT_FREE_BASE_URL,
+  DEFAULT_RETRY_MODE,
+  DEFAULT_RETRY_MAX_RETRIES,
+  DEFAULT_RETRY_INITIAL_DELAY_MS,
+  DEFAULT_RETRY_MAX_DELAY_MS,
+  DEFAULT_MAX_REQUEST_IMAGE_BYTES,
+  DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
+  DEFAULT_REQUEST_IMAGE_MAX_BYTES,
   MAX_ACCOUNTS,
   MAX_THINKING_BUDGET_TOKENS,
   modelSettingsKey,
   FREE_PROVIDER_ID,
+  type ConnectionProbeInput,
+  type ConnectionProbeResult,
+  type ProbeEndpointResult,
   type ModelSource,
   INPUT_MODALITIES,
   isModelEnabled,
   isNewModel,
   sortModels,
   type GoModel,
+  type GoModelPrice,
   type InputModality,
+  DEFAULT_GO_PLAN,
+  GO_PLANS,
+  accountPlanOf,
+  type GoPlan,
   USAGE_DISPLAY_MODES,
   USAGE_PILL_STYLES,
   DEFAULT_USAGE_PILL_STYLE,
+  DEFAULT_SHOW_MODEL_MULTIPLIER,
   type UsagePillStyle,
   OPENCODE_GO_THEMES,
+  RETRY_MODES,
 } from '../contracts.ts'
+import {
+  estimateModelQuota,
+  isFreePrice,
+  QUOTA_WORKLOAD_PROFILES,
+  type ModelQuotaEstimate,
+  type QuotaWorkloadProfile,
+} from '../quota-estimate.ts'
+import { resolveModelMultiplierBadge, useScheduledTransitionClock } from './quota-badge.ts'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 
 export function HintMark(props: { hint: string }) {
@@ -156,12 +185,34 @@ function slotAt(container: HTMLElement, clientY: number): number {
  * the preferred account. Every row is read in the same pass, so the one refresh
  * stamp belongs to the card and sits in its header.
  */
-export function AccountsCard({ state, actions, writable, t, locale, addRequest = 0, defaultOpen = false, surface = 'settings' }: {
+function PlanSelector({ label, hint, value, disabled, t, onSelect }: {
+  label: string
+  hint: string
+  value: GoPlan
+  disabled: boolean
+  t: AccountTranslate
+  onSelect: (plan: GoPlan) => void
+}) {
+  return <div className={css.planRow}>
+    <span className={css.planMeta}>
+      <span>{label}</span>
+      <HintMark hint={hint} />
+    </span>
+    <div className={css.planSeg} role="group" aria-label={label}>
+      {GO_PLANS.map(option => <button key={option} type="button" className={css.planOption}
+        aria-pressed={value === option} disabled={disabled}
+        onClick={() => { onSelect(option) }}>{t(`goPlan_${option}`)}</button>)}
+    </div>
+  </div>
+}
+
+export function AccountsCard({ state, actions, writable, t, locale, fallbackPlan = DEFAULT_GO_PLAN, addRequest = 0, defaultOpen = false, surface = 'settings' }: {
   state: GoAccountsState
   actions: GoAccountsActions
   writable: boolean
   t: AccountTranslate
   locale?: string
+  fallbackPlan?: GoPlan
   /**
    * Rising counter from a page-level "Add account" action. The page owns the
    * button, the card owns the editor: asking through a counter keeps one add
@@ -173,19 +224,30 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
   /** Settings keeps the hairline card; the console page draws a real card. */
   surface?: 'settings' | 'page'
 }) {
-  const [open, setOpen] = useState(defaultOpen)
-  const [details, setDetails] = useState<string | null>(null)
+  const collapsible = surface !== 'page'
+  const [open, setOpen] = useState(defaultOpen || !collapsible)
+  const [expandedRefs, setExpandedRefs] = useState<ReadonlySet<string>>(() => new Set())
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [name, setName] = useState('')
   const [key, setKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [addPlan, setAddPlan] = useState<GoPlan>(DEFAULT_GO_PLAN)
   const disabled = state.busy || state.blocked || !writable
   const total = state.entries.length
   const ready = state.entries.filter(entry => entry.configured === true).length
   const unreadable = state.entries.filter(entry => entry.failed === true).length
   const preferred = state.entries.find(entry => entry.apiKeyEnv === state.activeRef)
   const reorderable = !disabled && total > 1
+  const toggleDetails = (ref: string): void => {
+    setExpandedRefs(previous => {
+      const next = new Set(previous)
+      if (next.has(ref)) next.delete(ref)
+      else next.add(ref)
+      return next
+    })
+  }
   /** Row the drag started on, or -1 while nothing is being dragged. */
   const draggingFrom = dragging === null ? -1 : state.entries.findIndex(entry => entry.apiKeyEnv === dragging)
   /** A slot at the dragged row's own position changes nothing: no mark, and no write. */
@@ -212,11 +274,11 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
   }, [actions.loadAccounts])
   const start = (next: Editor, label = '') => {
     if (next.kind === 'add') actions.resetAddition?.()
-    setEditor(next); setName(label); setKey('')
+    setEditor(next); setName(label); setKey(''); setShowKey(false); setAddPlan(DEFAULT_GO_PLAN)
   }
   const cancel = () => {
     if (editor?.kind === 'add') actions.resetAddition?.()
-    setEditor(null); setName(''); setKey('')
+    setEditor(null); setName(''); setKey(''); setShowKey(false); setAddPlan(DEFAULT_GO_PLAN)
   }
   // A page-level toolbar can carry the add action while the editor below stays
   // the one in the card. Comparing against the previous request keeps a re-render
@@ -245,7 +307,8 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
   }, [state.entries, dragging])
   const submit = async () => {
     if (!editor) return
-    const accepted = editor.kind === 'add' ? await actions.addAccount(name, key)
+    const accepted = editor.kind === 'add'
+      ? (addPlan !== DEFAULT_GO_PLAN ? await actions.addAccount(name, key, addPlan) : await actions.addAccount(name, key))
       : editor.kind === 'rename' ? await actions.renameAccount(editor.ref!, name)
         : editor.kind === 'key' ? await actions.replaceAccountKey(editor.ref!, key)
           : await actions.removeAccount(editor.ref!)
@@ -271,22 +334,46 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
         onChange={event => { setName(event.target.value) }} />
     </label> : null}
     {editor.kind === 'add' || editor.kind === 'key' ? <><label className={css.accountField}>{t('keyLabel')}
-      <input className={css.input} type="password" autoComplete="off" value={key} required disabled={state.busy} autoFocus
-        onChange={event => { setKey(event.target.value) }} />
+      <span className={css.keyInputWrap}>
+        <input className={css.input} type={showKey ? 'text' : 'password'} autoComplete="off" value={key} required disabled={state.busy}
+          autoFocus={editor.kind === 'key'}
+          onChange={event => { setKey(event.target.value) }} />
+        <button type="button" className={css.keyToggle} disabled={state.busy}
+          aria-pressed={showKey}
+          aria-label={t(showKey ? 'accountKeyHide' : 'accountKeyShow')}
+          title={t(showKey ? 'accountKeyHide' : 'accountKeyShow')}
+          onClick={() => { setShowKey(previous => !previous) }}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {showKey
+              ? <><path d="M2 2l12 12" /><path d="M6.4 6.5a2.3 2.3 0 0 0 3.1 3.1" /><path d="M4.2 4.6C2.8 5.5 1.8 6.8 1.5 8c.9 2.4 3.5 4 6.5 4 1.1 0 2.2-.2 3.1-.7" /><path d="M7 4.1c.3 0 .7-.1 1-.1 3 0 5.6 1.6 6.5 4-.3.8-.9 1.6-1.6 2.2" /></>
+              : <><path d="M1.5 8c.9-2.4 3.5-4 6.5-4s5.6 1.6 6.5 4c-.9 2.4-3.5 4-6.5 4s-5.6-1.6-6.5-4Z" /><circle cx="8" cy="8" r="2.1" /></>}
+          </svg>
+        </button>
+      </span>
     </label><p className={css.hint}>{t('accountKeyHint')}</p></> : null}
+    {editor.kind === 'add' ? <PlanSelector
+      label={t('goPlanLabel')}
+      hint={t('goPlanHint')}
+      value={addPlan}
+      disabled={state.busy}
+      t={t}
+      onSelect={setAddPlan}
+    /> : null}
     <div className={css.accountEditorActions}>
       <Button variant="primary" size="sm" type="submit"
         disabled={editor.kind === 'key' ? state.busy || state.blocked : disabled}>{t(state.busy ? 'saving' : 'accountConfirm')}</Button>
       <Button variant="outline" size="sm" type="button" disabled={state.busy} onClick={cancel}>{t('accountCancel')}</Button>
     </div>
   </form> : null
-  const detail = (account: GoAccountView, label: string, index: number, isActive: boolean, panelId: string) =>
+  const detail = (account: GoAccountView, label: string, index: number, isActive: boolean, panelId: string, rowPlan: GoPlan) =>
     <div id={panelId} className={css.accountDetail} data-account-detail="">
       <div className={css.accountManageStrip} data-account-manage="">
         <span className={css.accountManageMeta}>
           {t(isActive ? 'accountManagePrimary' : 'accountManageBackup', { rank: index + 1 })}
         </span>
         <div className={css.accountActions}>
+          {!isActive ? <Button variant="primary" size="sm" disabled={disabled}
+            onClick={() => { void actions.selectAccount(account.apiKeyEnv) }}>{t('accountSetPrimary')}</Button> : null}
           <Button variant="outline" size="sm" disabled={disabled}
             onClick={() => { start({ kind: 'rename', ref: account.apiKeyEnv }, label) }}>{t('accountRename')}</Button>
           <Button variant="outline" size="sm" disabled={state.busy || state.blocked || account.writable === false}
@@ -295,6 +382,14 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
             onClick={() => { start({ kind: 'remove', ref: account.apiKeyEnv }, label) }}>{t('accountRemove')}</Button>
         </div>
       </div>
+      {actions.setAccountPlan ? <PlanSelector
+        label={t('goPlanLabel')}
+        hint={t('goPlanHint')}
+        value={rowPlan}
+        disabled={disabled}
+        t={t}
+        onSelect={plan => { void actions.setAccountPlan!(account.apiKeyEnv, plan) }}
+      /> : null}
       {account.usage ? <div className={css.accountUsage} data-account-quotas="">
         {WINDOWS.map(window => <div key={window} className={css.accountBentoTile}>
           <div className={css.accountBentoTop}>
@@ -312,22 +407,27 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
     </div>
   const cardClass = surface === 'page' ? css.cardPage + ' ' + css.accountsCard : open ? css.card : css.card + ' ' + css.cardFolded
   const foldTone = total === 0 ? 'neutral' : unreadable > 0 || ready < total ? 'warning' : 'success'
+  const headerContent = <>
+    <span className={css.cardTriggerRow}>
+      <span className={css.cardTitle}>{t('accountsTitle')}</span>
+      <span className={css.foldBadge} data-tone={foldTone}>
+        {total > 0 ? <span className={css.foldDot} aria-hidden="true" /> : null}
+        {total > 0 ? <span className={css.foldText}>
+          {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
+        </span> : null}
+        {collapsible ? <ChevronDown className={open ? css.chevronOpen : css.chevron} /> : null}
+      </span>
+    </span>
+    <span className={css.cardSub}>{summary}</span>
+  </>
   return <section className={cardClass}>
     <div className={css.cardHead + ' ' + css.accountsHead}>
-      <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
+      {collapsible ? <button type="button" className={css.cardTrigger} aria-expanded={open} aria-controls="opencode-go-accounts"
         onClick={() => { setOpen(!open) }}>
-        <span className={css.cardTriggerRow}>
-          <span className={css.cardTitle}>{t('accountsTitle')}</span>
-          <span className={css.foldBadge} data-tone={foldTone}>
-            {total > 0 ? <span className={css.foldDot} aria-hidden="true" /> : null}
-            {total > 0 ? <span className={css.foldText}>
-              {t(unreadable > 0 ? 'accountsAvailabilityFailed' : 'accountsAvailability', { ready, total, failed: unreadable })}
-            </span> : null}
-            <ChevronDown className={open ? css.chevronOpen : css.chevron} />
-          </span>
-        </span>
-        <span className={css.cardSub}>{summary}</span>
-      </button>
+        {headerContent}
+      </button> : <div className={css.cardTriggerStatic}>
+        {headerContent}
+      </div>}
       <span className={css.trailing}>
         {updatedAt > 0 ? <span className={css.cardStamp} title={formatDateTime(updatedAt, locale)}>
           {t('usageLastUpdated')} {stampText(updatedAt, locale)}
@@ -381,9 +481,10 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
         {state.entries.map((account, index) => {
           const label = account.name || t('accountDefault')
           const rolling = account.usage?.rolling
-          const expanded = details === account.apiKeyEnv
+          const expanded = expandedRefs.has(account.apiKeyEnv)
           const panelId = `opencode-go-account-${index}`
           const isActive = state.activeRef ? account.apiKeyEnv === state.activeRef : index === 0
+          const rowPlan = accountPlanOf(account, isActive || total === 1 ? fallbackPlan : DEFAULT_GO_PLAN)
           return <Fragment key={account.id}>
             <div className={css.accountRow} data-account-row={account.apiKeyEnv}
               data-active={isActive ? 'true' : undefined}
@@ -406,7 +507,12 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
                 }
                 setDragging(account.apiKeyEnv)
               }}>
-              <div className={css.accountMain} data-account-main="">
+              <div className={css.accountMain} data-account-main=""
+                onClick={event => {
+                  const target = event.target as HTMLElement | null
+                  if (target?.closest('button, input, a, select, textarea, [data-account-handle]')) return
+                  toggleDetails(account.apiKeyEnv)
+                }}>
                 <div className={css.accountLead}>
                   <button type="button" className={css.accountHandle} data-account-handle="" draggable={reorderable}
                     disabled={!reorderable} title={t('accountDragHandle', { name: label })}
@@ -426,6 +532,7 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
                       <span className={css.accountDot} data-off={account.configured === false ? 'true' : undefined} />
                       {account.configured === undefined ? t(account.failed ? 'accountsStatusUnknown' : 'usageLoading') : account.configured ? t('keyConfigured') : t('keyMissing')}
                     </span>
+                    <span className={css.accountPlanBadge}>{t(`goPlan_${rowPlan}`)}</span>
                   </div>
                 </div>
                 <div className={css.accountTail}>
@@ -435,7 +542,7 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
                     ? t('accountConfigureHint') : t(account.loading ? 'usageLoading' : 'usageUnavailable')}</span>) : null}
                   <button type="button" className={css.accountToggle} aria-expanded={expanded} aria-controls={panelId}
                     aria-label={t(expanded ? 'accountsDetailsHide' : 'accountsDetails', { name: label })}
-                    onClick={() => { setDetails(expanded ? null : account.apiKeyEnv) }}>
+                    onClick={() => { toggleDetails(account.apiKeyEnv) }}>
                     <ChevronDown className={expanded ? css.chevronOpen : css.chevron} />
                   </button>
                 </div>
@@ -450,7 +557,7 @@ export function AccountsCard({ state, actions, writable, t, locale, addRequest =
                 <button type="button" className={css.accountRetry} disabled={state.refreshing}
                   onClick={actions.loadAccounts}>{t('usageRetry')}</button>
               </div> : null}
-              {expanded ? detail(account, label, index, isActive, panelId) : null}
+              {expanded ? detail(account, label, index, isActive, panelId, rowPlan) : null}
               {editor?.ref === account.apiKeyEnv ? editorForm(label) : null}
             </div>
           </Fragment>
@@ -491,9 +598,18 @@ export function hasCapacityOverride(limit: OpencodeGoModelLimit | null | undefin
   return limit?.contextWindow != null || limit?.maxTokens != null || (limit?.thinkingBudgets?.length ?? 0) > 0
 }
 
+type ModelSortMode = 'default' | 'multiplier' | 'context' | 'release'
+
+interface BatchUndoState {
+  keys: readonly string[]
+  restoreTo: boolean
+  action: 'enable' | 'disable'
+  count: number
+}
+
 /** Every control here applies immediately; the editor only stages what the
  *  reader is still typing (Capacity commits a settled value). */
-export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled }: {
+export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, locale, disabled, visibilitySaving, onEdit, onModelEnabled, plan = DEFAULT_GO_PLAN }: {
   source?: ModelSource
   models: OpencodeGoModels
   draft: OpencodeGoModelLimits
@@ -504,42 +620,82 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
   visibilitySaving: boolean
   onEdit: (next: OpencodeGoModelLimits) => void
   onModelEnabled: (id: string | readonly string[], enabled: boolean) => void
+  plan?: GoPlan
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
+  const [sortMode, setSortMode] = useState<ModelSortMode>('default')
+  const [batchUndo, setBatchUndo] = useState<BatchUndoState | null>(null)
   const [selected, setSelected] = useState<string>()
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    const update = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      setNow(Date.now())
-    }
-    const timer = setInterval(update, 3_600_000)
-    document.addEventListener('visibilitychange', update)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', update)
-    }
-  }, [])
   // Saved overrides never establish membership: only a successful gateway listing does.
   const modelEntries = models.status === 'ready' ? models.entries : undefined
+  const schedules = useMemo(
+    () => (modelEntries ?? []).map(entry => entry.pricingMultipliers),
+    [modelEntries],
+  )
+  const now = useScheduledTransitionClock(schedules, true)
   const all = useMemo(() => sortModels(modelEntries ?? [], now), [modelEntries, now])
   const normalized = query.trim().toLocaleLowerCase()
   const customized = useMemo(() => all.filter(entry => hasCapacityOverride(draft[modelSettingsKey(entry)])).length, [all, draft])
+  const enabledCount = useMemo(() => all.filter(entry => isModelEnabled(entry, modelVisibility)).length, [all, modelVisibility])
   const ownKeys = Object.keys(draft).filter(key => key.startsWith(`${FREE_PROVIDER_ID}/`) === (source === 'free'))
   const filters = useMemo(() => [
     ['all', 'filterAll', all.length],
+    ['enabled', 'filterEnabled', enabledCount],
+    ['disabled', 'filterDisabled', all.length - enabledCount],
     ['new', 'filterNew', all.filter(entry => isNewModel(entry, now)).length],
     ['custom', 'filterCustom', customized],
     ['deprecated', 'filterDeprecated', all.filter(entry => entry.deprecated).length],
-  ] as const, [all, now, customized])
-  const entries = useMemo(() => all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
-    && (filter === 'all' || filter === 'new' && isNewModel(model, now)
-      || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)]) || filter === 'deprecated' && model.deprecated)), [all, normalized, filter, now, draft])
+  ] as const, [all, enabledCount, now, customized])
+  const entries = useMemo(() => {
+    const filtered = all.filter(model => `${model.name ?? ''} ${model.id}`.toLocaleLowerCase().includes(normalized)
+      && (filter === 'all'
+        || filter === 'enabled' && isModelEnabled(model, modelVisibility)
+        || filter === 'disabled' && !isModelEnabled(model, modelVisibility)
+        || filter === 'new' && isNewModel(model, now)
+        || filter === 'custom' && hasCapacityOverride(draft[modelSettingsKey(model)])
+        || filter === 'deprecated' && model.deprecated))
+    if (sortMode === 'default') return filtered
+    if (sortMode === 'context') {
+      return [...filtered].sort((a, b) => {
+        const ca = draft[modelSettingsKey(a)]?.contextWindow ?? a.contextWindow ?? 0
+        const cb = draft[modelSettingsKey(b)]?.contextWindow ?? b.contextWindow ?? 0
+        return cb - ca
+      })
+    }
+    if (sortMode === 'release') {
+      return [...filtered].sort((a, b) => (b.releaseDate ?? '').localeCompare(a.releaseDate ?? ''))
+    }
+    const rateOf = (entry: GoModel): number => {
+      const est = estimateModelQuota({ model: entry, plan, nowMs: now })
+      if (!est) return Number.POSITIVE_INFINITY
+      return est.kind === 'free' ? 0 : est.quotaMultiplier
+    }
+    return [...filtered].sort((a, b) => rateOf(a) - rateOf(b))
+  }, [all, normalized, filter, sortMode, now, draft, modelVisibility, plan])
   const toggleable = useMemo(() => entries.filter(entry => !entry.configurationMissing), [entries])
-  const canEnableAll = toggleable.some(entry => !isModelEnabled(entry, modelVisibility))
-  const canDisableAll = toggleable.some(entry => isModelEnabled(entry, modelVisibility))
+  const enableTargets = useMemo(() => toggleable.filter(entry => !isModelEnabled(entry, modelVisibility)), [toggleable, modelVisibility])
+  const disableTargets = useMemo(() => toggleable.filter(entry => isModelEnabled(entry, modelVisibility)), [toggleable, modelVisibility])
+  const canEnableAll = enableTargets.length > 0
+  const canDisableAll = disableTargets.length > 0
   const model = entries.find(entry => entry.id === selected) ?? entries[0]
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const detailsRef = useRef<HTMLElement | null>(null)
+  const selectedModelId = model?.id
+  useEffect(() => {
+    if (listRef.current && listRef.current.scrollTop > 0) {
+      listRef.current.scrollTop = 0
+    }
+  }, [filter, sortMode, normalized])
+  useEffect(() => {
+    if (detailsRef.current && detailsRef.current.scrollTop > 0) {
+      detailsRef.current.scrollTop = 0
+    }
+  }, [selectedModelId])
+  const selectedBaseEstimate = useMemo(
+    () => model ? estimateModelQuota({ model, plan, nowMs: now }) : undefined,
+    [model, plan, now],
+  )
   const visibilityDisabled = disabled || visibilitySaving
   const write = (id: string, field: keyof OpencodeGoModelLimit, value: number | number[] | undefined): void => {
     const current = draft[id] === null ? { contextWindow: null, maxTokens: null, thinkingBudgets: null } : draft[id] ?? {}
@@ -556,6 +712,13 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
         <label className={css.visuallyHidden} htmlFor="opencode-go-model-filter">{t('limitsFilterLabel')}</label>
         <input id="opencode-go-model-filter" className={css.input} type="search" autoComplete="off"
           placeholder={t('limitsFilterPlaceholder')} value={query} onChange={event => { setQuery(event.target.value) }} />
+        <select className={css.sortSelect} aria-label={t('modelSortLabel')} value={sortMode}
+          onChange={event => { setSortMode(event.target.value as ModelSortMode) }}>
+          <option value="default">{t('modelSortDefault')}</option>
+          {source === 'go' ? <option value="multiplier">{t('modelSortMultiplier')}</option> : null}
+          <option value="context">{t('modelSortContext')}</option>
+          <option value="release">{t('modelSortRelease')}</option>
+        </select>
         <div className={css.filters} role="group" aria-label={t('filterLabel')}>
           {filters.map(([key, label, count]) => <button key={key} type="button" className={css.filter}
             aria-pressed={filter === key} onClick={() => { setFilter(key) }}>{t(label)} <span>{count}</span></button>)}
@@ -564,36 +727,68 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
       <div className={css.modelSubbar}>
         <p className={css.modelHelp}>{t('visibilityHint')}</p>
         <div className={css.modelBatchActions}>
-          <Button variant="outline" size="sm" disabled={visibilityDisabled || !canEnableAll}
-            onClick={() => { onModelEnabled(toggleable.map(modelSettingsKey), true) }}>{t('modelsEnableAll')}</Button>
-          <Button variant="outline" size="sm" disabled={visibilityDisabled || !canDisableAll}
-            onClick={() => { onModelEnabled(toggleable.map(modelSettingsKey), false) }}>{t('modelsDisableAll')}</Button>
+          <Button variant="outline" size="sm" aria-label={t('modelsEnableAll')} disabled={visibilityDisabled || !canEnableAll}
+            onClick={() => {
+              const changed = enableTargets.map(modelSettingsKey)
+              onModelEnabled(toggleable.map(modelSettingsKey), true)
+              if (changed.length > 0) setBatchUndo({ keys: changed, restoreTo: false, action: 'enable', count: changed.length })
+            }}>
+            {t('modelsEnableAll')}{enableTargets.length > 0 ? <span className={css.batchCount} aria-hidden="true"> ({enableTargets.length})</span> : null}
+          </Button>
+          <Button variant="outline" size="sm" aria-label={t('modelsDisableAll')} disabled={visibilityDisabled || !canDisableAll}
+            onClick={() => {
+              const changed = disableTargets.map(modelSettingsKey)
+              onModelEnabled(toggleable.map(modelSettingsKey), false)
+              if (changed.length > 0) setBatchUndo({ keys: changed, restoreTo: true, action: 'disable', count: changed.length })
+            }}>
+            {t('modelsDisableAll')}{disableTargets.length > 0 ? <span className={css.batchCount} aria-hidden="true"> ({disableTargets.length})</span> : null}
+          </Button>
         </div>
       </div>
+      {batchUndo ? <div className={css.batchUndo} role="status">
+        <span>{t(batchUndo.action === 'enable' ? 'modelsBatchEnabled' : 'modelsBatchDisabled', { count: batchUndo.count })}</span>
+        <div className={css.batchUndoActions}>
+          <button type="button" className={css.batchUndoBtn} disabled={visibilityDisabled}
+            onClick={() => { onModelEnabled(batchUndo.keys, batchUndo.restoreTo); setBatchUndo(null) }}>
+            {t('modelsBatchUndo')}
+          </button>
+          <button type="button" className={css.batchDismissBtn} aria-label={t('modelsBatchDismiss')}
+            onClick={() => { setBatchUndo(null) }}>×</button>
+        </div>
+      </div> : null}
       {model ? (
         <div className={css.modelLayout}>
           {/* A group, not a <nav>: the model picker is not navigation, and any
               `nav button` styled by the host or a theme plugin would restyle
               every row control (issue #76). */}
-          <div className={css.modelList} role="group" aria-label={t('modelsLabel')}>
-            {entries.map(entry => <div key={entry.id}
-              className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
-              <button type="button" className={css.modelChoice}
-                aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
-                {/* The row carries the name and its badges only; the model id and
-                    the release date belong to the parameter card. */}
-                <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}
-                  {hasCapacityOverride(draft[modelSettingsKey(entry)])
-                    ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
-                    : null}
-                </span>
-              </button>
-              <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
-                checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
-                onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
-            </div>)}
+          <div ref={listRef} className={css.modelList} role="group" aria-label={t('modelsLabel')}>
+            {entries.map(entry => {
+              const multiplierBadge = source === 'go'
+                ? resolveModelMultiplierBadge({ model: entry, plan, t, locale, nowMs: now })
+                : undefined
+              return <div key={entry.id}
+                className={entry.id === model.id ? `${css.modelRow} ${css.modelRowSelected}` : css.modelRow}>
+                <button type="button" className={css.modelChoice}
+                  aria-pressed={entry.id === model.id} onClick={() => { setSelected(entry.id) }}>
+                  {/* The row carries the name and its badges only; the model id and
+                      the release date belong to the parameter card. */}
+                  <span className={css.modelName}>{entry.name ?? entry.id} {badges(entry)}
+                    {hasCapacityOverride(draft[modelSettingsKey(entry)])
+                      ? <span className={css.overrideDot} title={t('overridden')} aria-hidden="true" />
+                      : null}
+                  </span>{' '}
+                  {multiplierBadge ? <Tooltip label={multiplierBadge.title} side="left" maxWidth={280}>
+                    <span className={css.modelMultiplier} data-tone={multiplierBadge.tone}
+                      title={multiplierBadge.title}>{multiplierBadge.text}</span>
+                  </Tooltip> : null}
+                </button>
+                <Switch label={t('modelVisibleLabel', { name: entry.name ?? entry.id })}
+                  checked={isModelEnabled(entry, modelVisibility)} disabled={visibilityDisabled || entry.configurationMissing}
+                  onChange={enabled => { onModelEnabled(modelSettingsKey(entry), enabled) }} />
+              </div>
+            })}
           </div>
-          <section className={css.modelDetails} aria-label={t('modelDetails')}>
+          <section ref={detailsRef} className={css.modelDetails} aria-label={t('modelDetails')}>
             <div className={css.modelHeading}>
               <h3>{model.name ?? model.id}</h3>
               {badges(model)}
@@ -615,17 +810,22 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
                   <span className={css.statLabel}>{t('modalityLabel')}</span>
                   <Modalities model={model} t={t} />
                 </div>
+                {selectedBaseEstimate?.kind === 'go' ? <div className={css.stat}>
+                  <span className={css.statLabel}>{t('quotaEstimateLabel')}</span>
+                  <QuotaEstimateDetails model={model} plan={plan} now={now} t={t} locale={locale} />
+                </div> : null}
+                <div className={css.stat}>
+                  <span className={css.statLabel}>{t('priceLabel')}</span>
+                  <PriceDetails price={model.price} t={t} locale={locale} />
+                </div>
               </div>
               {model.reasoningBudget ? <BudgetPresets key={model.id} model={model} limit={draft[modelSettingsKey(model)]}
                 t={t} locale={locale} disabled={disabled} onChange={values => { write(modelSettingsKey(model), 'thinkingBudgets', values) }} /> : null}
               {hasCapacityOverride(draft[modelSettingsKey(model)]) ? <button type="button" className={css.reset} disabled={disabled}
                 onClick={() => { onEdit({ ...draft, [modelSettingsKey(model)]: null }) }}>{t('limitsResetModel')}</button> : null}
-              <p className={css.paneFoot}>
-                {t('limitsHint')} {t('modalitiesSource')}
-                {/* Only models declaring more than text and images need the caveat. */}
-                {model.inputModalities?.some(modality => modality !== 'text' && modality !== 'image') === true
-                  ? ` ${t('modalitiesForwarding')}` : ''}
-              </p>
+              {/* Only models declaring more than text and images need the caveat. */}
+              {model.inputModalities?.some(modality => modality !== 'text' && modality !== 'image') === true
+                ? <p className={css.paneFoot}>{t('modalitiesForwarding')}</p> : null}
             </>}
           </section>
         </div>
@@ -642,18 +842,134 @@ export function ModelEditor({ source = 'go', models, draft, modelVisibility, t, 
 }
 
 /**
- * Declared input modalities as chips, in catalog order. An undeclared modality
- * stays visible but dashed: the model simply does not accept that input.
+ * Declared input modalities as chips, in catalog order:
+ * - Forwarded by this plugin (`text`, `image`): solid surface
+ * - Declared upstream but not forwarded (`audio`, `video`, `pdf`): muted warning style + tooltip
+ * - Undeclared: dashed neutral chip
  */
 function Modalities({ model, t }: { model: GoModel; t: ModelTranslate }) {
   const declared = model.inputModalities
   if (declared === undefined || declared.length === 0) return <span className={css.hint}>{t('modalityUnknown')}</span>
   return <span className={css.modalities}>
-    {INPUT_MODALITIES.map(modality => <span key={modality}
-      className={declared.includes(modality) ? css.modality : css.modalityOff}>
-      {t(MODALITY_COPY[modality])}
-    </span>)}
+    {INPUT_MODALITIES.map(modality => {
+      const supported = declared.includes(modality)
+      const forwarded = modality === 'text' || modality === 'image'
+      if (supported && !forwarded) {
+        return <Tooltip key={modality} label={t('modalityUpstreamHint')} side="bottom" maxWidth={260}>
+          <span className={css.modalityUpstream} data-state="upstream" tabIndex={0}>
+            {t(MODALITY_COPY[modality])}
+          </span>
+        </Tooltip>
+      }
+      return <span key={modality}
+        className={supported ? css.modality : css.modalityOff}
+        data-state={supported ? 'forwarded' : 'unsupported'}>
+        {t(MODALITY_COPY[modality])}
+      </span>
+    })}
   </span>
+}
+
+/**
+ * One labeled rate list; zero cache rates stay out of the sentence.
+ * @param rates - the tariff or one of its context tiers.
+ * @param t - page translator.
+ * @param locale - active client locale for number formatting.
+ * @returns the rates as one line.
+ */
+function priceRates(rates: GoModelPrice, t: ModelTranslate, locale?: string): string {
+  const parts = [`${t('priceInput')} ${formatTokenPrice(rates.input, locale)}`,
+    `${t('priceOutput')} ${formatTokenPrice(rates.output, locale)}`]
+  if (rates.cacheRead > 0) parts.push(`${t('priceCacheRead')} ${formatTokenPrice(rates.cacheRead, locale)}`)
+  if (rates.cacheWrite > 0) parts.push(`${t('priceCacheWrite')} ${formatTokenPrice(rates.cacheWrite, locale)}`)
+  return parts.join(' · ')
+}
+
+function formatUsdCap(amount: number, locale?: string): string {
+  return Number.isInteger(amount) ? `$${formatTokenCount(amount, locale)}` : formatTokenPrice(amount, locale)
+}
+
+/** Full-capacity 5h / weekly / monthly estimated request specs with workload & plan comparison. */
+function QuotaEstimateDetails({ model, plan, now, t, locale }: {
+  model: GoModel
+  plan: GoPlan
+  now: number
+  t: ModelTranslate
+  locale?: string
+}) {
+  const [workload, setWorkload] = useState<QuotaWorkloadProfile>('coding')
+  const [previewPlan, setPreviewPlan] = useState<GoPlan | null>(null)
+  const effectivePlan = previewPlan ?? plan
+  const estimate = useMemo(
+    () => estimateModelQuota({ model, plan: effectivePlan, nowMs: now, profile: workload }),
+    [model, effectivePlan, now, workload],
+  )
+  if (!estimate || estimate.kind !== 'go') return null
+  const windows = [
+    ['usage_rolling', estimate.fullRequests.rolling],
+    ['usage_weekly', estimate.fullRequests.weekly],
+    ['usage_monthly', estimate.fullRequests.monthly],
+  ] as const
+  const basisNote = workload === 'chat'
+    ? t('quotaBasisNote_chat')
+    : workload === 'agent'
+      ? t('quotaBasisNote_agent')
+      : t('quotaBasisNote')
+  return <div className={css.quotaCard}>
+    <div className={css.quotaLead}>
+      <span className={css.quotaSecondary}>
+        {t('quotaPlanCap', {
+          plan: t(`goPlan_${estimate.plan}`),
+          monthly: formatUsdCap(estimate.monthlyUsd, locale),
+        })}
+      </span>
+      <div className={css.quotaPlanBar} role="group" aria-label={t('quotaPlanPreviewLabel')}>
+        {GO_PLANS.map(option => <button key={option} type="button" className={css.quotaChip}
+          aria-pressed={effectivePlan === option}
+          onClick={() => { setPreviewPlan(option === plan ? null : option) }}>
+          {t(`goPlan_${option}`)}
+        </button>)}
+      </div>
+    </div>
+    <div className={css.quotaProfileRow} role="group" aria-label={t('quotaProfileLabel')}>
+      {QUOTA_WORKLOAD_PROFILES.map(profile => <button key={profile} type="button" className={css.quotaProfileBtn}
+        aria-pressed={workload === profile}
+        onClick={() => { setWorkload(profile) }}>
+        {t(`quotaProfile_${profile}`)}
+      </button>)}
+    </div>
+    <div className={css.quotaGrid}>
+      {windows.map(([labelKey, count]) => (
+        <div key={labelKey} className={css.quotaCell}>
+          <span className={css.quotaCellLabel}>{t(labelKey)}</span>
+          <strong className={css.quotaCellValue}>
+            {t('quotaRequestCount', { count: formatTokenCount(count, locale) })}
+          </strong>
+        </div>
+      ))}
+    </div>
+    {estimate.peakFactor !== undefined ? (
+      <span className={css.quotaPeakNote}>
+        {estimate.peakFactor === 2
+          ? t('quotaPeakDoubleNote')
+          : t('quotaPeakFactorNote', { factor: estimate.peakFactor })}
+      </span>
+    ) : null}
+    <span className={css.priceNote}>{basisNote}</span>
+  </div>
+}
+
+/** The parameter card's tariff block: base rates, context tiers and the multiplier note. */
+function PriceDetails({ price, t, locale }: { price: GoModelPrice | undefined; t: ModelTranslate; locale?: string }) {
+  if (price === undefined) return <span className={css.priceNote}>{t('priceUnpublished')}</span>
+  if (isFreePrice(price)) return <span className={css.priceFree}>{t('priceFree')}</span>
+  return <>
+    <span className={css.priceLine}>{priceRates(price, t, locale)}</span>
+    {(price.tiers ?? []).map(tier => <span key={tier.inputTokensAbove} className={css.priceTier}>
+      {t('priceTier', { context: formatTokenCount(tier.inputTokensAbove, locale), rates: priceRates(tier, t, locale) })}
+    </span>)}
+    {price.multipliers ? <span className={css.priceNote}>{t('priceMultiplier')}</span> : null}
+  </>
 }
 
 /** How long typing must pause before a capacity field commits itself. */
@@ -682,6 +998,8 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
   const savedText = saved == null ? '' : String(saved)
   const [text, setText] = useState(savedText)
   const [editing, setEditing] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Adopt the saved value (or the newly shown model's value) unless the reader
   // is mid-edit: a stale buffer on a focused field would eat their next keystroke.
   const syncKey = `${model.id}:${field}:${savedText}`
@@ -691,6 +1009,17 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     synced.current = syncKey
     setText(savedText)
   }, [editing, syncKey, savedText])
+  useEffect(() => {
+    setSavedFlash(false)
+    return () => {
+      if (flashTimer.current !== undefined) clearTimeout(flashTimer.current)
+    }
+  }, [model.id, field])
+  const flashSaved = (): void => {
+    setSavedFlash(true)
+    if (flashTimer.current !== undefined) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => { setSavedFlash(false) }, 1_800)
+  }
   const invalid = text.trim() !== '' && !(Number.isSafeInteger(Number(text)) && Number(text) > 0)
   /** Write what the field holds, if it is writable; never throws the text away. */
   const commit = (): void => {
@@ -699,13 +1028,17 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     if (raw === '') {
       // Empty means "inherit the catalog value": it only writes when an override
       // is saved, so clearing an already empty field changes nothing.
-      if (saved != null) onChange(modelSettingsKey(model), field, undefined)
+      if (saved != null) {
+        onChange(modelSettingsKey(model), field, undefined)
+        flashSaved()
+      }
       return
     }
     const value = Number(raw)
     if (!Number.isSafeInteger(value) || value <= 0) return
     if (value === saved) { setText(String(value)); return }
     onChange(modelSettingsKey(model), field, value)
+    flashSaved()
   }
   // A pause in typing is a commit too: nothing else on this card blurs the field
   // for the reader, and the value must land without a Save gesture.
@@ -715,7 +1048,10 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     return () => { clearTimeout(timer) }
   }, [editing, text])
   return <div className={css.stat}>
-    <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
+    <div className={css.statLabelRow}>
+      <label className={css.statLabel} htmlFor={id}>{t(field === 'contextWindow' ? 'limitsContext' : 'limitsOutput')}</label>
+      {savedFlash ? <span className={css.savedBadge} role="status">✓ {t('capacitySaved')}</span> : null}
+    </div>
     <input id={id} className={css.input} type="number" min={1} max={field === 'maxTokens' ? model.maxTokens : undefined} step={1} inputMode="numeric"
       aria-label={t(field === 'contextWindow' ? 'limitsContextLabel' : 'limitsOutputLabel', { name: model.name ?? model.id })}
       aria-describedby={`${id}-default`} value={text}
@@ -732,6 +1068,14 @@ function Capacity({ model, field, limit, disabled, t, locale, onChange }: {
     </span>
   </div>
 }
+
+const QUICK_BUDGET_PRESETS = [
+  { tokens: 2048, label: '2K' },
+  { tokens: 4096, label: '4K' },
+  { tokens: 8192, label: '8K' },
+  { tokens: 16384, label: '16K' },
+  { tokens: 32768, label: '32K' },
+] as const
 
 function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
   model: GoModel
@@ -750,10 +1094,23 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
   const values = limit?.thinkingBudgets ?? []
   const tokens = Number(text)
   const valid = text.trim() !== '' && Number.isSafeInteger(tokens) && tokens >= range.min && tokens <= max
+  const quickChoices = QUICK_BUDGET_PRESETS.filter(item => item.tokens >= range.min && item.tokens <= max)
   const id = `opencode-go-thinking-budget-${encodeURIComponent(model.id)}`
   return <details className={css.budgetEditor}>
     <summary>{t('thinkingBudgets')}</summary>
     <p className={css.hint}>{t('thinkingBudgetsHint', { min: range.min.toLocaleString(locale), max: max.toLocaleString(locale) })}</p>
+    {quickChoices.length > 0 ? <div className={css.budgetQuickRow} role="group" aria-label={t('thinkingBudgetQuickLabel')}>
+      <span className={css.budgetQuickLabel}>{t('thinkingBudgetQuickLabel')}</span>
+      {quickChoices.map(item => {
+        const added = values.includes(item.tokens)
+        return <button key={item.tokens} type="button" className={css.budgetQuickChip}
+          aria-pressed={added}
+          disabled={disabled || added || values.length >= 16}
+          onClick={() => { onChange([...values, item.tokens].sort((a, b) => a - b)) }}>
+          +{item.label}
+        </button>
+      })}
+    </div> : null}
     <label className={css.statLabel} htmlFor={id}>{t('thinkingBudgetAddLabel', { name: model.name ?? model.id })}</label>
     <div className={css.budgetInput}>
       <input id={id} className={css.input} type="number" step={1} min={range.min} max={max} inputMode="numeric"
@@ -776,6 +1133,7 @@ function BudgetPresets({ model, limit, disabled, t, locale, onChange }: {
 const ADVANCED_FIELDS = [
   'baseURL', 'freeBaseURL', 'proxyURL',
   'refreshMinutes', 'streamIdleTimeoutMs', 'requestPreparationTimeoutMs', 'requestTimeoutMs',
+  'retryMode', 'retryMaxRetries', 'retryMaxDelayMs',
   'maxImages', 'maxRequestImageBytes', 'requestImagePixelBudget', 'requestImageMaxBytes',
 ] as const
 
@@ -795,7 +1153,7 @@ function numericBounds(field: TextField): { numeric: true; min?: number; max?: n
   }
 }
 
-const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'usagePillStyle', 'usagePillBorder'] as const
+const APPEARANCE_FIELDS = ['appearanceTheme', 'showSidebarQuota', 'showModelMultiplier', 'usagePillStyle', 'usagePillBorder'] as const
 /** The appearance tab also owns the quota display mode, so one reset covers that card. */
 const APPEARANCE_TAB_FIELDS = [...APPEARANCE_FIELDS, 'usageDisplay'] as const
 
@@ -808,6 +1166,108 @@ export type { OpencodeGoSectionState } from './controller.ts'
 /** Section copy lookup, including the optional `{name}` template params. */
 type SectionTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string
 
+/** Default advanced values mirrored from `src/config.ts` for browser-side default hints. */
+const ADVANCED_FIELD_DEFAULTS: Record<typeof ADVANCED_FIELDS[number], string> = {
+  baseURL: DEFAULT_BASE_URL,
+  freeBaseURL: DEFAULT_FREE_BASE_URL,
+  proxyURL: '',
+  refreshMinutes: '60',
+  streamIdleTimeoutMs: '300000',
+  requestPreparationTimeoutMs: '60000',
+  requestTimeoutMs: '1800000',
+  retryMode: DEFAULT_RETRY_MODE,
+  retryMaxRetries: String(DEFAULT_RETRY_MAX_RETRIES),
+  retryMaxDelayMs: String(DEFAULT_RETRY_MAX_DELAY_MS),
+  maxImages: '',
+  maxRequestImageBytes: String(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
+  requestImagePixelBudget: String(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
+  requestImageMaxBytes: String(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
+}
+
+function formatCompactNum(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '')
+}
+
+function formatAdvancedUnit(
+  field: typeof ADVANCED_FIELDS[number],
+  raw: string,
+  t: SectionTranslate,
+  locale?: string,
+): string | undefined {
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  if (field === 'refreshMinutes') {
+    if (n < 60) return t('advancedUnitMinutes', { value: formatCompactNum(n) })
+    if (n < 1440) return t('advancedUnitHours', { value: formatCompactNum(n / 60) })
+    return t('advancedUnitDays', { value: formatCompactNum(n / 1440) })
+  }
+  if (field === 'streamIdleTimeoutMs' || field === 'requestPreparationTimeoutMs'
+    || field === 'requestTimeoutMs' || field === 'retryMaxDelayMs') {
+    if (n < 1000) return undefined
+    if (n < 60_000) return t('advancedUnitSeconds', { value: formatCompactNum(n / 1000) })
+    if (n < 3_600_000) return t('advancedUnitMinutes', { value: formatCompactNum(n / 60_000) })
+    return t('advancedUnitHours', { value: formatCompactNum(n / 3_600_000) })
+  }
+  if (field === 'maxRequestImageBytes' || field === 'requestImageMaxBytes') {
+    if (n < 1024) return undefined
+    if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / 1_048_576).toFixed(1)} MB`
+  }
+  if (field === 'requestImagePixelBudget') {
+    if (n < 1_000_000) return `${formatTokenCount(Math.round(n), locale)} px`
+    const side = Math.round(Math.sqrt(n))
+    const mp = `${(n / 1_000_000).toFixed(1)} MP`
+    return side * side === n ? `${mp} (${side}×${side})` : mp
+  }
+  return undefined
+}
+
+function formatAdvancedDefault(
+  field: typeof ADVANCED_FIELDS[number],
+  t: SectionTranslate,
+  locale?: string,
+): string {
+  const raw = ADVANCED_FIELD_DEFAULTS[field]
+  if (!raw) return t('advancedDefaultEmpty')
+  if (field === 'retryMode') return t('advancedDefaultValue', { value: t(`retryMode_${DEFAULT_RETRY_MODE}`) })
+  if (field === 'baseURL' || field === 'freeBaseURL') return t('advancedDefaultValue', { value: raw })
+  const formatted = formatTokenCount(Number(raw), locale)
+  const unit = formatAdvancedUnit(field, raw, t, locale)
+  return t('advancedDefaultValue', { value: unit ? `${formatted} (${unit})` : formatted })
+}
+
+function invalidDetailFor(
+  field: typeof ADVANCED_FIELDS[number],
+  t: SectionTranslate,
+  locale?: string,
+): string | undefined {
+  if (field === 'proxyURL' || field === 'retryMode') return undefined
+  if (field === 'baseURL' || field === 'freeBaseURL') return t('invalidUrlDetail')
+  const limit = NUMERIC_FIELD_LIMITS[field]
+  if (!limit) return undefined
+  if (field === 'retryMaxDelayMs') {
+    return t('invalidRetryMaxDelayDetail', {
+      min: formatTokenCount(DEFAULT_RETRY_INITIAL_DELAY_MS, locale),
+      max: formatTokenCount(limit.max!, locale),
+    })
+  }
+  if (limit.integer) {
+    if (limit.max !== undefined && limit.max < Number.MAX_SAFE_INTEGER) {
+      return t('invalidIntRangeDetail', {
+        min: formatTokenCount(limit.min, locale),
+        max: formatTokenCount(limit.max, locale),
+      })
+    }
+    return t('invalidIntMinDetail', { min: formatTokenCount(limit.min, locale) })
+  }
+  return t('invalidNumberRangeDetail', {
+    min: '> 0',
+    max: formatTokenCount(limit.max!, locale),
+  })
+}
+
 /** Injected dependencies of {@link OpencodeGoSection} (slot `inject`). */
 export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
   /** Section copy. */
@@ -819,6 +1279,8 @@ export interface OpencodeGoSectionInjected extends OpencodeGoSectionFace {
    * never register the page simply leave the secondary button out.
    */
   openPage?: () => void
+  /** Safely probes gateway reachability from the Host without exposing credentials. */
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
 }
 
 /** Props delivered by the slot outlet: the inject face spread flat. */
@@ -830,6 +1292,12 @@ interface ValueFieldProps {
   hint: string
   field: OpencodeGoSectionState['baseURL']
   invalidLabel: string
+  invalidDetail?: string
+  unitHint?: string
+  defaultHint?: string
+  resetLabel?: string
+  resetAriaLabel?: string
+  onReset?: () => void
   disabled: boolean
   numeric?: boolean
   /** Browser-side bounds mirrored from the Host schema; only used for number inputs. */
@@ -856,80 +1324,111 @@ function ValueField(props: ValueFieldProps) {
   // is invalid: the alert announces the failure once, and this keeps the specific
   // sentence available on every later focus.
   const describedBy = props.field.invalid ? `${errorId} ${hintId}` : hintId
+  const hasMeta = Boolean(props.unitHint || props.defaultHint || props.onReset)
   return (
     <div className={css.row}>
       <div className={css.rowLabel}>
         {options
           ? <span id={labelId} className={css.rowTitle}>{props.label}</span>
           : <label htmlFor={props.id} className={css.rowTitle}>{props.label}</label>}
+        {props.field.overridden && props.defaultHint
+          ? <span className={css.rowOverrideDot} aria-hidden="true" /> : null}
         <HintMark hint={props.hint} />
       </div>
-      <div className={css.rowControl}>
-        {options ? (
-          <div
-            className={css.seg}
-            role="radiogroup"
-            aria-labelledby={labelId}
+      <div className={css.rowControlCol}>
+        <div className={css.rowControl}>
+          {options ? (
+            <div
+              className={css.seg}
+              role="radiogroup"
+              aria-labelledby={labelId}
+              aria-describedby={describedBy}
+              data-count={options.length}
+              data-index={selected < 0 ? 0 : selected}
+              {...props.field.invalid ? { 'aria-invalid': true } : {}}
+              onKeyDown={event => {
+                const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+                if (step === 0) return
+                event.preventDefault()
+                const next = (Math.max(0, selected) + step + options.length) % options.length
+                props.onEdit(options[next].value)
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
+              }}
+            >
+              <span className={css.segThumb} aria-hidden="true" />
+              {options.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={option.value === props.field.text}
+                  tabIndex={option.value === props.field.text ? 0 : -1}
+                  className={css.segOption}
+                  disabled={props.disabled}
+                  onClick={() => { props.onEdit(option.value) }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : <input
+            id={props.id}
+            name={props.id}
+            autoComplete="off"
+            placeholder={props.placeholder}
             aria-describedby={describedBy}
-            data-count={options.length}
-            data-index={selected < 0 ? 0 : selected}
+            className={props.field.invalid ? css.inputInvalid : css.input}
+            type={props.numeric === true ? 'number' : 'text'}
+            {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
+            {...props.numeric === true && props.min !== undefined ? { min: props.min } : {}}
+            {...props.numeric === true && props.max !== undefined ? { max: props.max } : {}}
+            {...props.numeric === true && props.step !== undefined ? { step: props.step } : {}}
             {...props.field.invalid ? { 'aria-invalid': true } : {}}
-            onKeyDown={event => {
-              const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
-                : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
-              if (step === 0) return
-              event.preventDefault()
-              const next = (Math.max(0, selected) + step + options.length) % options.length
-              props.onEdit(options[next].value)
-              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus()
-            }}
-          >
-            <span className={css.segThumb} aria-hidden="true" />
-            {options.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={option.value === props.field.text}
-                tabIndex={option.value === props.field.text ? 0 : -1}
-                className={css.segOption}
-                disabled={props.disabled}
-                onClick={() => { props.onEdit(option.value) }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ) : <input
-          id={props.id}
-          name={props.id}
-          autoComplete="off"
-          placeholder={props.placeholder}
-          aria-describedby={describedBy}
-          className={props.field.invalid ? css.inputInvalid : css.input}
-          type={props.numeric === true ? 'number' : 'text'}
-          {...props.numeric === true ? { inputMode: 'numeric' as const } : {}}
-          {...props.numeric === true && props.min !== undefined ? { min: props.min } : {}}
-          {...props.numeric === true && props.max !== undefined ? { max: props.max } : {}}
-          {...props.numeric === true && props.step !== undefined ? { step: props.step } : {}}
-          {...props.field.invalid ? { 'aria-invalid': true } : {}}
-          value={props.field.text}
-          disabled={props.disabled}
-          onChange={(event) => { props.onEdit(event.target.value) }}
-        />}
+            value={props.field.text}
+            disabled={props.disabled}
+            onChange={(event) => { props.onEdit(event.target.value) }}
+          />}
+        </div>
+        {hasMeta ? <div className={css.rowMeta}>
+          {props.unitHint ? <span className={css.rowUnit}>{props.unitHint}</span> : null}
+          {props.defaultHint ? <span className={css.rowDefault}>{props.defaultHint}</span> : null}
+          {props.onReset ? <button type="button" className={css.rowReset} disabled={props.disabled}
+            aria-label={props.resetAriaLabel} onClick={props.onReset}>
+            {props.resetLabel}
+          </button> : null}
+        </div> : null}
       </div>
       <HintText id={hintId} hint={props.hint} />
-      {props.field.invalid ? <p id={errorId} className={css.rowInvalid} role="alert">{props.invalidLabel}</p> : null}
+      {props.field.invalid ? <p id={errorId} className={css.rowInvalid} role="alert">
+        {props.invalidDetail
+          ? <><span>{props.invalidLabel}</span><span className={css.rowInvalidDetail}> — {props.invalidDetail}</span></>
+          : props.invalidLabel}
+      </p> : null}
     </div>
   )
 }
 
-/** Appearance controls; the card above them owns the heading and reset. */
-function QuotaAppearance({ state, t, disabled, onEdit }: {
+const SANDBOX_ALERT_WINDOWS = {
+  rolling: { status: 'ok' as const, percent: 86, resetsAt: '2026-11-17T00:00:00Z' },
+  weekly: { status: 'ok' as const, percent: 64, resetsAt: '2026-11-24T00:00:00Z' },
+  monthly: { status: 'ok' as const, percent: 92, resetsAt: '2026-12-01T00:00:00Z' },
+}
+
+/**
+ * The Appearance tab's card, organized into three clear domains:
+ * 1) Global interface theme (with miniature Bento previews),
+ * 2) Conversation input bar (display mode + causal muted 3×2 style/sandbox grid + border),
+ * 3) Sidebar & model picker toggles.
+ */
+export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface = 'settings' }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
   disabled: boolean
+  saving: boolean
   onEdit: (field: TextField, text: string) => void
+  resetField: (field: EditableField) => void
+  surface?: 'settings' | 'page'
 }) {
   const scheme = useHostScheme()
   const draftTheme = state.appearanceTheme.text === 'classic' ? 'classic' : 'native'
@@ -938,91 +1437,188 @@ function QuotaAppearance({ state, t, disabled, onEdit }: {
   const themeId = 'opencode-go-appearance-theme'
   const themeDescribedBy = state.appearanceTheme.invalid ? `${themeId}-hint ${themeId}-error` : `${themeId}-hint`
   const styleId = 'opencode-go-usage-pill-style'
-  const describedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
+  const styleDescribedBy = state.usagePillStyle.invalid ? `${styleId}-hint ${styleId}-error` : `${styleId}-hint`
   const selectedStyle = (USAGE_PILL_STYLES as readonly string[]).includes(state.usagePillStyle?.text ?? '')
     ? (state.usagePillStyle.text as UsagePillStyle)
     : DEFAULT_USAGE_PILL_STYLE
   const borderEnabled = state.usagePillBorder?.text !== 'false'
-  return <div className={css.appearanceGroup}>
-    <div className={css.rows}>
-    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
-      aria-describedby={themeDescribedBy} aria-invalid={state.appearanceTheme.invalid || undefined}>
-      <legend className={css.appearanceLegend}>
-        <span id={`${themeId}-label`} className={css.rowTitle}>{t('appearanceThemeLabel')}</span>
-        <HintMark hint={t('appearanceThemeHint')} />
-      </legend>
-      <p id={`${themeId}-hint`} className={css.appearanceHint}>{t('appearanceThemePreviewHint')}</p>
-      <div className={css.appearanceChoices}>
-        {OPENCODE_GO_THEMES.map(value => <label key={value} className={css.appearanceChoice}
-          data-selected={state.appearanceTheme.text === value} data-disabled={locked}>
-          <span className={css.appearanceChoiceHead}>
-            <span>{t(`appearanceTheme_${value}`)}</span>
-            <input type="radio" name={themeId} value={value} className={css.appearanceRadio}
-              checked={state.appearanceTheme.text === value} disabled={locked} aria-describedby={themeDescribedBy}
-              onChange={() => { onEdit('appearanceTheme', value) }} />
-          </span>
-          <span className={css.appearancePreview} style={themeStyle(GO_THEME_TOKENS[value][scheme])} aria-hidden="true">
-            <span className={`${usageCss.trigger} ${css.appearanceSample}`}>
-              {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
-            </span>
-          </span>
-        </label>)}
-      </div>
-      {state.appearanceTheme.invalid
-        ? <p id={`${themeId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
-    </fieldset>
-    <div className={css.appearanceToggle}>
-      <div className={css.appearanceCopy}>
-        <div className={css.rowLabel}>
-          <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
-          <HintMark hint={t('showSidebarQuotaHint')} />
+  const composerOff = state.usageDisplay?.text === 'off'
+  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
+  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field]?.overridden || state[field]?.invalid)
+  // Appearance writes as each control changes; a refused write names this card.
+  const writeFailed = state.writeFailed !== undefined
+    && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
+  return <section className={surface === 'page' ? css.cardPage : css.card}>
+    <div className={css.cardBody}>
+      <div className={css.rows}>
+        <div className={css.groupHead}>{t('appearanceGroupTheme')}</div>
+        <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${themeId}-label`}
+          aria-describedby={themeDescribedBy} aria-invalid={state.appearanceTheme.invalid || undefined}>
+          <legend className={css.appearanceLegend}>
+            <span id={`${themeId}-label`} className={css.rowTitle}>{t('appearanceThemeLabel')}</span>
+          </legend>
+          <p id={`${themeId}-hint`} className={css.appearanceHint}>{t('appearanceThemeHint')}</p>
+          <div className={css.appearanceThemeGrid}>
+            {OPENCODE_GO_THEMES.map(value => <label key={value} className={css.appearanceChoice}
+              data-selected={state.appearanceTheme.text === value} data-disabled={locked}>
+              <span className={css.appearanceChoiceHead}>
+                <span>{t(`appearanceTheme_${value}`)}</span>
+                <input type="radio" name={themeId} value={value} className={css.appearanceRadio}
+                  checked={state.appearanceTheme.text === value} disabled={locked} aria-describedby={themeDescribedBy}
+                  onChange={() => { onEdit('appearanceTheme', value) }} />
+              </span>
+              <span className={css.themeBento} style={themeStyle(GO_THEME_TOKENS[value][scheme])} aria-hidden="true">
+                <span className={css.themeBentoTop}>
+                  <span className={css.themeBentoTitle}>OpenCode Go</span>
+                  <span className={css.themeBentoSwatches}>
+                    <span className={css.themeSwatchAccent} />
+                    <span className={css.themeSwatchSuccess} />
+                    <span className={css.themeSwatchWarn} />
+                  </span>
+                </span>
+                <span className={css.themeBentoSub}>{t(`appearanceThemeTag_${value}`)}</span>
+                <span className={css.themeBentoCard}>
+                  <span className={css.themeBentoMeta}>
+                    <span>{t('usageRollingShort')}</span>
+                    <strong>42%</strong>
+                  </span>
+                  <span className={css.themeBentoTrack}>
+                    <span className={css.themeBentoFill} />
+                  </span>
+                </span>
+                <span className={`${usageCss.trigger} ${css.appearanceSample}`}>
+                  {t('usageRollingShort')} 24% · {t('usageWeekShort')} 48%
+                </span>
+              </span>
+            </label>)}
+          </div>
+          {state.appearanceTheme.invalid
+            ? <p id={`${themeId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+        </fieldset>
+
+        <div className={css.groupHead}>{t('appearanceGroupComposer')}</div>
+        <ValueField
+          id="opencode-go-usage-display"
+          label={t('usageDisplayLabel')}
+          hint={t('usageDisplayHint')}
+          field={state.usageDisplay}
+          options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
+          invalidLabel={t('invalidValue')}
+          disabled={disabled}
+          onEdit={text => { onEdit('usageDisplay', text) }}
+        />
+        {composerOff ? <p className={css.causalNotice} role="status">{t('usageDisplayOffNote')}</p> : null}
+        <div className={css.composerStyleZone} data-inactive={composerOff ? 'true' : undefined}>
+          <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
+            aria-describedby={styleDescribedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
+            <legend className={css.appearanceLegend}>
+              <span id={`${styleId}-label`} className={css.rowTitle}>{t('usagePillStyleLabel')}</span>
+            </legend>
+            <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
+            <div className={css.appearancePillGrid}>
+              {USAGE_PILL_STYLES.map(value => {
+                const legend = value === 'concentric' ? t('usagePillLegendConcentric')
+                  : value === 'rings' ? t('usagePillLegendRings') : undefined
+                return <label key={value} className={css.appearanceChoice}
+                  data-selected={selectedStyle === value} data-disabled={locked}>
+                  <span className={css.appearanceChoiceHead}>
+                    <span>{t(`usagePillStyle_${value}`)}</span>
+                    <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
+                      checked={selectedStyle === value} disabled={locked} aria-describedby={styleDescribedBy}
+                      onChange={() => { onEdit('usagePillStyle', value) }} />
+                  </span>
+                  <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
+                    <UsageTriggerPreview style={value} border={borderEnabled}
+                      rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+                      className={css.appearanceSample} />
+                    {legend ? <span className={css.appearanceLegendHint}>{legend}</span> : null}
+                  </span>
+                </label>
+              })}
+              <div className={css.appearanceSandbox} style={themeStyle(tokens)} aria-hidden="true" data-appearance-sandbox="">
+                <span className={css.sandboxHead}>
+                  <span className={css.sandboxTitle}>{t('appearanceSandboxTitle')}</span>
+                  <span className={css.sandboxTag}>{t(`usagePillStyle_${selectedStyle}`)}</span>
+                </span>
+                <div className={css.sandboxRows}>
+                  <div className={css.sandboxRow}>
+                    <span className={css.sandboxLabel}>{t('appearanceSandboxNormal')}</span>
+                    <UsageTriggerPreview style={selectedStyle} border={borderEnabled}
+                      rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+                      accountName={t('appearanceSandboxAccount')}
+                      className={css.appearanceSample} />
+                  </div>
+                  <div className={css.sandboxRow}>
+                    <span className={css.sandboxLabel}>{t('appearanceSandboxAlert')}</span>
+                    <UsageTriggerPreview style={selectedStyle} border={borderEnabled}
+                      rolling={SANDBOX_ALERT_WINDOWS.rolling}
+                      weekly={SANDBOX_ALERT_WINDOWS.weekly}
+                      monthly={SANDBOX_ALERT_WINDOWS.monthly}
+                      rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
+                      monthShort={t('usageMonthShort')}
+                      className={css.appearanceSample} />
+                  </div>
+                </div>
+              </div>
+            </div>
+            {state.usagePillStyle.invalid
+              ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
+          </fieldset>
+          <div className={css.appearanceToggle}>
+            <div className={css.appearanceCopy}>
+              <div className={css.rowLabel}>
+                <span className={css.rowTitle}>{t('usagePillBorderLabel')}</span>
+              </div>
+              <p className={css.appearanceHint}>{t('usagePillBorderSummary')}</p>
+            </div>
+            <Switch checked={borderEnabled} label={t('usagePillBorderLabel')}
+              title={t('usagePillBorderHint')} disabled={locked}
+              onChange={next => { onEdit('usagePillBorder', String(next)) }} />
+          </div>
         </div>
-        <p className={css.appearanceHint}>{t('showSidebarQuotaSummary')}</p>
-      </div>
-      <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
-        title={t('showSidebarQuotaHint')} disabled={locked}
-        onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
-    </div>
-    <fieldset className={css.appearanceStyles} role="radiogroup" aria-labelledby={`${styleId}-label`}
-      aria-describedby={describedBy} aria-invalid={state.usagePillStyle.invalid || undefined}>
-      <legend className={css.appearanceLegend}>
-        <span id={`${styleId}-label`} className={css.rowTitle}>{t('usagePillStyleLabel')}</span>
-        <HintMark hint={t('usagePillStyleHint')} />
-      </legend>
-      <p id={`${styleId}-hint`} className={css.appearanceHint}>{t('usagePillStylePreviewHint')}</p>
-      <div className={css.appearanceChoices}>
-        {USAGE_PILL_STYLES.map(value => <label key={value} className={css.appearanceChoice}
-          data-selected={selectedStyle === value} data-disabled={locked}>
-          <span className={css.appearanceChoiceHead}>
-            <span>{t(`usagePillStyle_${value}`)}</span>
-            <input type="radio" name={styleId} value={value} className={css.appearanceRadio}
-              checked={selectedStyle === value} disabled={locked} aria-describedby={describedBy}
-              onChange={() => { onEdit('usagePillStyle', value) }} />
-          </span>
-          <span className={css.appearancePreview} style={themeStyle(tokens)} aria-hidden="true">
-            <UsageTriggerPreview style={value} border={borderEnabled}
-              rollingShort={t('usageRollingShort')} weekShort={t('usageWeekShort')}
-              className={css.appearanceSample} />
-          </span>
-        </label>)}
-      </div>
-      {state.usagePillStyle.invalid
-        ? <p id={`${styleId}-error`} className={css.rowInvalid} role="alert">{t('invalidValue')}</p> : null}
-    </fieldset>
-    <div className={css.appearanceToggle}>
-      <div className={css.appearanceCopy}>
-        <div className={css.rowLabel}>
-          <span className={css.rowTitle}>{t('usagePillBorderLabel')}</span>
-          <HintMark hint={t('usagePillBorderHint')} />
+
+        <div className={css.groupHead}>{t('appearanceGroupWorkspace')}</div>
+        <div className={css.appearanceToggle}>
+          <div className={css.appearanceCopy}>
+            <div className={css.rowLabel}>
+              <span className={css.rowTitle}>{t('showSidebarQuotaLabel')}</span>
+              <HintMark hint={t('showSidebarQuotaHint')} />
+            </div>
+            <p className={css.appearanceHint}>{t('showSidebarQuotaSummary')}</p>
+          </div>
+          <Switch checked={state.showSidebarQuota.text === 'true'} label={t('showSidebarQuotaLabel')}
+            title={t('showSidebarQuotaHint')} disabled={locked}
+            onChange={next => { onEdit('showSidebarQuota', String(next)) }} />
         </div>
-        <p className={css.appearanceHint}>{t('usagePillBorderSummary')}</p>
+        <div className={css.appearanceToggle}>
+          <div className={css.appearanceCopy}>
+            <div className={css.rowLabel}>
+              <span className={css.rowTitle}>{t('showModelMultiplierLabel')}</span>
+            </div>
+            <p className={css.appearanceHint}>{t('showModelMultiplierSummary')}</p>
+          </div>
+          <Switch checked={(state.showModelMultiplier?.text ?? String(DEFAULT_SHOW_MODEL_MULTIPLIER)) !== 'false'}
+            label={t('showModelMultiplierLabel')}
+            title={t('showModelMultiplierHint')} disabled={locked}
+            onChange={next => { onEdit('showModelMultiplier', String(next)) }} />
+        </div>
       </div>
-      <Switch checked={borderEnabled} label={t('usagePillBorderLabel')}
-        title={t('usagePillBorderHint')} disabled={locked}
-        onChange={next => { onEdit('usagePillBorder', String(next)) }} />
+      {writeFailed ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
+      {/* The reset action closes the card: a title row above the fields only
+          repeated the tab label and pushed the first setting down. */}
+      <div className={css.cardActions}>
+        <button type="button" className={css.reset}
+          disabled={disabled || saving || !canReset}
+          onClick={() => {
+            for (const field of APPEARANCE_TAB_FIELDS) {
+              if (state[field]?.overridden || state[field]?.invalid) resetField(field)
+            }
+          }}>
+          {t('usageAppearanceReset')}
+        </button>
+      </div>
     </div>
-    </div>
-  </div>
+  </section>
 }
 
 /** Compact freshness for the selected source; full timestamps stay available on hover. */
@@ -1081,56 +1677,16 @@ function ModelsBody({ models, t, source, showProgress = true }: {
     {models.count === 0 ? <p className={css.hint}>{t('modelsEmpty')}</p> : null}</>
 }
 
-/**
- * The Appearance tab's card. Extracted from `Loaded` so the sidebar page and the
- * settings section render one implementation; the classes and children are the
- * ones the settings tests already read.
- */
-export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetField, surface = 'settings' }: {
-  state: OpencodeGoSectionState
-  t: SectionTranslate
-  disabled: boolean
-  saving: boolean
-  onEdit: (field: TextField, text: string) => void
-  resetField: (field: EditableField) => void
-  surface?: 'settings' | 'page'
-}) {
-  // Invalid drafts cannot be saved, but must still be recoverable with Reset.
-  const canReset = APPEARANCE_TAB_FIELDS.some(field => state[field]?.overridden || state[field]?.invalid)
-  // Appearance writes as each control changes; a refused write names this card.
-  const writeFailed = state.writeFailed !== undefined
-    && (APPEARANCE_TAB_FIELDS as readonly string[]).includes(state.writeFailed)
-  return <section className={surface === 'page' ? css.cardPage : css.card}>
-    <div className={css.cardBody}>
-      <div className={css.rows}>
-        <ValueField
-          id="opencode-go-usage-display"
-          label={t('usageDisplayLabel')}
-          hint={t('usageDisplayHint')}
-          field={state.usageDisplay}
-          options={USAGE_DISPLAY_MODES.map(value => ({ value, label: t(`usageDisplay_${value}`) }))}
-          invalidLabel={t('invalidValue')}
-          disabled={disabled}
-          onEdit={text => { onEdit('usageDisplay', text) }}
-        />
-        <QuotaAppearance state={state} t={t} disabled={disabled} onEdit={onEdit} />
-      </div>
-      {writeFailed ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
-      {/* The reset action closes the card: a title row above the fields only
-          repeated the tab label and pushed the first setting down. */}
-      <div className={css.cardActions}>
-        <button type="button" className={css.reset}
-          disabled={disabled || saving || !canReset}
-          onClick={() => {
-            for (const field of APPEARANCE_TAB_FIELDS) {
-              if (state[field].overridden || state[field].invalid) resetField(field)
-            }
-          }}>
-          {t('usageAppearanceReset')}
-        </button>
-      </div>
-    </div>
-  </section>
+function ProbeRow({ label, result, t }: { label: string; result: ProbeEndpointResult; t: SectionTranslate }) {
+  return <div className={css.probeRow} data-ok={result.ok ? 'true' : 'false'}>
+    <span className={css.probeDot} aria-hidden="true" />
+    <span className={css.probeName}>{label}</span>
+    <span className={css.probeDetail}>
+      {result.ok
+        ? t('probeOk', { latency: result.latencyMs, count: result.modelCount ?? 0 })
+        : t('probeFailed', { error: result.error ?? `HTTP ${result.status ?? '?'}` })}
+    </span>
+  </div>
 }
 
 /**
@@ -1138,19 +1694,63 @@ export function AppearanceSettings({ state, t, disabled, saving, onEdit, resetFi
  * image budget, closed by the reset-all row. Extracted from `Loaded` unchanged
  * so the full page can carry the same fields.
  */
-export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edit, resetField, surface = 'settings' }: {
+export function AdvancedSettings({ state, t, locale, disabled, saving, invalidLabel, edit, resetField, probeConnection, surface = 'settings' }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
+  locale?: string
   disabled: boolean
   saving: boolean
   invalidLabel: string
   edit: (field: TextField, text: string) => void
   resetField: (field: EditableField) => void
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
   surface?: 'settings' | 'page'
 }) {
+  const [probing, setProbing] = useState(false)
+  const [probeResult, setProbeResult] = useState<ConnectionProbeResult | null>(null)
+  const [probeError, setProbeError] = useState<string | null>(null)
+  const probeEpoch = useRef(0)
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
   // Invalid drafts cannot be saved, but must still be recoverable with Reset.
   const canReset = ADVANCED_FIELDS.some(field => state[field].overridden || state[field].invalid)
+  const connectionInvalid = state.baseURL.invalid || state.freeBaseURL.invalid || state.proxyURL.invalid
+  const runProbe = async (): Promise<void> => {
+    if (!probeConnection || probing || connectionInvalid) return
+    const epoch = ++probeEpoch.current
+    setProbing(true)
+    setProbeError(null)
+    try {
+      const result = await probeConnection({
+        baseURL: state.baseURL.text,
+        freeBaseURL: state.freeBaseURL.text,
+        proxyURL: state.proxyURL.text,
+        includeFree: state.freeEnabled?.text === 'true',
+      })
+      if (epoch !== probeEpoch.current) return
+      setProbeResult(result)
+    } catch (error) {
+      if (epoch !== probeEpoch.current) return
+      setProbeResult(null)
+      setProbeError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (epoch === probeEpoch.current) setProbing(false)
+    }
+  }
+  const metaFor = (field: typeof ADVANCED_FIELDS[number], label: string) => {
+    const fieldState = state[field]
+    const liveUnit = !fieldState.invalid ? formatAdvancedUnit(field, fieldState.text, t, locale) : undefined
+    const detail = invalidDetailFor(field, t, locale)
+    return {
+      ...(liveUnit ? { unitHint: t('advancedUnitApprox', { value: liveUnit }) } : {}),
+      defaultHint: formatAdvancedDefault(field, t, locale),
+      ...(detail ? { invalidDetail: detail } : {}),
+      ...(fieldState.overridden || fieldState.invalid ? {
+        resetLabel: t('reset'),
+        resetAriaLabel: t('advancedResetField', { label }),
+        onReset: () => { resetField(field) },
+      } : {}),
+    }
+  }
   return <section className={surface === 'page' ? css.cardPage : css.card}>
     <div className={css.cardBody}>
       {/* The one card with a Save gesture says so up front: every other surface
@@ -1164,6 +1764,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           hint={t('baseURLHint')}
           field={state.baseURL}
           invalidLabel={invalidLabel}
+          {...metaFor('baseURL', t('baseURLLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('baseURL', text) }}
         />
@@ -1173,6 +1774,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           hint={t('freeBaseURLHint')}
           field={state.freeBaseURL}
           invalidLabel={invalidLabel}
+          {...metaFor('freeBaseURL', t('freeBaseURLLabel'))}
           disabled={disabled}
           onEdit={text => { edit('freeBaseURL', text) }}
         />
@@ -1183,9 +1785,24 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           placeholder="http://127.0.0.1:7890"
           field={state.proxyURL}
           invalidLabel={t('proxyURLInvalid')}
+          {...metaFor('proxyURL', t('proxyURLLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('proxyURL', text) }}
         />
+        {probeConnection ? <div className={css.probeBox}>
+          <div className={css.probeHead}>
+            <span className={css.hint}>{t('probeHint')}</span>
+            <Button variant="outline" size="sm" disabled={probing || connectionInvalid}
+              onClick={() => { void runProbe() }}>
+              {t(probing ? 'probeTesting' : 'probeConnection')}
+            </Button>
+          </div>
+          {probeError ? <p className={css.failedNote} role="alert">{t('probeFailed', { error: probeError })}</p> : null}
+          {probeResult ? <div className={css.probeResults} role="status">
+            <ProbeRow label={t('probeGoLabel')} result={probeResult.go} t={t} />
+            {probeResult.free ? <ProbeRow label={t('probeFreeLabel')} result={probeResult.free} t={t} /> : null}
+          </div> : null}
+        </div> : null}
         <div className={css.groupHead}>{t('groupCacheTimeouts')}</div>
         <ValueField
           id="opencode-go-refresh-minutes"
@@ -1194,6 +1811,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.refreshMinutes}
           {...numericBounds('refreshMinutes')}
           invalidLabel={invalidLabel}
+          {...metaFor('refreshMinutes', t('refreshMinutesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('refreshMinutes', text) }}
         />
@@ -1204,6 +1822,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.streamIdleTimeoutMs}
           {...numericBounds('streamIdleTimeoutMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('streamIdleTimeoutMs', t('streamIdleTimeoutMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('streamIdleTimeoutMs', text) }}
         />
@@ -1214,6 +1833,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestPreparationTimeoutMs}
           {...numericBounds('requestPreparationTimeoutMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestPreparationTimeoutMs', t('requestPreparationTimeoutMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestPreparationTimeoutMs', text) }}
         />
@@ -1224,8 +1844,43 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestTimeoutMs}
           {...numericBounds('requestTimeoutMs')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestTimeoutMs', t('requestTimeoutMsLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestTimeoutMs', text) }}
+        />
+        <div className={css.groupHead}>{t('groupRetryPolicy')}</div>
+        <ValueField
+          id="opencode-go-retry-mode"
+          label={t('retryModeLabel')}
+          hint={t('retryModeHint')}
+          field={state.retryMode}
+          options={RETRY_MODES.map(value => ({ value, label: t(`retryMode_${value}`) }))}
+          invalidLabel={invalidLabel}
+          {...metaFor('retryMode', t('retryModeLabel'))}
+          disabled={disabled}
+          onEdit={(text) => { edit('retryMode', text) }}
+        />
+        <ValueField
+          id="opencode-go-retry-max-retries"
+          label={t('retryMaxRetriesLabel')}
+          hint={t('retryMaxRetriesHint')}
+          field={state.retryMaxRetries}
+          {...numericBounds('retryMaxRetries')}
+          invalidLabel={invalidLabel}
+          {...metaFor('retryMaxRetries', t('retryMaxRetriesLabel'))}
+          disabled={disabled || state.retryMode.text === 'always'}
+          onEdit={(text) => { edit('retryMaxRetries', text) }}
+        />
+        <ValueField
+          id="opencode-go-retry-max-delay-ms"
+          label={t('retryMaxDelayMsLabel')}
+          hint={t('retryMaxDelayMsHint')}
+          field={state.retryMaxDelayMs}
+          {...numericBounds('retryMaxDelayMs')}
+          invalidLabel={invalidLabel}
+          {...metaFor('retryMaxDelayMs', t('retryMaxDelayMsLabel'))}
+          disabled={disabled}
+          onEdit={(text) => { edit('retryMaxDelayMs', text) }}
         />
         <div className={css.groupHead}>{t('groupImages')}</div>
         <ValueField
@@ -1235,6 +1890,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.maxImages}
           {...numericBounds('maxImages')}
           invalidLabel={invalidLabel}
+          {...metaFor('maxImages', t('maxImagesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('maxImages', text) }}
         />
@@ -1245,6 +1901,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.maxRequestImageBytes}
           {...numericBounds('maxRequestImageBytes')}
           invalidLabel={invalidLabel}
+          {...metaFor('maxRequestImageBytes', t('maxRequestImageBytesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('maxRequestImageBytes', text) }}
         />
@@ -1255,6 +1912,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestImagePixelBudget}
           {...numericBounds('requestImagePixelBudget')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestImagePixelBudget', t('requestImagePixelBudgetLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestImagePixelBudget', text) }}
         />
@@ -1265,6 +1923,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
           field={state.requestImageMaxBytes}
           {...numericBounds('requestImageMaxBytes')}
           invalidLabel={invalidLabel}
+          {...metaFor('requestImageMaxBytes', t('requestImageMaxBytesLabel'))}
           disabled={disabled}
           onEdit={(text) => { edit('requestImageMaxBytes', text) }}
         />
@@ -1292,7 +1951,7 @@ export function AdvancedSettings({ state, t, disabled, saving, invalidLabel, edi
  * capacity editor. The selected source is local (as it was in `Loaded`), so the
  * page and the section behave the same on remount.
  */
-export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, surface = 'settings' }: {
+export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEnabled, loadModels, onEnableFree, surface = 'settings' }: {
   state: OpencodeGoSectionState
   t: SectionTranslate
   locale?: string
@@ -1300,14 +1959,35 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
   onEdit: (value: OpencodeGoModelLimits) => void
   setModelEnabled: (id: string | readonly string[], next: boolean) => void
   loadModels: () => void
+  onEnableFree?: () => void
   surface?: 'settings' | 'page'
 }) {
   const [modelSource, setModelSource] = useState<ModelSource>('go')
   const goModels = useMemo(() => modelsForSource(state.models, 'go'), [state.models])
   const freeModels = useMemo(() => modelsForSource(state.models, 'free'), [state.models])
   const models = modelSource === 'go' ? goModels : freeModels
+  const freeEnabled = state.freeEnabled?.text === 'true'
+  const prevFreeEnabled = useRef(freeEnabled)
+  useEffect(() => {
+    const turnedOn = !prevFreeEnabled.current && freeEnabled
+    prevFreeEnabled.current = freeEnabled
+    if (turnedOn && modelSource === 'free') loadModels()
+  }, [freeEnabled, modelSource, loadModels])
+  const activeRef = state.accounts.activeRef
+  const activeAccount = state.accounts.entries.find(entry => entry.apiKeyEnv === activeRef) ?? state.accounts.entries[0]
+  const fallbackPlan: GoPlan = (GO_PLANS as readonly string[]).includes(state.goPlan?.text ?? '')
+    ? (state.goPlan.text as GoPlan) : DEFAULT_GO_PLAN
+  const plan = accountPlanOf(activeAccount, fallbackPlan)
+  const showFreeDisabledGuide = modelSource === 'free'
+    && !freeEnabled
+    && models.status === 'ready'
+    && models.count === 0
+    && !models.stale
+    && models.sources?.free?.updatedAt === undefined
+    && !models.sources?.free?.error
+
   // The model tab carries the listing's own diagnostics and a refused switch write.
-  const modelNotices = (
+  const modelNotices = showFreeDisabledGuide ? null : (
     <>
       <ModelsBody models={models} source={modelSource} t={t} />
       {state.pickerFailed ? <p className={css.failedNote} role="alert">{t('pickerFailed')}</p> : null}
@@ -1350,13 +2030,23 @@ export function ModelsSettings({ state, t, locale, disabled, onEdit, setModelEna
         {state.writeFailed === 'modelLimits'
           ? <p className={css.failedNote} role="alert">{t('immediateWriteFailed')}</p> : null}
         {modelNotices}
-        {/* Capacity edits write immediately, so an in-flight write must not
-            disable the field being typed in: only the document's writability
-            locks the editor. Visibility switches keep the pending-write lock. */}
-        <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
-          modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
-          onModelEnabled={setModelEnabled}
-          onEdit={onEdit} />
+        {showFreeDisabledGuide ? <div className={css.freeGuideCard} data-free-disabled-guide="">
+          <h3 className={css.freeGuideTitle}>{t('modelsFreeDisabledTitle')}</h3>
+          <p className={css.freeGuideBody}>{t('modelsFreeDisabledBody')}</p>
+          {onEnableFree ? <div className={css.freeGuideActions}>
+            <Button variant="primary" size="sm" disabled={disabled || state.saving}
+              onClick={onEnableFree}>{t('modelsFreeEnableAction')}</Button>
+          </div> : null}
+        </div> : (
+          /* Capacity edits write immediately, so an in-flight write must not
+             disable the field being typed in: only the document's writability
+             locks the editor. Visibility switches keep the pending-write lock. */
+          <ModelEditor key={modelSource} source={modelSource} models={models} draft={state.modelLimitDraft} t={t} locale={locale} disabled={disabled}
+            modelVisibility={state.modelVisibility} visibilitySaving={state.pickerSaving}
+            plan={plan}
+            onModelEnabled={setModelEnabled}
+            onEdit={onEdit} />
+        )}
       </div>
     </div>
   </section>
@@ -1391,11 +2081,13 @@ export function OpencodeGoSection(props: OpencodeGoSectionProps) {
       setSidebarEntry={setSidebarEntry}
       setModelEnabled={setModelEnabled}
       openPage={props.openPage}
+      probeConnection={props.probeConnection}
       accountActions={{
         loadAccounts: props.loadAccounts, addAccount: props.addAccount, renameAccount: props.renameAccount,
         resetAddition: props.resetAddition, removeAccount: props.removeAccount, selectAccount: props.selectAccount,
         setAutoSwitch: props.setAutoSwitch, setBalanceAccounts: props.setBalanceAccounts,
         replaceAccountKey: props.replaceAccountKey, moveAccount: props.moveAccount,
+        ...(props.setAccountPlan ? { setAccountPlan: props.setAccountPlan } : {}),
       }}
     />
   )
@@ -1418,6 +2110,7 @@ function Loaded(props: {
   setModelEnabled: (id: string | readonly string[], next: boolean) => void
   /** Opens the full sidebar page; absent on hosts that have not registered it. */
   openPage?: () => void
+  probeConnection?: (input: ConnectionProbeInput) => Promise<ConnectionProbeResult>
   accountActions: GoAccountsActions
 }) {
   const { t, state, loadModels } = props
@@ -1425,6 +2118,12 @@ function Loaded(props: {
   // Tabs keep one class of settings on screen at a time: the overview is the
   // landing state, and the other tabs carry the former cards' contents.
   const [tab, setTab] = useState<SettingsTab>('overview')
+  const pageBodyRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (pageBodyRef.current && pageBodyRef.current.scrollTop > 0) {
+      pageBodyRef.current.scrollTop = 0
+    }
+  }, [tab])
   // The shell mounts only the open section, so a mount is the page being
   // opened: read the listing once, and let the button re-read it afterwards.
   useEffect(() => {
@@ -1441,21 +2140,24 @@ function Loaded(props: {
   const disabled = !state.writable
   // The provider switch says what its state means; the mark opens the sentence.
   const enabledHint = state.enabled ? t('enabledHint') : t('enabledOff')
+  const fallbackPlan: GoPlan = (GO_PLANS as readonly string[]).includes(state.goPlan?.text ?? '')
+    ? (state.goPlan.text as GoPlan) : DEFAULT_GO_PLAN
   const accountCard = <AccountsCard
     state={state.accounts} actions={props.accountActions} writable={state.writable}
-    t={t} locale={props.locale} />
+    fallbackPlan={fallbackPlan} t={t} locale={props.locale} />
   // Only Advanced keeps a draft: appearance writes as soon as it changes, so
   // its tab must not claim pending edits (the models mark reports its listing).
   const advancedOverridden = ADVANCED_FIELDS.some(field => state[field].overridden)
-  const tabs: { id: SettingsTab; label: string; marked?: boolean }[] = [
+  const modelsIssue = state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale
+  const tabs: { id: SettingsTab; label: string; mark?: 'override' | 'issue' }[] = [
     { id: 'overview', label: t('settingsTabOverview') },
-    { id: 'models', label: t('settingsTabModels'), marked: state.pickerFailed || state.models.status === 'failed' || state.models.status === 'ready' && state.models.stale },
+    { id: 'models', label: t('settingsTabModels'), mark: modelsIssue ? 'issue' : undefined },
     { id: 'appearance', label: t('settingsTabAppearance') },
-    { id: 'advanced', label: t('settingsTabAdvanced'), marked: advancedOverridden },
+    { id: 'advanced', label: t('settingsTabAdvanced'), mark: advancedOverridden ? 'override' : undefined },
   ]
   return (
     <div className={css.page} style={themeStyle(tokens)}>
-      <div className={css.pageBody}>
+      <div ref={pageBodyRef} className={css.pageBody}>
       <div className={css.pageTop}>
         {/* The sidebar row is the primary way into the page; the settings section
             keeps a secondary way there once the host wires `openPage`. The
@@ -1471,7 +2173,8 @@ function Loaded(props: {
       <div className={css.pageTabs} role="tablist" aria-label={t('settingsTabsLabel')}>
         {tabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`opencode-go-tab-${item.id}`}
           aria-selected={tab === item.id} aria-controls={`opencode-go-panel-${item.id}`}
-          data-marked={item.marked ? '' : undefined}
+          data-marked={item.mark ? '' : undefined}
+          data-mark-tone={item.mark}
           tabIndex={tab === item.id ? 0 : -1} className={css.pageTab}
           onClick={() => { setTab(item.id) }}
           onKeyDown={event => {
@@ -1484,7 +2187,8 @@ function Loaded(props: {
             document.getElementById(`opencode-go-tab-${next}`)?.focus()
           }}>
           {item.label}
-          {item.marked ? <span className={css.tabMark} title={t('overridden')} aria-hidden="true" /> : null}
+          {item.mark ? <span className={css.tabMark} data-tone={item.mark}
+            title={t(item.mark === 'issue' ? 'tabIssue' : 'overridden')} aria-hidden="true" /> : null}
         </button>)}
       </div>
       {tab === 'overview' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-overview" aria-labelledby="opencode-go-tab-overview">
@@ -1547,15 +2251,16 @@ function Loaded(props: {
       </div> : null}
       {tab === 'models' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-models" aria-labelledby="opencode-go-tab-models">
       <ModelsSettings state={state} t={t} locale={props.locale} disabled={disabled}
-        onEdit={props.editModelLimits} setModelEnabled={props.setModelEnabled} loadModels={loadModels} />
+        onEdit={props.editModelLimits} setModelEnabled={props.setModelEnabled} loadModels={loadModels}
+        onEnableFree={() => { props.edit('freeEnabled', 'true') }} />
       </div> : null}
       {tab === 'appearance' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-appearance" aria-labelledby="opencode-go-tab-appearance">
       <AppearanceSettings state={state} t={t} disabled={disabled} saving={state.saving}
         onEdit={props.edit} resetField={props.resetField} />
       </div> : null}
       {tab === 'advanced' ? <div className={css.tabPanel} role="tabpanel" id="opencode-go-panel-advanced" aria-labelledby="opencode-go-tab-advanced">
-      <AdvancedSettings state={state} t={t} disabled={disabled} saving={state.saving} invalidLabel={t('invalidValue')}
-        edit={props.edit} resetField={props.resetField} />
+      <AdvancedSettings state={state} t={t} locale={props.locale} disabled={disabled} saving={state.saving} invalidLabel={t('invalidValue')}
+        edit={props.edit} resetField={props.resetField} probeConnection={props.probeConnection} />
       </div> : null}
       {disabled ? <p className={css.hint}>{t('readOnly')}</p> : null}
       </div>

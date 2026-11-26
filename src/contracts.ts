@@ -1,5 +1,8 @@
 /** Browser-safe configuration, account metadata and RPC wire contracts. */
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
+import { parsePricingMultipliers, validReleaseDate, type PriceMultiplier } from './pricing.ts'
+
+export { validReleaseDate, type PriceMultiplier }
 
 /** Public DSH route and the private SDK transport have separate identities. */
 export const PROVIDER_ID = 'dsh-opencode-go'
@@ -65,6 +68,9 @@ export const DEFAULT_USAGE_PILL_STYLE: UsagePillStyle = 'badge'
 
 export const DEFAULT_USAGE_PILL_BORDER = true
 
+/** Default visibility of per-model quota multipliers in the conversation model selector. */
+export const DEFAULT_SHOW_MODEL_MULTIPLIER = true
+
 /** Accepted in profiles saved before 0.4.5 and mapped to `badge` without a border. */
 export const LEGACY_USAGE_PILL_STYLE = 'plain' as const
 
@@ -96,11 +102,27 @@ export type OpencodeGoTheme = typeof OPENCODE_GO_THEMES[number]
 
 export const DEFAULT_OPENCODE_GO_THEME: OpencodeGoTheme = 'native'
 
+/** OpenCode Go subscription tiers used to translate shared quota percentages into per-model limits. */
+export const GO_PLANS = ['go', 'go-plus', 'go-teams'] as const
+
+export type GoPlan = typeof GO_PLANS[number]
+
+export const DEFAULT_GO_PLAN: GoPlan = 'go'
+
+export type GoMonthlyUsage = Record<GoPlan, number>
+
 /** Client-safe account metadata. Secrets stay in the host credential service. */
 export type GoAccount = {
   id: string
   name: string
   apiKeyEnv: string
+  /** Optional display-only subscription tier used to convert quota percentages into call/token estimates. */
+  plan?: GoPlan
+}
+
+/** Resolve one account's display-only Go tier, falling back to the profile default. */
+export function accountPlanOf(account: Pick<GoAccount, 'plan'> | undefined, fallback: GoPlan = DEFAULT_GO_PLAN): GoPlan {
+  return account?.plan && GO_PLANS.includes(account.plan) ? account.plan : fallback
 }
 
 export const MAX_ACCOUNTS = 20
@@ -126,6 +148,7 @@ export interface AccountSettings {
   autoSwitch?: boolean
   /** Start each request on the next saved account, spending every subscription at once. */
   balanceAccounts?: boolean
+  goPlan?: GoPlan
 }
 
 export function accountRefOf(settings: AccountSettings): string {
@@ -167,6 +190,7 @@ export function assertAccounts(accounts: readonly GoAccount[] | null | undefined
       || account.id.startsWith('legacy:') && account.id !== `legacy:${account.apiKeyEnv}`
       || typeof account.name !== 'string' || (!account.name.trim() && account.id !== `legacy:${account.apiKeyEnv}`) || account.name.length > 80
       || typeof account.apiKeyEnv !== 'string' || !ACCOUNT_REF_PATTERN.test(account.apiKeyEnv)
+      || (account.plan !== undefined && !GO_PLANS.includes(account.plan))
       || ids.has(account.id) || refs.has(account.apiKeyEnv)) throw new Error('Invalid or duplicate OpenCode Go account')
     ids.add(account.id)
     refs.add(account.apiKeyEnv)
@@ -177,7 +201,7 @@ export function assertAccounts(accounts: readonly GoAccount[] | null | undefined
 export interface GoAccountSwitch {
   fromRef: string
   toRef: string
-  reason: 'quota' | 'credential'
+  reason: 'quota' | 'rate-limit' | 'credential'
   at: number
 }
 
@@ -217,6 +241,105 @@ export interface OpencodeGoModelLimit {
 /** Per-model capacities; a null entry selects both original catalog values. */
 export type OpencodeGoModelLimits = Record<string, OpencodeGoModelLimit | null>
 
+/** Browser-safe retry-policy vocabulary mirroring `@deepseek-ai/dsh-llm`. */
+export const RETRY_MODES = ['normal', 'always'] as const
+
+export type RetryMode = typeof RETRY_MODES[number]
+
+export const DEFAULT_RETRY_MODE: RetryMode = 'normal'
+
+export const DEFAULT_RETRY_MAX_RETRIES = 5
+
+export const DEFAULT_RETRY_INITIAL_DELAY_MS = 500
+
+/** Accommodate OpenCode Go 429 Retry-After headers (typically 15–18s) out of the box. */
+export const DEFAULT_RETRY_MAX_DELAY_MS = 30_000
+
+export const DEFAULT_RETRY_JITTER_RATIO = 0.1
+
+export const DEFAULT_RETRYABLE_CODES = ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'] as const
+
+export interface GoRetryBackoffConfig {
+  initialDelayMs?: number
+  maxDelayMs?: number
+  jitterRatio?: number
+}
+
+export type GoRetryPolicyConfig =
+  | {
+    mode: 'normal'
+    maxRetries?: number
+    retryableCodes?: string[]
+    backoff?: GoRetryBackoffConfig
+  }
+  | {
+    mode: 'always'
+    backoff?: GoRetryBackoffConfig
+  }
+
+/** Fresh default Go route retry policy safe for configuration defaults and mutations. */
+export function defaultGoRetryPolicy(): GoRetryPolicyConfig {
+  return {
+    mode: DEFAULT_RETRY_MODE,
+    maxRetries: DEFAULT_RETRY_MAX_RETRIES,
+    retryableCodes: [...DEFAULT_RETRYABLE_CODES],
+    backoff: {
+      initialDelayMs: DEFAULT_RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
+      jitterRatio: DEFAULT_RETRY_JITTER_RATIO,
+    },
+  }
+}
+
+export interface ResolvedGoRetryFields {
+  mode: RetryMode
+  maxRetries: number
+  initialDelayMs: number
+  maxDelayMs: number
+  jitterRatio: number
+  retryableCodes: string[]
+}
+
+/** Resolve UI-friendly scalar fields from a stored or omitted retry policy. */
+export function resolveGoRetryFields(policy?: GoRetryPolicyConfig): ResolvedGoRetryFields {
+  const mode: RetryMode = policy?.mode === 'always' ? 'always' : DEFAULT_RETRY_MODE
+  const maxRetries = policy?.mode === 'normal' && typeof policy.maxRetries === 'number'
+    ? policy.maxRetries
+    : DEFAULT_RETRY_MAX_RETRIES
+  const retryableCodes = policy?.mode === 'normal' && Array.isArray(policy.retryableCodes)
+    ? [...policy.retryableCodes]
+    : [...DEFAULT_RETRYABLE_CODES]
+  return {
+    mode,
+    maxRetries,
+    initialDelayMs: policy?.backoff?.initialDelayMs ?? DEFAULT_RETRY_INITIAL_DELAY_MS,
+    maxDelayMs: policy?.backoff?.maxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS,
+    jitterRatio: policy?.backoff?.jitterRatio ?? DEFAULT_RETRY_JITTER_RATIO,
+    retryableCodes,
+  }
+}
+
+/** Build a valid `GoRetryPolicyConfig` by patching mode, maxRetries, retryableCodes and/or maxDelayMs onto an existing policy. */
+export function mergeGoRetryPolicy(
+  base: GoRetryPolicyConfig | undefined,
+  patch: { mode?: RetryMode; maxRetries?: number; maxDelayMs?: number; retryableCodes?: readonly string[] },
+): GoRetryPolicyConfig {
+  const resolved = resolveGoRetryFields(base)
+  const mode = patch.mode ?? resolved.mode
+  const backoff: GoRetryBackoffConfig = {
+    initialDelayMs: resolved.initialDelayMs,
+    maxDelayMs: patch.maxDelayMs ?? resolved.maxDelayMs,
+    jitterRatio: resolved.jitterRatio,
+  }
+  if (mode === 'always') return { mode: 'always', backoff }
+  return {
+    mode: 'normal',
+    maxRetries: patch.maxRetries ?? resolved.maxRetries,
+    retryableCodes: patch.retryableCodes ? [...patch.retryableCodes] : resolved.retryableCodes,
+    backoff,
+  }
+}
+
 /** Runtime configuration for one plugin mount. */
 export interface OpencodeGoConfig {
   /**
@@ -244,12 +367,16 @@ export interface OpencodeGoConfig {
   usageDisplay: UsageDisplayMode
   /** Show quota in the sidebar independently of the selected conversation model. */
   showSidebarQuota: boolean
+  /** Show per-model quota consumption multipliers in the conversation model picker. */
+  showModelMultiplier: boolean
   /** Appearance of the conversation input's quota trigger. */
   usagePillStyle: UsagePillStyle
   /** Draw an outer border and background frame around the conversation input's quota trigger. */
   usagePillBorder: boolean
   /** Global plugin appearance theme. */
   appearanceTheme: OpencodeGoTheme
+  /** Active OpenCode Go subscription tier for per-model remaining quota estimation. */
+  goPlan: GoPlan
   /** Per-model picker switches; absent entries default to enabled unless deprecated. */
   modelVisibility?: Record<string, boolean>
   /** Legacy credential reference, kept in sync with the first/current account. */
@@ -274,6 +401,8 @@ export interface OpencodeGoConfig {
   requestPreparationTimeoutMs?: number
   /** Whole dispatch deadline, including discovery and account fallback. */
   requestTimeoutMs?: number
+  /** Host-executed request retry policy for the Go route (`dsh-llm-retry`). */
+  retryPolicy?: GoRetryPolicyConfig
   /** Optional retained image occurrence cap per request; omission or null leaves the count unlimited. */
   maxImages?: number | null
   /** Request-level bound on base64-encoded image payload, in bytes. */
@@ -309,13 +438,89 @@ export interface GoModel {
   releaseDate?: string
   /** Input modalities the gateway declares, in {@link INPUT_MODALITIES} order. */
   inputModalities?: readonly InputModality[]
+  /** The text tariff the gateway publishes; absent when it declares none. */
+  price?: GoModelPrice
+  /** Per-plan monthly dollar allowance declared under `/models`'s `go.monthly_usage`. */
+  goMonthlyUsage?: GoMonthlyUsage
+  /** Time/date multiplier schedule declared under `/models`'s `cost.multipliers`. */
+  pricingMultipliers?: readonly PriceMultiplier[]
   /** Advertised by the gateway but lacking a usable protocol and capability configuration. */
   configurationMissing?: boolean
+}
+
+/** A published text tariff in US dollars per million tokens. */
+export interface GoModelPrice {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  /** Rates that replace the base ones above a context threshold, in ascending order. */
+  tiers?: readonly GoModelPriceTier[]
+  /** The gateway prices some periods by a multiplier; the rates here are the base ones. */
+  multipliers?: boolean
+}
+
+/** One context-tier tariff; `inputTokensAbove` is the last context still on the previous tier. */
+export interface GoModelPriceTier {
+  inputTokensAbove: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
 }
 
 export interface ThinkingBudgetRange {
   min: number
   max: number
+}
+
+const PRICE_RATES = ['input', 'output', 'cacheRead', 'cacheWrite'] as const
+
+function priceRate(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * A price is display-only: a malformed declaration drops the price, never the
+ * model, so one drifted field cannot make the whole listing unusable.
+ * @param value - the `price` field of a Host model row.
+ * @returns the validated tariff, or undefined when the field is unusable.
+ */
+function parseGoModelPrice(value: unknown): GoModelPrice | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const row = value as Record<string, unknown>
+  const rates = PRICE_RATES.map(key => priceRate(row[key]))
+  if (rates.some(rate => rate === undefined)) return undefined
+  const price: GoModelPrice = { input: rates[0]!, output: rates[1]!, cacheRead: rates[2]!, cacheWrite: rates[3]! }
+  if (row.multipliers === true) price.multipliers = true
+  if (Array.isArray(row.tiers) && row.tiers.length > 0) {
+    const tiers: GoModelPriceTier[] = []
+    for (const entry of row.tiers) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return price
+      const tier = entry as Record<string, unknown>
+      const tierRates = PRICE_RATES.map(key => priceRate(tier[key]))
+      const threshold = tier.inputTokensAbove
+      if (tierRates.some(rate => rate === undefined)
+        || typeof threshold !== 'number' || !Number.isSafeInteger(threshold) || threshold <= 0) return price
+      tiers.push({ inputTokensAbove: threshold, input: tierRates[0]!, output: tierRates[1]!,
+        cacheRead: tierRates[2]!, cacheWrite: tierRates[3]! })
+    }
+    price.tiers = tiers
+  }
+  return price
+}
+
+/** Validate per-plan monthly dollar limits (`go`, `go-plus`, `go-teams`); malformed fields drop cleanly. */
+export function parseGoMonthlyUsage(value: unknown): GoMonthlyUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const row = value as Record<string, unknown>
+  const parsed = {} as GoMonthlyUsage
+  for (const plan of GO_PLANS) {
+    const limit = row[plan]
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return undefined
+    parsed[plan] = limit
+  }
+  return parsed
 }
 
 /**
@@ -370,11 +575,6 @@ export function isModelEnabled(
   return typeof enabled === 'boolean' ? enabled : !model.deprecated
 }
 
-export function validReleaseDate(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value
-}
-
 /** Calendar dates are supplied without a timezone; compare UTC dates consistently. */
 export function isNewModel(model: GoModel, now = Date.now()): boolean {
   if (model.deprecated || !validReleaseDate(model.releaseDate)) return false
@@ -413,6 +613,16 @@ export function parseGoModels(value: unknown): GoModel[] {
     if (validReleaseDate(row.releaseDate)) model.releaseDate = row.releaseDate
     const modalities = normalizeInputModalities(row.inputModalities)
     if (modalities !== undefined) model.inputModalities = modalities
+    const price = parseGoModelPrice(row.price)
+    if (price !== undefined) model.price = price
+    const goMonthlyUsage = parseGoMonthlyUsage(row.goMonthlyUsage)
+    if (goMonthlyUsage !== undefined) model.goMonthlyUsage = goMonthlyUsage
+    if (row.pricingMultipliers !== undefined) {
+      try {
+        const parsed = parsePricingMultipliers(row.pricingMultipliers)
+        if (parsed.length > 0) model.pricingMultipliers = parsed
+      } catch { /* Multiplier schedules are display-only; drop malformed entries without failing the model. */ }
+    }
     return model
   })
 }
@@ -451,19 +661,109 @@ function parseSources(value: unknown): NonNullable<GoModelCatalog['sources']> {
   return { go: parse(sources.go), free: parse(sources.free) }
 }
 
+/** Input to the safe keyless gateway connectivity probe. */
+export interface ConnectionProbeInput {
+  baseURL?: string
+  freeBaseURL?: string
+  proxyURL?: string
+  includeFree?: boolean
+}
+
+/** Sanitized connectivity probe outcome for one gateway endpoint (never carries credentials). */
+export interface ProbeEndpointResult {
+  readonly ok: boolean
+  readonly url?: string
+  readonly status?: number
+  readonly latencyMs: number
+  readonly modelCount?: number
+  readonly error?: string
+}
+
+/** Connectivity probe outcomes for Go and optionally Free gateways. */
+export interface ConnectionProbeResult {
+  readonly go: ProbeEndpointResult
+  readonly free?: ProbeEndpointResult
+}
+
+export function parseConnectionProbeInput(value: unknown): ConnectionProbeInput {
+  if (value === undefined || value === null) return {}
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid connection probe input')
+  const row = value as Record<string, unknown>
+  const allowed = ['baseURL', 'freeBaseURL', 'proxyURL', 'includeFree']
+  if (Object.keys(row).some(key => !allowed.includes(key))) throw new Error('Invalid connection probe input')
+  const result: ConnectionProbeInput = {}
+  for (const key of ['baseURL', 'freeBaseURL', 'proxyURL'] as const) {
+    if (row[key] !== undefined) {
+      if (typeof row[key] !== 'string' || row[key].length > 2048) throw new Error(`Invalid probe ${key}`)
+      result[key] = row[key]
+    }
+  }
+  if (row.includeFree !== undefined) {
+    if (typeof row.includeFree !== 'boolean') throw new Error('Invalid probe includeFree')
+    result.includeFree = row.includeFree
+  }
+  return result
+}
+
+function parseProbeEndpointResult(value: unknown): ProbeEndpointResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid probe endpoint result')
+  const row = value as Record<string, unknown>
+  if (typeof row.ok !== 'boolean' || typeof row.latencyMs !== 'number'
+    || !Number.isSafeInteger(row.latencyMs) || row.latencyMs < 0) {
+    throw new Error('Invalid probe endpoint result')
+  }
+  if (row.url !== undefined && (typeof row.url !== 'string' || row.url.length > 2048)) throw new Error('Invalid probe url')
+  if (row.status !== undefined && (typeof row.status !== 'number' || !Number.isSafeInteger(row.status) || row.status <= 0)) {
+    throw new Error('Invalid probe status')
+  }
+  if (row.modelCount !== undefined && (typeof row.modelCount !== 'number' || !Number.isSafeInteger(row.modelCount) || row.modelCount < 0)) {
+    throw new Error('Invalid probe modelCount')
+  }
+  if (row.error !== undefined && (typeof row.error !== 'string' || row.error.length > 1024)) throw new Error('Invalid probe error')
+  return {
+    ok: row.ok,
+    latencyMs: row.latencyMs,
+    ...(row.url === undefined ? {} : { url: row.url }),
+    ...(row.status === undefined ? {} : { status: row.status }),
+    ...(row.modelCount === undefined ? {} : { modelCount: row.modelCount }),
+    ...(row.error === undefined ? {} : { error: row.error }),
+  }
+}
+
+export function parseConnectionProbeResult(value: unknown): ConnectionProbeResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid connection probe result')
+  const row = value as Record<string, unknown>
+  return {
+    go: parseProbeEndpointResult(row.go),
+    ...(row.free === undefined ? {} : { free: parseProbeEndpointResult(row.free) }),
+  }
+}
+
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespaceMap {
-    opencodeGoModels: { read(): Promise<RemoteResult<GoModelCatalog>> }
+    opencodeGoModels: {
+      read(): Promise<RemoteResult<GoModelCatalog>>
+      probe(input: ConnectionProbeInput): Promise<RemoteResult<ConnectionProbeResult>>
+    }
   }
 }
 
 const codec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#GoModelCatalog',
   schema: { parse: parseGoModelCatalog }, create: () => ({ parse: parseGoModelCatalog }) }
 
+const probeInputCodec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#ConnectionProbeInput',
+  schema: { parse: parseConnectionProbeInput }, create: () => ({ parse: parseConnectionProbeInput }) }
+
+const probeResultCodec = { mode: 'strict' as const, typeSymbol: 'dsh-opencode-go#ConnectionProbeResult',
+  schema: { parse: parseConnectionProbeResult }, create: () => ({ parse: parseConnectionProbeResult }) }
+
 export const modelsRemote: TypertRemoteContribution = {
   package: 'dsh-opencode-go',
   descriptors: [{ id: 'dsh-opencode-go#opencodeGoModels/read', service: 'opencodeGoModels',
-    namespace: 'opencodeGoModels', method: 'read', invocation: { kind: 'direct' }, parameters: [], result: codec }],
+    namespace: 'opencodeGoModels', method: 'read', invocation: { kind: 'direct' }, parameters: [], result: codec },
+  { id: 'dsh-opencode-go#opencodeGoModels/probe', service: 'opencodeGoModels',
+    namespace: 'opencodeGoModels', method: 'probe', invocation: { kind: 'direct' },
+    parameters: [{ name: 'input', wire: 'input', source: 'json', codec: probeInputCodec }], result: probeResultCodec }],
 }
 
 export interface UsageWindow {
@@ -485,7 +785,7 @@ export function parseAccountSwitch(value: unknown): GoAccountSwitch {
   const notice = value as Partial<GoAccountSwitch> | null
   if (!notice || typeof notice.fromRef !== 'string' || typeof notice.toRef !== 'string'
     || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(notice.fromRef) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(notice.toRef)
-    || (notice.reason !== 'quota' && notice.reason !== 'credential')
+    || (notice.reason !== 'quota' && notice.reason !== 'rate-limit' && notice.reason !== 'credential')
     || typeof notice.at !== 'number' || !Number.isSafeInteger(notice.at) || notice.at < 0
     || notice.at > 8_640_000_000_000_000) throw new Error('Invalid account switch notice')
   return { fromRef: notice.fromRef, toRef: notice.toRef, reason: notice.reason, at: notice.at }
@@ -564,7 +864,7 @@ export const usageRemote: TypertRemoteContribution = {
 }
 
 export type AccountCommand =
-  | { kind: 'add'; id: string; name: string; key: string }
+  | { kind: 'add'; id: string; name: string; key: string; plan?: GoPlan }
   | { kind: 'remove'; ref: string }
   | { kind: 'select'; ref: string }
   | { kind: 'rename'; ref: string; name: string }
@@ -572,6 +872,7 @@ export type AccountCommand =
   | { kind: 'move'; ref: string; toIndex: number }
   | { kind: 'auto-switch'; value: boolean }
   | { kind: 'balance'; value: boolean }
+  | { kind: 'set-plan'; ref: string; plan: GoPlan }
 
 export function parseAccountCommand(value: unknown): AccountCommand {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid account command')
@@ -580,17 +881,23 @@ export function parseAccountCommand(value: unknown): AccountCommand {
     add: ['kind', 'id', 'name', 'key'], remove: ['kind', 'ref'], select: ['kind', 'ref'],
     rename: ['kind', 'ref', 'name'], 'replace-key': ['kind', 'ref', 'key'],
     move: ['kind', 'ref', 'toIndex'], 'auto-switch': ['kind', 'value'], balance: ['kind', 'value'],
+    'set-plan': ['kind', 'ref', 'plan'],
+  }
+  const optionalFields: Partial<Record<string, string[]>> = {
+    add: ['plan'],
   }
   if (typeof row.kind !== 'string' || !Object.hasOwn(fields, row.kind)
-    || Object.keys(row).some(key => !fields[row.kind as string]!.includes(key))
+    || Object.keys(row).some(key => !fields[row.kind as string]!.includes(key) && !(optionalFields[row.kind as string]?.includes(key) ?? false))
     || fields[row.kind]!.some(key => !Object.hasOwn(row, key))) throw new Error('Invalid account command')
   if ('ref' in row && (typeof row.ref !== 'string' || !ACCOUNT_REF_PATTERN.test(row.ref))) throw new Error('Invalid account reference')
   if ('name' in row && (typeof row.name !== 'string' || !row.name.trim() || row.name.trim().length > 80)) throw new Error('Invalid account name')
   if ('key' in row && (typeof row.key !== 'string' || !row.key.trim())) throw new Error('Missing account credential')
   if (row.kind === 'add' && (typeof row.id !== 'string' || !/^[a-f0-9]{32}$/.test(row.id))) throw new Error('Invalid account operation ID')
+  if (row.kind === 'add' && row.plan !== undefined && (typeof row.plan !== 'string' || !GO_PLANS.includes(row.plan as GoPlan))) throw new Error('Invalid account plan')
   if (row.kind === 'move' && (!Number.isInteger(row.toIndex) || (row.toIndex as number) < 0)) throw new Error('Invalid account position')
   if (row.kind === 'auto-switch' && typeof row.value !== 'boolean') throw new Error('Invalid account switch')
   if (row.kind === 'balance' && typeof row.value !== 'boolean') throw new Error('Invalid account balancing')
+  if (row.kind === 'set-plan' && (typeof row.plan !== 'string' || !GO_PLANS.includes(row.plan as GoPlan))) throw new Error('Invalid account plan')
   return { ...row } as AccountCommand
 }
 

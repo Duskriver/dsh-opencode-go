@@ -1,0 +1,60 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - name: Check package metadata and npm status
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$EVENT_NAME" = "release" ] && [ "$RELEASE_TAG" != "v${version}" ]; then
+            echo "Release tag ${RELEASE_TAG} does not match package.json version v${version}" >&2
+            exit 1
+          fi
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "${name}@${version} is already published on npm; skipping."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.meta.outputs.already_published != 'true'
+        run: npm ci --strict-peer-deps
+
+      - name: Verify package
+        if: steps.meta.outputs.already_published != 'true'
+        run: |
+          npm run verify
+          npm run check:pack
+
+      - name: Publish to npm
+        if: steps.meta.outputs.already_published != 'true'
+        run: npm publish --provenance --access public

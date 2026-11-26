@@ -1,9 +1,10 @@
 /** Request snapshots, SDK dispatch, deadlines and seamless account fallback. */
 import { type OpencodeGoModelLimits, type GoAccountSwitch, type ModelSource } from './contracts.ts';
-import { type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
-import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment';
+import { type ResolvedRetryPolicy, type GenerateOptions, type ImageAttachmentAccess, type StreamChunk, LlmAdapter, type LlmModelInfo, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm';
+import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment';
 import type { Api, Model, Provider } from './sdk-types.ts';
 import { type OpencodeGoConfig } from './config.ts';
+import { type CompatibleImageRequestTarget } from './conversion.ts';
 import { type PrivacyMaskClient } from './privacy.ts';
 import { ProxyTransport } from './transport.ts';
 import { OpencodeGoCatalog } from './catalog.ts';
@@ -213,13 +214,19 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
         name: string;
     };
     /**
+     * Expose the Go route's configured retry policy so `@deepseek-ai/dsh-llm-retry`
+     * honors longer upstream `Retry-After` delays instead of falling back to the
+     * 10s host default. Free keeps its passive cooldown semantics.
+     */
+    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;
+    /**
      * Report the exact request-image projection this route serializes: the
      * configured pixel budget decides the dimensions and the configured
      * encoded-byte target caps the bytes, matching conversion.ts's per-request
      * target. The token meter must price what is sent, not the normalized source.
      * Synchronous by contract; the live configuration is readable without I/O.
      */
-    imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget;
+    imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): CompatibleImageRequestTarget;
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
     resolveModel(_provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     /** Capture limits and protocol before discovery can yield to a settings update. */

@@ -3,6 +3,7 @@ import css from './Page.module.css'
 import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { themeStyle, useGoThemeTokens } from '../presentation.ts'
+import { GoRowIcon } from '../GoMark.tsx'
 import { setPageTab, usePageTab } from './nav.ts'
 import {
   PAGE_TABS,
@@ -68,9 +69,17 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
   const tab = usePageTab()
   const tokens = useGoThemeTokens(state.appliedAppearanceTheme)
   const scroller = useRef<HTMLDivElement | null>(null)
+  const tabsRef = useRef<HTMLDivElement | null>(null)
   // The tab store outlives the host panel, so a re-entry can restore a tab the
-  // reader left halfway down: every tab starts at its own top instead.
-  useEffect(() => { scroller.current?.scrollTo({ top: 0 }) }, [tab])
+  // reader left halfway down: every tab starts at its own top instead, and a
+  // narrow horizontal tab strip keeps the newly selected tab in view.
+  useEffect(() => {
+    scroller.current?.scrollTo?.({ top: 0 })
+    tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({
+      block: 'nearest',
+      inline: 'nearest',
+    })
+  }, [tab])
   const locale = seats.getLocale?.()
   const actions: PageActions = {
     edit: seats.edit,
@@ -92,9 +101,11 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     setBalanceAccounts: seats.setBalanceAccounts,
     replaceAccountKey: seats.replaceAccountKey,
     moveAccount: seats.moveAccount,
+    setAccountPlan: seats.setAccountPlan,
     t: seats.t,
     getLocale: seats.getLocale,
     readers: seats.readers,
+    probeConnection: seats.probeConnection,
     // The host panel is already open when a sub-page calls this, so switching the
     // tab is the whole navigation; the sidebar row keeps owning the open axis.
     openPage: next => { setPageTab(next ?? 'overview') },
@@ -106,9 +117,12 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
     <div className={css.scroller} ref={scroller}>
       <div className={css.page}>
         <header className={css.head}>
-          <div className={css.headMain}>
-            <h1 className={css.title}>{seats.t('pageTitle')}</h1>
-            <p className={css.sub}>{seats.t('pageSubtitle')}</p>
+          <div className={css.headLead}>
+            <span className={css.brandBadge} aria-hidden="true"><GoRowIcon size={22} /></span>
+            <div className={css.headMain}>
+              <h1 className={css.title}>{seats.t('pageTitle')}</h1>
+              <p className={css.sub}>{seats.t('pageSubtitle')}</p>
+            </div>
           </div>
           <div className={css.headActions}>
             <span className={css.statusChip} data-on={state.enabled ? 'true' : 'false'} title={statusText}>
@@ -117,7 +131,7 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
             </span>
           </div>
         </header>
-        {ready ? <div className={css.tabs} role="tablist" aria-label={seats.t('pageTabsLabel')}>
+        {ready ? <div ref={tabsRef} className={css.tabs} role="tablist" aria-label={seats.t('pageTabsLabel')}>
           {PAGE_TABS.map((item, index) => <button key={item} type="button" role="tab"
             id={tabId(item)} aria-selected={tab === item} aria-controls={panelId(item)}
             tabIndex={tab === item ? 0 : -1} className={css.tab}
@@ -133,6 +147,9 @@ function Loaded({ seats }: { seats: PageSeats }): ReactNode {
               document.getElementById(tabId(next))?.focus()
             }}>
             {seats.t(TAB_COPY[item])}
+            {item === 'advanced' && state.dirty
+              ? <span className={css.tabDot} title={seats.t('tabUnsaved')} aria-hidden="true" />
+              : null}
           </button>)}
         </div> : null}
         {state.status === 'loading' ? <p className={css.statusNote} role="status">{seats.t('pageLoading')}</p> : null}

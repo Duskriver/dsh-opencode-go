@@ -4,12 +4,12 @@
 
 ## 手动安装与离线升级（.tgz）
 
-仓库根目录会随每次发版同步追踪**唯一一个**预打包归档文件（例如 `dsh-opencode-go-0.4.5.tgz`），内含完整的编译产物 `lib/`、清单、`cordis.patch.yml` 与许可说明，不需要本机安装 `git` 或执行构建脚本。当 npm 源尚未发布最新版本（例如 npm 仍停留在 `0.4.0`）、或在 DS Bot / 桌面端 / 离线环境中需要获取最新修复（如 #94 自动高度外壳塌陷修复）时，请按以下步骤手动安装或升级。
+仓库根目录会随每次发版同步追踪**唯一一个**预打包归档文件（例如 `dsh-opencode-go-0.4.7.tgz`），内含完整的编译产物 `lib/`、清单、`cordis.patch.yml` 与许可说明，不需要本机安装 `git` 或执行构建脚本。当 npm 源尚未发布最新版本（例如 npm 仍停留在 `0.4.0`）、或在 DS Bot / 桌面端 / 离线环境中需要获取最新修复（如 #94 自动高度外壳塌陷修复）时，请按以下步骤手动安装或升级。
 
 ### 1. 下载到本地并检查路径
 
-- 在 GitHub 仓库根目录打开 [`dsh-opencode-go-0.4.5.tgz`](../dsh-opencode-go-0.4.5.tgz)，点击 **Download raw file**（或下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.5.tgz)）。
-- 建议保存到**不含空格与特殊字符**的本地目录（例如 Windows：`C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.5.tgz`；macOS / Linux：`~/Downloads/dsh-opencode-go-0.4.5.tgz`）。
+- 在 GitHub 仓库根目录打开 [`dsh-opencode-go-0.4.7.tgz`](../dsh-opencode-go-0.4.7.tgz)，点击 **Download raw file**（或下载 [Raw 链接](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.4.7.tgz)）。
+- 建议保存到**不含空格与特殊字符**的本地目录（例如 Windows：`C:\Users\<用户名>\Downloads\dsh-opencode-go-0.4.7.tgz`；macOS / Linux：`~/Downloads/dsh-opencode-go-0.4.7.tgz`）。
 
 ### 2. 从图形界面安装或升级（DSH Web / DSH Desktop / DS Bot）
 
@@ -18,7 +18,7 @@
 3. 在输入框填入本地 `.tgz` 文件的**完整绝对路径**（若路径中包含空格，建议先移至无空格路径，或按 `file:` URL 格式填写）。
 4. 点击 **安装**，完成后点击 **立即启用**。
 5. **彻底退出并重启**：DS Bot / DSH Desktop 请退出全部托盘与后台进程后重开；Web 端请重启 `dsh web` 并强制刷新浏览器页面。
-6. 重启后打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认当前版本为 `0.4.5`。
+6. 重启后打开 **设置 → OpenCode Go**（或开启侧边栏入口后打开控制台 **关于** 页签），确认当前版本为 `0.4.7`。
 
 ### 3. 从命令行安装或升级（按 profile 独立生效）
 
@@ -26,15 +26,15 @@ Web 与 Headless 使用不同的 DSH profile，需要分别安装和更新：
 
 ```sh
 # 首次安装到 web profile（将路径替换为本地 .tgz 实际路径）
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.7.tgz
 
 # 从旧版（如 npm 0.4.0）升级到新版 .tgz：先移除旧包再安装本地 .tgz 最稳妥
 dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.4.7.tgz
 
 # Headless profile 同理
 dsh plugin --profile headless remove dsh-opencode-go
-dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.7.tgz
 ```
 
 > 💡 **为什么建议先下载到本地再传本地路径，而不是直接填写远程 `.tgz` URL？**
@@ -55,7 +55,7 @@ dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
 
 ```sh
 # 从本地 .tgz 安装（推荐用于获取最新版本）
-dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.5.tgz
+dsh plugin --profile headless add /path/to/dsh-opencode-go-0.4.7.tgz
 
 # 或当 npm 已发布最新版时在线安装
 dsh plugin --profile headless add dsh-opencode-go
@@ -87,9 +87,12 @@ dsh --profile headless --patch ./headless.patch.yml "你好"
 ```text
 http://127.0.0.1:7890
 socks5://127.0.0.1:1080
+socks5://user:pass@[2001:db8::1]:1080
 ```
 
-支持 HTTP、HTTPS、SOCKS5 和带用户名、密码的代理 URL。保存后，后续对话、模型目录更新和用量查询使用新代理。代理运行在 DSH 所在的机器上；远程部署中的 `127.0.0.1` 指服务器自身。
+支持 HTTP、HTTPS、SOCKS5 和带用户名、密码的代理 URL；IPv6 字面量地址须带方括号。保存后，后续对话、模型目录更新和用量查询使用新代理。代理运行在 DSH 所在的机器上；远程部署中的 `127.0.0.1` 指服务器自身。
+
+已知限制：Go 通道经 SOCKS5 代理访问时，若 Go 网关地址的主机也是 IPv6 字面量（如 `http://[::1]:8080/v1`），请求会失败。请把网关地址改用域名或 IPv4 地址，或改用 Free 通道。
 
 ### 双路由与手动配置
 
@@ -164,6 +167,7 @@ Bun 1.4.4 通过插件直接声明的 `@oven/bun-<platform>` npm 可选平台包
 | `balanceAccounts` | 多账号轮询：同一会话固定一个账号，新会话轮流使用下一个账号；默认 `false`，需配合 `autoSwitch` 才能续到其他账号 |
 | `requestPreparationTimeoutMs` | 目录查询及每次尝试的凭据、图片准备时限，默认 60000 毫秒 |
 | `requestTimeoutMs` | 一次发送的完整时限，包含目录查询、账号切换和流式输出，默认 1800000 毫秒；预先准备的调用从发送时计时 |
+| `retryPolicy` | Go 路由的宿主重试策略（`mode`、`maxRetries`、`retryableCodes`、`backoff`），默认 `mode: normal`、`maxRetries: 5`、`backoff.maxDelayMs: 30000`；可在高级设置中调整模式、最大重试次数与最大退避上限，修改保存后热更新生效 |
 
 未显式配置 `freeEnabled` 的旧 profile 按默认值 `false` 处理：升级后 Free 路由保持关闭，需要时在 **设置 → OpenCode Go → 概览** 中开启（立即生效）；升级前已选择 `DSH OpenCode Free` 模型的旧会话，需要重新选择 Go 模型，或先开启 Free 再继续使用。
 

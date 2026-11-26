@@ -447,6 +447,47 @@ describe("route lifecycle", () => {
       expect(gateway.paths).toEqual([])
     })
 
+    it.each([
+      ['blank', '   \t\n  '],
+      ['illegal-characters', 'bad\nkey'],
+      ['non-ascii', 'sk-密钥'],
+    ])('keeps Go dormant when the resolved API key is unusable (%s)', async (_label, invalidKey) => {
+      vi.stubEnv('OPENCODE_API_KEY', invalidKey)
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      try {
+        apply(ctx, configOf(gateway.url, { freeEnabled: true }))
+        await new Promise(resolve => setTimeout(resolve, 200))
+        expect(ctx.llm.listProviders()).toEqual([{ id: 'dsh-opencode-free', name: 'DSH OpenCode Free' }])
+        expect(gateway.paths).toEqual([])
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    })
+
+    it('trims surrounding whitespace from a usable API key', async () => {
+      vi.stubEnv('OPENCODE_API_KEY', '  padded-key\n')
+      const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
+      gateway.pushCompletions({ events: textEvents })
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      try {
+        apply(ctx, configOf(gateway.url))
+        const chunks: StreamChunk[] = []
+        for await (const chunk of ctx.llm.stream({
+          provider: 'dsh-opencode-go',
+          model: 'deepseek-v4.1-flash',
+          sessionId: 'trimmed-key-session' as never,
+          messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
+        })) chunks.push(chunk)
+        expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'hello' }))
+        expect(gateway.headers.at(-1)?.authorization).toBe('Bearer padded-key')
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    })
+
     it('converts image attachments for the multimodal model end to end', async () => {
       vi.stubEnv('OPENCODE_API_KEY', 'test-key')
       const gateway = await mockGateway({ status: 200, body: listingBody(fullLiveListing()) })
@@ -534,6 +575,8 @@ describe("route lifecycle", () => {
         height: 2048,
         maxPixels: 2048 * 2048,
         maxBytes: 1024 * 1024,
+        maxImageBytes: 1024 * 1024,
+        imageTargetBytes: 1024 * 1024,
       }, expect.any(AbortSignal))
       expect(JSON.stringify(gateway.bodies[0])).toContain(MODEL_IMAGE_PATH)
       expect(chunks.find(chunk => chunk.type === 'finish')).toMatchObject({ reason: { kind: 'stop' } })
@@ -1024,6 +1067,40 @@ describe("independent provider identity and durable continuation", () => {
       // A real model switch must still strip signatures that belong to the previous model.
       await drain(ctx, { provider: route, model: 'union-alpha', messages })
       expect(JSON.stringify(gateway.bodies[2])).not.toContain('fixture-signature')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('re-captures the Go retry policy when live settings update without a restart', async () => {
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    let livePolicy: OpencodeGo.OpencodeGoConfig['retryPolicy'] = {
+      mode: 'normal',
+      maxRetries: 5,
+      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+      backoff: { initialDelayMs: 500, maxDelayMs: 30_000, jitterRatio: 0.1 },
+    }
+    const base = configOf('https://gateway.example/v1')
+    const live = Config(base) as LiveConfig
+    live.retryPolicy = { get: () => livePolicy }
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    try {
+      apply(ctx, live)
+      expect(ctx.llm.providerRetryPolicy(route)).toMatchObject({ mode: 'normal', maxRetries: 5, maxDelayMs: 30_000 })
+      const updates: number[] = []
+      ctx.on('llm/adapters-updated', () => { updates.push(ctx.llm.providerRetryPolicy(route).maxDelayMs) })
+
+      livePolicy = { mode: 'always', backoff: { initialDelayMs: 500, maxDelayMs: 60_000, jitterRatio: 0.1 } }
+      ctx.emit('loader/volatile-update', [['retryPolicy']])
+
+      expect(ctx.llm.providerRetryPolicy(route)).toEqual({
+        mode: 'always',
+        initialDelayMs: 500,
+        maxDelayMs: 60_000,
+        jitterRatio: 0.1,
+      })
+      expect(updates).toEqual([60_000])
     } finally {
       await ctx.fiber.dispose()
     }

@@ -88,7 +88,7 @@ function harness(options: { installSidebar?: boolean; sidebarEntry?: boolean; us
     // path and the older-host stand-in have their own spec
     // (tests/settings-nav-icon.client.spec.tsx), so the pair lifecycle here stays
     // focused on the sidebar slots.
-    if (slot === 'settings.section.icon') return () => {}
+    if (slot === 'settings.section.icon' || slot === 'conversation.input.model.label') return () => {}
     if (slot === 'sidebar.panellist' && !installSidebar) return () => {}
     return install()
   })
