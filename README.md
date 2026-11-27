@@ -37,19 +37,19 @@
 
 ### 1. 安装插件
 
-> 💡 **版本提示**：当前仓库最新版本为 **`0.5.1`**（修复 Go 通道使用 IPv6 字面量地址的 SOCKS5 代理时全部请求失败的问题，并放大插件包图标）。若 npm 源尚未同步最新版，建议优先使用下方 **方式 A** 安装仓库根目录附带的 [`dsh-opencode-go-0.5.1.tgz`](dsh-opencode-go-0.5.1.tgz)。
+> 💡 **版本提示**：当前仓库最新版本为 **`0.5.2`**（修复同时安装其他模型接入插件后，模型选择器中 OpenCode Go 各行缺少额度倍率/免费标记的问题）。若 npm 源尚未同步最新版，建议优先使用下方 **方式 A** 安装仓库根目录附带的 [`dsh-opencode-go-0.5.2.tgz`](dsh-opencode-go-0.5.2.tgz)。
 
 #### 方式 A：通过 `.tgz` 离线包安装（获取最新版本 / DS Bot 与桌面端推荐）
 
-1. **下载安装包**：下载仓库根目录的 [`dsh-opencode-go-0.5.1.tgz`](dsh-opencode-go-0.5.1.tgz)（[Raw 直链](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.5.1.tgz)）至无空格本地路径（如 `~/Downloads/dsh-opencode-go-0.5.1.tgz`）。若已 `git clone` 仓库，根目录已自带该文件。
+1. **下载安装包**：下载仓库根目录的 [`dsh-opencode-go-0.5.2.tgz`](dsh-opencode-go-0.5.2.tgz)（[Raw 直链](https://github.com/Duskriver/dsh-opencode-go/raw/main/dsh-opencode-go-0.5.2.tgz)）至无空格本地路径（如 `~/Downloads/dsh-opencode-go-0.5.2.tgz`）。若已 `git clone` 仓库，根目录已自带该文件。
 2. **图形界面安装**：打开 DSH（Web / Desktop）或 **DS Bot** → **插件 → 添加插件**（若已装旧版建议先移除，已保存的 API Key 与配置会保留），填入本地 `.tgz` 完整绝对路径，点击 **安装** → **立即启用**，随后**彻底重启客户端或 `dsh web`**。
 3. **命令行安装**：
    ```sh
    # Web profile（请替换为实际的本地 .tgz 路径）
-   dsh plugin --profile web add ./dsh-opencode-go-0.5.1.tgz
+   dsh plugin --profile web add ./dsh-opencode-go-0.5.2.tgz
 
    # Headless profile
-   dsh plugin --profile headless add ./dsh-opencode-go-0.5.1.tgz
+   dsh plugin --profile headless add ./dsh-opencode-go-0.5.2.tgz
    ```
    *更多离线升级与 `ERR_PNPM_MISSING_TARBALL_INTEGRITY` 排查细节见[高级使用指南](docs/advanced.md#手动安装与离线升级tgz)。*
 
@@ -62,7 +62,7 @@
 
 ### 2. 首次配置
 
-1. 重启后打开 **设置 → OpenCode Go**，确认版本为 `0.5.1`。
+1. 重启后打开 **设置 → OpenCode Go**，确认版本为 `0.5.2`。
 2. 在 **账号** 中点击 **添加账号**，填写名称与 OpenCode Go API Key，并按实际订阅选择**套餐档位**（用于界面换算模型调用次数）。
 3. *（可选）* 在 **概览** 中打开 **侧边栏入口**，即可在 DSH 左侧栏通过手绘 `go` 图标直达完整 7 子页控制台。
 4. 在任意对话的模型选择器中选用 **DSH OpenCode Go** 下的模型，输入区下方即可看到实时用量胶囊。
@@ -231,7 +231,7 @@ OpenCode Go 网关支持基于会话粘性的 Prompt Cache 复用。插件会将
 <details>
 <summary><strong>Q: 为什么按包名安装后版本仍是旧版（如 0.4.0），或在 DS Bot 中设置面板高度塌陷？</strong></summary>
 
-若 npm 仓库暂未同步最新源码，直接按包名 `dsh-opencode-go` 安装可能拿到旧版。请使用上文 **方式 A** 下载仓库根目录的 [`dsh-opencode-go-0.5.1.tgz`](dsh-opencode-go-0.5.1.tgz)，在插件列表移除旧版（不会清空已保存 Key 与设置）后通过本地 `.tgz` 路径重新安装启用，并**彻底退出重启客户端 / `dsh web`**。详见[手动安装与离线升级说明](docs/advanced.md#手动安装与离线升级tgz)。
+若 npm 仓库暂未同步最新源码，直接按包名 `dsh-opencode-go` 安装可能拿到旧版。请使用上文 **方式 A** 下载仓库根目录的 [`dsh-opencode-go-0.5.2.tgz`](dsh-opencode-go-0.5.2.tgz)，在插件列表移除旧版（不会清空已保存 Key 与设置）后通过本地 `.tgz` 路径重新安装启用，并**彻底退出重启客户端 / `dsh web`**。详见[手动安装与离线升级说明](docs/advanced.md#手动安装与离线升级tgz)。
 </details>
 
 <details>
@@ -283,11 +283,11 @@ Free 通道默认关闭，需在 **概览 → 启用免费通道** 显式开启�
 
 ### 通过 `.tgz` 离线升级（npm 未同步新版时推荐）
 
-下载最新 [`dsh-opencode-go-0.5.1.tgz`](dsh-opencode-go-0.5.1.tgz) 到本地，先移除旧包再安装本地路径（保留已存 Key 与配置）：
+下载最新 [`dsh-opencode-go-0.5.2.tgz`](dsh-opencode-go-0.5.2.tgz) 到本地，先移除旧包再安装本地路径（保留已存 Key 与配置）：
 
 ```sh
 dsh plugin --profile web remove dsh-opencode-go
-dsh plugin --profile web add /path/to/dsh-opencode-go-0.5.1.tgz
+dsh plugin --profile web add /path/to/dsh-opencode-go-0.5.2.tgz
 ```
 
 *图形界面用户可在 **插件** 页移除旧版后通过本地 `.tgz` 路径安装启用，操作完毕请彻底重启客户端或 `dsh web`。*

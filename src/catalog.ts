@@ -612,13 +612,25 @@ function listingError(snapshot: CatalogSnapshot): LlmError {
   return new LlmError(`llm-opencode-go: ${snapshot.failure instanceof Error ? snapshot.failure.message : 'the live model listing is unreachable'}; refresh the model list to retry`, 'DISCOVERY_FAILED', { cause: snapshot.failure })
 }
 
+/**
+ * One directory entry in the tariff shape the quota math reads. This is the row
+ * {@link describeCatalog} builds, for a single model and without its capacities.
+ * @param snapshot - the source catalog the entry was parsed from.
+ * @param model - the parsed directory entry.
+ * @returns the model id, name, published tariff and declared quota details.
+ */
+export function catalogGoModel(snapshot: CatalogSnapshot, model: Model<Api>): GoModel {
+  const price = publishedPrice(model, snapshot.details.get(model.id))
+  return { id: model.id, name: model.name, ...price === undefined ? {} : { price }, source: snapshot.source,
+    ...snapshot.details.get(model.id) }
+}
+
 function describeCatalog(snapshot: CatalogSnapshot): GoModel[] {
   return sortModels([
     ...[...snapshot.models.values()].map(model => {
-      const budget = reasoningBudgetRange(model), price = publishedPrice(model, snapshot.details.get(model.id))
-      return { id: model.id, name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens,
-        ...budget === undefined ? {} : { reasoningBudget: budget },
-        ...price === undefined ? {} : { price } }
+      const budget = reasoningBudgetRange(model)
+      return { ...catalogGoModel(snapshot, model), contextWindow: model.contextWindow, maxTokens: model.maxTokens,
+        ...budget === undefined ? {} : { reasoningBudget: budget } }
     }),
     ...[...snapshot.unavailable.keys()].map(id => ({ id, name: id, configurationMissing: true })),
   ].map(model => ({ ...model, source: snapshot.source, ...snapshot.details.get(model.id) })))

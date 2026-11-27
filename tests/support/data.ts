@@ -23,6 +23,13 @@ export function modelEntry(overrides: Record<string, unknown> = {}): Record<stri
   }
 }
 
+/** A priced model on the weekday peak schedule with a per-plan Go allowance: what the quota badge math reads. */
+export const pricedGoEntry = (overrides: Record<string, unknown> = {}) => modelEntry({
+  cost: { text: { input: { price: 0.66, cache: { read: 0.022 } }, output: { price: 1.98 } }, multipliers: peakMultipliers },
+  go: { monthly_usage: { go: 15, 'go-plus': 60, 'go-teams': 20 } },
+  ...overrides,
+})
+
 export function fixtureModels(): Record<string, Record<string, unknown>> {
   return {
     'deepseek-v4-pro': modelEntry({ name: 'DeepSeek V4 Pro', family: 'deepseek', modalities: { input: ['text'] },

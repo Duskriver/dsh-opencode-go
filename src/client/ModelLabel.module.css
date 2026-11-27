@@ -35,3 +35,23 @@
   color: var(--go-success);
   font-weight: 500;
 }
+
+/* Another provider's row while this label holds the slot: the host's own fallback geometry. */
+.catalogLabel {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 4px;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.catalogName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.catalogBadge {
+  flex: none;
+}

@@ -11,11 +11,12 @@ import {
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import { OpencodeGoAdapter } from '../src/adapter.ts'
-import { discoverCatalogModels, discoverSettingsModels, PROVIDER_ID } from '../src/catalog.ts'
+import { discoverCatalogModels, discoverSettingsModels, OpencodeGoCatalog, PROVIDER_ID } from '../src/catalog.ts'
 import { PlainConfig } from '../src/config.ts'
+import { FREE_PROVIDER_ID, type OpencodeGoConfig } from '../src/contracts.ts'
 import { configOf } from './support/host.ts'
 import { closeMockGateways, listingBody, mockGateway, textEvents, fullLiveListing } from './support/gateway.ts'
-import { modelsDocument, modelEntry } from './support/data.ts'
+import { modelsDocument, modelEntry, pricedGoEntry } from './support/data.ts'
 import SessionStore from '@deepseek-ai/dsh-session'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { AttachmentId, ImageVariantId, type ImageAttachmentRef, type ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
@@ -656,6 +657,55 @@ describe("requests and deadlines", () => {
       await expect(adapter.resolveModel(PROVIDER_ID, 'absent'))
         .rejects.toMatchObject({ code: 'UNKNOWN_MODEL' })
       expect(adapter.providerInfo(PROVIDER_ID)).toEqual({ id: PROVIDER_ID, name: 'DSH OpenCode Go' })
+    })
+
+    it('publishes each Go model quota badge on the catalog, keeps Free rows plain and republishes when a tariff window flips', async () => {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+      vi.setSystemTime(Date.parse('2026-11-16T00:59:30Z')) // Monday: the peak schedule opens at 01:00 UTC
+      const document = modelsDocument({
+        priced: pricedGoEntry({ name: 'Priced' }),
+        free: modelEntry({ name: 'Zero Cost' }),
+        unpriced: modelEntry({ name: 'Unpriced', cost: undefined }),
+      })
+      // A fetcher stub keeps the listing off the network, so only the clock is simulated.
+      const listing = new OpencodeGoCatalog('https://gateway.example/v1', 60_000, undefined, undefined, undefined,
+        async () => Response.json(document))
+      const config = (overrides: Partial<OpencodeGoConfig> = {}) => configOf('https://gateway.example/v1', overrides)
+      const key = () => Promise.resolve('test-key')
+      const onBadgeStale = vi.fn()
+      const go = new OpencodeGoAdapter({ config, resolveApiKey: key, catalog: () => listing, onBadgeStale })
+      const badges = (models: readonly { id: string; badge?: unknown }[]) =>
+        Object.fromEntries(models.flatMap(model => model.badge === undefined ? [] : [[model.id, model.badge]]))
+      try {
+        const models = await go.listModels(PROVIDER_ID)
+        expect(badges(models)).toEqual({
+          free: { text: { en: 'Free', zh: '免费' }, tone: 'success' },
+          priced: { text: '8.40×', tone: 'neutral' },
+        })
+        // "No badge" is an absent key: the host registry throws on a `null` and drops the whole provider.
+        expect(models.find(model => model.id === 'unpriced')).not.toHaveProperty('badge')
+        expect(models.some(model => model.badge === null)).toBe(false)
+
+        // 01:00 UTC: the published badge is now stale, so pickers are asked to reread —
+        // and the reread states the peak rate from the same cached listing.
+        expect(onBadgeStale).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(30_050)
+        expect(onBadgeStale).toHaveBeenCalledExactlyOnceWith()
+        expect(badges(await go.listModels(PROVIDER_ID)).priced).toEqual({ text: '16.8×', tone: 'warning' })
+
+        // The reader's switch outranks anything this plugin could publish.
+        const quiet = new OpencodeGoAdapter({ config: () => config({ showModelMultiplier: false }), resolveApiKey: key, catalog: () => listing })
+        expect(badges(await quiet.listModels(PROVIDER_ID))).toEqual({})
+
+        // The Free route never publishes one, zero price or not.
+        const free = new OpencodeGoAdapter({ source: 'free', config, resolveApiKey: key, catalog: () => listing })
+        expect(badges(await free.listModels(FREE_PROVIDER_ID))).toEqual({})
+      } finally {
+        await go.dispose()
+      }
+      // A disposed adapter leaves no reload pending for the window that closes at 04:00 UTC.
+      await vi.advanceTimersByTimeAsync(3 * 60 * 60_000)
+      expect(onBadgeStale).toHaveBeenCalledTimes(1)
     })
 
     it('bounds rejection and credential-version bookkeeping without changing cooldowns', async () => {

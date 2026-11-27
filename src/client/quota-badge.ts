@@ -1,13 +1,8 @@
 /** Shared multiplier badge formatting and boundary-aware clock hooks for model lists. */
 import { useEffect, useState } from 'react'
 import {
-  accountPlanOf,
-  accountsOf,
-  DEFAULT_GO_PLAN,
-  GO_PLANS,
   type GoModel,
   type GoPlan,
-  type OpencodeGoConfig,
   type PriceMultiplier,
 } from '../contracts.ts'
 import { nextCatalogMultiplierTransitionMs } from '../pricing.ts'
@@ -15,6 +10,8 @@ import { estimateModelQuota, formatQuotaMultiplier } from '../quota-estimate.ts'
 import { formatTokenCount, type en } from './presentation.ts'
 
 export type MultiplierTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string
+
+export { resolveActiveGoPlan } from '../model-badge.ts'
 
 export type ModelMultiplierBadge =
   | { readonly kind: 'free'; readonly text: string; readonly title: string; readonly tone: 'free' }
@@ -26,17 +23,6 @@ export type ModelMultiplierBadge =
     readonly tone: 'normal' | 'peak'
     readonly isPeak: boolean
   }
-
-/**
- * Resolve the subscription tier of the active account from a settings snapshot,
- * falling back to the profile-level `goPlan` and then `'go'`.
- */
-export function resolveActiveGoPlan(settings?: Partial<OpencodeGoConfig>): GoPlan {
-  const fallback: GoPlan = settings?.goPlan && (GO_PLANS as readonly string[]).includes(settings.goPlan)
-    ? settings.goPlan : DEFAULT_GO_PLAN
-  const active = accountsOf(settings ?? {})[0]
-  return accountPlanOf(active, fallback)
-}
 
 /**
  * Build the compact list multiplier badge and descriptive tooltip for one model.

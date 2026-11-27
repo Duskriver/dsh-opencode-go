@@ -31,12 +31,19 @@ import {
 } from './config.ts'
 import { GoUsageService, GoAccountManager, GoAccountsService } from './accounts.ts'
 import { GoAnalyticsService } from './analytics.ts'
+import { resolveActiveGoPlan } from './model-badge.ts'
 import { accountsOf, accountRefOf, PROFILE_ENTRY_ID, SETTINGS_NAMESPACE, goRemote } from './contracts.ts'
 import { ProxyTransport } from './transport.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
     'loader/volatile-update'(paths: readonly (readonly string[])[]): void
+    /**
+     * DSH 0.2.2+ declares this identically (the declarations merge) and answers it by
+     * reloading the client model catalog. A 0.2.1 Host has no listener: the emit is a
+     * no-op there, where no catalog badge exists to go stale either.
+     */
+    'llm/models-updated'(provider: string): void
   }
 }
 
@@ -195,6 +202,9 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     onReplayDegrade: (reason: string) => {
       ctx.logger.warn(`llm-opencode-go: unusable replay state on assistant history; sending provider-neutral content (${reason})`)
     },
+    // The Go rows' catalog badge follows the clock: once a tariff window flips, ask
+    // every open picker to reread the catalog it was published on.
+    onBadgeStale: () => { ctx.emit('llm/models-updated', PROVIDER_ID) },
     // Configured thinking budgets are filtered/clamped instead of failing the
     // model; surface each distinct dropped setting once so a stale profile can
     // be fixed without per-request log spam.
@@ -227,8 +237,11 @@ export function apply(ctx: Context, raw?: OpencodeGoConfig | LiveConfig): void {
     resolveApiKey: (ref: string) => resolveApiKey({ ...current(), apiKeyEnv: ref }),
     accountRefs: () => accountsOf(current()).map(account => account.apiKeyEnv),
   })
+  // Besides the models a picker may show, the Go rows' catalog badge is computed
+  // here: the reader's multiplier switch and the active plan the badge is stated
+  // for belong to what open pickers must reread as well.
   const pickerVisibilityOf = (): string => JSON.stringify([current().modelVisibility ?? {}, current().modelLimits ?? {},
-    current().baseURL, current().freeBaseURL, current().proxyURL])
+    current().baseURL, current().freeBaseURL, current().proxyURL, current().showModelMultiplier !== false, resolveActiveGoPlan(current())])
   let pickerVisibility = pickerVisibilityOf()
   const retryPolicyOf = (): string => JSON.stringify(current().retryPolicy ?? null)
   let retryPolicyKey = retryPolicyOf()

@@ -127,6 +127,11 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
     onCatalogWarning?: (warning: string) => void;
     /** Re-read picker models after a background catalog refresh commits. */
     onCatalogRefresh?: () => void;
+    /**
+     * A published catalog badge is about to change with the clock (a tariff window
+     * opening or closing). The mount asks open pickers to reread the catalog.
+     */
+    onBadgeStale?: () => void;
     /** Host account-state version for actual requests, captured before asynchronous model discovery. */
     accountGeneration?: () => number;
     /** Shared by both adapters so account settlement ordering spans both routes. */
@@ -170,6 +175,10 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
     private credentialEpoch;
     /** Monotonic sequence of the latest request this adapter started. */
     private callSeq;
+    /** Pending reload for the next tariff-window flip; unref'd, so it never holds the Host open. */
+    private badgeClock;
+    /** Schedules of the models the latest listing published a badge decision for. */
+    private badgeSchedules;
     private nextCallSequence;
     constructor(options: OpencodeGoAdapterOptions);
     /**
@@ -205,7 +214,31 @@ export declare class OpencodeGoAdapter extends LlmAdapter {
      * Synchronous by contract; the live configuration is readable without I/O.
      */
     imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): CompatibleImageRequestTarget;
+    /**
+     * Advertise the route's models, each Go row with the quota badge it carries right
+     * now. `badge` travels only this catalog path: DSH 0.2.2+ hands it to whichever
+     * contribution holds the single-occupant model-label slot, so Go rows keep their
+     * badge even while another plugin renders the picker (#125). An older registry
+     * drops the key, and exact-route resolution never carries it into a request.
+     */
     listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
+    /**
+     * The badge publisher for one listing, or undefined while the route publishes
+     * none: the Free route never does, and the Go route stops as soon as the reader
+     * turns multipliers off. A published badge would otherwise come straight back
+     * through the Host's own label fallback once this plugin vacates the slot.
+     */
+    private badgePublisherOf;
+    /**
+     * Published badges are a snapshot of the clock, so ask the pickers to reread the
+     * catalog when the next tariff window flips. Every listing re-arms the clock from
+     * the schedules of the rows it actually published a badge decision for (none while
+     * the route publishes no badge), and the reload that follows arms the next window
+     * by itself. A Host without the event (DSH 0.2.1) rereads nothing, which is also
+     * where no badge exists to go stale.
+     * @param schedules - when omitted, the clock restarts from the last listing's schedules.
+     */
+    private armBadgeClock;
     resolveModel(_provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
     /** Capture limits and protocol before discovery can yield to a settings update. */
     private modelSnapshot;

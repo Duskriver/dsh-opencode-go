@@ -35,7 +35,7 @@ import { Config, DEFAULT_CONFIG, normalizeConfig, type LiveConfig } from '../src
 import { OpencodeGoCatalog } from '../src/catalog.ts'
 import { FreeBunTransport } from '../src/free-transport.ts'
 import { ProxyTransport } from '../src/transport.ts'
-import { modelsDocument, modelEntry, protocolEntry } from './support/data.ts'
+import { modelsDocument, modelEntry, pricedGoEntry, protocolEntry } from './support/data.ts'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -1104,5 +1104,54 @@ describe("independent provider identity and durable continuation", () => {
     } finally {
       await ctx.fiber.dispose()
     }
+  })
+
+  it('asks open pickers to reread the catalog when a tariff window flips, the multiplier switch or the active plan changes', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(Date.parse('2026-11-16T00:59:30Z')) // Monday: the peak schedule opens at 01:00 UTC
+    vi.stubEnv('OPENCODE_API_KEY', 'test-key')
+    // The listing comes from a stub, so nothing here depends on the network or on the real clock.
+    const original = globalThis.fetch
+    const listing = modelsDocument({ priced: pricedGoEntry() })
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => String(input) === 'https://gateway.example/v1/models'
+      ? Promise.resolve(Response.json(listing)) : original(input, init))
+    const base = configOf('https://gateway.example/v1')
+    const live = Config(base) as LiveConfig
+    let showModelMultiplier = true
+    let goPlan: OpencodeGo.OpencodeGoConfig['goPlan'] = 'go'
+    live.showModelMultiplier = { get: () => showModelMultiplier }
+    live.goPlan = { get: () => goPlan }
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    const stale = vi.fn()
+    const refreshed = vi.fn()
+    ctx.on('llm/models-updated', stale)
+    ctx.on('llm/adapters-updated', refreshed)
+    try {
+      apply(ctx, live)
+      expect((await ctx.llm.listModels('dsh-opencode-go')).map(model => model.id)).toEqual(['priced'])
+
+      // 01:00 UTC: the badge published with that listing no longer holds.
+      expect(stale).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(30_050)
+      expect(stale).toHaveBeenCalledExactlyOnceWith('dsh-opencode-go')
+
+      // A setting that changes the published badge is a picker refresh; an unrelated one is not.
+      const before = refreshed.mock.calls.length
+      ctx.emit('loader/volatile-update', [['streamIdleTimeoutMs']])
+      expect(refreshed).toHaveBeenCalledTimes(before)
+      showModelMultiplier = false
+      ctx.emit('loader/volatile-update', [['showModelMultiplier']])
+      expect(refreshed).toHaveBeenCalledTimes(before + 1)
+      showModelMultiplier = true
+      goPlan = 'go-plus'
+      ctx.emit('loader/volatile-update', [['goPlan']])
+      expect(refreshed).toHaveBeenCalledTimes(before + 2)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+    // Unloaded: the window that closes at 04:00 UTC never reaches the pickers.
+    await vi.advanceTimersByTimeAsync(3 * 60 * 60_000)
+    expect(stale).toHaveBeenCalledTimes(1)
   })
 })
