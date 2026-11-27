@@ -124,6 +124,14 @@ export declare class OpencodeGoCatalog {
     forModel(id: string, signal?: AbortSignal): Promise<CatalogSnapshot>;
 }
 /**
+ * One directory entry in the tariff shape the quota math reads. This is the row
+ * {@link describeCatalog} builds, for a single model and without its capacities.
+ * @param snapshot - the source catalog the entry was parsed from.
+ * @param model - the parsed directory entry.
+ * @returns the model id, name, published tariff and declared quota details.
+ */
+export declare function catalogGoModel(snapshot: CatalogSnapshot, model: Model<Api>): GoModel;
+/**
  * Discover one catalog source's models, forced through the shared refresh.
  * @param catalog - source catalog to interrogate.
  * @param signal - optional caller cancellation. Only this waiter is cancelled;

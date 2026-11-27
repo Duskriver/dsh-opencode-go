@@ -3,6 +3,12 @@ import { type LiveConfig, type OpencodeGoConfig } from './config.ts';
 declare module '@deepseek-ai/cordis' {
     interface Events {
         'loader/volatile-update'(paths: readonly (readonly string[])[]): void;
+        /**
+         * DSH 0.2.2+ declares this identically (the declarations merge) and answers it by
+         * reloading the client model catalog. A 0.2.1 Host has no listener: the emit is a
+         * no-op there, where no catalog badge exists to go stale either.
+         */
+        'llm/models-updated'(provider: string): void;
     }
 }
 export { OpencodeGoAdapter } from './adapter.ts';

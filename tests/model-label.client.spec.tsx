@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply } from '../src/client/index.ts'
-import { ModelLabel } from '../src/client/ModelLabel.tsx'
+import { ModelLabel, type ModelLabelProps } from '../src/client/ModelLabel.tsx'
 import { createSharedModelCatalog } from '../src/client/model-catalog-store.ts'
-import { en, translator } from './support/client.tsx'
-import { createConfigForm } from './support/client.tsx'
+import { resolveModelMultiplierBadge } from '../src/client/quota-badge.ts'
+import { resolveModelCatalogBadge } from '../src/model-badge.ts'
+import { en as enCopy, zh as zhCopy } from '../src/client/presentation.ts'
+import { createConfigForm, translator } from './support/client.tsx'
 import { FREE_PROVIDER_ID, PROVIDER_ID, type GoModel, type GoModelCatalog } from '../src/contracts.ts'
 import type { OpencodeGoSettings } from '../src/client/controller.ts'
+
+const LABEL_SLOT = 'conversation.input.model.label'
+
+/** One picker row's model as DSH 0.2.2+ hands it over: the catalog entry plus the badge its provider published. */
+type PickerModel = ModelLabelProps['model'] & { badge?: unknown }
 
 describe('composer model-label slot and multiplier rendering', () => {
   afterEach(() => {
@@ -61,6 +69,8 @@ describe('composer model-label slot and multiplier rendering', () => {
     failRegister?: boolean
     failPriorities?: number[]
     loggerWarn?: ReturnType<typeof vi.fn>
+    /** Real slot ledger: label registrations land in it (this plugin as registrant) instead of a bare mock. */
+    ledger?: SlotCore
   } = {}) {
     const settings = createConfigForm<OpencodeGoSettings>({
       enabled: true,
@@ -71,15 +81,20 @@ describe('composer model-label slot and multiplier rendering', () => {
     })
     const effects: unknown[] = []
     const slotsRegister = vi.fn((opts: Record<string, unknown>, component: unknown) => {
-      if (opts.name === 'conversation.input.model.label') {
+      if (opts.name === LABEL_SLOT) {
         const priority = typeof opts.priority === 'number' ? opts.priority : 0
         if (options.failPriorities?.includes(priority)) {
           throw new Error(
-            `single slot "conversation.input.model.label" already has a registration at priority ${priority} — register at a different priority to shadow it (lowest renders)`,
+            `single slot "${LABEL_SLOT}" already has a registration at priority ${priority} — register at a different priority to shadow it (lowest renders)`,
           )
         }
         if (options.failRegister) {
           throw new Error('single slot occupied')
+        }
+        if (options.ledger) {
+          const dispose = options.ledger.register({ ...opts, registrant: 'dsh-opencode-go' } as never, component as never)
+          registrations.push({ opts, component, dispose: vi.fn(dispose as () => void) })
+          return dispose
         }
       }
       const dispose = vi.fn()
@@ -228,6 +243,147 @@ describe('composer model-label slot and multiplier rendering', () => {
       await Promise.resolve()
     })
     expect(readModels).toHaveBeenCalledTimes(2)
+  })
+
+  const enabledSettings: OpencodeGoSettings = {
+    enabled: true,
+    showModelMultiplier: true,
+    apiKeyEnv: 'ACCOUNT_A',
+    accounts: [{ id: 'a', name: 'Primary', apiKeyEnv: 'ACCOUNT_A', plan: 'go' }],
+  }
+
+  it('publishes on the catalog exactly what its own label draws', () => {
+    const toneOf = { free: 'success', normal: 'neutral', peak: 'warning' } as const
+    const moments = [Date.parse('2026-11-16T00:59:30Z'), Date.parse('2026-11-16T02:00:00Z'), Date.parse('2026-11-22T12:00:00Z')]
+    for (const model of [deepseekPro, deepseekFlash, goFree, unpriced]) {
+      for (const plan of ['go', 'go-plus', 'go-teams'] as const) {
+        for (const nowMs of moments) {
+          const live = resolveModelMultiplierBadge({ model, plan, t, locale: 'en', nowMs })
+          expect(resolveModelCatalogBadge({ model, plan, nowMs })).toEqual(live === undefined ? undefined : {
+            tone: toneOf[live.tone],
+            text: live.kind === 'free' ? { en: enCopy.modelMultiplierFreeBadge, zh: zhCopy.modelMultiplierFreeBadge } : live.text,
+          })
+        }
+      }
+    }
+    expect([enCopy.modelMultiplierFreeBadge, zhCopy.modelMultiplierFreeBadge]).toEqual(['Free', '免费'])
+  })
+
+  it('reproduces another provider catalog badge while it holds the slot, in the host order, and never throws on a malformed one', async () => {
+    const read = vi.fn()
+    const catalog = createSharedModelCatalog(read as never)
+    const host = createConfigForm<OpencodeGoSettings>(enabledSettings)
+    const other = { id: 'deepseek', name: 'DeepSeek' }
+    let locale = 'en'
+    const literal: PickerModel = { id: 'flash', name: 'DeepSeek V4.1 Flash', badge: { text: 'New', tone: 'info' } }
+    const localized: PickerModel = { id: 'tier', name: 'Free Tier', badge: { text: { en: 'Free', zh: '免费' }, tone: 'success' } }
+    const oddTone: PickerModel = { id: 'odd-tone', name: 'Odd Tone', badge: { text: 'New', tone: 'sparkle' } }
+    const plain: PickerModel = { id: 'plain', name: 'Plain Model' }
+    const malformed: Array<[id: string, badge: unknown]> = [
+      ['null', null], ['number', 42], ['string', 'New'], ['array', ['New']], ['empty', {}],
+      ['numeric-text', { text: 42 }], ['no-english', { text: { zh: '仅中文' } }], ['blank', { text: '   ' }], ['list-text', { text: ['New'] }],
+    ]
+    const cell = (model: PickerModel, placement: 'trigger' | 'option' = 'option') => (
+      <span key={`${model.id}:${placement}`} data-testid={`row:${model.id}:${placement}`}>
+        <ModelLabel provider={other} model={model as ModelLabelProps['model']} placement={placement} selected={false}
+          settings={host.form} catalog={catalog} t={t} getLocale={() => locale} />
+      </span>
+    )
+    const tree = () => (
+      <>
+        {cell(literal)}
+        {cell(literal, 'trigger')}
+        {cell(localized)}
+        {cell(oddTone)}
+        {cell(plain)}
+        {malformed.map(([id, badge]) => cell({ id, name: `Model ${id}`, badge }))}
+      </>
+    )
+    // Every element the label holds, in DOM order, as [text, tone]; a bare name holds none.
+    const parts = (id: string, placement: 'trigger' | 'option' = 'option') =>
+      [...(screen.getByTestId(`row:${id}:${placement}`).firstElementChild?.children ?? [])]
+        .map(node => [node.textContent, (node as HTMLElement).dataset.tone])
+
+    let view!: ReturnType<typeof render>
+    await act(async () => { view = render(tree()) })
+
+    // The host's own order: the badge follows the name in a menu row and leads in the composer trigger.
+    expect(parts('flash')).toEqual([['DeepSeek V4.1 Flash', undefined], ['New', 'info']])
+    expect(parts('flash', 'trigger')).toEqual([['New', 'info'], ['DeepSeek V4.1 Flash', undefined]])
+    // A tone the host does not know draws as a plain fact.
+    expect(parts('odd-tone')).toEqual([['Odd Tone', undefined], ['New', 'neutral']])
+
+    // A translation table is read for the active locale, then its base tag, then the required `en`.
+    for (const [active, text] of [['en', 'Free'], ['zh-CN', '免费'], ['pt-BR', 'Free']] as const) {
+      locale = active
+      await act(async () => { view.rerender(tree()) })
+      expect(screen.getByTestId('row:tier:option').textContent).toBe(`Free Tier${text}`)
+    }
+
+    // A row without a badge, or with one that says nothing readable, is the bare name.
+    expect(screen.getByTestId('row:plain:option').textContent).toBe('Plain Model')
+    for (const [id] of malformed) {
+      expect(screen.getByTestId(`row:${id}:option`).textContent).toBe(`Model ${id}`)
+    }
+    for (const id of ['plain', ...malformed.map(([id]) => id)]) {
+      expect(screen.getByTestId(`row:${id}:option`).children).toHaveLength(0)
+    }
+    // Another provider's row never reaches for this plugin's own catalog.
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('shows a Go row the badge published on the catalog until its live catalog answers', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.parse('2026-11-16T00:59:30Z')) // Monday 00:59:30 UTC (off-peak)
+    const answer = Promise.withResolvers<GoModelCatalog>()
+    const read = vi.fn(() => answer.promise)
+    const catalog = createSharedModelCatalog(read)
+    const host = createConfigForm<OpencodeGoSettings>(enabledSettings)
+    const provider = { id: PROVIDER_ID, name: 'DSH OpenCode Go' }
+    const published: PickerModel = { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', badge: { text: '8.40×', tone: 'neutral' } }
+    const cell = (placement: 'trigger' | 'option') => (
+      <span data-testid={`row:go:${placement}`}>
+        <ModelLabel provider={provider} model={published as ModelLabelProps['model']} placement={placement}
+          settings={host.form} catalog={catalog} t={t} />
+      </span>
+    )
+    await act(async () => { render(<>{cell('option')}{cell('trigger')}</>) })
+
+    // The row says what this plugin published, whoever ends up drawing it; the composer trigger keeps its plain name.
+    expect(screen.getByTestId('row:go:option').textContent).toBe('DeepSeek V4 Pro8.40×')
+    expect(screen.getByTestId('row:go:trigger').textContent).toBe('DeepSeek V4 Pro')
+
+    // The live answer replaces the published capsule with the plugin's own label.
+    answer.resolve({ models: [deepseekPro], stale: false })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByText('8.40×').getAttribute('data-tone')).toBe('normal')
+    expect(screen.getByTestId('row:go:trigger').textContent).toBe('DeepSeek V4 Pro')
+  })
+
+  it('yields the single label slot to a lower-priority registrant silently, and is next in line once that one leaves', async () => {
+    const ledger = new SlotCore()
+    const Empty = () => null
+    // The shape ui-model-selection registers: the label is a `single` child of the composer model seat.
+    ledger.register({ name: 'root', children: { 'conversation.input.model': { kind: 'single', scope: 'session' } } }, Empty)
+    ledger.register({ name: 'conversation.input.model', children: { [LABEL_SLOT]: { kind: 'single', scope: 'session', inline: true } } }, Empty)
+    const leave = ledger.register({ name: LABEL_SLOT, priority: -105, registrant: 'other-connector' }, Empty)
+    const warn = vi.fn()
+    const h = harness({ ledger, loggerWarn: warn })
+    try {
+      expect(() => apply(h.ctx as never)).not.toThrow()
+      const registered = () => ledger.entries(LABEL_SLOT).map(entry => [entry.registrant, entry.options.priority])
+      const rendering = () => ledger.entriesOfSlot(LABEL_SLOT).map(entry => entry.registrant)
+      // Only the lowest priority renders. This plugin's yielding 137 stays registered behind it, and nothing is logged.
+      expect(registered()).toEqual([['other-connector', -105], ['dsh-opencode-go', 137]])
+      expect(rendering()).toEqual(['other-connector'])
+      expect(warn).not.toHaveBeenCalled()
+      // The registration is live, not merely accepted: it takes over as soon as the slot is free.
+      leave()
+      expect(rendering()).toEqual(['dsh-opencode-go'])
+    } finally {
+      await h.dispose()
+    }
+    expect(ledger.entries(LABEL_SLOT)).toHaveLength(0)
   })
 
   it('registers conversation.input.model.label at yielding priority, disposes when toggled off, backs off on collision, and warns on failure', async () => {

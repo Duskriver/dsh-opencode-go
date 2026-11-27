@@ -11,6 +11,8 @@ import {
   modelSettingsKey,
   defaultGoRetryPolicy,
 } from './contracts.ts'
+import { nextCatalogMultiplierTransitionMs, type PriceMultiplier } from './pricing.ts'
+import { resolveActiveGoPlan, resolveModelCatalogBadge, type CatalogBadge } from './model-badge.ts'
 import { normalizeContext } from 'opencode-go-pi-ai'
 import { estimateContextTokens } from 'opencode-go-pi-ai/utils/estimate'
 import {
@@ -53,6 +55,7 @@ import {
   DISPLAY_NAME,
   OpencodeGoCatalog,
   type CatalogSnapshot,
+  catalogGoModel,
   GoCatalogManager,
 } from './catalog.ts'
 import { createHash, randomUUID } from 'node:crypto'
@@ -65,6 +68,9 @@ import { FreeBunTransport, OPENCODE_FREE_USER_AGENT } from './free-transport.ts'
 import { FreeChannelState } from './free-channel.ts'
 
 const DEFAULT_MAX_TOKENS = 65_536
+
+/** setTimeout's ceiling: a distant effective-date change is re-armed once it is this close. */
+const BADGE_CLOCK_MAX_DELAY_MS = 2_147_483_647
 
 /**
  * Bound for the per-reference rejection map. Only account references are ever
@@ -461,6 +467,11 @@ export interface OpencodeGoAdapterOptions extends OpencodeGoRequestExecutorOptio
   onCatalogWarning?: (warning: string) => void
   /** Re-read picker models after a background catalog refresh commits. */
   onCatalogRefresh?: () => void
+  /**
+   * A published catalog badge is about to change with the clock (a tariff window
+   * opening or closing). The mount asks open pickers to reread the catalog.
+   */
+  onBadgeStale?: () => void
   /** Host account-state version for actual requests, captured before asynchronous model discovery. */
   accountGeneration?: () => number
   /** Shared by both adapters so account settlement ordering spans both routes. */
@@ -544,6 +555,11 @@ export class OpencodeGoAdapter extends LlmAdapter {
   /** Monotonic sequence of the latest request this adapter started. */
   private callSeq = 0
 
+  /** Pending reload for the next tariff-window flip; unref'd, so it never holds the Host open. */
+  private badgeClock: ReturnType<typeof setTimeout> | undefined
+  /** Schedules of the models the latest listing published a badge decision for. */
+  private badgeSchedules: readonly (readonly PriceMultiplier[] | undefined)[] = []
+
   private nextCallSequence(): number { return this.options.nextCallSequence?.() ?? ++this.callSeq }
 
   constructor(private readonly options: OpencodeGoAdapterOptions) {
@@ -567,6 +583,8 @@ export class OpencodeGoAdapter extends LlmAdapter {
    * (Bun workers and SOCKS tunnels) always is.
    */
   async dispose(): Promise<void> {
+    if (this.badgeClock !== undefined) clearTimeout(this.badgeClock)
+    this.badgeClock = undefined
     await Promise.all([
       this.ownsTransport ? this.transport.dispose() : Promise.resolve(),
       this.freeTransport.dispose(),
@@ -621,6 +639,13 @@ export class OpencodeGoAdapter extends LlmAdapter {
     }
   }
 
+  /**
+   * Advertise the route's models, each Go row with the quota badge it carries right
+   * now. `badge` travels only this catalog path: DSH 0.2.2+ hands it to whichever
+   * contribution holds the single-occupant model-label slot, so Go rows keep their
+   * badge even while another plugin renders the picker (#125). An older registry
+   * drops the key, and exact-route resolution never carries it into a request.
+   */
   override async listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
     const config = this.options.config()
     // Picker notifications only change local visibility. Settings discovery
@@ -628,14 +653,63 @@ export class OpencodeGoAdapter extends LlmAdapter {
     const snapshot = await this.catalogOf(config).snapshot()
     // DSH resolves every listed model before showing the provider. Unconfigured
     // ids belong in settings discovery diagnostics, not this selectable list.
-    return [...snapshot.models.values()]
+    const listed = [...snapshot.models.values()]
       .filter(model => isModelEnabled({ id: model.id, source: this.source, ...snapshot.details.get(model.id) }, config.modelVisibility))
-      .map(model => ({
-        provider: this.source === 'go' ? PROVIDER_ID : FREE_PROVIDER_ID,
-        id: model.id,
-        name: model.name,
-        inputModalities: [...model.input],
-      }))
+    const badgeOf = this.badgePublisherOf(config, snapshot)
+    this.armBadgeClock(badgeOf === undefined ? [] : listed.map(model => snapshot.details.get(model.id)?.pricingMultipliers))
+    return listed.map(model => ({
+      provider: this.source === 'go' ? PROVIDER_ID : FREE_PROVIDER_ID,
+      id: model.id,
+      name: model.name,
+      inputModalities: [...model.input],
+      ...badgeOf?.(model),
+    }))
+  }
+
+  /**
+   * The badge publisher for one listing, or undefined while the route publishes
+   * none: the Free route never does, and the Go route stops as soon as the reader
+   * turns multipliers off. A published badge would otherwise come straight back
+   * through the Host's own label fallback once this plugin vacates the slot.
+   */
+  private badgePublisherOf(config: OpencodeGoConfig, snapshot: CatalogSnapshot):
+    ((model: Model<Api>) => { badge: CatalogBadge } | undefined) | undefined {
+    if (this.source !== 'go' || config.showModelMultiplier === false) return undefined
+    const plan = resolveActiveGoPlan(config)
+    // One clock for the whole listing: a window that closes between two rows must
+    // not decorate one row and leave its neighbour bare.
+    const nowMs = Date.now()
+    return model => {
+      const badge = resolveModelCatalogBadge({ model: catalogGoModel(snapshot, model), plan, nowMs })
+      // Spread, never a literal `badge` key: the pinned 0.2.1 Host types have no such
+      // field on `LlmModelInfo`. `undefined` is "no badge"; a `null` would throw inside
+      // the registry and take the whole provider out of the catalog.
+      return badge === undefined ? undefined : { badge }
+    }
+  }
+
+  /**
+   * Published badges are a snapshot of the clock, so ask the pickers to reread the
+   * catalog when the next tariff window flips. Every listing re-arms the clock from
+   * the schedules of the rows it actually published a badge decision for (none while
+   * the route publishes no badge), and the reload that follows arms the next window
+   * by itself. A Host without the event (DSH 0.2.1) rereads nothing, which is also
+   * where no badge exists to go stale.
+   * @param schedules - when omitted, the clock restarts from the last listing's schedules.
+   */
+  private armBadgeClock(schedules?: readonly (readonly PriceMultiplier[] | undefined)[]): void {
+    if (this.badgeClock !== undefined) clearTimeout(this.badgeClock)
+    this.badgeClock = undefined
+    if (schedules !== undefined) this.badgeSchedules = schedules
+    if (this.options.onBadgeStale === undefined) return
+    const next = nextCatalogMultiplierTransitionMs(this.badgeSchedules, Date.now())
+    if (next === undefined) return
+    const clock = this.badgeClock = setTimeout(() => {
+      if (this.badgeClock === clock) this.badgeClock = undefined
+      this.armBadgeClock()
+      try { this.options.onBadgeStale?.() } catch { /* Best effort: the badge then holds until the next reread. */ }
+    }, Math.min(Math.max(1_000, next - Date.now() + 50), BADGE_CLOCK_MAX_DELAY_MS))
+    clock.unref()
   }
 
   override async resolveModel(

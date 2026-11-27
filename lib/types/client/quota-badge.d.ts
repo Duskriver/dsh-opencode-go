@@ -1,6 +1,7 @@
-import { type GoModel, type GoPlan, type OpencodeGoConfig, type PriceMultiplier } from '../contracts.ts';
+import { type GoModel, type GoPlan, type PriceMultiplier } from '../contracts.ts';
 import { type en } from './presentation.ts';
 export type MultiplierTranslate = (key: keyof typeof en, params?: Record<string, unknown>) => string;
+export { resolveActiveGoPlan } from '../model-badge.ts';
 export type ModelMultiplierBadge = {
     readonly kind: 'free';
     readonly text: string;
@@ -14,11 +15,6 @@ export type ModelMultiplierBadge = {
     readonly tone: 'normal' | 'peak';
     readonly isPeak: boolean;
 };
-/**
- * Resolve the subscription tier of the active account from a settings snapshot,
- * falling back to the profile-level `goPlan` and then `'go'`.
- */
-export declare function resolveActiveGoPlan(settings?: Partial<OpencodeGoConfig>): GoPlan;
 /**
  * Build the compact list multiplier badge and descriptive tooltip for one model.
  * Returns `undefined` for Free-channel models and models lacking `goMonthlyUsage`

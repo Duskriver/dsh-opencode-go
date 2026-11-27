@@ -27,20 +27,21 @@ Vitest tests are organized by domain:
 
 | Test file | Coverage |
 | --- | --- |
-| `plugin.spec.ts` | Cordis mounting/unloading, native SettingsForms/profile writes, hot configuration (`retryPolicy`, visibility), RPC and public exports |
+| `plugin.spec.ts` | Cordis mounting/unloading, native SettingsForms/profile writes, hot configuration (`retryPolicy`, visibility, catalog badge reloads), RPC and public exports |
 | `accounts.spec.ts` | Account CRUD, 20-account cap, serial writes, failed-write cleanup, fallback/promotion (`quota`/`credential` promote, transient `rate-limit` borrows backup without reordering), stale calls and per-failure cooldowns (`Retry-After`/15s for `RATE_LIMIT`, 5m for `QUOTA`/credential) |
 | `free.spec.ts` | Dual route lifecycle, public Bearer fallback, official-HTTPS-only saved-key binding, account retry and credential deadlines |
 | `free-channel.spec.ts`, `free-transport.spec.ts` | Free failure classification, Retry-After/backoff, cancellation, transport isolation, stream-budget-derived SOCKS relay idle limits and coexistence with Go |
 | `pricing.spec.ts` | Catalog tariff validation, TTL-keyed cache write pricing, recurring peak vs effective-date multiplier breakdown, transition boundary timestamps and Free-model eligibility |
 | `quota-estimate.spec.ts` | Per-plan request-budget estimation, active window bottleneck resolution, normalized quota multipliers and compact formatting |
+| `model-badge.spec.ts` | Host catalog badge (`LlmModelInfo.badge`, DSH 0.2.2+) resolution: free, off-peak and peak tones per plan, no badge for unpriced or Free-channel rows, and active-plan resolution |
 | `catalog.spec.ts` | Discovery, model limits/visibility, gateway price projection, dual directories, ETag/disk cache, endpoint isolation and bounded transport |
 | `config-validation.spec.ts` | Base-URL credential rejection with redacted diagnostics, proxy userinfo acceptance, thinking-budget and `retryPolicy` schema bounds |
 | `socks-tunnel.spec.ts` | Loopback SOCKS relay: allowed-target enforcement, authentication, stream-budget-derived idle budget, idle teardown/reset and IPv4/IPv6 normalisation |
 | `theme.client.spec.ts`, `appearance-theme.spec.ts` | Native/Classic token resolution, neutral Host-token fallbacks, host font inheritance, WCAG 1.4.11 3:1 control boundaries and `--go-track` quota bar contrast |
 | `sidebar-page.client.spec.tsx`, `sidebar-page-registration.client.spec.tsx` | Opt-in 7-tab console page (`sidebar.panellist` + `main`), dynamic pair registration, staged-only save bar, immediate provider failure alerts and locale copy |
 | `settings-nav-icon.client.spec.tsx`, `icon.client.spec.tsx` | `GO_ROW_GEOMETRY` hand-drawn `go` mark, DSH 0.2.2+ `settings.section.icon` seat, older-host CSS-mask DOM fallback, and the SVG package icon pinned to the same geometry and palette |
-| `model-label.client.spec.tsx` | Composer `conversation.input.model.label` slot registration at yielding priority `137` (with collision backoff and warning), shared catalog RPC deduplication, live peak transition clock and immediate slot disposal when `showModelMultiplier` is turned off |
-| `adapter.spec.ts` | Requests, capacity limits, `providerRetryPolicy`, session/attribution headers, immutable request snapshots, cancellation and timeouts |
+| `model-label.client.spec.tsx` | Composer `conversation.input.model.label` slot registration at yielding priority `137` (with collision backoff and warning), single-slot election against the real `SlotCore`, catalog-badge parity with the plugin's own label, reproduction of another provider's catalog badge in the host order (a malformed badge never throws), the published badge shown until the live catalog answers, shared catalog RPC deduplication, live peak transition clock and immediate slot disposal when `showModelMultiplier` is turned off |
+| `adapter.spec.ts` | Requests, capacity limits, `providerRetryPolicy`, session/attribution headers, immutable request snapshots, cancellation, timeouts, and catalog badge publication (`listModels`) with its tariff-window reload clock |
 | `protocols.spec.ts` | Reasoning levels, protocol overrides, OpenAI/Anthropic/Google serialization and signed Google parts |
 | `conversion.spec.ts` | Independent tool messages, replay signatures, context conversion, durable image offload, per-request budgets and stream contracts |
 | `usage.spec.ts`, `usage.client.spec.tsx` | Official quota reads, current-account selection, 5 input pill styles + border toggle, active-model remaining call estimates, fallback notices and accessibility |
